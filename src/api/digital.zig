@@ -1001,14 +1001,8 @@ pub export fn AIL_debug_printf(fmt: [*:0]const u8, ...) callconv(.c) void {
     std.debug.print("{s}", .{std.mem.sliceTo(&openmiles.debug_printf_buf, 0)});
 }
 const c_vsnprintf = @extern(*const fn ([*]u8, usize, [*:0]const u8, std.builtin.VaList) callconv(.c) i32, .{ .name = "vsnprintf" });
-pub export fn AIL_sprintf(buf: [*]u8, fmt: [*:0]const u8, ...) callconv(.c) [*]u8 {
-    // NOTE: MSS API does not pass buffer size. Using vsnprintf with a large but bounded
-    // limit to prevent unbounded writes. Callers are expected to provide sufficient buffers.
-    var args = @cVaStart();
-    defer @cVaEnd(&args);
-    _ = c_vsnprintf(buf, 4096, fmt, args);
-    return buf;
-}
+// AIL_sprintf is implemented in C (src/bindings/c_impl.c) to avoid Zig stage2_llvm
+// miscompilation of C varargs on Windows.
 pub export fn AIL_file_error() callconv(.winapi) [*:0]const u8 {
     if (openmiles.last_file_error_buf[0] == 0) return "No error";
     return &openmiles.last_file_error_buf;
