@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Zig
+        uses: mleggiero/zvm-action@v1
+        with:
+          version: '0.15.2'
+
+      - name: Cache Zig global cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cache/zig
+            ~/.local/share/zig
+            ~/AppData/Local/zig
+            ~/Library/Caches/zig
+          key: ${{ runner.os }}-zig-${{ hashFiles('build.zig.zon') }}
+          restore-keys: |
+            ${{ runner.os }}-zig-
+
+      - name: Check formatting
+        if: matrix.os == 'ubuntu-latest'
+        run: zig fmt --check .
+
+      - name: Build
+        run: zig build
+
+      - name: Run Tests
+        run: zig build test
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: openmiles-artifacts-${{ matrix.os }}
+          path: |
+            zig-out/lib/
+            zig-out/bin/
+          retention-days: 7
+          if-no-files-found: ignore

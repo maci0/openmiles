@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 200" fill="none">
+  <defs>
+    <linearGradient id="wave" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#4a9eff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00d4aa;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <!-- Sound wave icon -->
+  <g transform="translate(30, 50)">
+    <rect x="0" y="35" width="8" height="30" rx="4" fill="url(#wave)"/>
+    <rect x="14" y="20" width="8" height="60" rx="4" fill="url(#wave)"/>
+    <rect x="28" y="5" width="8" height="90" rx="4" fill="url(#wave)"/>
+    <rect x="42" y="15" width="8" height="70" rx="4" fill="url(#wave)"/>
+    <rect x="56" y="30" width="8" height="40" rx="4" fill="url(#wave)"/>
+    <rect x="70" y="10" width="8" height="80" rx="4" fill="url(#wave)"/>
+    <rect x="84" y="25" width="8" height="50" rx="4" fill="url(#wave)"/>
+    <rect x="98" y="35" width="8" height="30" rx="4" fill="url(#wave)"/>
+  </g>
+  <!-- Text -->
+  <text x="160" y="115" font-family="system-ui, -apple-system, sans-serif" font-size="72" font-weight="700" fill="#e8eaed">
+    Open<tspan fill="url(#wave)">Miles</tspan>
+  </text>
+  <!-- Tagline -->
+  <text x="162" y="148" font-family="system-ui, -apple-system, sans-serif" font-size="18" fill="#9aa0a6" letter-spacing="2">
+    OPEN-SOURCE MILES SOUND SYSTEM
+  </text>
+</svg>

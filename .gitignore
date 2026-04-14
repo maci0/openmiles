@@ -1,0 +1,48 @@
+# Build outputs
+zig-out/
+.zig-cache/
+.zig-global-cache/
+*.o
+*.dll
+*.lib
+*.pdb
+*.exe
+*.so
+
+# Logs and traces
+*.log
+
+# Debug/temp artifacts
+europa_dump.txt
+exports.txt
+targets.txt
+loop.txt
+root.o
+file_access.log
+file_trace*.log
+full_trace.log
+trace*.log
+wine_crash.log
+
+# Test media (large binary files, provide your own)
+test_media/
+
+# Closed-source proprietary plugins (NOT distributable)
+plugins/
+*.asi
+*.AS6
+*.m3d
+*.flt
+
+# Copyrighted reference materials (NOT distributable)
+references/
+
+# Game directories (test data — NOT part of the project)
+Guild/
+
+# Tool directories
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db
