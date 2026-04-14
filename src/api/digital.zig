@@ -991,18 +991,8 @@ pub export fn AIL_HWND() callconv(.winapi) ?*anyopaque {
 pub export fn AIL_set_error(msg: [*:0]const u8) callconv(.winapi) void {
     openmiles.setLastError(std.mem.span(msg));
 }
-pub export fn AIL_debug_printf(fmt: [*:0]const u8, ...) callconv(.c) void {
-    // Debug output: in debug builds, pass through to stderr via vsnprintf
-    if (builtin.mode != .Debug) return;
-    var args = @cVaStart();
-    defer @cVaEnd(&args);
-    _ = c_vsnprintf(&openmiles.debug_printf_buf, openmiles.debug_printf_buf.len, fmt, args);
-    openmiles.debug_printf_buf[openmiles.debug_printf_buf.len - 1] = 0; // ensure null termination
-    std.debug.print("{s}", .{std.mem.sliceTo(&openmiles.debug_printf_buf, 0)});
-}
-const c_vsnprintf = @extern(*const fn ([*]u8, usize, [*:0]const u8, std.builtin.VaList) callconv(.c) i32, .{ .name = "vsnprintf" });
-// AIL_sprintf is implemented in C (src/bindings/c_impl.c) to avoid Zig stage2_llvm
-// miscompilation of C varargs on Windows.
+// AIL_debug_printf and AIL_sprintf are implemented in C (src/bindings/c_impl.c)
+// to avoid Zig stage2_llvm miscompilation of C varargs on Windows.
 pub export fn AIL_file_error() callconv(.winapi) [*:0]const u8 {
     if (openmiles.last_file_error_buf[0] == 0) return "No error";
     return &openmiles.last_file_error_buf;

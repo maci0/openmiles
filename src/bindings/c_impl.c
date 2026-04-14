@@ -24,10 +24,15 @@ int openmiles_tsf_channel_note_count(tsf* f, int channel) {
     return count;
 }
 
-// AIL_sprintf: implemented in C to avoid Zig stage2_llvm miscompilation of
-// C varargs on Windows. Exported as AIL_sprintf via linker directives in digital.zig.
+// AIL_debug_printf and AIL_sprintf: implemented in C to avoid Zig stage2_llvm
+// miscompilation of C varargs on Windows.
 #include <stdio.h>
 #include <stdarg.h>
+
+void AIL_debug_printf(const char* fmt, ...) {
+    (void)fmt; // no-op in release; debug logging handled by Zig logger
+}
+
 char* AIL_sprintf(char* buf, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
