@@ -26,10 +26,10 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         }),
     });
-    
+
     lib.root_module.addIncludePath(b.path("deps"));
     lib.root_module.addIncludePath(b.path("src"));
-    
+
     const c_impl = b.addObject(.{
         .name = "c_impl",
         .root_module = b.createModule(.{
@@ -41,9 +41,9 @@ pub fn build(b: *std.Build) void {
     c_impl.root_module.addIncludePath(b.path("deps"));
     c_impl.root_module.addCSourceFile(.{
         .file = b.path("src/bindings/c_impl.c"),
-        .flags = &.{ "-std=c99" },
+        .flags = &.{"-std=c99"},
     });
-    
+
     lib.addObject(c_impl);
 
     b.installArtifact(lib);
@@ -114,7 +114,7 @@ pub fn build(b: *std.Build) void {
     });
     mock_asi.addCSourceFile(.{
         .file = b.path("src/bindings/mock_asi.c"),
-        .flags = &.{ "-std=c99" },
+        .flags = &.{"-std=c99"},
     });
     // Install to bin/plugins/ (output name depends on platform: mock.dll, libmock.so, etc.)
     const install_mock = b.addInstallArtifact(mock_asi, .{
