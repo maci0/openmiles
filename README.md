@@ -64,21 +64,22 @@ OPENMILES_DEBUG=1 wine YourGame.exe
 
 ## Architecture
 
-```
-Game (.exe)
-  |
-  v
-mss32.dll (OpenMiles)
-  |-- src/api/       C ABI exports (stdcall, __declspec(dllexport))
-  |-- src/engine/    Zig engine layer (Sample, Sequence, DigitalDriver, Filter)
-  |-- src/rib/       RIB provider system
-  |-- src/utils/     Logging, filesystem compatibility
-  |
-  v
-deps/
-  |-- miniaudio.h    Audio output, decoding, mixing, 3D spatialization
-  |-- tsf.h          SoundFont (SF2) software synthesis
-  |-- tml.h          MIDI file parsing
+```mermaid
+graph TD
+    Game["Game (.exe)"] --> DLL["mss32.dll (OpenMiles)"]
+
+    subgraph OpenMiles
+        DLL --> API["src/api/<br/>C ABI exports (stdcall)"]
+        DLL --> Engine["src/engine/<br/>Zig engine layer<br/>Sample, Sequence, DigitalDriver, Filter"]
+        DLL --> RIB["src/rib/<br/>RIB provider system"]
+        DLL --> Utils["src/utils/<br/>Logging, filesystem compat"]
+    end
+
+    Engine --> MA["miniaudio.h<br/>Audio output, decoding, mixing, 3D"]
+    Engine --> TSF["tsf.h<br/>SoundFont (SF2) synthesis"]
+    Engine --> TML["tml.h<br/>MIDI file parsing"]
+
+    MA --> Backend["WASAPI / PulseAudio / CoreAudio"]
 ```
 
 ## API Coverage

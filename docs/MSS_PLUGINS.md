@@ -139,33 +139,15 @@ The built-in low-pass filter supports real-time cutoff frequency (20-22050 Hz) a
 
 ### Architecture Diagram
 
-```
-Game calls AIL_open_stream("music.mp3")
-        │
-        ▼
-┌─────────────────────────┐
-│  OpenMiles AIL_open_stream  │
-│  (src/api/digital.zig)      │
-└──────────┬──────────────┘
-           │
-           ▼
-┌─────────────────────────┐
-│  Sample.loadFromFile()      │
-│  (src/engine/digital.zig)   │
-│                             │
-│  Uses miniaudio ma_decoder  │
-│  Natively handles:          │
-│   - MP3  (dr_mp3)           │
-│   - OGG  (stb_vorbis)      │
-│   - WAV  (dr_wav)           │
-│   - FLAC (dr_flac)          │
-└──────────┬──────────────┘
-           │
-           ▼
-┌─────────────────────────┐
-│  miniaudio ma_engine        │
-│  → WASAPI/PulseAudio/etc   │
-└─────────────────────────┘
+```mermaid
+graph TD
+    A["Game calls<br/>AIL_open_stream('music.mp3')"] --> B
+
+    B["OpenMiles AIL_open_stream<br/><i>src/api/digital.zig</i>"] --> C
+
+    C["Sample.loadFromFile()<br/><i>src/engine/digital.zig</i><br/><br/>Uses miniaudio ma_decoder<br/>MP3 (dr_mp3) | OGG (stb_vorbis)<br/>WAV (dr_wav) | FLAC (dr_flac)"] --> D
+
+    D["miniaudio ma_engine<br/>WASAPI / PulseAudio / CoreAudio"]
 ```
 
 The RIB system (`"ASI stream"` registration) exists purely so the **game's own code** can verify codec support before calling `AIL_open_stream`. The actual decoding path in OpenMiles bypasses RIB entirely and goes straight through miniaudio.
