@@ -42,6 +42,7 @@ pub const MidiDriver = struct {
     }
 
     pub fn deinit(self: *MidiDriver) void {
+        if (root.last_midi_driver == self) root.last_midi_driver = null;
         if (self.soundfont) |sf| {
             if (self.owns_soundfont) tsf.tsf_close(sf);
         }
@@ -59,12 +60,11 @@ pub const MidiDriver = struct {
         if (fs_compat.openFile(filename, .{})) |f| {
             defer f.close();
             if (f.stat()) |st| {
-                self.soundfont_size_bytes = @intCast(st.size);
+                self.soundfont_size_bytes = @intCast(@min(st.size, std.math.maxInt(u32)));
             } else |_| {}
         } else |_| {}
         self.soundfont = tsf.tsf_load_filename(path_z.ptr);
         if (self.soundfont == null) return error.SoundFontLoadFailed;
-        // Use the engine's actual sample rate if a digital driver exists
         if (root.last_digital_driver) |dig| {
             self.sample_rate = ma.ma_engine_get_sample_rate(&dig.engine);
         }
@@ -87,6 +87,32 @@ pub const MidiDriver = struct {
         }
     }
 };
+
+pub var locked_channels: [16]?*Sequence = .{null} ** 16;
+var locked_channels_mutex: std.Thread.Mutex = .{};
+
+pub fn lockChannel(seq: *Sequence) i32 {
+    locked_channels_mutex.lock();
+    defer locked_channels_mutex.unlock();
+    for (&locked_channels, 0..) |*slot, i| {
+        if (i == 9) continue;
+        if (slot.* == null) {
+            slot.* = seq;
+            return @intCast(i);
+        }
+    }
+    return -1;
+}
+
+pub fn releaseChannel(seq: *Sequence, channel: i32) void {
+    if (channel < 0 or channel > 15) return;
+    locked_channels_mutex.lock();
+    defer locked_channels_mutex.unlock();
+    const idx: usize = @intCast(channel);
+    if (locked_channels[idx] == seq) {
+        locked_channels[idx] = null;
+    }
+}
 
 pub const MidiStatus = enum(u32) {
     free = 1, // SEQ_FREE
@@ -209,10 +235,10 @@ pub const Sequence = struct {
     /// over `duration_ms` milliseconds of real time. Called by AIL_set_sequence_tempo.
     pub fn startTempoFade(self: *Sequence, target_bpm: i32, duration_ms: i32) void {
         if (duration_ms <= 0 or self.tempo <= 0) {
-            // Instant change
             self.user_bpm = target_bpm;
             if (target_bpm > 0 and self.tempo > 0) {
-                self.tempo_ratio = @as(f64, @floatFromInt(target_bpm)) / @as(f64, @floatFromInt(self.tempo));
+                const raw = @as(f64, @floatFromInt(target_bpm)) / @as(f64, @floatFromInt(self.tempo));
+                self.tempo_ratio = @max(0.01, @min(raw, 100.0));
             } else {
                 self.tempo_ratio = 1.0;
             }
@@ -222,7 +248,8 @@ pub const Sequence = struct {
         self.user_bpm = target_bpm;
         self.tempo_fade_start_ratio = self.tempo_ratio;
         if (target_bpm > 0 and self.tempo > 0) {
-            self.tempo_fade_target_ratio = @as(f64, @floatFromInt(target_bpm)) / @as(f64, @floatFromInt(self.tempo));
+            const raw = @as(f64, @floatFromInt(target_bpm)) / @as(f64, @floatFromInt(self.tempo));
+            self.tempo_fade_target_ratio = @max(0.01, @min(raw, 100.0));
         } else {
             self.tempo_fade_target_ratio = 1.0;
         }
@@ -231,12 +258,11 @@ pub const Sequence = struct {
         self.tempo_fade_active = true;
     }
 
-    /// Advance the tempo fade by `real_ms` of wall-clock time. Returns the effective
-    /// tempo_ratio to use for this interval.
+    /// Advance the tempo fade by `real_ms` of wall-clock time, updating `tempo_ratio` in place.
     fn advanceTempoFade(self: *Sequence, real_ms: f64) void {
         if (!self.tempo_fade_active) return;
         self.tempo_fade_elapsed_ms += real_ms;
-        if (self.tempo_fade_elapsed_ms >= self.tempo_fade_duration_ms) {
+        if (self.tempo_fade_duration_ms <= 0 or self.tempo_fade_elapsed_ms >= self.tempo_fade_duration_ms) {
             // Fade complete
             self.tempo_ratio = self.tempo_fade_target_ratio;
             self.tempo_fade_active = false;
@@ -356,10 +382,12 @@ pub const Sequence = struct {
                                         self.allNotesOff();
                                         self.current_msg = top.start_msg;
                                         self.time_ms = top.start_time_ms;
-                                        const beats_elapsed: i32 = @intFromFloat(self.time_ms / self.ms_per_beat);
-                                        self.current_beat_in_measure = @mod(beats_elapsed, self.beats_per_measure) + 1;
-                                        self.current_measure = @divTrunc(beats_elapsed, self.beats_per_measure) + 1;
-                                        self.next_beat_ms = @as(f64, @floatFromInt(beats_elapsed + 1)) * self.ms_per_beat;
+                                        if (self.ms_per_beat > 0) {
+                                            const beats_elapsed: i32 = @intFromFloat(self.time_ms / self.ms_per_beat);
+                                            self.current_beat_in_measure = @mod(beats_elapsed, self.beats_per_measure) + 1;
+                                            self.current_measure = @divTrunc(beats_elapsed, self.beats_per_measure) + 1;
+                                            self.next_beat_ms = @as(f64, @floatFromInt(beats_elapsed + 1)) * self.ms_per_beat;
+                                        }
                                         xmidi_jumped = true;
                                     } else {
                                         // count == 1: last pass, pop loop stack
@@ -405,7 +433,7 @@ pub const Sequence = struct {
                 }
                 // Account for tempo_ratio: when playing faster, fewer frames elapse per ms of MIDI time.
                 // Clamp to a small positive value to avoid division by zero from pathological fades.
-                const safe_ratio = @max(self.tempo_ratio, 0.001);
+                const safe_ratio = @max(self.tempo_ratio, 0.01);
                 const msPerFrameEffective = msPerFrame * safe_ratio;
                 const rawFramesUntilEvent = @max(0.0, @min(timeToNextEvent / msPerFrameEffective, @as(f64, @floatFromInt(frameCount))));
                 const framesUntilEvent = @as(ma.ma_uint64, @intFromFloat(rawFramesUntilEvent));
@@ -501,24 +529,22 @@ pub const Sequence = struct {
     pub fn loadMidi(self: *Sequence, data: []const u8, seq_num: usize) !void {
         // Detect XMIDI (IFF FORM+XDIR or bare FORM+XMID) and convert to SMF if needed
         var converted: ?[]u8 = null;
-        const alloc_opt = root.global_allocator;
-        defer if (converted) |c| if (alloc_opt) |a| a.free(c);
+        const alloc = self.driver.allocator;
+        defer if (converted) |c| alloc.free(c);
         const smf_data: []const u8 = blk: {
-            if (alloc_opt) |alloc| {
-                if (data.len >= 12 and std.mem.eql(u8, data[0..4], "FORM")) {
-                    if (std.mem.eql(u8, data[8..12], "XDIR")) {
-                        converted = root.xmidiToSmf(alloc, data, seq_num) catch |err| {
-                            log("XMIDI->SMF conversion failed: {any}\n", .{err});
-                            break :blk data;
-                        };
-                        break :blk converted.?;
-                    } else if (std.mem.eql(u8, data[8..12], "XMID")) {
-                        converted = root.xmidiBareToSmf(alloc, data) catch |err| {
-                            log("XMIDI (bare FORM/XMID) conversion failed: {any}\n", .{err});
-                            break :blk data;
-                        };
-                        break :blk converted.?;
-                    }
+            if (data.len >= 12 and std.mem.eql(u8, data[0..4], "FORM")) {
+                if (std.mem.eql(u8, data[8..12], "XDIR")) {
+                    converted = root.xmidiToSmf(alloc, data, seq_num) catch |err| {
+                        log("XMIDI->SMF conversion failed: {any}\n", .{err});
+                        return err;
+                    };
+                    break :blk converted.?;
+                } else if (std.mem.eql(u8, data[8..12], "XMID")) {
+                    converted = root.xmidiBareToSmf(alloc, data) catch |err| {
+                        log("XMIDI (bare FORM/XMID) conversion failed: {any}\n", .{err});
+                        return err;
+                    };
+                    break :blk converted.?;
                 }
             }
             break :blk data;
@@ -589,6 +615,15 @@ pub const Sequence = struct {
         self.is_done = false;
     }
 
+    pub fn stopAndUninit(self: *Sequence) void {
+        self.is_playing = false;
+        if (self.is_initialized) {
+            _ = ma.ma_sound_stop(&self.sound);
+            ma.ma_sound_uninit(&self.sound);
+            self.is_initialized = false;
+        }
+    }
+
     pub fn stop(self: *Sequence) void {
         if (self.is_initialized) _ = ma.ma_sound_stop(&self.sound);
         self.is_playing = false;
@@ -612,7 +647,7 @@ pub const Sequence = struct {
     }
 
     pub fn status(self: *Sequence) MidiStatus {
-        if (!self.is_initialized) return .done;
+        if (!self.is_initialized) return .done; // MSS: uninitialized sequences report SEQ_DONE
         if (self.is_playing) return .playing; // includes paused state
         if (self.is_done) return .done;
         return .stopped;
@@ -688,7 +723,11 @@ pub const Sequence = struct {
             }
             self.current_msg = msg.*.next;
         }
-        // Recalculate beat/measure from new position
+        self.recalcBeatPosition(target_ms);
+    }
+
+    fn recalcBeatPosition(self: *Sequence, target_ms: f64) void {
+        if (self.ms_per_beat <= 0) return;
         const beats_elapsed: i32 = @intFromFloat(target_ms / self.ms_per_beat);
         self.current_beat_in_measure = @mod(beats_elapsed, self.beats_per_measure) + 1;
         self.current_measure = @divTrunc(beats_elapsed, self.beats_per_measure) + 1;
@@ -697,9 +736,6 @@ pub const Sequence = struct {
     }
 
     pub fn branchIndex(self: *Sequence, marker_number: u32) void {
-        // Seek to the XMIDI branch marker (CC 116) with value == marker_number.
-        // After xmidiToSmf conversion, CC 116 events are preserved as TML_CONTROL_CHANGE
-        // messages with control=116 and value=marker_index.
         var msg: ?*tsf.tml_message = self.midi;
         while (msg) |m| {
             if (m.*.type == tsf.TML_CONTROL_CHANGE and
@@ -710,16 +746,11 @@ pub const Sequence = struct {
                 const target_ms = @as(f64, @floatFromInt(m.*.time));
                 self.time_ms = target_ms;
                 self.current_msg = m.*.next;
-                const beats_elapsed: i32 = @intFromFloat(target_ms / self.ms_per_beat);
-                self.current_beat_in_measure = @mod(beats_elapsed, self.beats_per_measure) + 1;
-                self.current_measure = @divTrunc(beats_elapsed, self.beats_per_measure) + 1;
-                self.next_beat_ms = @as(f64, @floatFromInt(beats_elapsed + 1)) * self.ms_per_beat;
-                self.xmidi_loop_depth = 0;
+                self.recalcBeatPosition(target_ms);
                 return;
             }
             msg = m.*.next;
         }
-        // Marker not found — no-op
     }
 
     pub fn load(self: *Sequence, data: *anyopaque, size: i32) !void {
@@ -730,9 +761,7 @@ pub const Sequence = struct {
         if (self.is_initialized) return;
         // Auto-create a digital driver if none exists (game may only have opened a MIDI driver)
         if (root.last_digital_driver == null) {
-            if (root.global_allocator) |ga| {
-                _ = root.DigitalDriver.init(ga, 44100, 16, 2) catch {};
-            }
+            _ = root.DigitalDriver.init(root.global_allocator, 44100, 16, 2) catch {};
         }
         if (root.last_digital_driver) |driver| {
             const result = ma.ma_sound_init_from_data_source(&driver.engine, @ptrCast(&self.data_source), ma.MA_SOUND_FLAG_NO_SPATIALIZATION, null, &self.sound);

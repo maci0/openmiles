@@ -44,6 +44,9 @@ pub const Input = struct {
         }
         self.is_initialized = true;
         self.max_buffer_bytes = self.sample_rate * self.channels * (self.bits / 8);
+        // Pre-allocate so the audio-thread callback never hits the allocator.
+        self.buffer.ensureTotalCapacity(self.allocator, self.max_buffer_bytes) catch {};
+        self.snapshot.ensureTotalCapacity(self.allocator, self.max_buffer_bytes) catch {};
         return self;
     }
 
@@ -60,13 +63,13 @@ pub const Input = struct {
     pub fn start(self: *Input) void {
         if (!self.is_initialized) return;
         _ = ma.ma_device_start(&self.device);
-        self.state = 1;
+        @atomicStore(i32, &self.state, 1, .release);
     }
 
     pub fn stop(self: *Input) void {
         if (!self.is_initialized) return;
         _ = ma.ma_device_stop(&self.device);
-        self.state = 0;
+        @atomicStore(i32, &self.state, 0, .release);
     }
 
     fn captureCallback(pDevice: ?*ma.ma_device, pOutput: ?*anyopaque, pInput: ?*const anyopaque, frameCount: ma.ma_uint32) callconv(.c) void {
@@ -81,7 +84,7 @@ pub const Input = struct {
         else
             in_ptr[0..byte_count];
 
-        self.mutex.lock();
+        if (!self.mutex.tryLock()) return;
         defer self.mutex.unlock();
 
         // Ring-buffer behavior: drop oldest data if we exceed max_buffer_bytes
@@ -90,15 +93,17 @@ pub const Input = struct {
             if (overflow >= self.buffer.items.len) {
                 self.buffer.clearRetainingCapacity();
             } else {
-                // Shift remaining bytes to front
                 std.mem.copyForwards(u8, self.buffer.items[0..], self.buffer.items[overflow..]);
                 self.buffer.items.len -= overflow;
             }
         }
-        self.buffer.appendSlice(self.allocator, incoming) catch {};
+        if (self.buffer.capacity >= self.buffer.items.len + incoming.len) {
+            self.buffer.appendSliceAssumeCapacity(incoming);
+        }
+        // else: silently drop — never allocate on the audio thread
     }
 
-    /// InputInfo layout mirrors MSS's AILSOUNDINFO for basic query (rate, channels, bits, data buffer).
+    /// Capture state for basic query (rate, channels, bits, data buffer).
     pub const InputInfo = extern struct {
         format: u32 = 0,
         data_ptr: ?*const anyopaque = null,
@@ -113,20 +118,14 @@ pub const Input = struct {
 
     pub fn getInfo(self: *Input) InputInfo {
         self.mutex.lock();
-        defer self.mutex.unlock();
-        // Copy the current buffer into the snapshot so the returned pointer
-        // remains valid even if the capture callback reallocates or shifts
-        // self.buffer on the audio thread before the caller reads the data.
-        self.snapshot.clearRetainingCapacity();
-        self.snapshot.appendSlice(self.allocator, self.buffer.items) catch {
-            // On OOM, return no data rather than an invalid pointer.
-            return .{
-                .format = 0,
-                .rate = self.sample_rate,
-                .bits = self.bits,
-                .channels = self.channels,
-            };
-        };
+        // Swap buffer and snapshot under the lock — O(1) instead of copying.
+        // The old buffer becomes the snapshot (caller reads it); the old
+        // snapshot (cleared) becomes the new capture target.
+        const tmp = self.snapshot;
+        self.snapshot = self.buffer;
+        self.buffer = tmp;
+        self.buffer.clearRetainingCapacity();
+        self.mutex.unlock();
         const bytes_per_sample = self.channels * (self.bits / 8);
         const samples: u32 = if (bytes_per_sample == 0) 0 else @as(u32, @intCast(self.snapshot.items.len)) / bytes_per_sample;
         return .{

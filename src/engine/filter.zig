@@ -151,7 +151,9 @@ pub const Filter = struct {
 
     /// Set the low-pass cutoff frequency in Hz and reinitialize the filter.
     pub fn setCutoff(self: *Filter, frequency: f64) void {
-        self.cutoff_frequency = @max(20.0, @min(frequency, 22050.0));
+        const clamped = @max(20.0, @min(frequency, 22050.0));
+        if (clamped == self.cutoff_frequency) return;
+        self.cutoff_frequency = clamped;
         if (self.lpf_initialized) {
             const sample_rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
             const channels = ma.ma_engine_get_channels(&self.driver.engine);
@@ -166,7 +168,6 @@ pub const Filter = struct {
         }
     }
 
-    /// Get the current cutoff frequency.
     pub fn getCutoff(self: *const Filter) f64 {
         return self.cutoff_frequency;
     }

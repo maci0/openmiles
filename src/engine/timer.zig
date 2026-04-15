@@ -5,22 +5,17 @@ const root = @import("../root.zig");
 pub const Timer = struct {
     callback: *const fn (u32) callconv(.winapi) void,
     user_data: u32 = 0,
-    period_us: u64 = 10000,
-    period_mutex: std.Thread.Mutex = .{},
+    period_us: u32 = 10000,
     is_running: bool = false,
     thread: ?std.Thread = null,
     allocator: std.mem.Allocator,
 
-    pub fn getPeriodUs(self: *Timer) u64 {
-        self.period_mutex.lock();
-        defer self.period_mutex.unlock();
-        return self.period_us;
+    pub fn getPeriodUs(self: *Timer) u32 {
+        return @atomicLoad(u32, &self.period_us, .acquire);
     }
 
     pub fn setPeriodUs(self: *Timer, us: u64) void {
-        self.period_mutex.lock();
-        defer self.period_mutex.unlock();
-        self.period_us = us;
+        @atomicStore(u32, &self.period_us, @intCast(@min(us, std.math.maxInt(u32))), .release);
     }
 
     pub fn init(allocator: std.mem.Allocator, callback: *const fn (u32) callconv(.winapi) void) !*Timer {
@@ -29,11 +24,9 @@ pub const Timer = struct {
             .callback = callback,
             .allocator = allocator,
         };
-        if (root.global_allocator) |ga| {
-            root.global_timers_mutex.lock();
-            defer root.global_timers_mutex.unlock();
-            root.global_timers.append(ga, self) catch {};
-        }
+        root.global_timers_mutex.lock();
+        defer root.global_timers_mutex.unlock();
+        try root.global_timers.append(root.global_allocator, self);
         return self;
     }
 
@@ -68,10 +61,18 @@ pub const Timer = struct {
         }
     }
 
+    pub fn getUserData(self: *Timer) u32 {
+        return @atomicLoad(u32, &self.user_data, .acquire);
+    }
+
+    pub fn setUserData(self: *Timer, data: u32) void {
+        @atomicStore(u32, &self.user_data, data, .release);
+    }
+
     fn run(self: *Timer) void {
         var next_ns: i128 = std.time.nanoTimestamp();
         while (@atomicLoad(bool, &self.is_running, .acquire)) {
-            self.callback(self.user_data);
+            self.callback(self.getUserData());
             const period_ns: i128 = @as(i128, self.getPeriodUs()) * std.time.ns_per_us;
             next_ns += period_ns;
             const now = std.time.nanoTimestamp();

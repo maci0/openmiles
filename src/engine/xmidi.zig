@@ -5,10 +5,9 @@ const std = @import("std");
 // ---------------------------------------------------------------------------
 // XMIDI is an IFF-based format: FORM/XDIR → CAT /XMID → repeated FORM/XMID
 // blocks, each containing an EVNT chunk with MIDI-like events.
-// Key difference from SMF: Note-On (velocity > 0) is followed by a VLQ
-// "note duration" field (ticks until note-off); there are no separate Note-Off
-// events in the EVNT data.  Delta times are VLQ-encoded tick counts (PPQ = 120).
-// Unlike SMF, Note-On events include an additional VLQ duration field.
+// Key difference from SMF: every Note-On is followed by a VLQ "note duration"
+// field (ticks until note-off); explicit Note-Off events are rare but possible in the
+// EVNT data.  Delta times are VLQ-encoded tick counts (PPQ = 120).
 // ---------------------------------------------------------------------------
 
 /// Scan an SMF byte slice for the first time signature meta event (0xFF 0x58)
@@ -42,10 +41,10 @@ pub fn parseSmfTimeSigNumerator(smf: []const u8) i32 {
                 if (b & 0x80 == 0) break;
             }
             if (meta_type == 0x58 and meta_len >= 1 and i < trk_end) {
-                return @intCast(smf[i]); // numerator is first byte of time sig data
+                return @max(1, @as(i32, @intCast(smf[i])));
             }
             if (meta_type == 0x2F) break; // End of Track
-            i += meta_len; // skip meta data bytes
+            i +|= meta_len;
         } else if (status == 0xF0 or status == 0xF7) {
             // SysEx — VLQ length then data
             var len: u32 = 0;
@@ -55,7 +54,7 @@ pub fn parseSmfTimeSigNumerator(smf: []const u8) i32 {
                 len = (len << 7) | (b & 0x7F);
                 if (b & 0x80 == 0) break;
             }
-            i += len;
+            i +|= len;
         } else {
             // Channel event: 1 or 2 data bytes depending on message type
             const etype = status & 0xF0;
@@ -70,17 +69,20 @@ pub fn parseSmfTimeSigNumerator(smf: []const u8) i32 {
 }
 
 fn readBe32(data: []const u8, pos: usize) u32 {
-    return (@as(u32, data[pos]) << 24) | (@as(u32, data[pos + 1]) << 16) |
-        (@as(u32, data[pos + 2]) << 8) | @as(u32, data[pos + 3]);
+    if (pos + 4 > data.len) return 0;
+    return std.mem.readInt(u32, data[pos..][0..4], .big);
 }
 
 fn readVlq(data: []const u8, pos: *usize) u32 {
     var result: u32 = 0;
+    var bytes_read: u8 = 0;
     while (pos.* < data.len) {
         const b = data[pos.*];
         pos.* += 1;
         result = (result << 7) | (b & 0x7F);
+        bytes_read += 1;
         if (b & 0x80 == 0) break;
+        if (bytes_read >= 4) break;
     }
     return result;
 }
@@ -97,7 +99,6 @@ fn writeVlq(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, val
         v >>= 7;
         i += 1;
     }
-    // Bytes are in reverse order — reverse in-place
     var lo: usize = 0;
     var hi: usize = i - 1;
     while (lo < hi) {
@@ -200,7 +201,7 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
     var events: std.ArrayListUnmanaged(SmfEvent) = .{};
     defer events.deinit(allocator);
     // Pre-allocate: each event is ~3 bytes minimum, note-on generates 2 events (on + synthetic off)
-    events.ensureTotalCapacity(allocator, evnt.len / 2) catch {};
+    try events.ensureTotalCapacity(allocator, evnt.len / 2);
 
     var pos: usize = 0;
     var abs_time: u32 = 0;
@@ -245,13 +246,15 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
                 ev.data[6] = evnt[pos + 3];
                 try events.append(allocator, ev);
             }
-            pos += mlen;
+            pos +|= mlen;
+            if (pos > evnt.len) break;
             continue;
         }
 
         if (status == 0xF0 or status == 0xF7) {
             const slen = readVlq(evnt, &pos);
-            pos += slen;
+            pos +|= slen;
+            if (pos > evnt.len) break;
             continue;
         }
 

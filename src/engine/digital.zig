@@ -5,6 +5,7 @@ const log = root.log;
 const fs_compat = root.fs_compat;
 
 const deg2rad = root.deg2rad;
+const buildWavFromPcm = root.buildWavFromPcm;
 
 pub const SampleStatus = enum(u32) {
     free = 1, // SMP_FREE
@@ -71,6 +72,7 @@ pub const DigitalDriver = struct {
     }
 
     pub fn deinit(self: *DigitalDriver) void {
+        if (root.last_digital_driver == self) root.last_digital_driver = null;
         root.unregisterDriver(self);
         for (self.providers.items) |p| {
             p.deinit();
@@ -88,52 +90,16 @@ pub const DigitalDriver = struct {
             f.deinit();
         }
         self.filters.deinit(self.allocator);
-        // Uninit all sounds before the engine (miniaudio requires this order),
-        // then free all sample state. Mark driver_is_dead first so Sample.deinit
-        // skips the swapRemove on the list we're about to clear.
+        // Tear down all samples before the engine (miniaudio requires this order).
+        // Mark driver_is_dead so deinit() skips the swapRemove on these lists.
         for (self.samples.items) |s| {
             s.driver_is_dead = true;
-            // Detach from any attached Filter so the filter doesn't hold a
-            // dangling pointer after the sample is freed.
-            if (s.attached_filter) |f| f.detachSample(s);
-            // Clean up reverb node to avoid leaking ma_delay_node + internal state.
-            s.removeReverb();
-            if (s.is_initialized) {
-                ma.ma_sound_uninit(&s.sound);
-                s.is_initialized = false;
-            }
-            if (s.decoder) |d| {
-                _ = ma.ma_decoder_uninit(d);
-                self.allocator.destroy(d);
-                s.decoder = null;
-            }
-            if (s.bounded_mem_ctx) |ctx| {
-                self.allocator.destroy(ctx);
-                s.bounded_mem_ctx = null;
-            }
-            if (s.owned_buffer) |buf| {
-                self.allocator.free(buf);
-                s.owned_buffer = null;
-            }
-            self.allocator.destroy(s);
+            s.deinit();
         }
         self.samples.deinit(self.allocator);
         for (self.samples_3d.items) |s| {
             s.driver_is_dead = true;
-            if (s.is_initialized) {
-                ma.ma_sound_uninit(&s.sound);
-                s.is_initialized = false;
-            }
-            if (s.decoder) |d| {
-                _ = ma.ma_decoder_uninit(d);
-                self.allocator.destroy(d);
-                s.decoder = null;
-            }
-            if (s.owned_buffer) |buf| {
-                self.allocator.free(buf);
-                s.owned_buffer = null;
-            }
-            self.allocator.destroy(s);
+            s.deinit();
         }
         self.samples_3d.deinit(self.allocator);
         ma.ma_engine_uninit(&self.engine);
@@ -152,6 +118,7 @@ pub const DigitalDriver = struct {
             if (entry.kind != .file) continue;
             const name = entry.name;
             if (!root.isPluginExtension(name)) continue;
+            if (!root.isSafePluginFilename(name)) continue;
             const full_path = std.fs.path.join(alloc, &.{ redist_dir, name }) catch continue;
             defer alloc.free(full_path);
             const p = root.Provider.load(alloc, full_path) catch |err| {
@@ -188,36 +155,56 @@ pub const DigitalDriver = struct {
         }
         return count;
     }
+
+    pub fn setListenerPosition(self: *DigitalDriver, x: f32, y: f32, z: f32) void {
+        ma.ma_engine_listener_set_position(&self.engine, 0, x, y, z);
+    }
+
+    pub fn setListenerVelocity(self: *DigitalDriver, x: f32, y: f32, z: f32) void {
+        ma.ma_engine_listener_set_velocity(&self.engine, 0, x, y, z);
+    }
+
+    pub fn setListenerDirection(self: *DigitalDriver, fx: f32, fy: f32, fz: f32) void {
+        ma.ma_engine_listener_set_direction(&self.engine, 0, fx, fy, fz);
+    }
+
+    pub fn setListenerWorldUp(self: *DigitalDriver, ux: f32, uy: f32, uz: f32) void {
+        ma.ma_engine_listener_set_world_up(&self.engine, 0, ux, uy, uz);
+    }
+
+    pub fn getListenerPosition(self: *DigitalDriver) ma.ma_vec3f {
+        return ma.ma_engine_listener_get_position(&self.engine, 0);
+    }
+
+    pub fn getListenerVelocity(self: *DigitalDriver) ma.ma_vec3f {
+        return ma.ma_engine_listener_get_velocity(&self.engine, 0);
+    }
+
+    pub fn getListenerDirection(self: *DigitalDriver) ma.ma_vec3f {
+        return ma.ma_engine_listener_get_direction(&self.engine, 0);
+    }
+
+    pub fn getListenerWorldUp(self: *DigitalDriver) ma.ma_vec3f {
+        return ma.ma_engine_listener_get_world_up(&self.engine, 0);
+    }
+
+    pub fn getDevice(self: *DigitalDriver) ?*ma.ma_device {
+        return ma.ma_engine_get_device(&self.engine);
+    }
+
+    pub fn getSampleRate(self: *DigitalDriver) u32 {
+        return ma.ma_engine_get_sample_rate(&self.engine);
+    }
+
+    pub fn getChannels(self: *DigitalDriver) u32 {
+        return ma.ma_engine_get_channels(&self.engine);
+    }
 };
 
 pub const SamplePcmFormat = struct {
     channels: u16,
     bits: u16,
 };
-
-pub fn buildWavFromPcm(allocator: std.mem.Allocator, pcm_data: []const u8, channels: u16, sample_rate: u32, bits: u16) ![]u8 {
-    const byte_rate: u32 = sample_rate * @as(u32, channels) * (@as(u32, bits) / 8);
-    const block_align: u16 = channels * (bits / 8);
-    const data_len: u32 = @intCast(pcm_data.len);
-    const riff_size: u32 = 36 + data_len;
-    const total_size = 8 + riff_size;
-    const buf = try allocator.alloc(u8, total_size);
-    @memcpy(buf[0..4], "RIFF");
-    std.mem.writeInt(u32, buf[4..8], riff_size, .little);
-    @memcpy(buf[8..12], "WAVE");
-    @memcpy(buf[12..16], "fmt ");
-    std.mem.writeInt(u32, buf[16..20], 16, .little); // fmt chunk size
-    std.mem.writeInt(u16, buf[20..22], 1, .little); // PCM
-    std.mem.writeInt(u16, buf[22..24], channels, .little);
-    std.mem.writeInt(u32, buf[24..28], sample_rate, .little);
-    std.mem.writeInt(u32, buf[28..32], byte_rate, .little);
-    std.mem.writeInt(u16, buf[32..34], block_align, .little);
-    std.mem.writeInt(u16, buf[34..36], bits, .little);
-    @memcpy(buf[36..40], "data");
-    std.mem.writeInt(u32, buf[40..44], data_len, .little);
-    @memcpy(buf[44..], pcm_data);
-    return buf;
-}
 
 pub const Sample = struct {
     driver: *DigitalDriver,
@@ -253,7 +240,7 @@ pub const Sample = struct {
     sample_processors: [2]usize = .{ 0, 0 },
     // ADPCM block size hint (stored for round-tripping; miniaudio handles decoding).
     adpcm_block_size: u32 = 0,
-    // Reverb state (via miniaudio ma_delay_node)
+    cached_length_frames: u64 = 0,
     reverb_node: ?*ma.ma_delay_node = null,
     reverb_room_type: f32 = 0.0,
     reverb_level: f32 = 0.0,
@@ -262,7 +249,7 @@ pub const Sample = struct {
     fn eosCallbackBridge(pUserData: ?*anyopaque, pSound: ?*ma.ma_sound) callconv(.c) void {
         _ = pSound;
         const self: *Sample = @ptrCast(@alignCast(pUserData.?));
-        // Handle loop counting manually (miniaudio looping is never used).
+        // Handle finite loop counting manually (miniaudio looping handles infinite case).
         // loops_remaining <= 0: infinite (0 = documented infinite, negative = treated same).
         if (self.loops_remaining <= 0) {
             // Infinite loop - restart from loop start
@@ -281,7 +268,7 @@ pub const Sample = struct {
         // Signature: void callback(HSAMPLE S, S32 buff_num, U32 buff_size, void const *buff_addr)
         if (self.eob_callback != 0) {
             const buf_ptr: ?*anyopaque = if (self.owned_buffer) |b| @ptrCast(b.ptr) else null;
-            const buf_len: u32 = if (self.owned_buffer) |b| @intCast(b.len) else 0;
+            const buf_len: u32 = if (self.owned_buffer) |b| @intCast(@min(b.len, std.math.maxInt(u32))) else 0;
             const cb: *const fn (?*anyopaque, i32, u32, ?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eob_callback);
             cb(@ptrCast(self), self.last_loaded_buffer, buf_len, buf_ptr);
         }
@@ -336,7 +323,7 @@ pub const Sample = struct {
         self.driver.allocator.destroy(self);
     }
 
-    pub fn loadFromOwnedMemory(self: *Sample, data: []u8) !void {
+    fn cleanupPlaybackState(self: *Sample) void {
         if (self.is_initialized) {
             ma.ma_sound_uninit(&self.sound);
             self.is_initialized = false;
@@ -354,6 +341,10 @@ pub const Sample = struct {
             self.driver.allocator.free(buf);
             self.owned_buffer = null;
         }
+    }
+
+    pub fn loadFromOwnedMemory(self: *Sample, data: []u8) !void {
+        self.cleanupPlaybackState();
 
         const decoder = try self.driver.allocator.create(ma.ma_decoder);
         errdefer self.driver.allocator.destroy(decoder);
@@ -373,6 +364,7 @@ pub const Sample = struct {
         self.is_initialized = true;
         self.is_done = false;
         self.is_paused = false;
+        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
@@ -393,14 +385,18 @@ pub const Sample = struct {
     /// Context for bounded memory read/seek callbacks used by ma_decoder_init.
     /// Allows miniaudio to read from a raw pointer without creating an unsafe
     /// Zig slice that may extend past the real allocation.
-    const BoundedMemCtx = struct {
+    pub const BoundedMemCtx = struct {
         base: [*]const u8,
         size: usize,
         cursor: usize,
     };
 
-    fn boundedMemRead(pDecoder: [*c]ma.ma_decoder, pBufferOut: ?*anyopaque, bytesToRead: usize, pBytesRead: ?*usize) callconv(.c) ma.ma_result {
-        const ctx: *BoundedMemCtx = @ptrCast(@alignCast(pDecoder.*.pUserData));
+    pub fn boundedMemRead(pDecoder: [*c]ma.ma_decoder, pBufferOut: ?*anyopaque, bytesToRead: usize, pBytesRead: ?*usize) callconv(.c) ma.ma_result {
+        const user_data = pDecoder.*.pUserData orelse {
+            if (pBytesRead) |br| br.* = 0;
+            return ma.MA_INVALID_ARGS;
+        };
+        const ctx: *BoundedMemCtx = @ptrCast(@alignCast(user_data));
         if (ctx.cursor >= ctx.size) {
             if (pBytesRead) |br| br.* = 0;
             return ma.MA_AT_END;
@@ -414,8 +410,9 @@ pub const Sample = struct {
         return if (to_read < bytesToRead) ma.MA_AT_END else ma.MA_SUCCESS;
     }
 
-    fn boundedMemSeek(pDecoder: [*c]ma.ma_decoder, byteOffset: ma.ma_int64, origin: ma.ma_seek_origin) callconv(.c) ma.ma_result {
-        const ctx: *BoundedMemCtx = @ptrCast(@alignCast(pDecoder.*.pUserData));
+    pub fn boundedMemSeek(pDecoder: [*c]ma.ma_decoder, byteOffset: ma.ma_int64, origin: ma.ma_seek_origin) callconv(.c) ma.ma_result {
+        const user_data = pDecoder.*.pUserData orelse return ma.MA_INVALID_ARGS;
+        const ctx: *BoundedMemCtx = @ptrCast(@alignCast(user_data));
         const new_pos: i64 = switch (origin) {
             ma.ma_seek_origin_start => byteOffset,
             ma.ma_seek_origin_current => @as(i64, @intCast(ctx.cursor)) + byteOffset,
@@ -445,20 +442,8 @@ pub const Sample = struct {
     /// This avoids creating a Zig slice of unknown length — miniaudio reads through
     /// callbacks that bounds-check against `max_size`, returning EOF if exceeded.
     fn loadFromBoundedPointer(self: *Sample, data_ptr: [*]const u8, max_size: usize) !void {
-        if (self.is_initialized) {
-            ma.ma_sound_uninit(&self.sound);
-            self.is_initialized = false;
-        }
+        self.cleanupPlaybackState();
         log("Sample.loadFromBoundedPointer mounting bounded stream (max_size={d})\n", .{max_size});
-        if (self.decoder) |d| {
-            _ = ma.ma_decoder_uninit(d);
-            self.driver.allocator.destroy(d);
-            self.decoder = null;
-        }
-        if (self.owned_buffer) |buf| {
-            self.driver.allocator.free(buf);
-            self.owned_buffer = null;
-        }
 
         // Allocate the bounded context alongside the decoder so it persists for playback
         const ctx = try self.driver.allocator.create(BoundedMemCtx);
@@ -484,6 +469,7 @@ pub const Sample = struct {
         self.is_initialized = true;
         self.is_done = false;
         self.is_paused = false;
+        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
@@ -502,25 +488,8 @@ pub const Sample = struct {
     }
 
     pub fn loadFromMemory(self: *Sample, data: []const u8, copy_data: bool) !void {
-        if (self.is_initialized) {
-            ma.ma_sound_uninit(&self.sound);
-            self.is_initialized = false;
-        }
-
+        self.cleanupPlaybackState();
         log("Sample.loadFromMemory mounting buffer of size: {d}\n", .{data.len});
-        if (self.decoder) |d| {
-            _ = ma.ma_decoder_uninit(d);
-            self.driver.allocator.destroy(d);
-            self.decoder = null;
-        }
-        if (self.bounded_mem_ctx) |ctx| {
-            self.driver.allocator.destroy(ctx);
-            self.bounded_mem_ctx = null;
-        }
-        if (self.owned_buffer) |buf| {
-            self.driver.allocator.free(buf);
-            self.owned_buffer = null;
-        }
 
         var internal_data = data;
         var owned_copy: ?[]u8 = null;
@@ -548,6 +517,7 @@ pub const Sample = struct {
         self.is_initialized = true;
         self.is_done = false;
         self.is_paused = false;
+        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
@@ -572,7 +542,9 @@ pub const Sample = struct {
         // Read file into memory so owned_buffer is set (required for AIL_quick_copy)
         const file = fs_compat.openFile(path, .{}) catch return error.FileNotFound;
         defer file.close();
-        const size: usize = @intCast((file.stat() catch return error.FileNotFound).size);
+        const stat_size = (file.stat() catch return error.FileNotFound).size;
+        if (stat_size <= 0) return error.FileNotFound;
+        const size: usize = @intCast(stat_size);
         const buf = try self.driver.allocator.alloc(u8, size);
         errdefer self.driver.allocator.free(buf);
         _ = file.readAll(buf) catch return error.FileNotFound;
@@ -612,24 +584,8 @@ pub const Sample = struct {
 
     pub fn reset(self: *Sample) void {
         self.removeReverb();
-        if (self.is_initialized) {
-            _ = ma.ma_sound_stop(&self.sound);
-            ma.ma_sound_uninit(&self.sound);
-            self.is_initialized = false;
-        }
-        if (self.decoder) |d| {
-            _ = ma.ma_decoder_uninit(d);
-            self.driver.allocator.destroy(d);
-            self.decoder = null;
-        }
-        if (self.bounded_mem_ctx) |ctx| {
-            self.driver.allocator.destroy(ctx);
-            self.bounded_mem_ctx = null;
-        }
-        if (self.owned_buffer) |buf| {
-            self.driver.allocator.free(buf);
-            self.owned_buffer = null;
-        }
+        if (self.is_initialized) _ = ma.ma_sound_stop(&self.sound);
+        self.cleanupPlaybackState();
         self.volume = 1.0;
         self.original_volume = 127;
         self.pan = 0.0;
@@ -670,7 +626,7 @@ pub const Sample = struct {
         }
         if (self.sob_callback != 0) {
             const buf_ptr: ?*anyopaque = if (self.owned_buffer) |b| @ptrCast(b.ptr) else null;
-            const buf_len: u32 = if (self.owned_buffer) |b| @intCast(b.len) else 0;
+            const buf_len: u32 = if (self.owned_buffer) |b| @intCast(@min(b.len, std.math.maxInt(u32))) else 0;
             const cb: *const fn (?*anyopaque, i32, u32, ?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.sob_callback);
             cb(@ptrCast(self), self.last_loaded_buffer, buf_len, buf_ptr);
         }
@@ -686,6 +642,14 @@ pub const Sample = struct {
         self.is_paused = false;
     }
 
+    pub fn end(self: *Sample) void {
+        if (self.is_initialized) {
+            _ = ma.ma_sound_stop(&self.sound);
+            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, 0);
+        }
+        self.is_done = true;
+    }
+
     pub fn pause(self: *Sample) void {
         log("Sample.pause: s={*}\n", .{self});
         if (self.is_initialized and !self.is_paused and ma.ma_sound_is_playing(&self.sound) != 0) {
@@ -697,8 +661,8 @@ pub const Sample = struct {
     pub fn resumePlayback(self: *Sample) void {
         log("Sample.resume: s={*}\n", .{self});
         if (self.is_initialized) {
-            // In legacy MSS, AIL_resume_sample acts as an alias for AIL_start_sample
-            // and can be used to start a newly loaded sample as well as unpause.
+            // In legacy MSS, AIL_resume_sample can be used to start a newly loaded
+            // sample as well as unpause, though it does not reset loop state.
             _ = ma.ma_sound_start(&self.sound);
             self.is_paused = false;
         }
@@ -742,7 +706,6 @@ pub const Sample = struct {
         log("Sample.setReverb: s={*}, room={d}, level={d}, time={d}\n", .{ self, room_type, level, reflect_time });
 
         if (level <= 0.001 or reflect_time <= 0.001) {
-            // Remove reverb if level or time is negligible
             self.removeReverb();
             return;
         }
@@ -750,19 +713,19 @@ pub const Sample = struct {
 
         const sample_rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
         const channels = ma.ma_engine_get_channels(&self.driver.engine);
-        // Convert reflect_time (seconds) to frames
         const delay_frames: u32 = @intFromFloat(@max(1.0, reflect_time * @as(f32, @floatFromInt(sample_rate))));
         // Map room_type to decay: higher room_type = longer decay tail
         const decay: f32 = @min(0.95, room_type * 0.15);
 
         if (self.reverb_node) |node| {
-            // Update existing node parameters
             ma.ma_delay_node_set_wet(node, level);
             ma.ma_delay_node_set_dry(node, 1.0 - level * 0.5);
             ma.ma_delay_node_set_decay(node, decay);
         } else {
-            // Create new delay node
-            const node = self.driver.allocator.create(ma.ma_delay_node) catch return;
+            const node = self.driver.allocator.create(ma.ma_delay_node) catch {
+                log("Sample.setReverb: failed to allocate delay node\n", .{});
+                return;
+            };
             const config = ma.ma_delay_node_config_init(channels, sample_rate, delay_frames, decay);
             const result = ma.ma_delay_node_init(@ptrCast(&self.driver.engine), &config, null, node);
             if (result != ma.MA_SUCCESS) {
@@ -825,7 +788,7 @@ pub const Sample = struct {
         self.loop_count = count;
         self.loops_remaining = count;
         log("Sample.setLoopCount: s={*}, count={d}\n", .{ self, count });
-        // MSS uses 0 for infinite looping. The manual loop counting is handled in the EOS callback.
+        // MSS uses 0 for infinite looping.
         if (self.is_initialized) {
             if (count == 0) {
                 ma.ma_sound_set_looping(&self.sound, ma.MA_TRUE);
@@ -872,7 +835,7 @@ pub const Sample = struct {
             var cursor: u64 = 0;
             _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
             const bpf = self.bytesPerFrame();
-            return @as(u32, @intCast(cursor * @as(u64, bpf)));
+            return @as(u32, @intCast(@min(cursor * @as(u64, bpf), std.math.maxInt(u32))));
         }
         return 0;
     }
@@ -891,12 +854,11 @@ pub const Sample = struct {
         var pos = MsPosition{ .total = 0, .current = 0 };
         if (self.is_initialized and self.decoder != null) {
             var cursor: u64 = 0;
-            var length: u64 = 0;
             _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
-            _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &length);
             const rate = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
-            pos.current = @as(i32, @intFromFloat(@as(f32, @floatFromInt(cursor)) * 1000.0 / rate));
-            pos.total = @as(i32, @intFromFloat(@as(f32, @floatFromInt(length)) * 1000.0 / rate));
+            const ms_per_frame = 1000.0 / rate;
+            pos.current = @as(i32, @intFromFloat(@as(f32, @floatFromInt(cursor)) * ms_per_frame));
+            pos.total = @as(i32, @intFromFloat(@as(f32, @floatFromInt(self.cached_length_frames)) * ms_per_frame));
         }
         return pos;
     }
@@ -940,8 +902,8 @@ pub const Sample3D = struct {
     pos_z: f32 = 0.0,
     min_distance: f32 = 1.0,
     max_distance: f32 = 100.0,
-    cone_inner_deg: f32 = 360.0,
-    cone_outer_deg: f32 = 360.0,
+    cone_inner_rad: f32 = 360.0 * deg2rad,
+    cone_outer_rad: f32 = 360.0 * deg2rad,
     cone_outer_volume: f32 = 1.0,
     orient_fx: f32 = 0.0,
     orient_fy: f32 = 0.0,
@@ -950,6 +912,8 @@ pub const Sample3D = struct {
     orient_uy: f32 = 1.0,
     orient_uz: f32 = 0.0,
     user_data: [8]u32 = [_]u32{0} ** 8,
+    bounded_mem_ctx: ?*Sample.BoundedMemCtx = null,
+    cached_length_frames: u64 = 0,
 
     fn eosCallbackBridge(pUserData: ?*anyopaque, pSound: ?*ma.ma_sound) callconv(.c) void {
         _ = pSound;
@@ -1023,13 +987,16 @@ pub const Sample3D = struct {
             _ = ma.ma_decoder_uninit(d);
             self.driver.allocator.destroy(d);
         }
+        if (self.bounded_mem_ctx) |ctx| {
+            self.driver.allocator.destroy(ctx);
+        }
         if (self.owned_buffer) |buf| {
             self.driver.allocator.free(buf);
         }
         self.driver.allocator.destroy(self);
     }
 
-    pub fn loadFromOwnedMemory(self: *Sample3D, data: []u8) !void {
+    fn cleanupPlaybackState(self: *Sample3D) void {
         if (self.is_initialized) {
             ma.ma_sound_uninit(&self.sound);
             self.is_initialized = false;
@@ -1039,10 +1006,18 @@ pub const Sample3D = struct {
             self.driver.allocator.destroy(d);
             self.decoder = null;
         }
+        if (self.bounded_mem_ctx) |ctx| {
+            self.driver.allocator.destroy(ctx);
+            self.bounded_mem_ctx = null;
+        }
         if (self.owned_buffer) |buf| {
             self.driver.allocator.free(buf);
             self.owned_buffer = null;
         }
+    }
+
+    pub fn loadFromOwnedMemory(self: *Sample3D, data: []u8) !void {
+        self.cleanupPlaybackState();
 
         const decoder = try self.driver.allocator.create(ma.ma_decoder);
         errdefer self.driver.allocator.destroy(decoder);
@@ -1060,6 +1035,7 @@ pub const Sample3D = struct {
         self.is_initialized = true;
         self.is_done = false;
         self.is_paused = false;
+        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
@@ -1076,19 +1052,7 @@ pub const Sample3D = struct {
     }
 
     pub fn loadFromMemory(self: *Sample3D, data: []const u8, copy_data: bool) !void {
-        if (self.is_initialized) {
-            ma.ma_sound_uninit(&self.sound);
-            self.is_initialized = false;
-        }
-        if (self.decoder) |d| {
-            _ = ma.ma_decoder_uninit(d);
-            self.driver.allocator.destroy(d);
-            self.decoder = null;
-        }
-        if (self.owned_buffer) |buf| {
-            self.driver.allocator.free(buf);
-            self.owned_buffer = null;
-        }
+        self.cleanupPlaybackState();
 
         var internal_data = data;
         var owned_copy: ?[]u8 = null;
@@ -1114,6 +1078,7 @@ pub const Sample3D = struct {
         self.is_initialized = true;
         self.is_done = false;
         self.is_paused = false;
+        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
@@ -1124,7 +1089,6 @@ pub const Sample3D = struct {
         ma.ma_sound_set_pitch(&self.sound, self.pitch);
         ma.ma_sound_set_looping(&self.sound, 0);
         _ = ma.ma_sound_set_end_callback(&self.sound, Sample3D.eosCallbackBridge, self);
-        // Apply driver-level 3D factors
         if (self.driver.rolloff_factor != 1.0) ma.ma_sound_set_rolloff(&self.sound, self.driver.rolloff_factor);
         if (self.driver.doppler_factor != 1.0) ma.ma_sound_set_doppler_factor(&self.sound, self.driver.doppler_factor);
         // Re-apply stored spatial settings (may have been set before audio loaded)
@@ -1132,13 +1096,69 @@ pub const Sample3D = struct {
         ma.ma_sound_set_velocity(&self.sound, self.velocity_x, self.velocity_y, self.velocity_z);
         ma.ma_sound_set_min_distance(&self.sound, self.min_distance);
         ma.ma_sound_set_max_distance(&self.sound, self.max_distance);
-        // Re-apply cone (MSS degrees → radians for miniaudio)
         self.applyCone();
-        // Re-apply orientation (forward direction for cone)
         ma.ma_sound_set_direction(&self.sound, self.orient_fx, self.orient_fy, self.orient_fz);
-        // Re-apply loop end range if set
         if (self.loop_end_frame > 0) {
             _ = ma.ma_data_source_set_range_in_pcm_frames(decoder, 0, self.loop_end_frame);
+        }
+    }
+
+    fn loadFromBoundedPointer(self: *Sample3D, data_ptr: [*]const u8, max_size: usize) !void {
+        self.cleanupPlaybackState();
+
+        const ctx = try self.driver.allocator.create(Sample.BoundedMemCtx);
+        errdefer self.driver.allocator.destroy(ctx);
+        ctx.* = .{ .base = data_ptr, .size = max_size, .cursor = 0 };
+
+        const decoder = try self.driver.allocator.create(ma.ma_decoder);
+        errdefer self.driver.allocator.destroy(decoder);
+        var result = ma.ma_decoder_init(Sample.boundedMemRead, Sample.boundedMemSeek, @ptrCast(ctx), null, decoder);
+        if (result != ma.MA_SUCCESS) {
+            self.driver.allocator.destroy(ctx);
+            return error.DecoderInitFailed;
+        }
+
+        result = ma.ma_sound_init_from_data_source(&self.driver.engine, @ptrCast(decoder), 0, null, &self.sound);
+        if (result != ma.MA_SUCCESS) {
+            _ = ma.ma_decoder_uninit(decoder);
+            self.driver.allocator.destroy(ctx);
+            return error.SoundInitFailed;
+        }
+        self.decoder = decoder;
+        self.bounded_mem_ctx = ctx;
+        self.is_initialized = true;
+        self.is_done = false;
+        self.is_paused = false;
+        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
+
+        if (self.target_rate) |tr| {
+            const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
+            self.pitch = tr / native_rate;
+        }
+
+        self.applyVolume();
+        ma.ma_sound_set_pitch(&self.sound, self.pitch);
+        ma.ma_sound_set_looping(&self.sound, 0);
+        _ = ma.ma_sound_set_end_callback(&self.sound, Sample3D.eosCallbackBridge, self);
+        if (self.driver.rolloff_factor != 1.0) ma.ma_sound_set_rolloff(&self.sound, self.driver.rolloff_factor);
+        if (self.driver.doppler_factor != 1.0) ma.ma_sound_set_doppler_factor(&self.sound, self.driver.doppler_factor);
+        ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, self.pos_z);
+        ma.ma_sound_set_velocity(&self.sound, self.velocity_x, self.velocity_y, self.velocity_z);
+        ma.ma_sound_set_min_distance(&self.sound, self.min_distance);
+        ma.ma_sound_set_max_distance(&self.sound, self.max_distance);
+        self.applyCone();
+        ma.ma_sound_set_direction(&self.sound, self.orient_fx, self.orient_fy, self.orient_fz);
+        if (self.loop_end_frame > 0) {
+            _ = ma.ma_data_source_set_range_in_pcm_frames(decoder, 0, self.loop_end_frame);
+        }
+    }
+
+    pub fn loadFromUnownedPointer(self: *Sample3D, data_ptr: [*]const u8) !void {
+        const detected = root.detectAudioSize(data_ptr);
+        if (detected > 0 and detected != root.streaming_sentinel_size) {
+            try self.loadFromMemory(data_ptr[0..detected], true);
+        } else {
+            try self.loadFromBoundedPointer(data_ptr, root.streaming_sentinel_size);
         }
     }
 
@@ -1154,7 +1174,14 @@ pub const Sample3D = struct {
         self.is_done = false;
         self.is_paused = false;
         if (self.is_initialized) {
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, 0);
+            if (self.loop_count == 0) {
+                ma.ma_sound_set_looping(&self.sound, ma.MA_TRUE);
+            } else {
+                ma.ma_sound_set_looping(&self.sound, ma.MA_FALSE);
+            }
+            if (ma.ma_sound_at_end(&self.sound) != 0) {
+                _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, 0);
+            }
             _ = ma.ma_sound_start(&self.sound);
         }
     }
@@ -1166,6 +1193,14 @@ pub const Sample3D = struct {
         }
         self.is_done = false;
         self.is_paused = false;
+    }
+
+    pub fn end(self: *Sample3D) void {
+        if (self.is_initialized) {
+            _ = ma.ma_sound_stop(&self.sound);
+            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, 0);
+        }
+        self.is_done = true;
     }
 
     pub fn pause(self: *Sample3D) void {
@@ -1184,8 +1219,7 @@ pub const Sample3D = struct {
 
     pub fn status(self: *Sample3D) SampleStatus {
         if (self.is_done) return .done;
-        // For 3D samples, AIL_stop_3D_sample preserves position but reports SMP_STOPPED (2),
-        // unlike 2D samples where AIL_pause_sample reports SMP_PLAYING (4).
+        // Paused 3D samples report SMP_STOPPED (8), unlike 2D where paused reports SMP_PLAYING (4).
         if (self.is_paused) return .stopped;
         if (self.is_initialized) {
             if (ma.ma_sound_is_playing(&self.sound) != 0) return .playing;
@@ -1197,7 +1231,7 @@ pub const Sample3D = struct {
 
     pub fn applyCone(self: *Sample3D) void {
         if (self.is_initialized) {
-            ma.ma_sound_set_cone(&self.sound, self.cone_inner_deg * deg2rad, self.cone_outer_deg * deg2rad, self.cone_outer_volume);
+            ma.ma_sound_set_cone(&self.sound, self.cone_inner_rad, self.cone_outer_rad, self.cone_outer_volume);
         }
     }
 
@@ -1229,7 +1263,13 @@ pub const Sample3D = struct {
     pub fn setLoopCount(self: *Sample3D, count: i32) void {
         self.loop_count = count;
         self.loops_remaining = count;
-        if (self.is_initialized) ma.ma_sound_set_looping(&self.sound, 0);
+        if (self.is_initialized) {
+            if (count == 0) {
+                ma.ma_sound_set_looping(&self.sound, ma.MA_TRUE);
+            } else {
+                ma.ma_sound_set_looping(&self.sound, ma.MA_FALSE);
+            }
+        }
     }
 
     pub fn setPlaybackRate(self: *Sample3D, rate: i32) void {
@@ -1263,10 +1303,8 @@ pub const Sample3D = struct {
 
     pub fn getLength(self: *Sample3D) u32 {
         if (self.is_initialized) {
-            var length: u64 = 0;
-            _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &length);
             const bpf = self.bytesPerFrame();
-            return @as(u32, @intCast(@min(length * @as(u64, bpf), std.math.maxInt(u32))));
+            return @as(u32, @intCast(@min(self.cached_length_frames * @as(u64, bpf), std.math.maxInt(u32))));
         }
         return 0;
     }
@@ -1275,12 +1313,11 @@ pub const Sample3D = struct {
         var pos = Sample.MsPosition{ .total = 0, .current = 0 };
         if (self.is_initialized and self.decoder != null) {
             var cursor: u64 = 0;
-            var length: u64 = 0;
             _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
-            _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &length);
             const rate = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
-            pos.current = @as(i32, @intFromFloat(@as(f32, @floatFromInt(cursor)) * 1000.0 / rate));
-            pos.total = @as(i32, @intFromFloat(@as(f32, @floatFromInt(length)) * 1000.0 / rate));
+            const ms_per_frame = 1000.0 / rate;
+            pos.current = @as(i32, @intFromFloat(@as(f32, @floatFromInt(cursor)) * ms_per_frame));
+            pos.total = @as(i32, @intFromFloat(@as(f32, @floatFromInt(self.cached_length_frames)) * ms_per_frame));
         }
         return pos;
     }
@@ -1321,6 +1358,7 @@ pub const Sample3D = struct {
 
     pub fn updatePosition(self: *Sample3D, dt_s: f32) void {
         if (!self.auto_update or !self.is_initialized) return;
+        if (self.velocity_x == 0 and self.velocity_y == 0 and self.velocity_z == 0) return;
         self.pos_x += self.velocity_x * dt_s;
         self.pos_y += self.velocity_y * dt_s;
         self.pos_z += self.velocity_z * dt_s;
