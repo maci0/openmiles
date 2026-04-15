@@ -24,6 +24,12 @@ pub const MidiDriver = struct {
     dls_reverb_reflect_time: f32 = 0.0,
     // Approximate soundfont memory footprint, captured at load time
     soundfont_size_bytes: u32 = 0,
+    // DLS processor callback (stored but not invoked; TSF has its own pipeline)
+    dls_processor: usize = 0,
+    // DLS filter preferences — stored name/value pairs for AIL_set_filter_DLS_preference
+    // and AIL_filter_DLS_attribute round-tripping. Simple last-set wins.
+    dls_filter_pref_cutoff: f32 = 0.0,
+    dls_filter_pref_compression: f32 = 0.0,
 
     pub fn init(allocator: std.mem.Allocator) !*MidiDriver {
         const self = try allocator.create(MidiDriver);

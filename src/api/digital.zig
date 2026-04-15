@@ -756,11 +756,12 @@ pub export fn AIL_register_SOB_callback(s_opt: ?*Sample, callback: ?*anyopaque) 
     s.sob_callback = if (callback) |cb| @intFromPtr(cb) else 0;
     return prev;
 }
-pub export fn AIL_set_sample_processor(s_opt: ?*Sample, stage: i32, processor: ?*anyopaque) callconv(.winapi) void {
-    const s = s_opt orelse return;
-    _ = s;
-    _ = stage;
-    _ = processor;
+pub export fn AIL_set_sample_processor(s_opt: ?*Sample, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    const s = s_opt orelse return null;
+    const idx: usize = @intCast(@min(@max(stage, 0), 1));
+    const prev: ?*anyopaque = @ptrFromInt(s.sample_processors[idx]);
+    s.sample_processors[idx] = if (processor) |p| @intFromPtr(p) else 0;
+    return prev;
 }
 pub export fn AIL_stream_position(s_opt: ?*Sample) callconv(.winapi) u32 {
     const s = s_opt orelse return 0;
@@ -836,11 +837,12 @@ pub export fn AIL_register_EOF_callback(s: *anyopaque, callback: ?*anyopaque) ca
     stream.eos_callback = if (callback) |cb| @intFromPtr(cb) else 0;
     return prev;
 }
-pub export fn AIL_set_stream_processor(s_opt: ?*Sample, stage: i32, processor: ?*anyopaque) callconv(.winapi) void {
-    const s = s_opt orelse return;
-    _ = s;
-    _ = stage;
-    _ = processor;
+pub export fn AIL_set_stream_processor(s_opt: ?*Sample, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    const s = s_opt orelse return null;
+    const idx: usize = @intCast(@min(@max(stage, 0), 1));
+    const prev: ?*anyopaque = @ptrFromInt(s.sample_processors[idx]);
+    s.sample_processors[idx] = if (processor) |p| @intFromPtr(p) else 0;
+    return prev;
 }
 pub export fn AIL_filter_stream_attribute(s: *anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const sample: *Sample = @ptrCast(@alignCast(s));
@@ -972,11 +974,12 @@ pub export fn AIL_set_DirectSound_HWND(driver_opt: ?*DigitalDriver, hwnd: *anyop
     _ = driver;
     _ = hwnd;
 }
-pub export fn AIL_set_digital_driver_processor(driver_opt: ?*DigitalDriver, stage: i32, processor: ?*anyopaque) callconv(.winapi) void {
-    const driver = driver_opt orelse return;
-    _ = driver;
-    _ = stage;
-    _ = processor;
+pub export fn AIL_set_digital_driver_processor(driver_opt: ?*DigitalDriver, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    const driver = driver_opt orelse return null;
+    const idx: usize = @intCast(@min(@max(stage, 0), 1));
+    const prev: ?*anyopaque = @ptrFromInt(driver.driver_processors[idx]);
+    driver.driver_processors[idx] = if (processor) |p| @intFromPtr(p) else 0;
+    return prev;
 }
 pub export fn AIL_process_digital_audio(driver_opt: ?*DigitalDriver, dest: *anyopaque, count: u32, mono_dest: *anyopaque, mono_count: u32, flags: u32) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
@@ -1464,20 +1467,35 @@ pub export fn AIL_decompress_ADPCM(data: *anyopaque, len: u32, out: ?*anyopaque)
     @memcpy(@as([*]u8, @ptrCast(@alignCast(out.?)))[0..wav.len], wav);
     return wav_size;
 }
-pub export fn AIL_open_input(device: *anyopaque) callconv(.winapi) ?*anyopaque {
+pub export fn AIL_open_input(device: *anyopaque) callconv(.winapi) ?*openmiles.Input {
     _ = device;
-    return null;
+    const allocator = openmiles.global_allocator orelse return null;
+    const input = openmiles.Input.init(allocator) catch |err| {
+        log("AIL_open_input failed: {any}\n", .{err});
+        return null;
+    };
+    log("AIL_open_input: input={*}\n", .{input});
+    return input;
 }
-pub export fn AIL_close_input(input: *anyopaque) callconv(.winapi) void {
-    _ = input;
+pub export fn AIL_close_input(input_ptr: ?*openmiles.Input) callconv(.winapi) void {
+    const input = input_ptr orelse return;
+    log("AIL_close_input: input={*}\n", .{input});
+    input.deinit();
 }
-pub export fn AIL_set_input_state(input: *anyopaque, state: i32) callconv(.winapi) void {
-    _ = input;
-    _ = state;
+pub export fn AIL_set_input_state(input_ptr: ?*openmiles.Input, state: i32) callconv(.winapi) void {
+    const input = input_ptr orelse return;
+    log("AIL_set_input_state: input={*}, state={d}\n", .{ input, state });
+    if (state != 0) {
+        input.start();
+    } else {
+        input.stop();
+    }
 }
-pub export fn AIL_get_input_info(input: *anyopaque) callconv(.winapi) ?*anyopaque {
-    _ = input;
-    return null;
+pub export fn AIL_get_input_info(input_ptr: ?*openmiles.Input) callconv(.winapi) u32 {
+    const input = input_ptr orelse return 0;
+    const info = input.getInfo();
+    // MSS historically returned sample count here; callers query additional info via separate paths.
+    return info.samples;
 }
 pub export fn AIL_set_file_callbacks(open_fn: ?*anyopaque, close_fn: ?*anyopaque, read_fn: ?*anyopaque, seek_fn: ?*anyopaque) callconv(.winapi) void {
     log("AIL_set_file_callbacks\n", .{});

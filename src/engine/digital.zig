@@ -26,6 +26,9 @@ pub const DigitalDriver = struct {
     distance_factor: f32 = 1.0,
     room_type: i32 = 0,
     speaker_type: i32 = 0,
+    // DSP processor callbacks [input_stage, output_stage]. Stored for query
+    // round-tripping; not invoked (miniaudio manages its own processing graph).
+    driver_processors: [2]usize = .{ 0, 0 },
 
     pub fn init(allocator: std.mem.Allocator, frequency: u32, bits: i32, channels: u32) !*DigitalDriver {
         _ = bits;
@@ -226,6 +229,9 @@ pub const Sample = struct {
     bounded_mem_ctx: ?*BoundedMemCtx = null,
     // Filter attached to this sample (set by AIL_set_sample_filter)
     attached_filter: ?*root.Filter = null,
+    // DSP processor callbacks [input_stage, output_stage]. Stored but not
+    // actively invoked (miniaudio manages its own processing graph).
+    sample_processors: [2]usize = .{ 0, 0 },
     // Reverb state (via miniaudio ma_delay_node)
     reverb_node: ?*ma.ma_delay_node = null,
     reverb_room_type: f32 = 0.0,

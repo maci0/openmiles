@@ -1,0 +1,122 @@
+const std = @import("std");
+const root = @import("../root.zig");
+const ma = root.ma;
+const log = root.log;
+
+/// Audio capture device wrapping a miniaudio ma_device in capture mode.
+/// Created via AIL_open_input, controlled via AIL_set_input_state, queried
+/// via AIL_get_input_info.
+pub const Input = struct {
+    device: ma.ma_device,
+    allocator: std.mem.Allocator,
+    state: i32 = 0, // 0 = stopped, 1 = recording
+    sample_rate: u32 = 44100,
+    channels: u32 = 1,
+    bits: u32 = 16,
+    // Ring buffer of captured PCM (bounded to ~1 second)
+    buffer: std.ArrayListUnmanaged(u8) = .{},
+    max_buffer_bytes: usize = 44100 * 2, // 1s of 16-bit mono
+    mutex: std.Thread.Mutex = .{},
+    is_initialized: bool = false,
+
+    pub fn init(allocator: std.mem.Allocator) !*Input {
+        const self = try allocator.create(Input);
+        self.* = .{
+            .device = undefined,
+            .allocator = allocator,
+        };
+
+        var config = ma.ma_device_config_init(ma.ma_device_type_capture);
+        config.capture.format = ma.ma_format_s16;
+        config.capture.channels = self.channels;
+        config.sampleRate = self.sample_rate;
+        config.dataCallback = captureCallback;
+        config.pUserData = @ptrCast(self);
+
+        const result = ma.ma_device_init(null, &config, &self.device);
+        if (result != ma.MA_SUCCESS) {
+            log("Input.init: ma_device_init failed: {d}\n", .{result});
+            allocator.destroy(self);
+            return error.CaptureDeviceInitFailed;
+        }
+        self.is_initialized = true;
+        self.max_buffer_bytes = self.sample_rate * self.channels * (self.bits / 8);
+        return self;
+    }
+
+    pub fn deinit(self: *Input) void {
+        if (self.is_initialized) {
+            _ = ma.ma_device_stop(&self.device);
+            ma.ma_device_uninit(&self.device);
+        }
+        self.buffer.deinit(self.allocator);
+        self.allocator.destroy(self);
+    }
+
+    pub fn start(self: *Input) void {
+        if (!self.is_initialized) return;
+        _ = ma.ma_device_start(&self.device);
+        self.state = 1;
+    }
+
+    pub fn stop(self: *Input) void {
+        if (!self.is_initialized) return;
+        _ = ma.ma_device_stop(&self.device);
+        self.state = 0;
+    }
+
+    fn captureCallback(pDevice: ?*ma.ma_device, pOutput: ?*anyopaque, pInput: ?*const anyopaque, frameCount: ma.ma_uint32) callconv(.c) void {
+        _ = pOutput;
+        const self: *Input = @ptrCast(@alignCast(pDevice.?.pUserData));
+        const in_ptr: [*]const u8 = @ptrCast(pInput.?);
+        const bytes_per_frame = self.channels * (self.bits / 8);
+        const byte_count: usize = @as(usize, frameCount) * bytes_per_frame;
+
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        // Ring-buffer behavior: drop oldest data if we exceed max_buffer_bytes
+        if (self.buffer.items.len + byte_count > self.max_buffer_bytes) {
+            const overflow = (self.buffer.items.len + byte_count) - self.max_buffer_bytes;
+            if (overflow >= self.buffer.items.len) {
+                self.buffer.clearRetainingCapacity();
+            } else {
+                // Shift remaining bytes to front
+                std.mem.copyForwards(u8, self.buffer.items[0..], self.buffer.items[overflow..]);
+                self.buffer.items.len -= overflow;
+            }
+        }
+        self.buffer.appendSlice(self.allocator, in_ptr[0..byte_count]) catch {};
+    }
+
+    /// InputInfo layout mirrors MSS's AILSOUNDINFO for basic query (rate, channels, bits, data buffer).
+    pub const InputInfo = extern struct {
+        format: u32 = 0,
+        data_ptr: ?*const anyopaque = null,
+        data_len: u32 = 0,
+        rate: u32 = 0,
+        bits: u32 = 0,
+        channels: u32 = 0,
+        samples: u32 = 0,
+        block_size: u32 = 0,
+        initial_ptr: ?*const anyopaque = null,
+    };
+
+    pub fn getInfo(self: *Input) InputInfo {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const bytes_per_sample = self.channels * (self.bits / 8);
+        const samples: u32 = if (bytes_per_sample == 0) 0 else @as(u32, @intCast(self.buffer.items.len)) / bytes_per_sample;
+        return .{
+            .format = 0,
+            .data_ptr = if (self.buffer.items.len > 0) @ptrCast(self.buffer.items.ptr) else null,
+            .data_len = @intCast(self.buffer.items.len),
+            .rate = self.sample_rate,
+            .bits = self.bits,
+            .channels = self.channels,
+            .samples = samples,
+            .block_size = bytes_per_sample,
+            .initial_ptr = null,
+        };
+    }
+};

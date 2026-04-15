@@ -77,7 +77,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 |----------|--------|-------|
 | `AIL_primary_digital_driver` | 🟢 Implemented | |
 | `AIL_process_digital_audio` | ⚪ Stub | Returns 0; direct PCM processing not implemented |
-| `AIL_set_digital_driver_processor` | ⚪ Stub | No-op; DSP callback chains not implemented |
+| `AIL_set_digital_driver_processor` | 🟡 Partial | Callback is stored and returned on subsequent set (round-tripping); not invoked during processing |
 | `AIL_size_processed_digital_audio` | 🟢 Implemented | Computes output size from format parameters |
 | `AIL_open_digital_driver` | 🟢 Implemented | Uses miniaudio engine; `bits` parameter ignored |
 | `AIL_close_digital_driver` | 🟢 Implemented | |
@@ -104,7 +104,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_sample_user_data` | 🟢 Implemented | |
 | `AIL_set_sample_adpcm_block_size` | ⚪ Stub | No-op; ADPCM block size managed internally |
 | `AIL_set_sample_loop_block` | 🟢 Implemented | |
-| `AIL_set_sample_processor` | ⚪ Stub | No-op; DSP callback chains not implemented |
+| `AIL_set_sample_processor` | 🟡 Partial | Callback stored per stage (input/output) for round-tripping; not invoked |
 | `AIL_set_sample_reverb` | 🟢 Implemented | Creates ma_delay_node per-sample; maps room_type→decay, level→wet/dry, reflect_time→delay frames |
 | `AIL_set_sample_user_data` | 🟢 Implemented | |
 | `AIL_allocate_sample_handle` | 🟢 Implemented | |
@@ -144,7 +144,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_service_stream` | ⚪ Stub | Returns 1; miniaudio handles servicing internally |
 | `AIL_set_stream_loop_block` | 🟢 Implemented | |
 | `AIL_set_stream_position` | 🟢 Implemented | |
-| `AIL_set_stream_processor` | ⚪ Stub | No-op; DSP callback chains not implemented |
+| `AIL_set_stream_processor` | 🟡 Partial | Callback stored per stage (input/output) for round-tripping; not invoked |
 | `AIL_set_stream_reverb` | 🟢 Implemented | Same ma_delay_node reverb as sample reverb |
 | `AIL_set_stream_user_data` | 🟢 Implemented | |
 | `AIL_stream_info` | 🟢 Implemented | |
@@ -180,10 +180,10 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_map_sequence_channel` | 🟢 Implemented | Per-sequence 16-channel mapping applied in MIDI event dispatch |
 | `AIL_register_ICA_array` | 🟢 Implemented | Sends initial CC values per channel to TinySoundFont |
 | `AIL_true_sequence_channel` | 🟢 Implemented | Returns mapped physical channel from sequence channel_map |
-| `AIL_filter_DLS_attribute` | ⚪ Stub | No-op |
+| `AIL_filter_DLS_attribute` | 🟢 Implemented | Reads Cutoff/Compression DLS prefs from MidiDriver |
 | `AIL_filter_DLS_with_XMI` | ⚪ Stub | Returns 0 |
-| `AIL_set_DLS_processor` | ⚪ Stub | No-op |
-| `AIL_set_filter_DLS_preference` | ⚪ Stub | No-op |
+| `AIL_set_DLS_processor` | 🟡 Partial | Callback stored for round-tripping; not invoked |
+| `AIL_set_filter_DLS_preference` | 🟢 Implemented | Stores Cutoff/Compression DLS prefs on MidiDriver |
 | `DLSMSSGetCPU` | ⚪ Stub | Returns 0.0 |
 | `DLSSetAttribute` | ⚪ Stub | No-op |
 | `AIL_open_midi_driver` | 🟢 Implemented | Uses TinySoundFont |
@@ -400,10 +400,10 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 *(Appeared in MSS v4+)*
 | Function | Status | Notes |
 |----------|--------|-------|
-| `AIL_close_input` | ⚪ Stub | No-op; audio input not implemented |
-| `AIL_get_input_info` | ⚪ Stub | Returns null; audio input not implemented |
-| `AIL_open_input` | ⚪ Stub | Returns null; audio input not implemented |
-| `AIL_set_input_state` | ⚪ Stub | No-op; audio input not implemented |
+| `AIL_close_input` | 🟢 Implemented | Stops and frees miniaudio capture device |
+| `AIL_get_input_info` | 🟢 Implemented | Returns current captured sample count |
+| `AIL_open_input` | 🟢 Implemented | Creates miniaudio ma_device in capture mode (16-bit mono 44100Hz) |
+| `AIL_set_input_state` | 🟢 Implemented | Starts/stops capture; records into internal ring buffer |
 
 ## Legacy Compatibility
 | Function | Status | Notes |

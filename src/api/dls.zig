@@ -36,15 +36,27 @@ pub export fn AIL_DLS_unload_file(driver_opt: ?*MidiDriver, bank: *anyopaque) ca
     log("AIL_DLS_unload_file(driver={*}, bank={*})\n", .{ driver, bank });
     driver.unloadDLS(bank);
 }
-pub export fn AIL_set_filter_DLS_preference(driver: *anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
-    _ = driver;
-    _ = name;
-    _ = val;
+pub export fn AIL_set_filter_DLS_preference(driver_ptr: *anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
+    const driver: *openmiles.MidiDriver = @ptrCast(@alignCast(driver_ptr));
+    const name_slice = std.mem.span(name);
+    const v: *const f32 = @ptrCast(@alignCast(val));
+    if (std.ascii.eqlIgnoreCase(name_slice, "cutoff")) {
+        driver.dls_filter_pref_cutoff = v.*;
+    } else if (std.ascii.eqlIgnoreCase(name_slice, "compression")) {
+        driver.dls_filter_pref_compression = v.*;
+    }
 }
-pub export fn AIL_filter_DLS_attribute(driver: *anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
-    _ = driver;
-    _ = name;
-    _ = val;
+pub export fn AIL_filter_DLS_attribute(driver_ptr: *anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
+    const driver: *openmiles.MidiDriver = @ptrCast(@alignCast(driver_ptr));
+    const name_slice = std.mem.span(name);
+    const out: *f32 = @ptrCast(@alignCast(val));
+    if (std.ascii.eqlIgnoreCase(name_slice, "cutoff")) {
+        out.* = driver.dls_filter_pref_cutoff;
+    } else if (std.ascii.eqlIgnoreCase(name_slice, "compression")) {
+        out.* = driver.dls_filter_pref_compression;
+    } else {
+        out.* = 0.0;
+    }
 }
 pub export fn AIL_filter_DLS_with_XMI(driver: *anyopaque, xmi: *anyopaque, dls: *anyopaque, out: *anyopaque, out_len: *u32, flags: u32) callconv(.winapi) i32 {
     _ = driver;
@@ -143,10 +155,12 @@ pub export fn AIL_DLS_close(driver: *openmiles.MidiDriver, flags: u32) callconv(
     if (openmiles.last_midi_driver == driver) openmiles.last_midi_driver = null;
     driver.deinit();
 }
-pub export fn AIL_set_DLS_processor(driver: *anyopaque, stage: i32, processor: ?*anyopaque) callconv(.winapi) void {
-    _ = driver;
+pub export fn AIL_set_DLS_processor(driver_ptr: *anyopaque, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     _ = stage;
-    _ = processor;
+    const driver: *openmiles.MidiDriver = @ptrCast(@alignCast(driver_ptr));
+    const prev: ?*anyopaque = @ptrFromInt(driver.dls_processor);
+    driver.dls_processor = if (processor) |p| @intFromPtr(p) else 0;
+    return prev;
 }
 pub export fn AIL_compress_DLS(driver: *openmiles.MidiDriver, filename: [*:0]const u8, out_filename: [*:0]const u8, flags: u32, callback: ?*anyopaque) callconv(.winapi) i32 {
     _ = driver;

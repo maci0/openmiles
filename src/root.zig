@@ -36,6 +36,8 @@ pub const Timer = @import("engine/timer.zig").Timer;
 
 pub const Filter = @import("engine/filter.zig").Filter;
 
+pub const Input = @import("engine/input.zig").Input;
+
 pub const Provider = @import("rib/provider.zig").Provider;
 pub const getCurrentLoadingProvider = @import("rib/provider.zig").getCurrentLoadingProvider;
 pub const Interface = @import("rib/provider.zig").Interface;
