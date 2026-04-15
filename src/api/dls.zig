@@ -71,6 +71,7 @@ pub export fn AIL_DLS_load_memory(driver: *openmiles.MidiDriver, mem: *anyopaque
     driver.soundfont = tsf_mod.tsf_load_memory(data, @intCast(size));
     driver.owns_soundfont = true;
     if (driver.soundfont == null) return null;
+    driver.soundfont_size_bytes = @intCast(size);
     tsf_mod.tsf_set_output(driver.soundfont, tsf_mod.TSF_STEREO_INTERLEAVED, 44100, 0);
     return @ptrCast(driver.soundfont.?);
 }
@@ -80,23 +81,35 @@ pub export fn AIL_DLS_unload(driver: *openmiles.MidiDriver, bank: *anyopaque) ca
 pub export fn AIL_DLS_compact(driver: *openmiles.MidiDriver) callconv(.winapi) void {
     _ = driver;
 }
+// MSS DLS_INFO structure (6.6-era): first field is total memory usage in bytes.
+// Games typically inspect only the first field for "how much RAM does the soundfont use?"
+const DlsInfo = extern struct {
+    total_memory: u32,
+    preset_count: u32,
+    instrument_count: u32,
+    sample_count: u32,
+};
+
 pub export fn AIL_DLS_get_info(driver: *openmiles.MidiDriver, bank: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
-    _ = driver;
     _ = bank;
-    _ = info;
-    return 0;
+    const out: *DlsInfo = @ptrCast(@alignCast(info));
+    out.* = .{
+        .total_memory = driver.soundfont_size_bytes,
+        .preset_count = 0,
+        .instrument_count = 0,
+        .sample_count = 0,
+    };
+    return if (driver.soundfont != null) 1 else 0;
 }
 pub export fn AIL_DLS_get_reverb(driver: *openmiles.MidiDriver, room_type: ?*f32, level: ?*f32, reflect_time: ?*f32) callconv(.winapi) void {
-    _ = driver;
-    if (room_type) |p| p.* = 0.0;
-    if (level) |p| p.* = 0.0;
-    if (reflect_time) |p| p.* = 0.0;
+    if (room_type) |p| p.* = driver.dls_reverb_room_type;
+    if (level) |p| p.* = driver.dls_reverb_level;
+    if (reflect_time) |p| p.* = driver.dls_reverb_reflect_time;
 }
 pub export fn AIL_DLS_set_reverb(driver: *openmiles.MidiDriver, room_type: f32, level: f32, reflect_time: f32) callconv(.winapi) void {
-    _ = driver;
-    _ = room_type;
-    _ = level;
-    _ = reflect_time;
+    driver.dls_reverb_room_type = room_type;
+    driver.dls_reverb_level = level;
+    driver.dls_reverb_reflect_time = reflect_time;
 }
 pub export fn AIL_DLS_open(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, freq: u32, bits: i32, channels: i32, flags: u32) callconv(.winapi) ?*openmiles.MidiDriver {
     const dig = dig_opt orelse return null;

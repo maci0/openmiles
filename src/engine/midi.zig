@@ -18,6 +18,12 @@ pub const MidiDriver = struct {
     master_volume: f32 = 1.0,
     sample_rate: u32 = 44100,
     owns_soundfont: bool = true, // false when soundfont is borrowed (AIL_create_wave_synthesizer)
+    // DLS reverb state (stored; not actively applied — TSF has no global reverb bus)
+    dls_reverb_room_type: f32 = 0.0,
+    dls_reverb_level: f32 = 0.0,
+    dls_reverb_reflect_time: f32 = 0.0,
+    // Approximate soundfont memory footprint, captured at load time
+    soundfont_size_bytes: u32 = 0,
 
     pub fn init(allocator: std.mem.Allocator) !*MidiDriver {
         const self = try allocator.create(MidiDriver);
@@ -43,6 +49,13 @@ pub const MidiDriver = struct {
         self.owns_soundfont = true;
         const path_z = try fs_compat.dupeResolvedPathZ(self.allocator, filename);
         defer self.allocator.free(path_z);
+        // Capture file size for AIL_DLS_get_info
+        if (fs_compat.openFile(filename, .{})) |f| {
+            defer f.close();
+            if (f.stat()) |st| {
+                self.soundfont_size_bytes = @intCast(st.size);
+            } else |_| {}
+        } else |_| {}
         self.soundfont = tsf.tsf_load_filename(path_z.ptr);
         if (self.soundfont == null) return error.SoundFontLoadFailed;
         // Use the engine's actual sample rate if a digital driver exists

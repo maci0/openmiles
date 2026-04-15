@@ -194,9 +194,9 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_DLS_unload_file` | 🟢 Implemented | Closes and clears the loaded soundfont |
 | `AIL_DLS_load_memory` | 🟢 Implemented | Loads SF2 soundfont from memory |
 | `AIL_DLS_unload` | 🟢 Implemented | Alias for unload_file |
-| `AIL_DLS_compact` | ⚪ Stub | No-op |
-| `AIL_DLS_get_info` | ⚪ Stub | Returns 0 |
-| `AIL_DLS_get_reverb` / `AIL_DLS_set_reverb` | ⚪ Stub | |
+| `AIL_DLS_compact` | ⚪ Stub | No-op (miniaudio handles memory management) |
+| `AIL_DLS_get_info` | 🟢 Implemented | Returns soundfont memory footprint via DlsInfo struct |
+| `AIL_DLS_get_reverb` / `AIL_DLS_set_reverb` | 🟢 Implemented | Stores room_type/level/reflect_time on MidiDriver |
 | `AIL_DLS_open` | 🟢 Implemented | Opens MIDI driver with DLS bank |
 | `AIL_DLS_close` | 🟢 Implemented | |
 | `AIL_allocate_sequence_handle` | 🟢 Implemented | |
@@ -221,7 +221,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_channel_notes` | 🟢 Implemented | Counts active voices per channel via TinySoundFont |
 | `AIL_controller_value` | 🟢 Implemented | Reads directly from TinySoundFont |
 | `AIL_send_channel_voice_message` | 🟢 Implemented | Parses and forwards to TSF |
-| `AIL_send_sysex_message` | ⚪ Stub | No-op |
+| `AIL_send_sysex_message` | 🟢 Implemented | Recognizes GM/GS/XG reset; resets all channels (notes off, controllers, volume, pan) |
 | `AIL_lock_channel` / `AIL_release_channel` | 🟢 Implemented | Global 16-channel reservation system; lock returns first free non-drum channel |
 | `AIL_register_beat_callback` | 🟢 Implemented | Fires continuously during playback |
 | `AIL_register_event_callback` | 🟢 Implemented | Fires on Control Change messages |

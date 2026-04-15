@@ -545,8 +545,41 @@ pub export fn AIL_send_channel_voice_message(seq_opt: ?*Sequence, status: i32, d
 }
 pub export fn AIL_send_sysex_message(seq_opt: ?*Sequence, data: *anyopaque) callconv(.winapi) void {
     const seq = seq_opt orelse return;
-    _ = seq;
-    _ = data;
+    const sf = seq.driver.soundfont orelse return;
+    const bytes: [*]const u8 = @ptrCast(data);
+    // SysEx starts with 0xF0 and ends with 0xF7. Scan for known reset patterns.
+    if (bytes[0] != 0xF0) return;
+    // Match common resets by looking for distinctive bytes within a small window
+    var is_reset = false;
+    var i: usize = 0;
+    while (i < 16) : (i += 1) {
+        if (bytes[i] == 0xF7) break;
+        // GM On: F0 7E 7F 09 01 F7
+        if (bytes[i] == 0x7E and i + 2 < 16 and bytes[i + 2] == 0x09) {
+            is_reset = true;
+            break;
+        }
+        // GS Reset: F0 41 .. 42 12 40 00 7F 00
+        if (bytes[i] == 0x40 and i + 2 < 16 and bytes[i + 1] == 0x00 and bytes[i + 2] == 0x7F) {
+            is_reset = true;
+            break;
+        }
+        // XG Reset: F0 43 .. 4C 00 00 7E 00
+        if (bytes[i] == 0x4C and i + 3 < 16 and bytes[i + 1] == 0x00 and bytes[i + 3] == 0x7E) {
+            is_reset = true;
+            break;
+        }
+    }
+    if (is_reset) {
+        log("AIL_send_sysex_message: recognized GM/GS/XG reset — resetting all channels\n", .{});
+        var ch: i32 = 0;
+        while (ch < 16) : (ch += 1) {
+            _ = openmiles.tsf.tsf_channel_midi_control(sf, ch, 123, 0); // All Notes Off
+            _ = openmiles.tsf.tsf_channel_midi_control(sf, ch, 121, 0); // Reset All Controllers
+            _ = openmiles.tsf.tsf_channel_midi_control(sf, ch, 7, 100); // Default volume
+            _ = openmiles.tsf.tsf_channel_midi_control(sf, ch, 10, 64); // Center pan
+        }
+    }
 }
 pub export fn AIL_lock_channel(seq_opt: ?*Sequence) callconv(.winapi) i32 {
     const seq = seq_opt orelse return -1;
