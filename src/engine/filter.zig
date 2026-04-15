@@ -180,7 +180,10 @@ pub const Filter = struct {
             const new_order: u32 = @intFromFloat(@max(1.0, @min(value, 4.0)));
             if (new_order != self.order) {
                 self.order = new_order;
-                self.setCutoff(self.cutoff_frequency); // reinit with new order
+                // Force reinit: temporarily invalidate cutoff so setCutoff doesn't early-return
+                const saved = self.cutoff_frequency;
+                self.cutoff_frequency = 0.0;
+                self.setCutoff(saved);
             }
         } else {
             log("Filter.setAttribute: unknown attribute '{s}'\n", .{name});

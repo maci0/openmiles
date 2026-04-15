@@ -249,7 +249,7 @@ pub const Sample = struct {
     fn eosCallbackBridge(pUserData: ?*anyopaque, pSound: ?*ma.ma_sound) callconv(.c) void {
         _ = pSound;
         const self: *Sample = @ptrCast(@alignCast(pUserData.?));
-        // Handle finite loop counting manually (miniaudio looping handles infinite case).
+        // All looping is handled manually here (miniaudio looping is disabled).
         // loops_remaining <= 0: infinite (0 = documented infinite, negative = treated same).
         if (self.loops_remaining <= 0) {
             // Infinite loop - restart from loop start
@@ -427,13 +427,14 @@ pub const Sample = struct {
     pub fn loadFromUnownedMemoryUnknownSize(self: *Sample, data_ptr: [*]const u8) !void {
         const detected = root.detectAudioSize(data_ptr);
         if (detected > 0) {
-            // Format recognized with known size — safe to create a bounded slice
+            // Format recognized — for WAV/AIFF this is the real size; for streaming
+            // formats (OGG/MP3/FLAC) it is a 16 MB sentinel window.
             log("Sample.loadFromUnownedMemoryUnknownSize detected size: {d}\n", .{detected});
             try self.loadFromMemory(data_ptr[0..detected], false);
         } else {
-            // Streaming format (OGG/MP3/FLAC) — use bounded read callbacks to avoid
-            // creating a Zig slice that may extend past the real allocation.
-            log("Sample.loadFromUnownedMemoryUnknownSize using bounded decoder (streaming format)\n", .{});
+            // Format unrecognized (detected == 0) — use bounded decoder as a safe
+            // fallback to avoid creating a Zig slice past the real allocation.
+            log("Sample.loadFromUnownedMemoryUnknownSize using bounded decoder (unknown format)\n", .{});
             try self.loadFromBoundedPointer(data_ptr, root.streaming_sentinel_size);
         }
     }
