@@ -10,7 +10,6 @@ pub export fn AIL_enumerate_3D_providers(next: *?*anyopaque, handle: *?*Provider
     log("AIL_enumerate_3D_providers(next={*}, handle={*}, name={*})\n", .{ next, handle, name });
     const idx: usize = if (next.*) |v| @intFromPtr(v) else 0;
     if (idx == 0 and openmiles.startup_provider != null) {
-        // Return our built-in software spatial audio as the sole 3D provider
         handle.* = openmiles.startup_provider;
         name.* = "OpenMiles Software 3D";
         next.* = @ptrFromInt(1);
@@ -29,144 +28,160 @@ pub export fn AIL_allocate_3D_sample_handle(driver_opt: ?*DigitalDriver) callcon
     };
     return @ptrCast(s);
 }
-pub export fn AIL_release_3D_sample_handle(s: *anyopaque) callconv(.winapi) void {
-    log("AIL_release_3D_sample_handle(s={*})\n", .{s});
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_release_3D_sample_handle(s: ?*anyopaque) callconv(.winapi) void {
+    const p = s orelse return;
+    log("AIL_release_3D_sample_handle(s={*})\n", .{p});
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.deinit();
 }
-pub export fn AIL_set_3D_sample_file(s: *anyopaque, data: *anyopaque) callconv(.winapi) i32 {
-    log("AIL_set_3D_sample_file(s={*}, data={*})\n", .{ s, data });
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
-    const raw: [*]const u8 = @ptrCast(@alignCast(data));
-    const size = openmiles.detectAudioSize(raw);
-    if (size == 0) return 0;
-    sample.loadFromMemory(raw[0..size], true) catch |err| {
+pub export fn AIL_set_3D_sample_file(s: ?*anyopaque, data: ?*anyopaque) callconv(.winapi) i32 {
+    const p = s orelse return 0;
+    const d = data orelse return 0;
+    log("AIL_set_3D_sample_file(s={*}, data={*})\n", .{ p, d });
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
+    const raw: [*]const u8 = @ptrCast(@alignCast(d));
+    sample.loadFromUnownedPointer(raw) catch |err| {
         log("Error: {any}\n", .{err});
         return 0;
     };
     return 1;
 }
-pub export fn AIL_set_3D_position(obj: *anyopaque, x: f32, y: f32, z: f32) callconv(.winapi) void {
-    if (openmiles.isKnownDriver(obj)) {
-        const dig: *DigitalDriver = @ptrCast(@alignCast(obj));
-        openmiles.ma.ma_engine_listener_set_position(&dig.engine, 0, x, y, z);
+// MSS uses the same function for both listener and sample positioning; the obj handle determines which.
+pub export fn AIL_set_3D_position(obj: ?*anyopaque, x: f32, y: f32, z: f32) callconv(.winapi) void {
+    const o = obj orelse return;
+    if (openmiles.isKnownDriver(o)) {
+        const dig: *DigitalDriver = @ptrCast(@alignCast(o));
+        dig.setListenerPosition(x, y, z);
     } else {
-        const sample: *openmiles.Sample3D = @ptrCast(@alignCast(obj));
+        const sample: *openmiles.Sample3D = @ptrCast(@alignCast(o));
         sample.setPosition(x, y, z);
     }
 }
-pub export fn AIL_set_3D_velocity(obj: *anyopaque, x: f32, y: f32, z: f32, factor: f32) callconv(.winapi) void {
-    if (openmiles.isKnownDriver(obj)) {
-        const dig: *DigitalDriver = @ptrCast(@alignCast(obj));
-        openmiles.ma.ma_engine_listener_set_velocity(&dig.engine, 0, x * factor, y * factor, z * factor);
+pub export fn AIL_set_3D_velocity(obj: ?*anyopaque, x: f32, y: f32, z: f32, factor: f32) callconv(.winapi) void {
+    const o = obj orelse return;
+    if (openmiles.isKnownDriver(o)) {
+        const dig: *DigitalDriver = @ptrCast(@alignCast(o));
+        dig.setListenerVelocity(x * factor, y * factor, z * factor);
     } else {
-        const sample: *openmiles.Sample3D = @ptrCast(@alignCast(obj));
+        const sample: *openmiles.Sample3D = @ptrCast(@alignCast(o));
         sample.setVelocity(x * factor, y * factor, z * factor);
     }
 }
-pub export fn AIL_set_3D_orientation(obj: *anyopaque, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) callconv(.winapi) void {
-    if (openmiles.isKnownDriver(obj)) {
-        const dig: *DigitalDriver = @ptrCast(@alignCast(obj));
-        openmiles.ma.ma_engine_listener_set_direction(&dig.engine, 0, fx, fy, fz);
-        openmiles.ma.ma_engine_listener_set_world_up(&dig.engine, 0, ux, uy, uz);
+pub export fn AIL_set_3D_orientation(obj: ?*anyopaque, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) callconv(.winapi) void {
+    const o = obj orelse return;
+    if (openmiles.isKnownDriver(o)) {
+        const dig: *DigitalDriver = @ptrCast(@alignCast(o));
+        dig.setListenerDirection(fx, fy, fz);
+        dig.setListenerWorldUp(ux, uy, uz);
     } else {
-        const sample: *openmiles.Sample3D = @ptrCast(@alignCast(obj));
+        const sample: *openmiles.Sample3D = @ptrCast(@alignCast(o));
         sample.setOrientation(fx, fy, fz, ux, uy, uz);
     }
 }
-pub export fn AIL_set_3D_sample_distances(s: *anyopaque, max_dist: f32, min_dist: f32) callconv(.winapi) void {
-    log("AIL_set_3D_sample_distances(s={*}, max={d}, min={d})\n", .{ s, max_dist, min_dist });
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_sample_distances(s: ?*anyopaque, max_dist: f32, min_dist: f32) callconv(.winapi) void {
+    const p = s orelse return;
+    log("AIL_set_3D_sample_distances(s={*}, max={d}, min={d})\n", .{ p, max_dist, min_dist });
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.setMinMaxDistance(min_dist, max_dist);
 }
 pub export fn AIL_set_listener_3D_position(dig_opt: ?*DigitalDriver, x: f32, y: f32, z: f32) callconv(.winapi) void {
     const dig = dig_opt orelse return;
-    openmiles.ma.ma_engine_listener_set_position(&dig.engine, 0, x, y, z);
+    dig.setListenerPosition(x, y, z);
 }
 pub export fn AIL_set_listener_3D_velocity(dig_opt: ?*DigitalDriver, x: f32, y: f32, z: f32, factor: f32) callconv(.winapi) void {
     const dig = dig_opt orelse return;
-    openmiles.ma.ma_engine_listener_set_velocity(&dig.engine, 0, x * factor, y * factor, z * factor);
+    dig.setListenerVelocity(x * factor, y * factor, z * factor);
 }
 pub export fn AIL_set_listener_3D_orientation(dig_opt: ?*DigitalDriver, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) callconv(.winapi) void {
     const dig = dig_opt orelse return;
-    openmiles.ma.ma_engine_listener_set_direction(&dig.engine, 0, fx, fy, fz);
-    openmiles.ma.ma_engine_listener_set_world_up(&dig.engine, 0, ux, uy, uz);
+    dig.setListenerDirection(fx, fy, fz);
+    dig.setListenerWorldUp(ux, uy, uz);
 }
-pub export fn AIL_start_3D_sample(s: *anyopaque) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_start_3D_sample(s: ?*anyopaque) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.start();
 }
-pub export fn AIL_stop_3D_sample(s: *anyopaque) callconv(.winapi) void {
-    // MSS: stop_3D_sample preserves playback position (acts like pause for 3D samples).
-    // resume_3D_sample resumes from the preserved position.
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_stop_3D_sample(s: ?*anyopaque) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.pause();
 }
-pub export fn AIL_resume_3D_sample(s: *anyopaque) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_resume_3D_sample(s: ?*anyopaque) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.resumePlayback();
 }
-pub export fn AIL_end_3D_sample(s: *anyopaque) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
-    // end_3D_sample transitions to SMP_DONE (not SMP_STOPPED)
-    if (sample.is_initialized) {
-        _ = openmiles.ma.ma_sound_stop(&sample.sound);
-        _ = openmiles.ma.ma_sound_seek_to_pcm_frame(&sample.sound, 0);
-    }
-    sample.is_done = true;
+pub export fn AIL_end_3D_sample(s: ?*anyopaque) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
+    sample.end();
 }
-pub export fn AIL_3D_sample_status(s: *anyopaque) callconv(.winapi) u32 {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_sample_status(s: ?*anyopaque) callconv(.winapi) u32 {
+    const p = s orelse return 0;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     return @intFromEnum(sample.status());
 }
-pub export fn AIL_3D_sample_volume(s: *anyopaque) callconv(.winapi) i32 {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_sample_volume(s: ?*anyopaque) callconv(.winapi) i32 {
+    const p = s orelse return 0;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     return sample.original_volume;
 }
-pub export fn AIL_set_3D_sample_volume(s: *anyopaque, volume: i32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_sample_volume(s: ?*anyopaque, volume: i32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.setVolume(volume);
 }
-pub export fn AIL_3D_sample_loop_count(s: *anyopaque) callconv(.winapi) i32 {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_sample_loop_count(s: ?*anyopaque) callconv(.winapi) i32 {
+    const p = s orelse return 0;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     return sample.loop_count;
 }
-pub export fn AIL_set_3D_sample_loop_count(s: *anyopaque, count: i32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_sample_loop_count(s: ?*anyopaque, count: i32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.setLoopCount(count);
 }
-pub export fn AIL_3D_sample_playback_rate(s: *anyopaque) callconv(.winapi) i32 {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_sample_playback_rate(s: ?*anyopaque) callconv(.winapi) i32 {
+    const p = s orelse return 0;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     return @intFromFloat(sample.target_rate orelse 44100.0);
 }
-pub export fn AIL_set_3D_sample_playback_rate(s: *anyopaque, rate: i32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_sample_playback_rate(s: ?*anyopaque, rate: i32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.setPlaybackRate(rate);
 }
-pub export fn AIL_3D_sample_offset(s: *anyopaque) callconv(.winapi) u32 {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_sample_offset(s: ?*anyopaque) callconv(.winapi) u32 {
+    const p = s orelse return 0;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     return sample.getOffset();
 }
-pub export fn AIL_set_3D_sample_offset(s: *anyopaque, offset: u32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_sample_offset(s: ?*anyopaque, offset: u32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.setOffset(offset);
 }
-pub export fn AIL_3D_sample_length(s: *anyopaque) callconv(.winapi) u32 {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_sample_length(s: ?*anyopaque) callconv(.winapi) u32 {
+    const p = s orelse return 0;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     return sample.getLength();
 }
-pub export fn AIL_3D_sample_ms_position(s: *anyopaque, total_ms: ?*i32, current_ms: ?*i32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_sample_ms_position(s: ?*anyopaque, total_ms: ?*i32, current_ms: ?*i32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     const pos = sample.getMsPosition();
     if (total_ms) |t| t.* = pos.total;
     if (current_ms) |c| c.* = pos.current;
 }
-pub export fn AIL_set_3D_sample_ms_position(s: *anyopaque, ms: i32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_sample_ms_position(s: ?*anyopaque, ms: i32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.setMsPosition(ms);
 }
-pub export fn AIL_register_3D_EOS_callback(s: *anyopaque, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_register_3D_EOS_callback(s: ?*anyopaque, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    const p = s orelse return null;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     const prev: ?*anyopaque = @ptrFromInt(sample.eos_callback);
     sample.eos_callback = if (callback) |cb| @intFromPtr(cb) else 0;
     return prev;
@@ -175,19 +190,23 @@ pub export fn AIL_active_3D_sample_count(dig_opt: ?*DigitalDriver) callconv(.win
     const dig = dig_opt orelse return 0;
     return dig.get3DActiveSampleCount();
 }
-pub export fn AIL_3D_user_data(s: *anyopaque, index: i32) callconv(.winapi) u32 {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_user_data(s: ?*anyopaque, index: i32) callconv(.winapi) u32 {
+    const p = s orelse return 0;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     const idx: usize = @intCast(@min(@max(index, 0), 7));
     return sample.user_data[idx];
 }
-pub export fn AIL_set_3D_user_data(s: *anyopaque, index: i32, value: u32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_user_data(s: ?*anyopaque, index: i32, value: u32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     const idx: usize = @intCast(@min(@max(index, 0), 7));
     sample.user_data[idx] = value;
 }
-pub export fn AIL_set_3D_sample_info(s: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
-    const si: *openmiles.AILSOUNDINFO = @ptrCast(@alignCast(info));
+pub export fn AIL_set_3D_sample_info(s: ?*anyopaque, info: ?*anyopaque) callconv(.winapi) i32 {
+    const p = s orelse return 0;
+    const i = info orelse return 0;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
+    const si: *openmiles.AILSOUNDINFO = @ptrCast(@alignCast(i));
     if (si.data_ptr == null or si.data_len == 0) return 0;
     const data: [*]const u8 = @ptrCast(si.data_ptr.?);
     const channels: u16 = @intCast(@max(1, si.channels));
@@ -198,49 +217,59 @@ pub export fn AIL_set_3D_sample_info(s: *anyopaque, info: *anyopaque) callconv(.
     };
     return 1;
 }
-pub export fn AIL_set_3D_sample_loop_block(s: *anyopaque, loop_start: i32, loop_end: i32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_sample_loop_block(s: ?*anyopaque, loop_start: i32, loop_end: i32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.setLoopBlock(loop_start, loop_end);
 }
-pub export fn AIL_set_3D_sample_cone(s: *anyopaque, inner_angle: f32, outer_angle: f32, outer_volume: f32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
-    sample.cone_inner_deg = inner_angle;
-    sample.cone_outer_deg = outer_angle;
+pub export fn AIL_set_3D_sample_cone(s: ?*anyopaque, inner_angle: f32, outer_angle: f32, outer_volume: f32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
+    sample.cone_inner_rad = inner_angle * openmiles.deg2rad;
+    sample.cone_outer_rad = outer_angle * openmiles.deg2rad;
     sample.cone_outer_volume = outer_volume;
     sample.applyCone();
 }
-pub export fn AIL_3D_sample_cone(s: *anyopaque, inner_angle: ?*f32, outer_angle: ?*f32, outer_volume: ?*f32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
-    if (inner_angle) |p| p.* = sample.cone_inner_deg;
-    if (outer_angle) |p| p.* = sample.cone_outer_deg;
-    if (outer_volume) |p| p.* = sample.cone_outer_volume;
+pub export fn AIL_3D_sample_cone(s: ?*anyopaque, inner_angle: ?*f32, outer_angle: ?*f32, outer_volume: ?*f32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
+    if (inner_angle) |a| a.* = sample.cone_inner_rad / openmiles.deg2rad;
+    if (outer_angle) |a| a.* = sample.cone_outer_rad / openmiles.deg2rad;
+    if (outer_volume) |a| a.* = sample.cone_outer_volume;
 }
-pub export fn AIL_set_3D_sample_effects_level(s: *anyopaque, effects_level: f32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_sample_effects_level(s: ?*anyopaque, effects_level: f32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.effects_level = @min(1.0, @max(0.0, effects_level));
 }
-pub export fn AIL_3D_sample_effects_level(s: *anyopaque) callconv(.winapi) f32 {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_sample_effects_level(s: ?*anyopaque) callconv(.winapi) f32 {
+    const p = s orelse return 0.0;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     return sample.effects_level;
 }
-pub export fn AIL_set_3D_sample_obstruction(s: *anyopaque, obstruction: f32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_sample_obstruction(s: ?*anyopaque, obstruction: f32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.setObstruction(obstruction);
 }
-pub export fn AIL_3D_sample_obstruction(s: *anyopaque) callconv(.winapi) f32 {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_sample_obstruction(s: ?*anyopaque) callconv(.winapi) f32 {
+    const p = s orelse return 0.0;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     return sample.obstruction;
 }
-pub export fn AIL_set_3D_sample_occlusion(s: *anyopaque, occlusion: f32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_sample_occlusion(s: ?*anyopaque, occlusion: f32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.setOcclusion(occlusion);
 }
-pub export fn AIL_3D_sample_occlusion(s: *anyopaque) callconv(.winapi) f32 {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_sample_occlusion(s: ?*anyopaque) callconv(.winapi) f32 {
+    const p = s orelse return 0.0;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     return sample.occlusion;
 }
-pub export fn AIL_set_3D_sample_preference(s: *anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_sample_preference(s: ?*anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     const n = std.mem.span(name);
     if (std.mem.eql(u8, n, "Obstruction")) {
         const v: *const f32 = @ptrCast(@alignCast(val));
@@ -276,11 +305,11 @@ pub export fn AIL_set_3D_sample_preference(s: *anyopaque, name: [*:0]const u8, v
         if (sample.is_initialized) openmiles.ma.ma_sound_set_max_distance(&sample.sound, v.*);
     } else if (std.mem.eql(u8, n, "Cone inner angle")) {
         const v: *const f32 = @ptrCast(@alignCast(val));
-        sample.cone_inner_deg = v.*;
+        sample.cone_inner_rad = v.* * openmiles.deg2rad;
         sample.applyCone();
     } else if (std.mem.eql(u8, n, "Cone outer angle")) {
         const v: *const f32 = @ptrCast(@alignCast(val));
-        sample.cone_outer_deg = v.*;
+        sample.cone_outer_rad = v.* * openmiles.deg2rad;
         sample.applyCone();
     } else if (std.mem.eql(u8, n, "Cone outer volume")) {
         const v: *const f32 = @ptrCast(@alignCast(val));
@@ -291,8 +320,9 @@ pub export fn AIL_set_3D_sample_preference(s: *anyopaque, name: [*:0]const u8, v
         sample.setLoopCount(v.*);
     }
 }
-pub export fn AIL_3D_sample_attribute(s: *anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_sample_attribute(s: ?*anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
+    const sp = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(sp));
     const n = std.mem.span(name);
     if (std.mem.eql(u8, n, "Obstruction")) {
         const v: *f32 = @ptrCast(@alignCast(val));
@@ -337,10 +367,10 @@ pub export fn AIL_3D_sample_attribute(s: *anyopaque, name: [*:0]const u8, val: *
         v.* = if (sample.is_initialized) openmiles.ma.ma_sound_get_max_distance(&sample.sound) else sample.max_distance;
     } else if (std.mem.eql(u8, n, "Cone inner angle")) {
         const v: *f32 = @ptrCast(@alignCast(val));
-        v.* = sample.cone_inner_deg;
+        v.* = sample.cone_inner_rad / openmiles.deg2rad;
     } else if (std.mem.eql(u8, n, "Cone outer angle")) {
         const v: *f32 = @ptrCast(@alignCast(val));
-        v.* = sample.cone_outer_deg;
+        v.* = sample.cone_outer_rad / openmiles.deg2rad;
     } else if (std.mem.eql(u8, n, "Cone outer volume")) {
         const v: *f32 = @ptrCast(@alignCast(val));
         v.* = sample.cone_outer_volume;
@@ -358,16 +388,19 @@ pub export fn AIL_3D_sample_attribute(s: *anyopaque, name: [*:0]const u8, val: *
         v.* = sample.loop_count;
     }
 }
-pub export fn AIL_auto_update_3D_position(s: *anyopaque, onoff: i32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_auto_update_3D_position(s: ?*anyopaque, onoff: i32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.auto_update = (onoff != 0);
 }
-pub export fn AIL_update_3D_position(s: *anyopaque, dt: f32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
-    sample.updatePosition(dt / 1000.0); // MSS passes dt in milliseconds
+pub export fn AIL_update_3D_position(s: ?*anyopaque, dt: f32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
+    sample.updatePosition(dt / 1000.0);
 }
-pub export fn AIL_set_3D_velocity_vector(s: *anyopaque, x: f32, y: f32, z: f32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_set_3D_velocity_vector(s: ?*anyopaque, x: f32, y: f32, z: f32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.setVelocity(x, y, z);
 }
 pub export fn AIL_set_3D_distance_factor(dig_opt: ?*DigitalDriver, factor: f32) callconv(.winapi) void {
@@ -375,31 +408,29 @@ pub export fn AIL_set_3D_distance_factor(dig_opt: ?*DigitalDriver, factor: f32) 
     dig.distance_factor = factor;
 }
 pub export fn AIL_3D_distance_factor(dig_opt: ?*DigitalDriver) callconv(.winapi) f32 {
-    const dig = dig_opt orelse return 0.0;
+    const dig = dig_opt orelse return 1.0;
     return dig.distance_factor;
 }
 pub export fn AIL_set_3D_doppler_factor(dig_opt: ?*DigitalDriver, factor: f32) callconv(.winapi) void {
     const dig = dig_opt orelse return;
     dig.doppler_factor = factor;
-    // Apply to all active 3D samples
     for (dig.samples_3d.items) |s| {
         if (s.is_initialized) openmiles.ma.ma_sound_set_doppler_factor(&s.sound, factor);
     }
 }
 pub export fn AIL_3D_doppler_factor(dig_opt: ?*DigitalDriver) callconv(.winapi) f32 {
-    const dig = dig_opt orelse return 0.0;
+    const dig = dig_opt orelse return 1.0;
     return dig.doppler_factor;
 }
 pub export fn AIL_set_3D_rolloff_factor(dig_opt: ?*DigitalDriver, factor: f32) callconv(.winapi) void {
     const dig = dig_opt orelse return;
     dig.rolloff_factor = factor;
-    // Apply to all active 3D samples
     for (dig.samples_3d.items) |s| {
         if (s.is_initialized) openmiles.ma.ma_sound_set_rolloff(&s.sound, factor);
     }
 }
 pub export fn AIL_3D_rolloff_factor(dig_opt: ?*DigitalDriver) callconv(.winapi) f32 {
-    const dig = dig_opt orelse return 0.0;
+    const dig = dig_opt orelse return 1.0;
     return dig.rolloff_factor;
 }
 pub export fn AIL_set_3D_room_type(dig_opt: ?*DigitalDriver, room_type: i32) callconv(.winapi) void {
@@ -428,14 +459,12 @@ pub export fn AIL_close_3D_provider(handle: *anyopaque) callconv(.winapi) void {
     _ = handle; // Driver lifetime managed by AIL_close_digital_driver
 }
 pub export fn AIL_open_3D_listener(provider: *anyopaque) callconv(.winapi) ?*anyopaque {
-    // Return provider (which is the driver) as the listener handle
     return provider;
 }
 pub export fn AIL_close_3D_listener(listener: *anyopaque) callconv(.winapi) void {
     _ = listener;
 }
 pub export fn AIL_open_3D_object(provider: *anyopaque) callconv(.winapi) ?*anyopaque {
-    // Allocate a 3D sample as a positionable object
     const dig: *DigitalDriver = @ptrCast(@alignCast(provider));
     const s = openmiles.Sample3D.init(dig) catch |err| {
         log("Error: {any}\n", .{err});
@@ -486,7 +515,7 @@ pub export fn AIL_enumerate_3D_provider_attributes(provider: *anyopaque, next: *
     next.* = null;
     return 0;
 }
-pub export fn AIL_enumerate_3D_sample_attributes(s: *anyopaque, next: *?*anyopaque, name: *[*:0]const u8) callconv(.winapi) i32 {
+pub export fn AIL_enumerate_3D_sample_attributes(s: ?*anyopaque, next: *?*anyopaque, name: *[*:0]const u8) callconv(.winapi) i32 {
     _ = s;
     const idx: usize = if (next.*) |v| @intFromPtr(v) else 0;
     if (idx < openmiles.sample_3d_attr_names.len) {
@@ -500,8 +529,8 @@ pub export fn AIL_enumerate_3D_sample_attributes(s: *anyopaque, next: *?*anyopaq
 pub export fn AIL_3D_orientation(obj: *anyopaque, fx: ?*f32, fy: ?*f32, fz: ?*f32, ux: ?*f32, uy: ?*f32, uz: ?*f32) callconv(.winapi) void {
     if (openmiles.isKnownDriver(obj)) {
         const dig: *DigitalDriver = @ptrCast(@alignCast(obj));
-        const fwd = openmiles.ma.ma_engine_listener_get_direction(&dig.engine, 0);
-        const up = openmiles.ma.ma_engine_listener_get_world_up(&dig.engine, 0);
+        const fwd = dig.getListenerDirection();
+        const up = dig.getListenerWorldUp();
         if (fx) |p| p.* = fwd.x;
         if (fy) |p| p.* = fwd.y;
         if (fz) |p| p.* = fwd.z;
@@ -521,7 +550,7 @@ pub export fn AIL_3D_orientation(obj: *anyopaque, fx: ?*f32, fy: ?*f32, fz: ?*f3
 pub export fn AIL_3D_position(obj: *anyopaque, x: ?*f32, y: ?*f32, z: ?*f32) callconv(.winapi) void {
     if (openmiles.isKnownDriver(obj)) {
         const dig: *DigitalDriver = @ptrCast(@alignCast(obj));
-        const pos = openmiles.ma.ma_engine_listener_get_position(&dig.engine, 0);
+        const pos = dig.getListenerPosition();
         if (x) |p| p.* = pos.x;
         if (y) |p| p.* = pos.y;
         if (z) |p| p.* = pos.z;
@@ -535,7 +564,7 @@ pub export fn AIL_3D_position(obj: *anyopaque, x: ?*f32, y: ?*f32, z: ?*f32) cal
 pub export fn AIL_3D_velocity(obj: *anyopaque, x: ?*f32, y: ?*f32, z: ?*f32, factor: ?*f32) callconv(.winapi) void {
     if (openmiles.isKnownDriver(obj)) {
         const dig: *DigitalDriver = @ptrCast(@alignCast(obj));
-        const vel = openmiles.ma.ma_engine_listener_get_velocity(&dig.engine, 0);
+        const vel = dig.getListenerVelocity();
         if (x) |p| p.* = vel.x;
         if (y) |p| p.* = vel.y;
         if (z) |p| p.* = vel.z;
@@ -548,8 +577,8 @@ pub export fn AIL_3D_velocity(obj: *anyopaque, x: ?*f32, y: ?*f32, z: ?*f32, fac
         if (factor) |p| p.* = 1.0;
     }
 }
-pub export fn AIL_3D_sample_distances(s: *anyopaque, max_dist: ?*f32, min_dist: ?*f32) callconv(.winapi) void {
-    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(s));
+pub export fn AIL_3D_sample_distances(s_opt: ?*openmiles.Sample3D, max_dist: ?*f32, min_dist: ?*f32) callconv(.winapi) void {
+    const sample = s_opt orelse return;
     if (sample.is_initialized) {
         if (max_dist) |p| p.* = openmiles.ma.ma_sound_get_max_distance(&sample.sound);
         if (min_dist) |p| p.* = openmiles.ma.ma_sound_get_min_distance(&sample.sound);

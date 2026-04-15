@@ -20,17 +20,19 @@ pub export fn AIL_quick_shutdown() callconv(.winapi) void {
 }
 pub export fn AIL_quick_load(filename: [*:0]const u8) callconv(.winapi) ?*Sample {
     log("AIL_quick_load(filename={s})\n", .{filename});
+    openmiles.clearLastError();
     if (openmiles.last_digital_driver) |d| {
         const s = openmiles.Sample.init(d) catch |err| {
             log("Error: {any}\n", .{err});
+            openmiles.setLastError("Failed to allocate sample for quick load");
             return null;
         };
-        // Try custom file callbacks first
         if (openmiles.cb_file_open != null) {
             const buf = openmiles.fileCallbackReadAll(filename) catch null;
             if (buf) |b| {
                 s.loadFromOwnedMemory(b) catch {
-                    openmiles.global_allocator.?.free(b);
+                    openmiles.global_allocator.free(b);
+                    openmiles.setLastError("Failed to load quick sample from memory");
                     s.deinit();
                     return null;
                 };
@@ -38,6 +40,7 @@ pub export fn AIL_quick_load(filename: [*:0]const u8) callconv(.winapi) ?*Sample
             }
         }
         s.loadFromFile(std.mem.span(filename)) catch {
+            openmiles.setLastError("Failed to load quick sample file");
             s.deinit();
             return null;
         };
@@ -47,12 +50,15 @@ pub export fn AIL_quick_load(filename: [*:0]const u8) callconv(.winapi) ?*Sample
 }
 pub export fn AIL_quick_load_mem(data: *anyopaque, size: u32) callconv(.winapi) ?*Sample {
     log("AIL_quick_load_mem(data={*}, size={d})\n", .{ data, size });
+    openmiles.clearLastError();
     if (openmiles.last_digital_driver) |d| {
         const s = openmiles.Sample.init(d) catch |err| {
             log("Error: {any}\n", .{err});
+            openmiles.setLastError("Failed to allocate sample for quick load");
             return null;
         };
         s.load(data, @intCast(size)) catch {
+            openmiles.setLastError("Failed to load quick sample from memory");
             s.deinit();
             return null;
         };
@@ -63,13 +69,16 @@ pub export fn AIL_quick_load_mem(data: *anyopaque, size: u32) callconv(.winapi) 
 pub export fn AIL_quick_copy(s_opt: ?*Sample) callconv(.winapi) ?*Sample {
     const s = s_opt orelse return null;
     log("AIL_quick_copy(s={*})\n", .{s});
+    openmiles.clearLastError();
     if (openmiles.last_digital_driver) |d| {
         const new_s = openmiles.Sample.init(d) catch |err| {
             log("Error: {any}\n", .{err});
+            openmiles.setLastError("Failed to allocate sample for quick copy");
             return null;
         };
         if (s.owned_buffer) |buf| {
             new_s.loadFromMemory(buf, true) catch {
+                openmiles.setLastError("Failed to copy sample data");
                 new_s.deinit();
                 return null;
             };
@@ -131,9 +140,11 @@ pub export fn AIL_quick_set_reverb(s_opt: ?*Sample, room_type: f32, level: f32, 
     s.setReverb(room_type, level, reflect_time);
 }
 pub export fn AIL_quick_load_and_play(filename: [*:0]const u8, loop_count: i32, start_paused: i32) callconv(.winapi) ?*Sample {
+    openmiles.clearLastError();
     if (openmiles.last_digital_driver) |d| {
         const s = openmiles.Sample.init(d) catch |err| {
             log("Error: {any}\n", .{err});
+            openmiles.setLastError("Failed to allocate sample for quick load and play");
             return null;
         };
         loaded: {
@@ -141,7 +152,7 @@ pub export fn AIL_quick_load_and_play(filename: [*:0]const u8, loop_count: i32, 
                 const buf = openmiles.fileCallbackReadAll(filename) catch null;
                 if (buf) |b| {
                     s.loadFromOwnedMemory(b) catch {
-                        openmiles.global_allocator.?.free(b);
+                        openmiles.global_allocator.free(b);
                         break :loaded;
                     };
                     s.setLoopCount(loop_count);
@@ -154,6 +165,7 @@ pub export fn AIL_quick_load_and_play(filename: [*:0]const u8, loop_count: i32, 
             if (start_paused == 0) s.start();
             return s;
         }
+        openmiles.setLastError("Failed to load quick sample file");
         s.deinit();
         return null;
     }

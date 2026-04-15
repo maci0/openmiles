@@ -7,7 +7,7 @@ const Provider = openmiles.Provider;
 
 pub export fn RIB_alloc_provider_handle(module: *anyopaque) callconv(.winapi) ?*Provider {
     log("RIB_alloc_provider_handle(module={*})\n", .{module});
-    return Provider.init(openmiles.global_allocator.?, module) catch |err| {
+    return Provider.init(openmiles.global_allocator, module) catch |err| {
         log("Error: {any}\n", .{err});
         return null;
     };
@@ -20,7 +20,9 @@ pub export fn RIB_free_provider_handle(provider_opt: ?*Provider) callconv(.winap
 pub export fn RIB_register_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) void {
     const provider = provider_opt orelse return;
     log("RIB_register_interface(provider={*}, name={s}, count={d}, entries={*})\n", .{ provider, name, count, entries });
-    provider.registerInterface(std.mem.span(name), count, entries) catch {};
+    provider.registerInterface(std.mem.span(name), count, entries) catch |err| {
+        log("RIB_register_interface: failed: {any}\n", .{err});
+    };
 }
 pub export fn RIB_unregister_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) void {
     const provider = provider_opt orelse return;
@@ -29,7 +31,6 @@ pub export fn RIB_unregister_interface(provider_opt: ?*Provider, name: [*:0]cons
 }
 pub export fn RIB_provider_library_handle() callconv(.winapi) ?*anyopaque {
     log("RIB_provider_library_handle()\n", .{});
-    // Return the handle of the currently-loading provider (used by plugins registering themselves)
     if (openmiles.getCurrentLoadingProvider()) |p| return @ptrCast(p);
     return @ptrCast(openmiles.startup_provider);
 }
@@ -37,15 +38,13 @@ pub export fn RIB_load_application_providers(dir: [*:0]const u8) callconv(.winap
     const dir_str = std.mem.span(dir);
     log("RIB_load_application_providers(dir={s})\n", .{dir_str});
     const count = openmiles.loadApplicationProviders(dir_str);
-    return if (count >= 0) 1 else 0; // MSS returns 1 on success
+    return if (count >= 0) 1 else 0;
 }
 pub export fn RIB_enumerate_providers(name: [*:0]const u8, next: ?*?*anyopaque, handle: ?*?*Provider) callconv(.winapi) i32 {
     const iface_name = std.mem.span(name);
     log("RIB_enumerate_providers(name='{s}', next={*}, handle={*})\n", .{ iface_name, next, handle });
 
-    // Build a flat ordered list: startup_provider first, then global providers.
-    // Advance the cursor (stored as 1-based flat index) until we find a provider
-    // that has the requested interface registered.
+    // next.* encodes cursor position: null means start, otherwise (last_returned_index + 1).
     var cursor: usize = if (next) |n| if (n.*) |v| @intFromPtr(v) else 0 else 0;
 
     const global_providers = openmiles.getAllProviders();
@@ -82,10 +81,8 @@ pub export fn RIB_request_interface(provider_opt: ?*Provider, name: [*:0]const u
     const dest: [*]openmiles.RIB_INTERFACE_ENTRY = @ptrCast(@alignCast(entries));
     const n: usize = @intCast(@max(0, count));
 
-    // Search the provider's registered interfaces by name
     for (provider.interfaces.items) |iface| {
         if (std.mem.eql(u8, iface.name, iface_name)) {
-            // Fill in token for each entry based on caller-supplied name field
             for (dest[0..n]) |*entry| {
                 const ename = std.mem.span(entry.name);
                 if (iface.entries.get(ename)) |tok| {
@@ -118,13 +115,11 @@ pub export fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callcon
     log("AIL_open_ASI_provider(buffer={*}, size={d})\n", .{ buffer, size });
     if (size < 2) return null;
     const raw: []const u8 = @as([*]const u8, @ptrCast(@alignCast(buffer)))[0..size];
-    // Must be a Windows PE DLL (MZ signature)
     if (raw[0] != 'M' or raw[1] != 'Z') return null;
 
     const id = @atomicRmw(u32, &openmiles.asi_temp_counter, .Add, 1, .monotonic);
     var path_buf: [512:0]u8 = undefined;
 
-    // Get Windows temp directory via kernel32
     const GetTempPathA = struct {
         extern "kernel32" fn GetTempPathA(nBufferLength: u32, lpBuffer: [*]u8) callconv(.winapi) u32;
     }.GetTempPathA;
@@ -142,7 +137,6 @@ pub export fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callcon
             return null;
         };
 
-    // Write DLL bytes to temp file
     const wf = std.fs.createFileAbsolute(path, .{}) catch
         (std.fs.cwd().createFile(path, .{}) catch |err| {
             log("Error: {any}\n", .{err});
@@ -150,12 +144,17 @@ pub export fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callcon
         });
     wf.writeAll(raw) catch {
         wf.close();
+        std.fs.deleteFileAbsolute(path) catch {};
         return null;
     };
     wf.close();
 
     // Load the provider (calls RIB_Main inside the DLL)
-    return openmiles.Provider.load(openmiles.global_allocator.?, path) catch null;
+    return openmiles.Provider.load(openmiles.global_allocator, path) catch {
+        std.fs.deleteFileAbsolute(path) catch {};
+        std.fs.cwd().deleteFile(path) catch {};
+        return null;
+    };
 }
 pub export fn AIL_close_ASI_provider(provider_opt: ?*Provider) callconv(.winapi) void {
     const provider = provider_opt orelse return;
@@ -181,7 +180,7 @@ pub export fn RIB_find_file_provider(name: [*:0]const u8, property: [*:0]const u
     return handle;
 }
 pub export fn RIB_load_provider_library(path: [*:0]const u8) callconv(.winapi) ?*Provider {
-    const p = openmiles.Provider.load(openmiles.global_allocator.?, std.mem.span(path)) catch |err| {
+    const p = openmiles.Provider.load(openmiles.global_allocator, std.mem.span(path)) catch |err| {
         log("Error: {any}\n", .{err});
         return null;
     };
@@ -208,7 +207,6 @@ pub export fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const
     const iface_name = std.mem.span(name);
     for (provider.interfaces.items) |iface| {
         if (!std.mem.eql(u8, iface.name, iface_name)) continue;
-        // Cursor is a 0-based entry index stored as a pointer-sized integer
         const idx: usize = if (next.*) |v| @intFromPtr(v) else 0;
         var i: usize = 0;
         var it = iface.entries.iterator();
@@ -285,7 +283,6 @@ pub export fn AIL_compress_ASI(provider_opt: ?*Provider, filename: [*:0]const u8
 pub export fn AIL_decompress_ASI(provider_opt: ?*Provider, filename: [*:0]const u8, out_filename: [*:0]const u8, flags: u32) callconv(.winapi) i32 {
     const provider = provider_opt orelse return 0;
     log("AIL_decompress_ASI: {s} -> {s} (provider={*}, flags={d})\n", .{ filename, out_filename, provider, flags });
-    // Decode input file to 16-bit stereo PCM at 44100 Hz, write as WAV
     var decoder: openmiles.ma.ma_decoder = undefined;
     var config = openmiles.ma.ma_decoder_config_init(openmiles.ma.ma_format_s16, 2, 44100);
     if (openmiles.ma.ma_decoder_init_file(filename, &config, &decoder) != openmiles.ma.MA_SUCCESS) {
@@ -294,15 +291,13 @@ pub export fn AIL_decompress_ASI(provider_opt: ?*Provider, filename: [*:0]const 
     }
     defer _ = openmiles.ma.ma_decoder_uninit(&decoder);
 
-    // Decode all frames in chunks
     var all_pcm = std.ArrayListUnmanaged(u8){};
-    defer all_pcm.deinit(openmiles.global_allocator.?);
-    // Pre-allocate if total length is known to avoid repeated reallocations
+    defer all_pcm.deinit(openmiles.global_allocator);
     {
         var total_frames: u64 = 0;
         _ = openmiles.ma.ma_decoder_get_length_in_pcm_frames(&decoder, &total_frames);
         if (total_frames > 0) {
-            all_pcm.ensureTotalCapacity(openmiles.global_allocator.?, @intCast(total_frames * 4)) catch {};
+            all_pcm.ensureTotalCapacity(openmiles.global_allocator, @intCast(total_frames * 4)) catch {};
         }
     }
     var chunk_buf: [4096 * 4]u8 = undefined; // 4096 frames × 4 bytes (s16 stereo)
@@ -310,28 +305,21 @@ pub export fn AIL_decompress_ASI(provider_opt: ?*Provider, filename: [*:0]const 
         var fr: u64 = 0;
         _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, &chunk_buf, 4096, &fr);
         if (fr == 0) break;
-        all_pcm.appendSlice(openmiles.global_allocator.?, chunk_buf[0..@intCast(fr * 4)]) catch break;
+        all_pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..@intCast(fr * 4)]) catch break;
     }
     if (all_pcm.items.len == 0) return 0;
 
-    // Wrap in a WAV container and write to output file
-    const wav = openmiles.buildWavFromPcm(openmiles.global_allocator.?, all_pcm.items, 2, 44100, 16) catch |err| {
+    const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, all_pcm.items, 2, 44100, 16) catch |err| {
         log("Error: {any}\n", .{err});
         return 0;
     };
-    defer openmiles.global_allocator.?.free(wav);
+    defer openmiles.global_allocator.free(wav);
 
     const out_path = std.mem.span(out_filename);
-    const out_file = if (std.fs.path.isAbsolute(out_path))
-        std.fs.createFileAbsolute(out_path, .{}) catch |err| {
-            log("Error: {any}\n", .{err});
-            return 0;
-        }
-    else
-        std.fs.cwd().createFile(out_path, .{}) catch |err| {
-            log("Error: {any}\n", .{err});
-            return 0;
-        };
+    const out_file = openmiles.fs_compat.createFile(out_path, .{}) catch |err| {
+        log("Error: {any}\n", .{err});
+        return 0;
+    };
     defer out_file.close();
     out_file.writeAll(wav) catch |err| {
         log("Error: {any}\n", .{err});
