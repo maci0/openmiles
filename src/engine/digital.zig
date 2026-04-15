@@ -29,6 +29,8 @@ pub const DigitalDriver = struct {
     // DSP processor callbacks [input_stage, output_stage]. Stored for query
     // round-tripping; not invoked (miniaudio manages its own processing graph).
     driver_processors: [2]usize = .{ 0, 0 },
+    // Filters opened against this driver (tracked for cleanup on driver close).
+    filters: std.ArrayListUnmanaged(*root.Filter) = .{},
 
     pub fn init(allocator: std.mem.Allocator, frequency: u32, bits: i32, channels: u32) !*DigitalDriver {
         _ = bits;
@@ -78,6 +80,14 @@ pub const DigitalDriver = struct {
             t.deinit();
         }
         self.timers.deinit(self.allocator);
+        // Free any filters that weren't explicitly closed by the game. Mark
+        // driver_is_dead so Filter.deinit skips engine-graph touches (the
+        // engine is about to be torn down) and skips updating this list.
+        for (self.filters.items) |f| {
+            f.driver_is_dead = true;
+            f.deinit();
+        }
+        self.filters.deinit(self.allocator);
         // Uninit all sounds before the engine (miniaudio requires this order),
         // then free all sample state. Mark driver_is_dead first so Sample.deinit
         // skips the swapRemove on the list we're about to clear.

@@ -18,6 +18,11 @@ pub const Filter = struct {
     // Track which samples are routed through this filter for cleanup
     attached_samples: std.ArrayListUnmanaged(*root.Sample),
 
+    /// If true, this filter is being torn down as part of DigitalDriver.deinit.
+    /// In that path we skip updating the driver's filters list (which is being
+    /// cleared anyway) and avoid touching the engine (already uninit'd).
+    driver_is_dead: bool = false,
+
     pub fn init(provider: *root.Provider, driver: *root.DigitalDriver) !*Filter {
         const self = try driver.allocator.create(Filter);
         self.* = .{
@@ -27,7 +32,10 @@ pub const Filter = struct {
             .lpf_node = undefined,
             .attached_samples = .{},
         };
+        errdefer driver.allocator.destroy(self);
         try self.initLpfNode();
+        errdefer ma.ma_lpf_node_uninit(&self.lpf_node, null);
+        try driver.filters.append(driver.allocator, self);
         return self;
     }
 
@@ -61,12 +69,22 @@ pub const Filter = struct {
     }
 
     pub fn deinit(self: *Filter) void {
-        // Re-route all attached samples back to the engine endpoint and clear
-        // their back-reference so they don't hold a dangling pointer to this
-        // filter after it's freed.
+        // Unregister from driver's filter list so DigitalDriver.deinit doesn't
+        // try to free us again. Skip if driver_is_dead (driver is already
+        // iterating its filters list and will free us directly).
+        if (!self.driver_is_dead) {
+            for (self.driver.filters.items, 0..) |f, i| {
+                if (f == self) {
+                    _ = self.driver.filters.swapRemove(i);
+                    break;
+                }
+            }
+        }
+        // Clear each attached sample's back-reference so they don't dangle.
+        // Only re-route through the engine endpoint if the driver is still alive.
         for (self.attached_samples.items) |sample| {
             sample.attached_filter = null;
-            if (sample.is_initialized) {
+            if (!self.driver_is_dead and sample.is_initialized) {
                 _ = ma.ma_node_attach_output_bus(
                     @ptrCast(&sample.sound),
                     0,
@@ -77,7 +95,9 @@ pub const Filter = struct {
         }
         self.attached_samples.deinit(self.allocator);
         if (self.lpf_initialized) {
-            _ = ma.ma_node_detach_output_bus(@ptrCast(&self.lpf_node), 0);
+            if (!self.driver_is_dead) {
+                _ = ma.ma_node_detach_output_bus(@ptrCast(&self.lpf_node), 0);
+            }
             ma.ma_lpf_node_uninit(&self.lpf_node, null);
         }
         self.allocator.destroy(self);
@@ -86,6 +106,11 @@ pub const Filter = struct {
     /// Attach a sample's audio output to route through this filter.
     pub fn attachSample(self: *Filter, sample: *root.Sample) void {
         if (!self.lpf_initialized or !sample.is_initialized) return;
+        // Idempotent: if already attached to this filter, no-op.
+        if (sample.attached_filter == self) return;
+        // If attached to a different filter, detach from that one first so
+        // the attached_samples lists stay consistent.
+        if (sample.attached_filter) |prev| prev.detachSample(sample);
         // Route sample output → filter input (detaches from previous endpoint)
         const result = ma.ma_node_attach_output_bus(
             @ptrCast(&sample.sound),

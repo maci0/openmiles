@@ -521,6 +521,21 @@ pub fn openMidiDriver() ?*MidiDriver {
 
 pub fn closeMidiDriver(driver: *MidiDriver) void {
     if (last_midi_driver == driver) last_midi_driver = null;
+    // Stop every Sequence using this driver BEFORE freeing the soundfont — the
+    // audio thread's onRead dereferences driver.soundfont, so any still-running
+    // sound would UAF on the next render after deinit.
+    global_sequences_mutex.lock();
+    for (global_sequences.items) |seq| {
+        if (seq.driver == driver) {
+            seq.is_playing = false;
+            if (seq.is_initialized) {
+                _ = ma.ma_sound_stop(&seq.sound);
+                ma.ma_sound_uninit(&seq.sound);
+                seq.is_initialized = false;
+            }
+        }
+    }
+    global_sequences_mutex.unlock();
     driver.deinit();
 }
 
