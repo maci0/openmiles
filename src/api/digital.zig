@@ -533,11 +533,11 @@ pub export fn AIL_send_channel_voice_message(seq_opt: ?*Sequence, status: i32, d
     const msg_type = status & 0xF0;
     const channel = status & 0x0F;
     switch (msg_type) {
-        0x80 => tsf_mod.tsf_note_off(sf, channel, d1), // Note Off
+        0x80 => tsf_mod.tsf_channel_note_off(sf, channel, d1), // Note Off
         0x90 => if (d2 > 0) { // Note On
-            _ = tsf_mod.tsf_note_on(sf, channel, d1, @as(f32, @floatFromInt(d2)) / 127.0);
+            _ = tsf_mod.tsf_channel_note_on(sf, channel, d1, @as(f32, @floatFromInt(d2)) / 127.0);
         } else {
-            tsf_mod.tsf_note_off(sf, channel, d1);
+            tsf_mod.tsf_channel_note_off(sf, channel, d1);
         },
         0xB0 => { // Control Change
             _ = tsf_mod.tsf_channel_midi_control(sf, channel, d1, d2);
@@ -558,28 +558,32 @@ pub export fn AIL_send_sysex_message(seq_opt: ?*Sequence, data: *anyopaque) call
     const seq = seq_opt orelse return;
     const sf = seq.driver.soundfont orelse return;
     const bytes: [*]const u8 = @ptrCast(data);
-    // SysEx starts with 0xF0 and ends with 0xF7. Scan for known reset patterns.
+    // SysEx starts with 0xF0 and ends with 0xF7. MSS provides no length, so we
+    // match known GM/GS/XG resets exactly and bail at the first 0xF7.
     if (bytes[0] != 0xF0) return;
-    // Match common resets by looking for distinctive bytes within a small window
+    // Known reset patterns (bytes after 0xF0, ending at 0xF7):
+    // GM On:   F0 7E 7F 09 01 F7                                 (6 bytes)
+    // GS Reset: F0 41 <dev_id> 42 12 40 00 7F 00 <checksum> F7    (11 bytes)
+    // XG Reset: F0 43 <dev_id> 4C 00 00 7E 00 F7                  (9 bytes)
     var is_reset = false;
-    var i: usize = 0;
-    while (i < 16) : (i += 1) {
-        if (bytes[i] == 0xF7) break;
-        // GM On: F0 7E 7F 09 01 F7
-        if (bytes[i] == 0x7E and i + 2 < 16 and bytes[i + 2] == 0x09) {
-            is_reset = true;
-            break;
-        }
-        // GS Reset: F0 41 .. 42 12 40 00 7F 00
-        if (bytes[i] == 0x40 and i + 2 < 16 and bytes[i + 1] == 0x00 and bytes[i + 2] == 0x7F) {
-            is_reset = true;
-            break;
-        }
-        // XG Reset: F0 43 .. 4C 00 00 7E 00
-        if (bytes[i] == 0x4C and i + 3 < 16 and bytes[i + 1] == 0x00 and bytes[i + 3] == 0x7E) {
-            is_reset = true;
-            break;
-        }
+    // GM On: bytes[1..5] = 7E 7F 09 01
+    if (bytes[1] == 0x7E and bytes[1] != 0xF7 and bytes[2] != 0xF7 and bytes[3] != 0xF7 and
+        bytes[2] == 0x7F and bytes[3] == 0x09 and bytes[4] == 0x01)
+    {
+        is_reset = true;
+    } else if (bytes[1] == 0x41 and bytes[2] != 0xF7 and bytes[3] != 0xF7 and bytes[4] != 0xF7 and
+        bytes[5] != 0xF7 and bytes[6] != 0xF7 and bytes[7] != 0xF7 and bytes[8] != 0xF7 and
+        bytes[3] == 0x42 and bytes[4] == 0x12 and bytes[5] == 0x40 and
+        bytes[6] == 0x00 and bytes[7] == 0x7F and bytes[8] == 0x00)
+    {
+        // GS Reset
+        is_reset = true;
+    } else if (bytes[1] == 0x43 and bytes[2] != 0xF7 and bytes[3] != 0xF7 and bytes[4] != 0xF7 and
+        bytes[5] != 0xF7 and bytes[6] != 0xF7 and
+        bytes[3] == 0x4C and bytes[4] == 0x00 and bytes[5] == 0x00 and bytes[6] == 0x7E)
+    {
+        // XG Reset
+        is_reset = true;
     }
     if (is_reset) {
         log("AIL_send_sysex_message: recognized GM/GS/XG reset — resetting all channels\n", .{});

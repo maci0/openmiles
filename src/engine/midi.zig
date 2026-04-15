@@ -308,10 +308,12 @@ pub const Sequence = struct {
                     const phys_ch = self.mapChannel(msg.*.channel);
                     switch (msg.*.type) {
                         tsf.TML_NOTE_ON => {
-                            _ = tsf.tsf_note_on(self.driver.soundfont, phys_ch, openmiles_tml_get_key(msg), @as(f32, @floatFromInt(openmiles_tml_get_velocity(msg))) / 127.0);
+                            // Use channel-aware API: tsf_note_on's second arg is preset_index,
+                            // not channel. tsf_channel_note_on dispatches via channel's assigned patch.
+                            _ = tsf.tsf_channel_note_on(self.driver.soundfont, phys_ch, openmiles_tml_get_key(msg), @as(f32, @floatFromInt(openmiles_tml_get_velocity(msg))) / 127.0);
                         },
                         tsf.TML_NOTE_OFF => {
-                            tsf.tsf_note_off(self.driver.soundfont, phys_ch, openmiles_tml_get_key(msg));
+                            tsf.tsf_channel_note_off(self.driver.soundfont, phys_ch, openmiles_tml_get_key(msg));
                         },
                         tsf.TML_PROGRAM_CHANGE => {
                             const prog = openmiles_tml_get_program(msg);
@@ -653,20 +655,23 @@ pub const Sequence = struct {
         while (self.current_msg) |msg| {
             if (@as(f64, @floatFromInt(msg.*.time)) >= target_ms) break;
             if (self.driver.soundfont) |sf| {
+                // Apply channel mapping so seek-replay state targets the same
+                // physical channel that onRead will use for live events.
+                const phys_ch = self.mapChannel(msg.*.channel);
                 switch (msg.*.type) {
                     tsf.TML_PROGRAM_CHANGE => {
-                        _ = tsf.tsf_channel_set_presetnumber(sf, msg.*.channel, openmiles_tml_get_program(msg), if (msg.*.channel == 9) 1 else 0);
+                        _ = tsf.tsf_channel_set_presetnumber(sf, phys_ch, openmiles_tml_get_program(msg), if (phys_ch == 9) 1 else 0);
                     },
                     tsf.TML_CONTROL_CHANGE => {
                         const ctrl = openmiles_tml_get_control(msg);
                         const val = openmiles_tml_get_control_value(msg);
                         // Skip XMIDI reserved controls (112=prefix, 116=FOR, 117=NEXT, 119=trigger)
                         if (ctrl != 112 and ctrl != 116 and ctrl != 117 and ctrl != 119) {
-                            _ = tsf.tsf_channel_midi_control(sf, msg.*.channel, ctrl, val);
+                            _ = tsf.tsf_channel_midi_control(sf, phys_ch, ctrl, val);
                         }
                     },
                     tsf.TML_PITCH_BEND => {
-                        _ = tsf.tsf_channel_set_pitchwheel(sf, msg.*.channel, openmiles_tml_get_pitch_bend(msg));
+                        _ = tsf.tsf_channel_set_pitchwheel(sf, phys_ch, openmiles_tml_get_pitch_bend(msg));
                     },
                     tsf.TML_SET_TEMPO => {
                         // Update tempo so beat/measure recalculation below uses the tempo

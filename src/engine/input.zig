@@ -18,6 +18,9 @@ pub const Input = struct {
     max_buffer_bytes: usize = 44100 * 2, // 1s of 16-bit mono
     mutex: std.Thread.Mutex = .{},
     is_initialized: bool = false,
+    // Snapshot of the buffer handed to getInfo(). Lives until the next getInfo()
+    // call so the caller's returned pointer remains valid even while capture continues.
+    snapshot: std.ArrayListUnmanaged(u8) = .{},
 
     pub fn init(allocator: std.mem.Allocator) !*Input {
         const self = try allocator.create(Input);
@@ -50,6 +53,7 @@ pub const Input = struct {
             ma.ma_device_uninit(&self.device);
         }
         self.buffer.deinit(self.allocator);
+        self.snapshot.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 
@@ -71,13 +75,18 @@ pub const Input = struct {
         const in_ptr: [*]const u8 = @ptrCast(pInput.?);
         const bytes_per_frame = self.channels * (self.bits / 8);
         const byte_count: usize = @as(usize, frameCount) * bytes_per_frame;
+        // Truncate incoming chunks larger than the ring capacity (keep the tail).
+        const incoming = if (byte_count > self.max_buffer_bytes)
+            in_ptr[(byte_count - self.max_buffer_bytes)..byte_count]
+        else
+            in_ptr[0..byte_count];
 
         self.mutex.lock();
         defer self.mutex.unlock();
 
         // Ring-buffer behavior: drop oldest data if we exceed max_buffer_bytes
-        if (self.buffer.items.len + byte_count > self.max_buffer_bytes) {
-            const overflow = (self.buffer.items.len + byte_count) - self.max_buffer_bytes;
+        if (self.buffer.items.len + incoming.len > self.max_buffer_bytes) {
+            const overflow = (self.buffer.items.len + incoming.len) - self.max_buffer_bytes;
             if (overflow >= self.buffer.items.len) {
                 self.buffer.clearRetainingCapacity();
             } else {
@@ -86,7 +95,7 @@ pub const Input = struct {
                 self.buffer.items.len -= overflow;
             }
         }
-        self.buffer.appendSlice(self.allocator, in_ptr[0..byte_count]) catch {};
+        self.buffer.appendSlice(self.allocator, incoming) catch {};
     }
 
     /// InputInfo layout mirrors MSS's AILSOUNDINFO for basic query (rate, channels, bits, data buffer).
@@ -105,12 +114,25 @@ pub const Input = struct {
     pub fn getInfo(self: *Input) InputInfo {
         self.mutex.lock();
         defer self.mutex.unlock();
+        // Copy the current buffer into the snapshot so the returned pointer
+        // remains valid even if the capture callback reallocates or shifts
+        // self.buffer on the audio thread before the caller reads the data.
+        self.snapshot.clearRetainingCapacity();
+        self.snapshot.appendSlice(self.allocator, self.buffer.items) catch {
+            // On OOM, return no data rather than an invalid pointer.
+            return .{
+                .format = 0,
+                .rate = self.sample_rate,
+                .bits = self.bits,
+                .channels = self.channels,
+            };
+        };
         const bytes_per_sample = self.channels * (self.bits / 8);
-        const samples: u32 = if (bytes_per_sample == 0) 0 else @as(u32, @intCast(self.buffer.items.len)) / bytes_per_sample;
+        const samples: u32 = if (bytes_per_sample == 0) 0 else @as(u32, @intCast(self.snapshot.items.len)) / bytes_per_sample;
         return .{
             .format = 0,
-            .data_ptr = if (self.buffer.items.len > 0) @ptrCast(self.buffer.items.ptr) else null,
-            .data_len = @intCast(self.buffer.items.len),
+            .data_ptr = if (self.snapshot.items.len > 0) @ptrCast(self.snapshot.items.ptr) else null,
+            .data_len = @intCast(self.snapshot.items.len),
             .rate = self.sample_rate,
             .bits = self.bits,
             .channels = self.channels,

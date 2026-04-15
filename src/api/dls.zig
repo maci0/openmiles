@@ -69,14 +69,18 @@ pub export fn AIL_filter_DLS_with_XMI(driver: *anyopaque, xmi: *anyopaque, dls: 
 }
 pub export fn AIL_DLS_load_memory(driver: *openmiles.MidiDriver, mem: *anyopaque, flags: u32) callconv(.winapi) ?*anyopaque {
     _ = flags;
-    // Load SF2 from memory using tsf
+    // Load SF2 from memory using tsf. SF2 files are RIFF containers, so we
+    // require a successful header-based size detection — falling back to a
+    // 16MB sentinel would be an OOB read if the real buffer is smaller.
     const tsf_mod = openmiles.tsf;
     const data: [*c]const u8 = @ptrCast(@alignCast(mem));
-    // Detect size from header, or fall back to 16MB sentinel for unknown formats
-    const size = blk: {
-        const detected = openmiles.detectAudioSize(data);
-        break :blk if (detected > 0) detected else openmiles.streaming_sentinel_size;
-    };
+    const detected = openmiles.detectAudioSize(data);
+    if (detected == 0) {
+        log("AIL_DLS_load_memory: could not determine SF2 size from header; refusing to load\n", .{});
+        openmiles.setLastError("DLS/SF2 memory buffer has unrecognized header");
+        return null;
+    }
+    const size = detected;
     if (driver.soundfont) |sf| {
         if (driver.owns_soundfont) tsf_mod.tsf_close(sf);
     }
@@ -137,15 +141,19 @@ pub export fn AIL_DLS_open(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*any
     };
     if (dls) |data| {
         // dls is a pointer to in-memory DLS/SF2 data (same as AIL_DLS_load_memory).
-        // Detect size from RIFF header, then load it.
+        // Require a successful size detection to avoid OOB reads on unknown-size buffers.
         const tsf_mod = openmiles.tsf;
         const raw: [*c]const u8 = @ptrCast(@alignCast(data));
         const detected = openmiles.detectAudioSize(raw);
-        const size: usize = if (detected > 0) detected else openmiles.streaming_sentinel_size;
-        driver.soundfont = tsf_mod.tsf_load_memory(raw, @intCast(size));
-        driver.owns_soundfont = true;
-        if (driver.soundfont) |sf| {
-            tsf_mod.tsf_set_output(sf, tsf_mod.TSF_STEREO_INTERLEAVED, 44100, 0);
+        if (detected > 0) {
+            driver.soundfont = tsf_mod.tsf_load_memory(raw, @intCast(detected));
+            driver.soundfont_size_bytes = @intCast(detected);
+            driver.owns_soundfont = true;
+            if (driver.soundfont) |sf| {
+                tsf_mod.tsf_set_output(sf, tsf_mod.TSF_STEREO_INTERLEAVED, 44100, 0);
+            }
+        } else {
+            log("AIL_DLS_open: could not determine SF2 size from header; opening without soundfont\n", .{});
         }
     }
     return driver;

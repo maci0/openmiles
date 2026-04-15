@@ -68,9 +68,16 @@ pub const Redbook = struct {
     }
 
     pub fn getPosition(self: *Redbook) u32 {
+        const clamp = struct {
+            fn f(ms: i64) u32 {
+                if (ms < 0) return 0;
+                if (ms > std.math.maxInt(u32)) return std.math.maxInt(u32);
+                return @intCast(ms);
+            }
+        }.f;
         return switch (self.status) {
-            .playing => @intCast(std.time.milliTimestamp() - self.play_start_ms),
-            .paused => @intCast(self.paused_position_ms),
+            .playing => clamp(std.time.milliTimestamp() - self.play_start_ms),
+            .paused => clamp(self.paused_position_ms),
             .stopped => 0,
         };
     }
