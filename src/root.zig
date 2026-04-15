@@ -92,8 +92,11 @@ pub var global_allocator: ?std.mem.Allocator = null;
 // Tracks which MIDI channels (0-15) are locked by sequences.
 // null = unlocked, non-null = pointer to owning Sequence.
 pub var locked_channels: [16]?*Sequence = .{null} ** 16;
+var locked_channels_mutex: std.Thread.Mutex = .{};
 
 pub fn lockChannel(seq: *Sequence) i32 {
+    locked_channels_mutex.lock();
+    defer locked_channels_mutex.unlock();
     // Find first unlocked non-drum channel (skip 9 = percussion)
     for (&locked_channels, 0..) |*slot, i| {
         if (i == 9) continue;
@@ -107,6 +110,8 @@ pub fn lockChannel(seq: *Sequence) i32 {
 
 pub fn releaseChannel(seq: *Sequence, channel: i32) void {
     if (channel < 0 or channel > 15) return;
+    locked_channels_mutex.lock();
+    defer locked_channels_mutex.unlock();
     const idx: usize = @intCast(channel);
     if (locked_channels[idx] == seq) {
         locked_channels[idx] = null;
@@ -561,18 +566,21 @@ pub fn detectMidiSize(raw: [*]const u8) usize {
         const body = std.mem.readInt(u32, raw[4..8], .big);
         return @as(usize, body) + 8;
     }
-    // Check for MThd header (Standard MIDI Format) - compute size from all track chunks
+    // Check for MThd header (Standard MIDI Format) - compute size from all track chunks.
+    // Cap the walk at streaming_sentinel_size to prevent reading past the caller's
+    // buffer when the file is corrupt (e.g. fabricated num_tracks or trk_len).
     if (raw[0] == 'M' and raw[1] == 'T' and raw[2] == 'h' and raw[3] == 'd') {
-        // MThd header is 14 bytes; then one or more MTrk chunks follow
         const hdr_size = std.mem.readInt(u32, raw[4..8], .big);
         const num_tracks = std.mem.readInt(u16, raw[10..12], .big);
-        // Walk track chunks to compute total file size
         var pos: usize = 8 + hdr_size;
         var tracks_found: u16 = 0;
         while (tracks_found < num_tracks) {
-            // Each MTrk chunk: 4-byte tag + 4-byte length + data
+            // Stop walking if we've exceeded the bounded sentinel — a corrupt
+            // or malicious SMF would otherwise read arbitrary memory.
+            if (pos + 8 > streaming_sentinel_size) return streaming_sentinel_size;
             const trk_raw = raw + pos + 4;
             const trk_len = std.mem.readInt(u32, trk_raw[0..4], .big);
+            if (trk_len > streaming_sentinel_size - pos - 8) return streaming_sentinel_size;
             pos += 8 + trk_len;
             tracks_found += 1;
         }

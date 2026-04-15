@@ -61,8 +61,11 @@ pub const Filter = struct {
     }
 
     pub fn deinit(self: *Filter) void {
-        // Re-route all attached samples back to the engine endpoint
+        // Re-route all attached samples back to the engine endpoint and clear
+        // their back-reference so they don't hold a dangling pointer to this
+        // filter after it's freed.
         for (self.attached_samples.items) |sample| {
+            sample.attached_filter = null;
             if (sample.is_initialized) {
                 _ = ma.ma_node_attach_output_bus(
                     @ptrCast(&sample.sound),

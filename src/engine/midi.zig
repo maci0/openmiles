@@ -188,11 +188,13 @@ pub const Sequence = struct {
     }
 
     /// Recalculate tempo_ratio from user_bpm and a given file BPM.
+    /// Tempo ratio is clamped to [0.01, 100] — games occasionally request
+    /// extreme values, but onRead needs a non-zero divisor.
     fn recalcTempoRatio(self: *Sequence, file_bpm: i32) void {
         if (self.user_bpm > 0 and file_bpm > 0) {
-            const target = @as(f64, @floatFromInt(self.user_bpm)) / @as(f64, @floatFromInt(file_bpm));
+            const raw = @as(f64, @floatFromInt(self.user_bpm)) / @as(f64, @floatFromInt(file_bpm));
+            const target = @max(0.01, @min(raw, 100.0));
             if (self.tempo_fade_active) {
-                // An active fade is targeting a new ratio — update the target
                 self.tempo_fade_target_ratio = target;
             } else {
                 self.tempo_ratio = target;
@@ -402,8 +404,11 @@ pub const Sequence = struct {
                     continue;
                 }
                 // Account for tempo_ratio: when playing faster, fewer frames elapse per ms of MIDI time.
-                const msPerFrameEffective = msPerFrame * self.tempo_ratio;
-                const framesUntilEvent = @as(ma.ma_uint64, @intFromFloat(@max(0, timeToNextEvent / msPerFrameEffective)));
+                // Clamp to a small positive value to avoid division by zero from pathological fades.
+                const safe_ratio = @max(self.tempo_ratio, 0.001);
+                const msPerFrameEffective = msPerFrame * safe_ratio;
+                const rawFramesUntilEvent = @max(0.0, @min(timeToNextEvent / msPerFrameEffective, @as(f64, @floatFromInt(frameCount))));
+                const framesUntilEvent = @as(ma.ma_uint64, @intFromFloat(rawFramesUntilEvent));
                 const framesToRender = @min(framesRemaining, @max(1, framesUntilEvent));
                 tsf.tsf_render_float(self.driver.soundfont, buffer + (@as(usize, @intCast(framesProcessed)) * 2), @intCast(@as(usize, @intCast(framesToRender))), 0);
                 const realMs = @as(f64, @floatFromInt(framesToRender)) * msPerFrame;

@@ -147,9 +147,9 @@ pub export fn AIL_DLS_open(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*any
         const detected = openmiles.detectAudioSize(raw);
         if (detected > 0) {
             driver.soundfont = tsf_mod.tsf_load_memory(raw, @intCast(detected));
-            driver.soundfont_size_bytes = @intCast(detected);
             driver.owns_soundfont = true;
             if (driver.soundfont) |sf| {
+                driver.soundfont_size_bytes = @intCast(detected);
                 tsf_mod.tsf_set_output(sf, tsf_mod.TSF_STEREO_INTERLEAVED, 44100, 0);
             }
         } else {

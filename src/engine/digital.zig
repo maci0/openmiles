@@ -83,6 +83,11 @@ pub const DigitalDriver = struct {
         // skips the swapRemove on the list we're about to clear.
         for (self.samples.items) |s| {
             s.driver_is_dead = true;
+            // Detach from any attached Filter so the filter doesn't hold a
+            // dangling pointer after the sample is freed.
+            if (s.attached_filter) |f| f.detachSample(s);
+            // Clean up reverb node to avoid leaking ma_delay_node + internal state.
+            s.removeReverb();
             if (s.is_initialized) {
                 ma.ma_sound_uninit(&s.sound);
                 s.is_initialized = false;
@@ -91,6 +96,10 @@ pub const DigitalDriver = struct {
                 _ = ma.ma_decoder_uninit(d);
                 self.allocator.destroy(d);
                 s.decoder = null;
+            }
+            if (s.bounded_mem_ctx) |ctx| {
+                self.allocator.destroy(ctx);
+                s.bounded_mem_ctx = null;
             }
             if (s.owned_buffer) |buf| {
                 self.allocator.free(buf);
@@ -295,6 +304,11 @@ pub const Sample = struct {
                 }
             }
         }
+        // Detach from any attached Filter first — Filter's attached_samples
+        // list would otherwise hold a dangling pointer after we're freed.
+        if (self.attached_filter) |f| {
+            f.detachSample(self);
+        }
         self.removeReverb();
         if (self.is_initialized) {
             ma.ma_sound_uninit(&self.sound);
@@ -331,8 +345,6 @@ pub const Sample = struct {
             self.owned_buffer = null;
         }
 
-        self.owned_buffer = data;
-
         const decoder = try self.driver.allocator.create(ma.ma_decoder);
         errdefer self.driver.allocator.destroy(decoder);
         var result = ma.ma_decoder_init_memory(data.ptr, data.len, null, decoder);
@@ -343,6 +355,10 @@ pub const Sample = struct {
             _ = ma.ma_decoder_uninit(decoder);
             return error.SampleLoadFailed;
         }
+        // Take ownership only after all fallible steps succeed, so callers' catch
+        // paths can safely free the buffer on failure without causing a double-free
+        // through a later Sample.deinit.
+        self.owned_buffer = data;
         self.decoder = decoder;
         self.is_initialized = true;
         self.is_done = false;
@@ -497,12 +513,15 @@ pub const Sample = struct {
         }
 
         var internal_data = data;
+        var owned_copy: ?[]u8 = null;
         if (copy_data) {
-            const owned = try self.driver.allocator.dupe(u8, data);
-            errdefer self.driver.allocator.free(owned);
-            internal_data = owned;
-            self.owned_buffer = owned;
+            owned_copy = try self.driver.allocator.dupe(u8, data);
+            internal_data = owned_copy.?;
         }
+        // Free the copy if any subsequent step fails — but DON'T assign
+        // self.owned_buffer until the whole init succeeds, or we risk a
+        // double-free when the caller retries or deinit runs.
+        errdefer if (owned_copy) |c| self.driver.allocator.free(c);
 
         const decoder = try self.driver.allocator.create(ma.ma_decoder);
         errdefer self.driver.allocator.destroy(decoder);
@@ -514,6 +533,7 @@ pub const Sample = struct {
             _ = ma.ma_decoder_uninit(decoder);
             return error.SampleLoadFailed;
         }
+        self.owned_buffer = owned_copy;
         self.decoder = decoder;
         self.is_initialized = true;
         self.is_done = false;
@@ -1014,8 +1034,6 @@ pub const Sample3D = struct {
             self.owned_buffer = null;
         }
 
-        self.owned_buffer = data;
-
         const decoder = try self.driver.allocator.create(ma.ma_decoder);
         errdefer self.driver.allocator.destroy(decoder);
         var result = ma.ma_decoder_init_memory(data.ptr, data.len, null, decoder);
@@ -1026,6 +1044,8 @@ pub const Sample3D = struct {
             _ = ma.ma_decoder_uninit(decoder);
             return error.SoundInitFailed;
         }
+        // Take ownership only after all fallible steps succeed (see Sample.loadFromOwnedMemory).
+        self.owned_buffer = data;
         self.decoder = decoder;
         self.is_initialized = true;
         self.is_done = false;
@@ -1061,12 +1081,12 @@ pub const Sample3D = struct {
         }
 
         var internal_data = data;
+        var owned_copy: ?[]u8 = null;
         if (copy_data) {
-            const owned = try self.driver.allocator.dupe(u8, data);
-            errdefer self.driver.allocator.free(owned);
-            internal_data = owned;
-            self.owned_buffer = owned;
+            owned_copy = try self.driver.allocator.dupe(u8, data);
+            internal_data = owned_copy.?;
         }
+        errdefer if (owned_copy) |c| self.driver.allocator.free(c);
 
         const decoder = try self.driver.allocator.create(ma.ma_decoder);
         errdefer self.driver.allocator.destroy(decoder);
@@ -1079,6 +1099,7 @@ pub const Sample3D = struct {
             _ = ma.ma_decoder_uninit(decoder);
             return error.SoundInitFailed;
         }
+        self.owned_buffer = owned_copy;
         self.decoder = decoder;
         self.is_initialized = true;
         self.is_done = false;

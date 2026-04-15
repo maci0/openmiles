@@ -558,34 +558,30 @@ pub export fn AIL_send_sysex_message(seq_opt: ?*Sequence, data: *anyopaque) call
     const seq = seq_opt orelse return;
     const sf = seq.driver.soundfont orelse return;
     const bytes: [*]const u8 = @ptrCast(data);
-    // SysEx starts with 0xF0 and ends with 0xF7. MSS provides no length, so we
-    // match known GM/GS/XG resets exactly and bail at the first 0xF7.
+    // MSS provides no length for SysEx. Walk byte-by-byte capped at 512 (MIDI
+    // spec's practical max for inline SysEx) and stop at the 0xF7 terminator,
+    // building a slice of the body only. Known reset matching uses the slice.
     if (bytes[0] != 0xF0) return;
-    // Known reset patterns (bytes after 0xF0, ending at 0xF7):
-    // GM On:   F0 7E 7F 09 01 F7                                 (6 bytes)
-    // GS Reset: F0 41 <dev_id> 42 12 40 00 7F 00 <checksum> F7    (11 bytes)
-    // XG Reset: F0 43 <dev_id> 4C 00 00 7E 00 F7                  (9 bytes)
-    var is_reset = false;
-    // GM On: bytes[1..5] = 7E 7F 09 01
-    if (bytes[1] == 0x7E and bytes[1] != 0xF7 and bytes[2] != 0xF7 and bytes[3] != 0xF7 and
-        bytes[2] == 0x7F and bytes[3] == 0x09 and bytes[4] == 0x01)
-    {
-        is_reset = true;
-    } else if (bytes[1] == 0x41 and bytes[2] != 0xF7 and bytes[3] != 0xF7 and bytes[4] != 0xF7 and
-        bytes[5] != 0xF7 and bytes[6] != 0xF7 and bytes[7] != 0xF7 and bytes[8] != 0xF7 and
-        bytes[3] == 0x42 and bytes[4] == 0x12 and bytes[5] == 0x40 and
-        bytes[6] == 0x00 and bytes[7] == 0x7F and bytes[8] == 0x00)
-    {
-        // GS Reset
-        is_reset = true;
-    } else if (bytes[1] == 0x43 and bytes[2] != 0xF7 and bytes[3] != 0xF7 and bytes[4] != 0xF7 and
-        bytes[5] != 0xF7 and bytes[6] != 0xF7 and
-        bytes[3] == 0x4C and bytes[4] == 0x00 and bytes[5] == 0x00 and bytes[6] == 0x7E)
-    {
-        // XG Reset
-        is_reset = true;
+    var body_len: usize = 0;
+    var i: usize = 1;
+    while (i < 512) : (i += 1) {
+        if (bytes[i] == 0xF7) break;
+        body_len = i; // last byte index before terminator
     }
-    if (is_reset) {
+    if (body_len == 0) return; // malformed or empty SysEx
+    const body = bytes[1 .. body_len + 1];
+    // Known reset patterns (body = bytes between 0xF0 and 0xF7):
+    //   GM On:   7E 7F 09 01
+    //   GS Reset: 41 <dev_id> 42 12 40 00 7F 00 <checksum>
+    //   XG Reset: 43 <dev_id> 4C 00 00 7E 00
+    const is_gm = body.len >= 4 and body[0] == 0x7E and body[1] == 0x7F and
+        body[2] == 0x09 and body[3] == 0x01;
+    const is_gs = body.len >= 8 and body[0] == 0x41 and body[2] == 0x42 and
+        body[3] == 0x12 and body[4] == 0x40 and body[5] == 0x00 and
+        body[6] == 0x7F and body[7] == 0x00;
+    const is_xg = body.len >= 6 and body[0] == 0x43 and body[2] == 0x4C and
+        body[3] == 0x00 and body[4] == 0x00 and body[5] == 0x7E;
+    if (is_gm or is_gs or is_xg) {
         log("AIL_send_sysex_message: recognized GM/GS/XG reset — resetting all channels\n", .{});
         var ch: i32 = 0;
         while (ch < 16) : (ch += 1) {
@@ -1097,10 +1093,14 @@ pub export fn AIL_file_read(filename: [*:0]const u8, dest: ?*anyopaque) callconv
     if (size == 0) return null;
     if (dest) |d| {
         const buf: [*]u8 = @ptrCast(@alignCast(d));
-        _ = file.readAll(buf[0..size]) catch {
+        const n = file.readAll(buf[0..size]) catch {
             openmiles.setFileError("Read error");
             return null;
         };
+        if (n < size) {
+            // Zero-fill the tail so callers don't see uninitialised memory on short reads.
+            @memset(buf[n..size], 0);
+        }
         return d;
     } else {
         // Allocate with malloc so caller can free with AIL_mem_free_lock (std.c.free)
@@ -1108,11 +1108,14 @@ pub export fn AIL_file_read(filename: [*:0]const u8, dest: ?*anyopaque) callconv
             openmiles.setFileError("Out of memory");
             return null;
         });
-        _ = file.readAll(buf[0..size]) catch {
+        const n = file.readAll(buf[0..size]) catch {
             std.c.free(buf);
             openmiles.setFileError("Read error");
             return null;
         };
+        if (n < size) {
+            @memset(buf[n..size], 0);
+        }
         return buf;
     }
 }
