@@ -31,7 +31,7 @@ This matrix tracks the availability of major API groups across different histori
 | Volume / Panning Control | v2 | 🟢 | 🟢 | 🟢 | 🟢 Full | |
 | Memory Image Loading | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
 | Streaming (File-based) | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | |
-| Input API | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | Recording functionality |
+| Input API | v4 | 🔴 | 🔴 | 🟢 | ⚪ Stub | Recording not implemented |
 | Compression API | v4 | 🔴 | 🔴 | 🟢 | 🟡 Partial | Decompression implemented |
 | Filter API | v6 | 🔴 | 🔴 | 🟢 | 🟢 Full | Low-pass filter via miniaudio ma_lpf_node; real-time cutoff/order control |
 

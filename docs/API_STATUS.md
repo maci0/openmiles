@@ -22,7 +22,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_get_DirectSound_info` | ⚪ Stub | Returns 0; DirectSound not used |
 | `AIL_set_DirectSound_HWND` | ⚪ Stub | No-op; DirectSound not used |
 | `AIL_digital_CPU_percent` | ⚪ Stub | Returns 0.0; no CPU accounting |
-| `AIL_digital_latency` | ⚪ Stub | Returns hardcoded 50ms |
+| `AIL_digital_latency` | 🟢 Implemented | Queries miniaudio device period for real latency |
 | `AIL_digital_configuration` | 🟢 Implemented | |
 | `DllMain` | 🟢 Implemented | |
 | `AIL_file_error` | 🟢 Implemented | |
@@ -177,9 +177,9 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_MIDI_handle_release` | ⚪ Stub | No-op; device sharing not applicable |
 | `AIL_create_wave_synthesizer` | 🟢 Implemented | |
 | `AIL_destroy_wave_synthesizer` | 🟢 Implemented | |
-| `AIL_map_sequence_channel` | ⚪ Stub | No-op; channel remapping not implemented |
-| `AIL_register_ICA_array` | ⚪ Stub | No-op; initial controller arrays not implemented |
-| `AIL_true_sequence_channel` | ⚪ Stub | Returns channel unchanged; no remapping |
+| `AIL_map_sequence_channel` | 🟢 Implemented | Per-sequence 16-channel mapping applied in MIDI event dispatch |
+| `AIL_register_ICA_array` | 🟢 Implemented | Sends initial CC values per channel to TinySoundFont |
+| `AIL_true_sequence_channel` | 🟢 Implemented | Returns mapped physical channel from sequence channel_map |
 | `AIL_filter_DLS_attribute` | ⚪ Stub | No-op |
 | `AIL_filter_DLS_with_XMI` | ⚪ Stub | Returns 0 |
 | `AIL_set_DLS_processor` | ⚪ Stub | No-op |
@@ -222,7 +222,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_controller_value` | 🟢 Implemented | Reads directly from TinySoundFont |
 | `AIL_send_channel_voice_message` | 🟢 Implemented | Parses and forwards to TSF |
 | `AIL_send_sysex_message` | ⚪ Stub | No-op |
-| `AIL_lock_channel` / `AIL_release_channel` | ⚪ Stub | |
+| `AIL_lock_channel` / `AIL_release_channel` | 🟢 Implemented | Global 16-channel reservation system; lock returns first free non-drum channel |
 | `AIL_register_beat_callback` | 🟢 Implemented | Fires continuously during playback |
 | `AIL_register_event_callback` | 🟢 Implemented | Fires on Control Change messages |
 | `AIL_register_prefix_callback` | 🟢 Implemented | Handles system exclusive prefixes |
@@ -303,11 +303,11 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 |----------|--------|-------|
 | `AIL_enumerate_filter_attributes` | 🟢 Implemented | Enumerates Cutoff and Order attributes |
 | `AIL_enumerate_filter_sample_attributes` | 🟢 Implemented | Enumerates Cutoff and Order attributes |
-| `AIL_filter_sample_attribute` | ⚪ Stub | No-op; per-sample filter attributes not wired |
-| `AIL_filter_stream_attribute` | ⚪ Stub | No-op; per-stream filter attributes not wired |
-| `AIL_set_filter_preference` | ⚪ Stub | No-op |
-| `AIL_set_filter_sample_preference` | ⚪ Stub | No-op; per-sample filter preferences not wired |
-| `AIL_set_filter_stream_preference` | ⚪ Stub | No-op; per-stream filter preferences not wired |
+| `AIL_filter_sample_attribute` | 🟢 Implemented | Reads Cutoff/Order from sample's attached filter |
+| `AIL_filter_stream_attribute` | 🟢 Implemented | Reads Cutoff/Order from stream's attached filter |
+| `AIL_set_filter_preference` | 🟢 Implemented | Sets Cutoff/Order on filter handle |
+| `AIL_set_filter_sample_preference` | 🟢 Implemented | Sets Cutoff/Order via sample's attached filter |
+| `AIL_set_filter_stream_preference` | 🟢 Implemented | Sets Cutoff/Order via stream's attached filter |
 | `AIL_open_filter` | 🟢 Implemented | Creates Filter with miniaudio ma_lpf_node for low-pass filtering |
 | `AIL_close_filter` | 🟢 Implemented | Detaches all samples and frees filter node |
 | `AIL_set_sample_filter` | 🟢 Implemented | Routes sample audio through filter's LPF node |

@@ -37,13 +37,15 @@ It replaces the proprietary MSS audio stack with [miniaudio](https://miniaud.io/
 Requires [Zig 0.15.2](https://ziglang.org/download/).
 
 ```bash
-# Native build (Linux/macOS -- for tests)
+# Native build (Linux/Windows -- for tests)
 zig build
 zig build test
 
 # Cross-compile for Windows (game deployment)
 zig build -Dtarget=x86-windows -Doptimize=ReleaseSmall
 ```
+
+> **Note:** Native builds on macOS aarch64 (Apple Silicon) are not supported because Zig's stage2 backend does not implement the `aarch64_aapcs_win` calling convention used by the stdcall exports. Use Linux or Windows for native builds, or cross-compile to `x86-windows`.
 
 The output DLL is at `zig-out/bin/mss32.dll`.
 
@@ -84,7 +86,7 @@ graph TD
 
 ## API Coverage
 
-~270 functions implemented out of ~340 total MSS 6.6 API surface. See [docs/API_STATUS.md](docs/API_STATUS.md) for the full matrix.
+367 functions exported, covering the full MSS 6.6 API surface (including `DIG_`/`MDI_` aliases and legacy `waveOut`/`midiOut` compatibility). See [docs/API_STATUS.md](docs/API_STATUS.md) for the per-function implementation matrix.
 
 | Category | Status |
 |----------|--------|
@@ -109,7 +111,7 @@ graph TD
 - [API Implementation Status](docs/API_STATUS.md) -- per-function status matrix
 - [API Support Matrix](docs/MSS_API_MATRIX.md) -- version compatibility overview
 - [Plugin & Codec Coverage](docs/MSS_PLUGINS.md) -- ASI/M3D/FLT replacement status
-- [Performance Review](docs/perf-review.md) -- profiling notes and optimization log
+- [MSS Version History](docs/MSS_VERSION_HISTORY.md) -- historical MSS releases
 
 ## Dependencies
 
