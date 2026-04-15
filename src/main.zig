@@ -14,4 +14,8 @@ comptime {
     _ = @import("api/timer.zig");
     _ = @import("api/quick.zig");
     _ = @import("api/digital.zig");
+    _ = @import("api/stream.zig");
+    _ = @import("api/redbook.zig");
+    _ = @import("api/input.zig");
+    _ = @import("api/file.zig");
 }
