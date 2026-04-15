@@ -145,7 +145,7 @@ Per-sample reverb (via `AIL_set_sample_reverb`/`AIL_set_stream_reverb`/`AIL_quic
 graph TD
     A["Game calls<br/>AIL_open_stream('music.mp3')"] --> B
 
-    B["OpenMiles AIL_open_stream<br/><i>src/api/digital.zig</i>"] --> C
+    B["OpenMiles AIL_open_stream<br/><i>src/api/stream.zig</i>"] --> C
 
     C["Sample.loadFromFile()<br/><i>src/engine/digital.zig</i><br/><br/>Uses miniaudio ma_decoder<br/>MP3 (dr_mp3) | OGG (stb_vorbis)<br/>WAV (dr_wav) | FLAC (dr_flac)"] --> D
 

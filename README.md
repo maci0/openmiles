@@ -9,14 +9,14 @@
 <p align="center">
   <a href="https://github.com/maci0/openmiles/actions"><img src="https://github.com/maci0/openmiles/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="License: GPL-3.0"></a>
-  <a href="https://ziglang.org"><img src="https://img.shields.io/badge/built%20with-Zig%200.15-f7a41d.svg" alt="Built with Zig"></a>
+  <a href="https://ziglang.org"><img src="https://img.shields.io/badge/built%20with-Zig%200.15.2-f7a41d.svg" alt="Built with Zig"></a>
 </p>
 
 ---
 
 OpenMiles is a clean-room reimplementation of the **Miles Sound System (MSS) 6.6** API in [Zig](https://ziglang.org/), designed as a drop-in `mss32.dll` replacement for legacy Windows games running on modern systems and under [Wine](https://www.winehq.org/).
 
-It replaces the proprietary MSS audio stack with [miniaudio](https://miniaud.io/) for audio output, [TinySoundFont](https://github.com/schellingb/TinySoundFont) for MIDI synthesis, and native decoders for MP3, OGG, WAV, and FLAC -- no proprietary codec plugins required.
+It replaces the proprietary MSS audio stack with [miniaudio](https://miniaud.io/) for audio output, [TinySoundFont](https://github.com/schellingb/TinySoundFont) for MIDI synthesis, and native decoders for MP3, OGG, and WAV (replacing MSS's proprietary ASI plugins), plus FLAC as a bonus format not in the original MSS.
 
 ## Features
 
@@ -75,6 +75,7 @@ graph TD
         DLL --> Engine["src/engine/<br/>Zig engine layer<br/>Sample, Sequence, DigitalDriver, Filter"]
         DLL --> RIB["src/rib/<br/>RIB provider system"]
         DLL --> Utils["src/utils/<br/>Logging, filesystem compat"]
+        DLL --> Bindings["src/bindings/<br/>C implementations<br/>(AIL_debug_printf, AIL_sprintf)"]
     end
 
     Engine --> MA["miniaudio.h<br/>Audio output, decoding, mixing, 3D"]
@@ -86,19 +87,19 @@ graph TD
 
 ## API Coverage
 
-367 functions exported, covering the full MSS 6.6 API surface (including `DIG_`/`MDI_` aliases and legacy `waveOut`/`midiOut` compatibility). See [docs/API_STATUS.md](docs/API_STATUS.md) for the per-function implementation matrix.
+367 functions exported, covering the full MSS 6.6 API surface (legacy `waveOut`/`midiOut` compatibility included; `DIG_`/`MDI_` prefix aliases not yet exported). See [docs/API_STATUS.md](docs/API_STATUS.md) for the per-function implementation matrix.
 
 | Category | Status |
 |----------|--------|
-| Core System | Fully implemented |
+| Core System | Mostly implemented (some Windows/hardware-specific APIs are no-ops) |
 | Digital Audio (Samples & Streams) | Fully implemented |
-| MIDI / XMIDI | Fully implemented |
+| MIDI / XMIDI | Core playback fully implemented; DLS utility and filter functions stubbed |
 | 3D Positional Audio | Fully implemented |
 | RIB / ASI Plugin System | Fully implemented |
 | Filter API | Low-pass filter implemented |
 | Timer API | Fully implemented |
 | Quick API | Fully implemented |
-| Redbook (CD) API | Stubbed (not applicable) |
+| Redbook (CD) API | Emulated (no audio -- games proceed gracefully) |
 
 ## Tested Games
 

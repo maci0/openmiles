@@ -41,7 +41,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_serve` | ⚪ Stub | No-op; miniaudio uses its own audio thread |
 
 ## RIB / ASI Plugin System
-*(Appeared in MSS v5+)*
+*(Appeared in MSS v4+)*
 | Function | Status | Notes |
 |----------|--------|-------|
 | `AIL_request_EOB_ASI_reset` | 🟢 Implemented | |
@@ -98,7 +98,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_register_EOB_callback` | 🟢 Implemented | |
 | `AIL_register_SOB_callback` | 🟢 Implemented | |
 | `AIL_sample_buffer_info` | 🟢 Implemented | |
-| `AIL_sample_buffer_ready` | 🟢 Implemented | |
+| `AIL_sample_buffer_ready` | ⚪ Stub | Always returns 1 (buffer always reported as ready); double-buffered streaming not implemented |
 | `AIL_sample_granularity` | 🟢 Implemented | |
 | `AIL_sample_reverb` | 🟢 Implemented | Returns current room_type, level, reflect_time |
 | `AIL_sample_user_data` | 🟢 Implemented | |
@@ -235,7 +235,8 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_list_DLS` / `AIL_list_MIDI` / `AIL_merge_DLS_with_XMI` | ⚪ Stub | Returns 0 |
 | `DLSClose` / `DLSLoadFile` / `DLSLoadMemFile` / `DLSMSSOpen` | 🟢 Implemented | Aliases for corresponding AIL_DLS_* functions |
 | `DLSUnloadFile` | 🟢 Implemented | Alias for AIL_DLS_unload |
-| `DLSCompactMemory` / `DLSGetInfo` / `DLSUnloadAll` | ⚪ Stub | No-op |
+| `DLSCompactMemory` / `DLSUnloadAll` | ⚪ Stub | No-op |
+| `DLSGetInfo` | 🟢 Implemented | Delegates to `AIL_DLS_get_info` |
 
 ## 3D Audio API
 *(Appeared in MSS v5+)*
@@ -382,9 +383,9 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 *(Appeared in MSS v4+)*
 | Function | Status | Notes |
 |----------|--------|-------|
-| `AIL_mem_use_free` | 🟢 Implemented | |
-| `AIL_mem_use_malloc` | 🟢 Implemented | |
-| `AIL_set_mem_callbacks` | 🟢 Implemented | |
+| `AIL_mem_use_free` | ⚪ Stub | No-op; custom allocator callbacks ignored; OpenMiles always uses its own allocator |
+| `AIL_mem_use_malloc` | ⚪ Stub | No-op; custom allocator callbacks ignored; OpenMiles always uses its own allocator |
+| `AIL_set_mem_callbacks` | ⚪ Stub | No-op; custom allocator callbacks ignored; OpenMiles always uses its own allocator |
 | `AIL_mem_alloc_lock` | 🟢 Implemented | Uses C allocator |
 | `AIL_mem_free_lock` | 🟢 Implemented | |
 
