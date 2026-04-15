@@ -170,6 +170,13 @@ pub fn openDir(path: []const u8, options: std.fs.Dir.OpenOptions) !std.fs.Dir {
     };
 }
 
+pub fn createFile(path: []const u8, flags: std.fs.File.CreateFlags) !std.fs.File {
+    if (std.fs.path.isAbsolute(path)) {
+        return std.fs.createFileAbsolute(path, flags);
+    }
+    return std.fs.cwd().createFile(path, flags);
+}
+
 pub fn dupeResolvedPathZ(allocator: std.mem.Allocator, path: []const u8) ![:0]u8 {
     var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
     const resolved = maybeResolveCaseInsensitivePath(path, &resolved_buf) orelse path;

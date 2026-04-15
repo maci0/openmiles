@@ -52,7 +52,9 @@ fn rib_register_interface(provider_handle: HPROVIDER, name: [*c]const u8, entry_
     if (provider_handle) |ptr| {
         const p: *Provider = @ptrCast(@alignCast(ptr));
         const z_name = std.mem.span(name);
-        p.registerInterface(z_name, entry_count, entries) catch {};
+        p.registerInterface(z_name, entry_count, entries) catch |err| {
+            log("rib_register_interface: failed for '{s}': {any}\n", .{ z_name, err });
+        };
         return 1;
     }
     return 0;
@@ -147,10 +149,12 @@ pub const Provider = struct {
 
     pub fn registerInterface(self: *Provider, name: []const u8, count: i32, entries: *anyopaque) !void {
         log("Provider.registerInterface called: {s}, count={d}\n", .{ name, count });
+        if (count < 0) return;
+        const entry_count: usize = @intCast(count);
         const iface = try Interface.init(self.allocator, name);
         const rib_entries: [*]RIB_INTERFACE_ENTRY = @ptrCast(@alignCast(entries));
         var i: usize = 0;
-        while (i < @as(usize, @intCast(count))) : (i += 1) {
+        while (i < entry_count) : (i += 1) {
             const entry = rib_entries[i];
             // dupeZ so key.ptr can be safely used as a null-terminated C string in RIB_enumerate_interface
             if (entry.name != null) {

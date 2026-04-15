@@ -10,12 +10,11 @@ extern "kernel32" fn GetEnvironmentVariableA(lpName: [*:0]const u8, lpBuffer: [*
 extern "kernel32" fn OutputDebugStringA(lpOutputString: [*c]const u8) callconv(.winapi) void;
 
 pub fn init() void {
-    if (initialized) return;
+    if (@atomicLoad(bool, &initialized, .acquire)) return;
     mutex.lock();
     defer mutex.unlock();
-    if (initialized) return;
+    if (@atomicLoad(bool, &initialized, .acquire)) return;
 
-    // Default to enabled in debug builds, but allow override via env var
     debug_enabled = builtin.mode == .Debug;
 
     if (builtin.os.tag == .windows) {
@@ -40,7 +39,6 @@ pub fn init() void {
     }
 
     if (debug_enabled) {
-        // Try to open openmiles.log in current directory with restrictive permissions
         if (std.fs.cwd().createFile("openmiles.log", .{
             .truncate = false,
             .mode = if (builtin.os.tag != .windows) 0o600 else 0,
@@ -49,11 +47,21 @@ pub fn init() void {
             log_file = f;
         } else |_| {}
     }
-    initialized = true;
+    @atomicStore(bool, &initialized, true, .release);
+}
+
+pub fn deinit() void {
+    mutex.lock();
+    defer mutex.unlock();
+    if (log_file) |f| {
+        f.close();
+        log_file = null;
+    }
+    @atomicStore(bool, &initialized, false, .release);
 }
 
 pub fn log(comptime fmt: []const u8, args: anytype) void {
-    if (!debug_enabled and initialized) return;
+    if (!debug_enabled and @atomicLoad(bool, &initialized, .acquire)) return;
     init();
     if (!debug_enabled) return;
     {
@@ -64,7 +72,6 @@ pub fn log(comptime fmt: []const u8, args: anytype) void {
         defer mutex.unlock();
 
         if (builtin.os.tag == .windows) {
-            // Write to OutputDebugString
             var z_buf: [1025]u8 = undefined;
             @memcpy(z_buf[0..msg.len], msg);
             z_buf[msg.len] = 0;
