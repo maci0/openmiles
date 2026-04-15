@@ -60,7 +60,7 @@ This matrix tracks the availability of major API groups across different histori
 ## 6. CD Audio
 | Function Group | Intro | AIL v2 | MSS v3 | MSS 6.6 | OpenMiles | Notes |
 |:---|:---:|:---:|:---:|:---:|:---:|:---|
-| Redbook Audio | v3 | 🔴 | 🟢 | 🟢 | ⚪ Stub | No physical CD support, stubbed |
+| Redbook Audio | v3 | 🔴 | 🟢 | 🟢 | 🟡 Partial | Emulated handle tracks play/pause state; no actual CD audio (games fall back gracefully) |
 
 ## Technical Summary
 OpenMiles provides **Tier 1 (v6.6)** compatibility. Legacy `DIG_` and `MDI_` prefix aliases are not currently exported but could be added as PE export aliases if needed for older titles.

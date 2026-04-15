@@ -21,7 +21,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_sprintf` | 🟢 Implemented | |
 | `AIL_get_DirectSound_info` | ⚪ Stub | Returns 0; DirectSound not used |
 | `AIL_set_DirectSound_HWND` | ⚪ Stub | No-op; DirectSound not used |
-| `AIL_digital_CPU_percent` | ⚪ Stub | Returns 0.0; no CPU accounting |
+| `AIL_digital_CPU_percent` | 🟡 Partial | Estimated from active sound count vs nominal 32-voice budget |
 | `AIL_digital_latency` | 🟢 Implemented | Queries miniaudio device period for real latency |
 | `AIL_digital_configuration` | 🟢 Implemented | |
 | `DllMain` | 🟢 Implemented | |
@@ -102,7 +102,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_sample_granularity` | 🟢 Implemented | |
 | `AIL_sample_reverb` | 🟢 Implemented | Returns current room_type, level, reflect_time |
 | `AIL_sample_user_data` | 🟢 Implemented | |
-| `AIL_set_sample_adpcm_block_size` | ⚪ Stub | No-op; ADPCM block size managed internally |
+| `AIL_set_sample_adpcm_block_size` | 🟢 Implemented | Stores block size hint on Sample (miniaudio handles actual decoding) |
 | `AIL_set_sample_loop_block` | 🟢 Implemented | |
 | `AIL_set_sample_processor` | 🟡 Partial | Callback stored per stage (input/output) for round-tripping; not invoked |
 | `AIL_set_sample_reverb` | 🟢 Implemented | Creates ma_delay_node per-sample; maps room_type→decay, level→wet/dry, reflect_time→delay frames |
@@ -184,7 +184,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_filter_DLS_with_XMI` | ⚪ Stub | Returns 0 |
 | `AIL_set_DLS_processor` | 🟡 Partial | Callback stored for round-tripping; not invoked |
 | `AIL_set_filter_DLS_preference` | 🟢 Implemented | Stores Cutoff/Compression DLS prefs on MidiDriver |
-| `DLSMSSGetCPU` | ⚪ Stub | Returns 0.0 |
+| `DLSMSSGetCPU` | 🟡 Partial | Delegates to digital driver CPU estimate |
 | `DLSSetAttribute` | ⚪ Stub | No-op |
 | `AIL_open_midi_driver` | 🟢 Implemented | Uses TinySoundFont |
 | `AIL_close_midi_driver` | 🟢 Implemented | |
@@ -361,23 +361,22 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 *(Appeared in MSS v3+)*
 | Function | Status | Notes |
 |----------|--------|-------|
-| `AIL_redbook_eject` | ⚪ Stub | Returns 0; CD audio not applicable |
-| `AIL_redbook_id` | ⚪ Stub | Returns empty string; CD audio not applicable |
-| `AIL_redbook_open_drive` | ⚪ Stub | Returns null; CD audio not applicable |
-| `AIL_redbook_position` | ⚪ Stub | Returns 0; CD audio not applicable |
-| `AIL_redbook_retract` | ⚪ Stub | Returns 0; CD audio not applicable |
-| `AIL_redbook_set_volume` | ⚪ Stub | No-op; CD audio not applicable |
-| `AIL_redbook_track` | ⚪ Stub | Returns 0; CD audio not applicable |
-| `AIL_redbook_track_info` | ⚪ Stub | Returns zeros; CD audio not applicable |
-| `AIL_redbook_volume` | ⚪ Stub | Returns 127; CD audio not applicable |
-| `AIL_redbook_open` | ⚪ Stub | Returns null; CD audio not applicable |
-| `AIL_redbook_close` | ⚪ Stub | |
-| `AIL_redbook_play` | ⚪ Stub | |
-| `AIL_redbook_stop` | ⚪ Stub | |
-| `AIL_redbook_pause` | ⚪ Stub | |
-| `AIL_redbook_resume` | ⚪ Stub | |
-| `AIL_redbook_status` | ⚪ Stub | |
-| `AIL_redbook_tracks` | ⚪ Stub | |
+| `AIL_redbook_open` / `AIL_redbook_open_drive` | 🟢 Implemented | Creates emulated Redbook handle |
+| `AIL_redbook_close` | 🟢 Implemented | Frees handle |
+| `AIL_redbook_play` | 🟢 Implemented | Tracks play state (start/end track); no actual audio (no CD) |
+| `AIL_redbook_stop` | 🟢 Implemented | |
+| `AIL_redbook_pause` | 🟢 Implemented | Pauses and remembers position |
+| `AIL_redbook_resume` | 🟢 Implemented | Resumes from paused position |
+| `AIL_redbook_status` | 🟢 Implemented | Returns stopped/playing/paused |
+| `AIL_redbook_tracks` | 🟢 Implemented | Returns 0 (no physical disc — games fall back gracefully) |
+| `AIL_redbook_track` | 🟢 Implemented | Returns current track |
+| `AIL_redbook_track_info` | 🟢 Implemented | Returns zeros (no disc) |
+| `AIL_redbook_position` | 🟢 Implemented | Real-time ms-from-play-start while playing |
+| `AIL_redbook_eject` | 🟢 Implemented | Stops playback |
+| `AIL_redbook_retract` | 🟢 Implemented | Returns 1 |
+| `AIL_redbook_id` | 🟢 Implemented | Returns empty string (no disc ID) |
+| `AIL_redbook_set_volume` | 🟢 Implemented | Stored volume (0-127) |
+| `AIL_redbook_volume` | 🟢 Implemented | Returns stored volume |
 
 ## Memory API
 *(Appeared in MSS v4+)*

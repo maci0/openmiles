@@ -232,6 +232,8 @@ pub const Sample = struct {
     // DSP processor callbacks [input_stage, output_stage]. Stored but not
     // actively invoked (miniaudio manages its own processing graph).
     sample_processors: [2]usize = .{ 0, 0 },
+    // ADPCM block size hint (stored for round-tripping; miniaudio handles decoding).
+    adpcm_block_size: u32 = 0,
     // Reverb state (via miniaudio ma_delay_node)
     reverb_node: ?*ma.ma_delay_node = null,
     reverb_room_type: f32 = 0.0,

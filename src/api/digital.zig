@@ -450,36 +450,47 @@ pub export fn AIL_enumerate_filters(provider_opt: ?*Provider, next: *?*anyopaque
     }
     return 0;
 }
-pub export fn AIL_redbook_open(drive: u32) callconv(.winapi) ?*anyopaque {
+pub export fn AIL_redbook_open(drive: u32) callconv(.winapi) ?*openmiles.Redbook {
     log("AIL_redbook_open(drive={d})\n", .{drive});
-    return null;
+    const allocator = openmiles.global_allocator orelse return null;
+    return openmiles.Redbook.init(allocator, drive) catch null;
 }
-pub export fn AIL_redbook_close(hb: *anyopaque) callconv(.winapi) void {
-    log("AIL_redbook_close(hb={*})\n", .{hb});
+pub export fn AIL_redbook_close(hb: ?*openmiles.Redbook) callconv(.winapi) void {
+    const rb = hb orelse return;
+    log("AIL_redbook_close(hb={*})\n", .{rb});
+    rb.deinit();
 }
-pub export fn AIL_redbook_play(hb: *anyopaque, start: u32, end: u32) callconv(.winapi) u32 {
-    log("AIL_redbook_play(hb={*}, start={d}, end={d})\n", .{ hb, start, end });
-    return 0;
+pub export fn AIL_redbook_play(hb: ?*openmiles.Redbook, start: u32, end: u32) callconv(.winapi) u32 {
+    const rb = hb orelse return 0;
+    log("AIL_redbook_play(hb={*}, start={d}, end={d})\n", .{ rb, start, end });
+    rb.play(start, end);
+    return 1;
 }
-pub export fn AIL_redbook_stop(hb: *anyopaque) callconv(.winapi) u32 {
-    log("AIL_redbook_stop(hb={*})\n", .{hb});
-    return 0;
+pub export fn AIL_redbook_stop(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
+    const rb = hb orelse return 0;
+    log("AIL_redbook_stop(hb={*})\n", .{rb});
+    rb.stop();
+    return 1;
 }
-pub export fn AIL_redbook_pause(hb: *anyopaque) callconv(.winapi) u32 {
-    log("AIL_redbook_pause(hb={*})\n", .{hb});
-    return 0;
+pub export fn AIL_redbook_pause(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
+    const rb = hb orelse return 0;
+    log("AIL_redbook_pause(hb={*})\n", .{rb});
+    rb.pause();
+    return 1;
 }
-pub export fn AIL_redbook_resume(hb: *anyopaque) callconv(.winapi) u32 {
-    log("AIL_redbook_resume(hb={*})\n", .{hb});
-    return 0;
+pub export fn AIL_redbook_resume(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
+    const rb = hb orelse return 0;
+    log("AIL_redbook_resume(hb={*})\n", .{rb});
+    rb.resumePlayback();
+    return 1;
 }
-pub export fn AIL_redbook_status(hb: *anyopaque) callconv(.winapi) u32 {
-    log("AIL_redbook_status(hb={*})\n", .{hb});
-    return 0;
+pub export fn AIL_redbook_status(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
+    const rb = hb orelse return 0;
+    return @intFromEnum(rb.status);
 }
-pub export fn AIL_redbook_tracks(hb: *anyopaque) callconv(.winapi) u32 {
-    log("AIL_redbook_tracks(hb={*})\n", .{hb});
-    return 0;
+pub export fn AIL_redbook_tracks(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
+    const rb = hb orelse return 0;
+    return rb.trackCount();
 }
 
 pub export fn AIL_mem_alloc_lock(size: u32) callconv(.winapi) ?*anyopaque {
@@ -663,8 +674,7 @@ pub export fn AIL_set_sample_loop_block(s_opt: ?*Sample, loop_start: i32, loop_e
 }
 pub export fn AIL_set_sample_adpcm_block_size(s_opt: ?*Sample, block_size: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    _ = s;
-    _ = block_size;
+    s.adpcm_block_size = block_size;
 }
 pub export fn AIL_sample_granularity(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
     const driver = driver_opt orelse return 0;
@@ -894,43 +904,47 @@ pub export fn AIL_set_filter_preference(filter_ptr: *anyopaque, name: [*:0]const
     const v: *const f32 = @ptrCast(@alignCast(val));
     filter.setAttribute(std.mem.span(name), v.*);
 }
-pub export fn AIL_redbook_eject(hb: *anyopaque) callconv(.winapi) u32 {
-    _ = hb;
-    return 0;
+pub export fn AIL_redbook_eject(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
+    const rb = hb orelse return 0;
+    rb.stop();
+    return 1;
 }
-pub export fn AIL_redbook_retract(hb: *anyopaque) callconv(.winapi) u32 {
+pub export fn AIL_redbook_retract(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
     _ = hb;
-    return 0;
+    return 1;
 }
-pub export fn AIL_redbook_id(hb: *anyopaque) callconv(.winapi) [*:0]const u8 {
+pub export fn AIL_redbook_id(hb: ?*openmiles.Redbook) callconv(.winapi) [*:0]const u8 {
     _ = hb;
+    // Empty ID: signals "no physical disc" to games
     return "";
 }
-pub export fn AIL_redbook_open_drive(drive: [*:0]const u8) callconv(.winapi) ?*anyopaque {
-    _ = drive;
-    return null;
+pub export fn AIL_redbook_open_drive(drive: [*:0]const u8) callconv(.winapi) ?*openmiles.Redbook {
+    log("AIL_redbook_open_drive(drive={s})\n", .{drive});
+    const allocator = openmiles.global_allocator orelse return null;
+    return openmiles.Redbook.init(allocator, 0) catch null;
 }
-pub export fn AIL_redbook_position(hb: *anyopaque) callconv(.winapi) u32 {
-    _ = hb;
-    return 0;
+pub export fn AIL_redbook_position(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
+    const rb = hb orelse return 0;
+    return rb.getPosition();
 }
-pub export fn AIL_redbook_track(hb: *anyopaque) callconv(.winapi) u32 {
-    _ = hb;
-    return 0;
+pub export fn AIL_redbook_track(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
+    const rb = hb orelse return 0;
+    return rb.current_track;
 }
-pub export fn AIL_redbook_track_info(hb: *anyopaque, track: u32, start_ms: ?*u32, end_ms: ?*u32) callconv(.winapi) void {
+pub export fn AIL_redbook_track_info(hb: ?*openmiles.Redbook, track: u32, start_ms: ?*u32, end_ms: ?*u32) callconv(.winapi) void {
     _ = hb;
     _ = track;
+    // No disc loaded — return zeros for all tracks
     if (start_ms) |p| p.* = 0;
     if (end_ms) |p| p.* = 0;
 }
-pub export fn AIL_redbook_set_volume(hb: *anyopaque, volume: i32) callconv(.winapi) void {
-    _ = hb;
-    _ = volume;
+pub export fn AIL_redbook_set_volume(hb: ?*openmiles.Redbook, volume: i32) callconv(.winapi) void {
+    const rb = hb orelse return;
+    rb.volume = @intCast(@min(@max(volume, 0), 127));
 }
-pub export fn AIL_redbook_volume(hb: *anyopaque) callconv(.winapi) i32 {
-    _ = hb;
-    return 127;
+pub export fn AIL_redbook_volume(hb: ?*openmiles.Redbook) callconv(.winapi) i32 {
+    const rb = hb orelse return 0;
+    return @intCast(rb.volume);
 }
 pub export fn AIL_primary_digital_driver(device_num: i32) callconv(.winapi) ?*DigitalDriver {
     _ = device_num;
@@ -938,8 +952,13 @@ pub export fn AIL_primary_digital_driver(device_num: i32) callconv(.winapi) ?*Di
 }
 pub export fn AIL_digital_CPU_percent(driver_opt: ?*DigitalDriver) callconv(.winapi) f32 {
     const driver = driver_opt orelse return 0.0;
-    _ = driver;
-    return 0.0;
+    // Estimate CPU load from the ratio of active sounds to a nominal budget.
+    // miniaudio doesn't expose CPU usage directly; this approximation is
+    // sufficient for games that throttle sound spawning based on this value.
+    const active: f32 = @floatFromInt(driver.getActiveSampleCount() + driver.get3DActiveSampleCount());
+    const nominal_budget: f32 = 32.0; // ~32 simultaneous voices = 100% load estimate
+    const pct = (active / nominal_budget) * 100.0;
+    return @min(pct, 100.0);
 }
 pub export fn AIL_digital_latency(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
     const driver = driver_opt orelse return 0;

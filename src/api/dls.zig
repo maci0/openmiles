@@ -224,6 +224,12 @@ pub export fn DLSMSSOpen(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyop
 }
 pub export fn DLSMSSGetCPU(driver: *openmiles.MidiDriver) callconv(.winapi) f32 {
     _ = driver;
+    // Delegate to the primary digital driver's CPU estimate (soundfont playback
+    // routes through the digital driver anyway).
+    if (openmiles.last_digital_driver) |dig| {
+        const active: f32 = @floatFromInt(dig.getActiveSampleCount());
+        return @min((active / 32.0) * 100.0, 100.0);
+    }
     return 0.0;
 }
 pub export fn DLSSetAttribute(driver: *openmiles.MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
