@@ -200,7 +200,7 @@ pub const DigitalDriver = struct {
     /// Read captured frames into a caller-supplied buffer. Returns the
     /// number of BYTES written. Converts from float to 16-bit PCM.
     pub fn readCaptured(self: *DigitalDriver, dest: [*]u8, max_bytes: usize) u32 {
-        self.capture_mutex.lock();
+        if (!self.capture_mutex.tryLock()) return 0;
         defer self.capture_mutex.unlock();
         const channels = ma.ma_engine_get_channels(&self.engine);
         const sample_count = self.capture_buf.items.len;
@@ -807,6 +807,10 @@ pub const Sample = struct {
     /// Remove reverb from this sample, re-routing sound directly to the endpoint.
     fn removeReverb(self: *Sample) void {
         if (self.reverb_node) |node| {
+            // Stop the sound before rewiring so the audio thread doesn't walk
+            // through a node that's about to be freed.
+            const was_playing = self.is_initialized and (ma.ma_sound_is_playing(&self.sound) != 0);
+            if (was_playing) _ = ma.ma_sound_stop(&self.sound);
             if (self.is_initialized) {
                 _ = ma.ma_node_attach_output_bus(
                     @ptrCast(&self.sound),
@@ -819,6 +823,7 @@ pub const Sample = struct {
             ma.ma_delay_node_uninit(node, null);
             self.driver.allocator.destroy(node);
             self.reverb_node = null;
+            if (was_playing) _ = ma.ma_sound_start(&self.sound);
         }
     }
 
