@@ -1,0 +1,46 @@
+name: Release
+
+on:
+  push:
+    tags: [ "v*" ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows DLL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TAG_NAME: placeholder
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406 # v2.2.1
+        with:
+          version: 0.15.2
+
+      - name: Run Tests
+        run: zig build test
+
+      - name: Cross-compile Windows DLL
+        run: zig build -Dtarget=x86-windows -Doptimize=ReleaseSmall
+
+      - name: Resolve tag name
+        run: echo "TAG_NAME=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+
+      - name: Package release
+        run: |
+          mkdir -p release
+          cp zig-out/bin/mss32.dll release/
+          cp LICENSE release/
+          cp README.md release/
+          cd release && zip "../openmiles-${TAG_NAME}-win32.zip" *
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+        with:
+          files: openmiles-${{ env.TAG_NAME }}-win32.zip
+          generate_release_notes: true
