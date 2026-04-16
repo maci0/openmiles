@@ -1524,3 +1524,174 @@ test "Sample3D getMsPosition returns zeros when uninitialized" {
     try testing.expectEqual(@as(i32, 0), pos.total);
     try testing.expectEqual(@as(i32, 0), pos.current);
 }
+
+test "DigitalDriver listener world-up roundtrip" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    driver.setListenerWorldUp(0.0, 1.0, 0.0);
+    const up = driver.getListenerWorldUp();
+    try testing.expectEqual(@as(f32, 0.0), up.x);
+    try testing.expectEqual(@as(f32, 1.0), up.y);
+    try testing.expectEqual(@as(f32, 0.0), up.z);
+}
+
+test "Sample3D loadFromMemory and start stop lifecycle" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const s = try openmiles.Sample3D.init(driver);
+    defer s.deinit();
+
+    const pcm = [_]u8{0} ** 4410;
+    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    defer allocator.free(wav);
+
+    try s.loadFromMemory(wav, true);
+    try testing.expect(s.is_initialized);
+    try testing.expectEqual(openmiles.SampleStatus.stopped, s.status());
+
+    s.start();
+    try testing.expectEqual(openmiles.SampleStatus.playing, s.status());
+
+    s.stop();
+    try testing.expectEqual(openmiles.SampleStatus.stopped, s.status());
+
+    s.start();
+    s.end();
+    try testing.expectEqual(openmiles.SampleStatus.done, s.status());
+}
+
+test "Sample3D pause and resume lifecycle" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const s = try openmiles.Sample3D.init(driver);
+    defer s.deinit();
+
+    const pcm = [_]u8{0} ** 4410;
+    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    defer allocator.free(wav);
+
+    try s.loadFromMemory(wav, true);
+
+    s.start();
+    try testing.expectEqual(openmiles.SampleStatus.playing, s.status());
+
+    s.pause();
+    try testing.expect(s.is_paused);
+
+    s.resumePlayback();
+    try testing.expect(!s.is_paused);
+}
+
+test "Sample3D getOffset and getLength return 0 when uninitialized" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const s = try openmiles.Sample3D.init(driver);
+    defer s.deinit();
+
+    try testing.expectEqual(@as(u32, 0), s.getOffset());
+    try testing.expectEqual(@as(u32, 0), s.getLength());
+}
+
+test "Sample setLoopBlock stores frame boundaries" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const sample = try openmiles.Sample.init(driver);
+    defer sample.deinit();
+
+    const pcm = [_]u8{0} ** 4410;
+    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    defer allocator.free(wav);
+
+    try sample.loadFromMemory(wav, true);
+
+    sample.setLoopBlock(100, 1000);
+    try testing.expect(sample.loop_start_frame > 0);
+    try testing.expect(sample.loop_end_frame > 0);
+    try testing.expect(sample.loop_end_frame > sample.loop_start_frame);
+
+    sample.setLoopBlock(0, -1);
+    try testing.expectEqual(@as(u64, 0), sample.loop_start_frame);
+    try testing.expectEqual(@as(u64, 0), sample.loop_end_frame);
+}
+
+test "Sample setPosition on initialized sample" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const sample = try openmiles.Sample.init(driver);
+    defer sample.deinit();
+
+    const pcm = [_]u8{0} ** 4410;
+    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    defer allocator.free(wav);
+
+    try sample.loadFromMemory(wav, true);
+
+    sample.setPosition(0);
+    try testing.expectEqual(@as(u32, 0), sample.getPosition());
+}
+
+test "Redbook trackCount returns 0" {
+    const allocator = testing.allocator;
+    const rb = try openmiles.Redbook.init(allocator, 0);
+    defer rb.deinit();
+
+    try testing.expectEqual(@as(u32, 0), rb.trackCount());
+}
+
+test "Sample3D setLoopBlock stores frame boundaries" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const s = try openmiles.Sample3D.init(driver);
+    defer s.deinit();
+
+    s.setLoopBlock(0, -1);
+    try testing.expectEqual(@as(u64, 0), s.loop_start_frame);
+    try testing.expectEqual(@as(u64, 0), s.loop_end_frame);
+
+    s.setLoopBlock(100, 1000);
+    try testing.expect(s.loop_start_frame > 0);
+    try testing.expect(s.loop_end_frame > 0);
+}
+
+test "Sample3D loadFromPcm initializes sample" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const s = try openmiles.Sample3D.init(driver);
+    defer s.deinit();
+
+    const pcm = [_]u8{0} ** 4410;
+    try s.loadFromPcm(&pcm, 1, 44100, 8);
+    try testing.expect(s.is_initialized);
+    try testing.expectEqual(openmiles.SampleStatus.stopped, s.status());
+}
+
+test "Sequence setVolume boundary values" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.MidiDriver.init(allocator);
+    defer driver.deinit();
+
+    const seq = try openmiles.Sequence.init(driver);
+    defer seq.deinit();
+
+    seq.setVolume(127, 0);
+    try testing.expectEqual(@as(i32, 127), seq.getVolume());
+
+    seq.setVolume(-1, 0);
+    try testing.expectEqual(@as(i32, 0), seq.getVolume());
+}

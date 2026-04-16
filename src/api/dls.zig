@@ -241,12 +241,23 @@ pub export fn DLSMSSGetCPU(driver_opt: ?*MidiDriver) callconv(.winapi) f32 {
     return 0.0;
 }
 pub export fn DLSSetAttribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
-    _ = driver_opt;
-    _ = name;
-    _ = val;
+    const driver = driver_opt orelse return;
+    const name_slice = std.mem.span(name);
+    const v: *const f32 = @ptrCast(@alignCast(val));
+    if (std.ascii.eqlIgnoreCase(name_slice, "cutoff")) {
+        driver.dls_filter_pref_cutoff = v.*;
+    } else if (std.ascii.eqlIgnoreCase(name_slice, "compression")) {
+        driver.dls_filter_pref_compression = v.*;
+    }
 }
 pub export fn DLSUnloadAll(driver_opt: ?*MidiDriver) callconv(.winapi) void {
-    _ = driver_opt;
+    const driver = driver_opt orelse return;
+    if (driver.soundfont) |sf| {
+        if (driver.owns_soundfont) openmiles.tsf.tsf_close(sf);
+        driver.soundfont = null;
+        driver.owns_soundfont = true;
+        driver.soundfont_size_bytes = 0;
+    }
 }
 pub export fn DLSUnloadFile(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
     AIL_DLS_unload(driver_opt, bank);

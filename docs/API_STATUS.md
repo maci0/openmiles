@@ -76,7 +76,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | Function | Status | Notes |
 |----------|--------|-------|
 | `AIL_primary_digital_driver` | 🟢 Implemented | |
-| `AIL_process_digital_audio` | ⚪ Stub | Returns 0; direct PCM processing not implemented |
+| `AIL_process_digital_audio` | 🟢 Implemented | Captures engine output via onProcess callback; returns 16-bit PCM with optional mono down-mix |
 | `AIL_set_digital_driver_processor` | 🟡 Partial | Callback is stored and returned on subsequent set (round-tripping); not invoked during processing |
 | `AIL_size_processed_digital_audio` | 🟢 Implemented | Computes output size from format parameters |
 | `AIL_open_digital_driver` | 🟢 Implemented | Uses miniaudio engine; `bits` parameter ignored |
@@ -185,7 +185,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_set_DLS_processor` | 🟡 Partial | Callback stored for round-tripping; not invoked |
 | `AIL_set_filter_DLS_preference` | 🟢 Implemented | Stores Cutoff/Compression DLS prefs on MidiDriver |
 | `DLSMSSGetCPU` | 🟡 Partial | Delegates to digital driver CPU estimate |
-| `DLSSetAttribute` | ⚪ Stub | No-op |
+| `DLSSetAttribute` | 🟢 Implemented | Stores Cutoff/Compression attributes on MidiDriver |
 | `AIL_open_midi_driver` | 🟢 Implemented | Uses TinySoundFont |
 | `AIL_close_midi_driver` | 🟢 Implemented | |
 | `AIL_open_XMIDI_driver` | 🟢 Implemented | Alias for `AIL_open_midi_driver` |
@@ -235,7 +235,8 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_list_DLS` / `AIL_list_MIDI` / `AIL_merge_DLS_with_XMI` | ⚪ Stub | Returns 0 |
 | `DLSClose` / `DLSLoadFile` / `DLSLoadMemFile` / `DLSMSSOpen` | 🟢 Implemented | Aliases for corresponding AIL_DLS_* functions |
 | `DLSUnloadFile` | 🟢 Implemented | Alias for AIL_DLS_unload |
-| `DLSCompactMemory` / `DLSUnloadAll` | ⚪ Stub | No-op |
+| `DLSCompactMemory` | ⚪ Stub | No-op (miniaudio handles memory management) |
+| `DLSUnloadAll` | 🟢 Implemented | Unloads all soundfonts from the MidiDriver |
 | `DLSGetInfo` | 🟢 Implemented | Delegates to `AIL_DLS_get_info` |
 
 ## 3D Audio API

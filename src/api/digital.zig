@@ -521,15 +521,31 @@ pub export fn AIL_set_digital_driver_processor(driver_opt: ?*DigitalDriver, stag
     driver.driver_processors[idx] = if (processor) |p| @intFromPtr(p) else 0;
     return prev;
 }
-pub export fn AIL_process_digital_audio(driver_opt: ?*DigitalDriver, dest: *anyopaque, count: u32, mono_dest: *anyopaque, mono_count: u32, flags: u32) callconv(.winapi) i32 {
+pub export fn AIL_process_digital_audio(driver_opt: ?*DigitalDriver, dest: ?*anyopaque, count: u32, mono_dest: ?*anyopaque, mono_count: u32, flags: u32) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
-    _ = driver;
-    _ = dest;
-    _ = count;
-    _ = mono_dest;
-    _ = mono_count;
     _ = flags;
-    return 0;
+    driver.enableCapture();
+    if (dest) |d| {
+        const bytes = driver.readCaptured(@ptrCast(@alignCast(d)), @as(usize, count));
+        if (bytes == 0) return 0;
+    }
+    // Mono down-mix: average L+R if both buffers provided
+    if (mono_dest) |md| {
+        if (dest) |d| {
+            const channels = openmiles.ma.ma_engine_get_channels(&driver.engine);
+            if (channels >= 2) {
+                const stereo: [*]const i16 = @ptrCast(@alignCast(d));
+                const mono: [*]i16 = @ptrCast(@alignCast(md));
+                const frames = @min(count / 4, mono_count / 2);
+                for (0..frames) |i| {
+                    const l: i32 = stereo[i * 2];
+                    const r: i32 = stereo[i * 2 + 1];
+                    mono[i] = @intCast(@divTrunc(l + r, 2));
+                }
+            }
+        }
+    }
+    return 1;
 }
 pub export fn AIL_size_processed_digital_audio(driver_opt: ?*DigitalDriver, rate: i32, format: i32, data: *anyopaque, len: u32) callconv(.winapi) u32 {
     const driver = driver_opt orelse return 0;
@@ -608,6 +624,7 @@ pub export fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi)
     if (data_ptr == null) return 0;
     // For PCM (format 1): bytes_per_frame = channels * (bits/8)
     // For ADPCM (format 2) and others: block_align from fmt chunk is used
+    // Note: out.samples is left 0 for non-PCM formats (ADPCM etc.) because per-sample counting requires decompression.
     const fmt: i32 = switch (num_channels) {
         1 => if (bits_per_sample <= 8) 0 else 1,
         else => if (bits_per_sample <= 8) 2 else 3,
@@ -624,7 +641,7 @@ pub export fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi)
     out.channels = num_channels;
     out.samples = if (bytes_per_frame > 0 and audio_format == 1) data_len / bytes_per_frame else 0;
     out.block_size = block_align;
-    // initial_ptr: for compressed formats, points to the start of compressed data (same as data_ptr)
+    // initial_ptr: set to data_ptr for compressed formats (no separate codec header in our implementation)
     out.initial_ptr = if (audio_format != 1) data_ptr else null;
     return 1;
 }
@@ -676,7 +693,7 @@ pub export fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque
     return 1;
 }
 /// Decodes ADPCM (or any miniaudio-supported compressed format) WAV to a 16-bit PCM WAV.
-/// If `out` is null, decodes the data and returns the output WAV size without writing it.
+/// If `out` is null, performs a full decode and returns the output WAV size (same cost as a write call).
 /// Otherwise, writes the decoded WAV into the `out` buffer.
 pub export fn AIL_decompress_ADPCM(data: *anyopaque, len: u32, out: ?*anyopaque) callconv(.winapi) i32 {
     const raw: []const u8 = @as([*]const u8, @ptrCast(@alignCast(data)))[0..len];

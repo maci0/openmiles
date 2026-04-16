@@ -32,6 +32,11 @@ pub const DigitalDriver = struct {
     driver_processors: [2]usize = .{ 0, 0 },
     // Filters opened against this driver (tracked for cleanup on driver close).
     filters: std.ArrayListUnmanaged(*root.Filter) = .{},
+    // Captured output buffer for AIL_process_digital_audio. Populated by
+    // the onProcess callback each time the audio thread renders a buffer.
+    capture_buf: std.ArrayListUnmanaged(f32) = .{},
+    capture_mutex: std.Thread.Mutex = .{},
+    capture_enabled: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, frequency: u32, bits: i32, channels: u32) !*DigitalDriver {
         _ = bits;
@@ -65,6 +70,11 @@ pub const DigitalDriver = struct {
         } else {
             log("ma_engine_init success. (No Device)\n", .{});
         }
+
+        // Install an onProcess callback so AIL_process_digital_audio can
+        // capture the engine's mixed output without interfering with playback.
+        self.engine.onProcess = onProcessCapture;
+        self.engine.pProcessUserData = @ptrCast(self);
 
         root.last_digital_driver = self;
         root.registerDriver(self);
@@ -102,6 +112,7 @@ pub const DigitalDriver = struct {
             s.deinit();
         }
         self.samples_3d.deinit(self.allocator);
+        self.capture_buf.deinit(self.allocator);
         ma.ma_engine_uninit(&self.engine);
         self.allocator.destroy(self);
     }
@@ -154,6 +165,55 @@ pub const DigitalDriver = struct {
             if (s.status() == .playing) count += 1;
         }
         return count;
+    }
+
+    /// Called from the audio thread each time the engine renders a buffer.
+    /// Copies the mixed float frames into the capture ring so that
+    /// AIL_process_digital_audio can return them to the game.
+    fn onProcessCapture(pUserData: ?*anyopaque, pFramesOut: [*c]f32, frameCount: ma.ma_uint64) callconv(.c) void {
+        const self: *DigitalDriver = @ptrCast(@alignCast(pUserData.?));
+        if (!self.capture_enabled) return;
+        const channels = ma.ma_engine_get_channels(&self.engine);
+        const sample_count: usize = @as(usize, @intCast(frameCount)) * channels;
+        if (!self.capture_mutex.tryLock()) return;
+        defer self.capture_mutex.unlock();
+        // Keep only the latest buffer; games typically call process_digital_audio
+        // once per frame expecting the most recent rendered block.
+        self.capture_buf.clearRetainingCapacity();
+        if (self.capture_buf.capacity >= sample_count) {
+            self.capture_buf.appendSliceAssumeCapacity(pFramesOut[0..sample_count]);
+        }
+    }
+
+    /// Enable the capture path and pre-allocate the buffer so the audio
+    /// thread callback never needs to allocate.
+    pub fn enableCapture(self: *DigitalDriver) void {
+        if (self.capture_enabled) return;
+        const channels = ma.ma_engine_get_channels(&self.engine);
+        const rate = ma.ma_engine_get_sample_rate(&self.engine);
+        // Pre-allocate for ~50ms of audio (a generous render buffer).
+        const cap: usize = @as(usize, rate / 20) * channels;
+        self.capture_buf.ensureTotalCapacity(self.allocator, cap) catch {};
+        self.capture_enabled = true;
+    }
+
+    /// Read captured frames into a caller-supplied buffer. Returns the
+    /// number of BYTES written. Converts from float to 16-bit PCM.
+    pub fn readCaptured(self: *DigitalDriver, dest: [*]u8, max_bytes: usize) u32 {
+        self.capture_mutex.lock();
+        defer self.capture_mutex.unlock();
+        const channels = ma.ma_engine_get_channels(&self.engine);
+        const sample_count = self.capture_buf.items.len;
+        const frame_count = if (channels == 0) 0 else sample_count / channels;
+        // Convert f32 → s16 into dest
+        const out_frames = @min(frame_count, max_bytes / (channels * 2));
+        const out_samples = out_frames * channels;
+        const out: [*]i16 = @ptrCast(@alignCast(dest));
+        for (0..out_samples) |i| {
+            const clamped = @max(-1.0, @min(1.0, self.capture_buf.items[i]));
+            out[i] = @intFromFloat(clamped * 32767.0);
+        }
+        return @intCast(out_samples * 2);
     }
 
     pub fn setListenerPosition(self: *DigitalDriver, x: f32, y: f32, z: f32) void {

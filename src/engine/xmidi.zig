@@ -324,8 +324,10 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
                 try events.append(allocator, ev);
             },
             0xF0 => {
-                // Remaining system real-time messages (0xF1-0xF6, 0xF8-0xFE) not caught above.
-                // These should not appear in XMIDI EVNT chunks — skip conservatively (0 bytes).
+                // Remaining system messages (0xF1-0xF6, 0xF8-0xFE) not caught above.
+                // Status byte is consumed but no data bytes are skipped — if any of
+                // these rare messages carry data bytes, parsing would be corrupted.
+                // In practice they should not appear in XMIDI EVNT chunks.
             },
             else => break,
         }

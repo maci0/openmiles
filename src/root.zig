@@ -400,7 +400,7 @@ pub fn setPreference(number: u32, value: i32) i32 {
 ///
 /// The original MSS library used a heavily weighted scale where low values
 /// (e.g., 30/127) produced dramatic attenuation. A cubic power curve
-/// `(v/127)^3` closely matches this: value 30 → gain ~0.013 (vs linear 0.24).
+/// `(v/127)^3` closely matches this: value 30 → gain ~0.013 (vs linear ~0.236).
 pub fn mssVolumeToGain(value: i32) f32 {
     if (value <= 0) return 0.0;
     if (value >= 127) return 1.0;
@@ -408,7 +408,7 @@ pub fn mssVolumeToGain(value: i32) f32 {
 }
 
 /// Inverse of mssVolumeToGain: convert a linear gain back to MSS 0-127.
-/// Binary-searches the precomputed gain table for the closest value.
+/// Binary-searches the precomputed gain table, then picks the nearest neighbor.
 pub fn gainToMssVolume(gain: f32) i32 {
     if (gain <= 0.0) return 0;
     if (gain >= 1.0) return 127;

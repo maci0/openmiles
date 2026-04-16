@@ -2,6 +2,12 @@ const std = @import("std");
 const root = @import("../root.zig");
 const log = root.log;
 
+pub const RedbookStatus = enum(u32) {
+    stopped = 0,
+    playing = 1,
+    paused = 2,
+};
+
 /// Software Redbook (CD audio) emulation.
 ///
 /// Modern systems rarely have CD drives, so OpenMiles emulates a Redbook
@@ -12,12 +18,6 @@ const log = root.log;
 /// Games that treat "Redbook unavailable" as fatal will be able to
 /// initialise and continue; games that expected audio feedback will
 /// behave as if the CD drive is present but silent.
-pub const RedbookStatus = enum(u32) {
-    stopped = 0,
-    playing = 1,
-    paused = 2,
-};
-
 pub const Redbook = struct {
     allocator: std.mem.Allocator,
     drive: u32 = 0,
