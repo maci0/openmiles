@@ -398,8 +398,12 @@ pub export fn AIL_load_sample_buffer(s_opt: ?*Sample, data: *anyopaque, len: u32
 }
 pub export fn AIL_sample_buffer_ready(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    _ = s;
-    return 1;
+    // A buffer is "ready" when the sample has stopped/finished (is_done)
+    // or hasn't started yet. Games use this to know when to refill a
+    // double-buffer slot via AIL_load_sample_buffer.
+    if (s.is_done or !s.is_initialized) return 1;
+    if (s.is_initialized and openmiles.ma.ma_sound_at_end(&s.sound) != 0) return 1;
+    return 0;
 }
 pub export fn AIL_sample_buffer_info(s_opt: ?*Sample, info: *anyopaque, len: *u32, buffer_id: *i32, flags: *u32) callconv(.winapi) void {
     const s = s_opt orelse return;
@@ -664,15 +668,17 @@ pub export fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len:
     };
     return 1;
 }
+var stored_malloc_fn: ?*anyopaque = null;
+var stored_free_fn: ?*anyopaque = null;
 pub export fn AIL_mem_use_malloc(malloc_fn: ?*anyopaque) callconv(.winapi) void {
-    _ = malloc_fn;
+    stored_malloc_fn = malloc_fn;
 }
 pub export fn AIL_mem_use_free(free_fn: ?*anyopaque) callconv(.winapi) void {
-    _ = free_fn;
+    stored_free_fn = free_fn;
 }
 pub export fn AIL_set_mem_callbacks(malloc_fn: ?*anyopaque, free_fn: ?*anyopaque) callconv(.winapi) void {
-    _ = malloc_fn;
-    _ = free_fn;
+    stored_malloc_fn = malloc_fn;
+    stored_free_fn = free_fn;
 }
 /// Allocates a new buffer which must be freed by the caller using AIL_mem_free_lock.
 pub export fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsize: *u32) callconv(.winapi) i32 {
