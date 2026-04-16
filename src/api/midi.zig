@@ -162,10 +162,9 @@ pub export fn AIL_set_XMIDI_master_volume(driver_opt: ?*openmiles.MidiDriver, vo
 pub export fn AIL_midiOutClose(driver: *anyopaque) callconv(.winapi) void {
     _ = driver;
 }
-pub export fn AIL_midiOutOpen(driver: *anyopaque, hmidiout: *anyopaque, device_id: i32) callconv(.winapi) i32 {
-    _ = driver;
-    _ = hmidiout;
+pub export fn AIL_midiOutOpen(driver: *anyopaque, hmidiout: **anyopaque, device_id: i32) callconv(.winapi) i32 {
     _ = device_id;
+    hmidiout.* = driver;
     return 0;
 }
 pub export fn AIL_MIDI_handle_release(driver: *anyopaque) callconv(.winapi) void {
