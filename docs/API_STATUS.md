@@ -98,7 +98,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_register_EOB_callback` | 🟢 Implemented | |
 | `AIL_register_SOB_callback` | 🟢 Implemented | |
 | `AIL_sample_buffer_info` | 🟢 Implemented | |
-| `AIL_sample_buffer_ready` | ⚪ Stub | Always returns 1 (buffer always reported as ready); double-buffered streaming not implemented |
+| `AIL_sample_buffer_ready` | 🟢 Implemented | Returns 1 when sample is done/at-end and ready for new data; 0 while playing |
 | `AIL_sample_granularity` | 🟢 Implemented | |
 | `AIL_sample_reverb` | 🟢 Implemented | Returns current room_type, level, reflect_time |
 | `AIL_sample_user_data` | 🟢 Implemented | |
@@ -384,9 +384,9 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 *(Appeared in MSS v4+)*
 | Function | Status | Notes |
 |----------|--------|-------|
-| `AIL_mem_use_free` | ⚪ Stub | No-op; custom allocator callbacks ignored; OpenMiles always uses its own allocator |
-| `AIL_mem_use_malloc` | ⚪ Stub | No-op; custom allocator callbacks ignored; OpenMiles always uses its own allocator |
-| `AIL_set_mem_callbacks` | ⚪ Stub | No-op; custom allocator callbacks ignored; OpenMiles always uses its own allocator |
+| `AIL_mem_use_free` | 🟡 Partial | Stores callback pointer for round-tripping; OpenMiles uses its own allocator internally |
+| `AIL_mem_use_malloc` | 🟡 Partial | Stores callback pointer for round-tripping; OpenMiles uses its own allocator internally |
+| `AIL_set_mem_callbacks` | 🟡 Partial | Stores callback pointers for round-tripping; OpenMiles uses its own allocator internally |
 | `AIL_mem_alloc_lock` | 🟢 Implemented | Uses C allocator |
 | `AIL_mem_free_lock` | 🟢 Implemented | |
 
@@ -411,7 +411,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 |----------|--------|-------|
 | `AIL_waveOutClose` | 🟢 Implemented | |
 | `AIL_midiOutClose` | ⚪ Stub | No-op; legacy midiOut not applicable |
-| `AIL_midiOutOpen` | ⚪ Stub | Returns 0; legacy midiOut not applicable |
+| `AIL_midiOutOpen` | 🟢 Implemented | Returns driver as handle so games that null-check succeed |
 | `AIL_waveOutOpen` | 🟢 Implemented | Opens digital driver; returns dummy waveOut handle |
 | `AIL_digital_handle_release` | ⚪ Stub | No-op |
 | `AIL_digital_handle_reacquire` | ⚪ Stub | Always returns 1 |
