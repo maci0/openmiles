@@ -175,6 +175,10 @@ pub const Sequence = struct {
     tempo_fade_elapsed_ms: f64 = 0,
     tempo_fade_duration_ms: f64 = 0,
     tempo_fade_active: bool = false,
+    // Protects Sequence state against audio-thread / control-thread races.
+    // onRead uses tryLock (renders silence if contended); all control-path
+    // methods (start/stop/setMsPosition/setLoopCount/etc.) use lock.
+    state_mutex: std.Thread.Mutex = .{},
 
     /// Resolve a logical MIDI channel to its physical (mapped) channel.
     fn mapChannel(self: *const Sequence, ch: i32) i32 {
@@ -234,6 +238,8 @@ pub const Sequence = struct {
     /// Begin a gradual tempo transition from current tempo_ratio to the new target
     /// over `duration_ms` milliseconds of real time. Called by AIL_set_sequence_tempo.
     pub fn startTempoFade(self: *Sequence, target_bpm: i32, duration_ms: i32) void {
+        self.state_mutex.lock();
+        defer self.state_mutex.unlock();
         if (duration_ms <= 0 or self.tempo <= 0) {
             self.user_bpm = target_bpm;
             if (target_bpm > 0 and self.tempo > 0) {
@@ -321,6 +327,14 @@ pub const Sequence = struct {
             if (pFramesRead) |pr| pr.* = 0;
             return ma.MA_SUCCESS;
         }
+        // tryLock so the audio thread never blocks waiting for a control-path
+        // method (start/stop/setMsPosition/etc.). If contended, render silence
+        // for this buffer — the next callback will retry.
+        if (!self.state_mutex.tryLock()) {
+            if (pFramesRead) |pr| pr.* = 0;
+            return ma.MA_SUCCESS;
+        }
+        defer self.state_mutex.unlock();
 
         const sampleRate = @as(f64, @floatFromInt(self.driver.sample_rate));
         const msPerFrame = 1000.0 / sampleRate;
@@ -606,8 +620,9 @@ pub const Sequence = struct {
     }
 
     pub fn start(self: *Sequence) void {
+        self.state_mutex.lock();
+        defer self.state_mutex.unlock();
         if (!self.is_initialized) self.ensureSoundInitialized() catch return;
-        // AIL_start_sequence always restarts from the beginning (even if paused)
         self.resetToBeginning();
         _ = ma.ma_sound_start(&self.sound);
         self.is_playing = true;
@@ -616,6 +631,8 @@ pub const Sequence = struct {
     }
 
     pub fn stopAndUninit(self: *Sequence) void {
+        self.state_mutex.lock();
+        defer self.state_mutex.unlock();
         self.is_playing = false;
         if (self.is_initialized) {
             _ = ma.ma_sound_stop(&self.sound);
@@ -625,6 +642,8 @@ pub const Sequence = struct {
     }
 
     pub fn stop(self: *Sequence) void {
+        self.state_mutex.lock();
+        defer self.state_mutex.unlock();
         if (self.is_initialized) _ = ma.ma_sound_stop(&self.sound);
         self.is_playing = false;
         self.is_paused = false;
@@ -633,6 +652,8 @@ pub const Sequence = struct {
     }
 
     pub fn pause(self: *Sequence) void {
+        self.state_mutex.lock();
+        defer self.state_mutex.unlock();
         if (self.is_playing and !self.is_paused) {
             if (self.is_initialized) _ = ma.ma_sound_stop(&self.sound);
             self.is_paused = true;
@@ -640,6 +661,8 @@ pub const Sequence = struct {
     }
 
     pub fn resumePlayback(self: *Sequence) void {
+        self.state_mutex.lock();
+        defer self.state_mutex.unlock();
         if (self.is_playing and self.is_paused) {
             if (self.is_initialized) _ = ma.ma_sound_start(&self.sound);
             self.is_paused = false;
@@ -667,6 +690,8 @@ pub const Sequence = struct {
     }
 
     pub fn setLoopCount(self: *Sequence, count: i32) void {
+        self.state_mutex.lock();
+        defer self.state_mutex.unlock();
         self.loop_count = count;
         self.loops_remaining = count;
     }
@@ -685,6 +710,8 @@ pub const Sequence = struct {
     }
 
     pub fn setMsPosition(self: *Sequence, ms: i32) void {
+        self.state_mutex.lock();
+        defer self.state_mutex.unlock();
         self.allNotesOff();
         const target_ms = @as(f64, @floatFromInt(ms));
         self.time_ms = target_ms;
@@ -736,6 +763,8 @@ pub const Sequence = struct {
     }
 
     pub fn branchIndex(self: *Sequence, marker_number: u32) void {
+        self.state_mutex.lock();
+        defer self.state_mutex.unlock();
         var msg: ?*tsf.tml_message = self.midi;
         while (msg) |m| {
             if (m.*.type == tsf.TML_CONTROL_CHANGE and
