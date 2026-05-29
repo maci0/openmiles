@@ -17,6 +17,7 @@ const openmiles = @import("openmiles");
 // module with the api wrappers (see test_root.zig).
 const api_digital = @import("api/digital.zig");
 const api_redbook = @import("api/redbook.zig");
+const api_quick = @import("api/quick.zig");
 
 const ITERS = 3000;
 
@@ -338,6 +339,64 @@ test "fuzz AIL_redbook drive/track ops (C-ABI export)" {
             2 => api_redbook.AIL_redbook_set_volume(rb, @bitCast(t1)),
             3 => _ = api_redbook.AIL_redbook_status(rb),
             4 => _ = api_redbook.AIL_redbook_position(rb),
+            else => unreachable,
+        }
+    }
+}
+
+test "fuzz AIL_quick API with garbage data and adversarial scalars" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE0E);
+    const rand = prng.random();
+    var buf: [2048]u8 = undefined;
+    var i: usize = 0;
+    while (i < 600) : (i += 1) {
+        const len = rand.intRangeAtMost(usize, 0, buf.len);
+        _ = randBytes(rand, &buf, len);
+        // Occasionally a valid-ish WAV header to reach the load path.
+        if (len >= 16 and rand.boolean()) {
+            @memcpy(buf[0..4], "RIFF");
+            std.mem.writeInt(u32, buf[4..8][0..4], @intCast(if (len >= 8) len - 8 else 0), .little);
+            @memcpy(buf[8..12], "WAVE");
+        }
+        const s = api_quick.AIL_quick_load_mem(&buf, @intCast(len)) orelse continue;
+        defer api_quick.AIL_quick_unload(s);
+        const iv = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
+        const f1 = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        switch (rand.intRangeAtMost(u8, 0, 6)) {
+            0 => api_quick.AIL_quick_play(s, iv),
+            1 => api_quick.AIL_quick_set_volume(s, iv),
+            2 => api_quick.AIL_quick_set_speed(s, iv),
+            3 => api_quick.AIL_quick_set_ms_position(s, iv),
+            4 => api_quick.AIL_quick_set_reverb(s, f1, f1, f1),
+            5 => _ = api_quick.AIL_quick_ms_position(s),
+            6 => _ = api_quick.AIL_quick_ms_length(s),
+            else => unreachable,
+        }
+    }
+}
+
+test "fuzz AIL digital sample seek/position exports with adversarial values" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE0F);
+    const rand = prng.random();
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const pcm = [_]u8{0} ** 256;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const s = openmiles.Sample.init(driver) catch continue;
+        defer s.deinit();
+        s.loadFromMemory(wav, false) catch continue;
+        const iv = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
+        switch (rand.intRangeAtMost(u8, 0, 5)) {
+            0 => api_digital.AIL_set_sample_ms_position(s, iv),
+            1 => api_digital.AIL_set_sample_position(s, @bitCast(iv)),
+            2 => api_digital.AIL_set_sample_playback_rate(s, iv),
+            3 => api_digital.AIL_set_sample_volume(s, iv),
+            4 => api_digital.AIL_set_sample_pan(s, iv),
+            5 => api_digital.AIL_set_sample_loop_count(s, iv),
             else => unreachable,
         }
     }
