@@ -87,15 +87,16 @@ test "fuzz WAV PCM/ADPCM encoders with random params" {
     while (i < ITERS) : (i += 1) {
         const len = rand.intRangeAtMost(usize, 0, pcm.len);
         _ = randBytes(rand, &pcm, len);
-        const channels = rand.intRangeAtMost(u16, 0, 8);
-        const rate = rand.intRangeAtMost(u32, 0, 192000);
+        // Adversarial channels/rate (incl. values that overflow naive size math).
+        const channels = if (rand.boolean()) rand.intRangeAtMost(u16, 0, 8) else rand.int(u16);
+        const rate = if (rand.boolean()) rand.intRangeAtMost(u32, 0, 192000) else rand.int(u32);
         const bits: u16 = if (rand.boolean()) 8 else 16;
         if (openmiles.buildWavFromPcm(testing.allocator, pcm[0..len], channels, rate, bits)) |w| {
             testing.allocator.free(w);
         } else |_| {}
 
         // ADPCM: pcm reinterpreted as i16 samples; bound total_per_ch to the buffer.
-        const ch_a = rand.intRangeAtMost(u16, 0, 4);
+        const ch_a = if (rand.boolean()) rand.intRangeAtMost(u16, 0, 4) else rand.int(u16);
         const samples_i16 = len / 2;
         const max_per_ch = if (ch_a == 0) 0 else samples_i16 / ch_a;
         const total_per_ch = if (max_per_ch == 0) 0 else rand.intRangeAtMost(usize, 0, max_per_ch);

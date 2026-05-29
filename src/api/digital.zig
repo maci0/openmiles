@@ -629,7 +629,7 @@ pub export fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi)
             data_len = chunk_size;
             break;
         }
-        const next = offset + chunk_size + (chunk_size & 1); // pad to even
+        const next = offset +| chunk_size +| (chunk_size & 1); // pad to even (saturating)
         if (next <= offset) break; // guard against zero/wraparound
         offset = next;
     }

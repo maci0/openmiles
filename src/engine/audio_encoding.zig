@@ -2,8 +2,9 @@ const std = @import("std");
 
 pub fn buildWavFromPcm(allocator: std.mem.Allocator, pcm_data: []const u8, channels: u16, sample_rate: u32, bits: u16) ![]u8 {
     if (pcm_data.len > std.math.maxInt(u32) - 44) return error.InvalidParam;
-    const byte_rate: u32 = sample_rate * @as(u32, channels) * (@as(u32, bits) / 8);
-    const block_align: u16 = channels * (bits / 8);
+    // Header fields only — saturate rather than panic on absurd rate/channels.
+    const byte_rate: u32 = sample_rate *| @as(u32, channels) *| (@as(u32, bits) / 8);
+    const block_align: u16 = channels *| (bits / 8);
     const data_len: u32 = @intCast(pcm_data.len);
     const riff_size: u32 = 36 + data_len;
     const total_size = 8 + riff_size;
@@ -68,13 +69,18 @@ fn imaEncode(sample: i16, predictor: *i32, step_idx: *i32) u8 {
 }
 
 pub fn buildAdpcmWav(alloc: std.mem.Allocator, pcm: [*]const i16, total_per_ch: usize, channels: u16, rate: u32) ![]u8 {
-    if (channels == 0) return error.InvalidParam;
+    // IMA ADPCM WAV is mono or stereo only; >2 channels would underflow the
+    // `block_size - 4*ch` samples-per-block computation below.
+    if (channels == 0 or channels > 2) return error.InvalidParam;
     const block_size: u32 = 512;
     const ch: u32 = channels;
     const spb: u32 = (block_size - 4 * ch) * 8 / (4 * ch) + 1;
     const num_blocks: usize = (total_per_ch + spb - 1) / spb;
-    const data_size: u32 = @intCast(num_blocks * block_size);
-    const avg_bps: u32 = rate * block_size / spb;
+    // Reject inputs whose encoded size would not fit the 32-bit WAV size fields.
+    const data_bytes: usize = num_blocks * block_size;
+    if (data_bytes > std.math.maxInt(u32)) return error.InvalidParam;
+    const data_size: u32 = @intCast(data_bytes);
+    const avg_bps: u32 = @intCast(@min(@as(u64, rate) * block_size / spb, std.math.maxInt(u32)));
     const header_sz: usize = 8 + 4 + 8 + 20 + 8 + 4 + 8;
     var buf = try alloc.alloc(u8, header_sz + data_size);
     errdefer alloc.free(buf);
