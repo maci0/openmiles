@@ -11,7 +11,7 @@ const std = @import("std");
 
 /// Round an IFF chunk size up to the 2-byte boundary IFF uses for padding.
 fn align2(n: usize) usize {
-    return n + (n & 1);
+    return n +| (n & 1);
 }
 
 /// Total byte length of the XMIDI (or SMF) image at the start of `data`, or 0 if
@@ -30,22 +30,22 @@ pub fn xmiImageSize(data: []const u8) usize {
 
     if (!std.mem.eql(u8, data[0..4], "FORM")) return 0;
 
-    // First top-level FORM (typically XDIR).
+    // First top-level FORM (typically XDIR). Saturating adds + immediate clamp
+    // so a lying 32-bit chunk size can't overflow the cursor (panic/wrap).
     const form_body = std.mem.readInt(u32, data[4..8], .big);
-    var end = align2(8 + @as(usize, form_body));
-    if (end > data.len) return data.len;
+    var end = @min(align2(8 +| @as(usize, form_body)), data.len);
 
     // An XDIR group is immediately followed by a `CAT  XMID` group holding the
     // actual sequences; fold it into the image extent when present.
-    if (end + 12 <= data.len and
+    if (end +| 12 <= data.len and
         std.mem.eql(u8, data[end .. end + 4], "CAT ") and
         std.mem.eql(u8, data[end + 8 .. end + 12], "XMID"))
     {
         const cat_body = std.mem.readInt(u32, data[end + 4 .. end + 8][0..4], .big);
-        end = align2(end + 8 + @as(usize, cat_body));
+        end = @min(align2(end +| 8 +| @as(usize, cat_body)), data.len);
     }
 
-    return @min(end, data.len);
+    return end;
 }
 
 /// Byte length of a Standard MIDI File by walking its track chunks.
@@ -53,16 +53,16 @@ fn smfImageSize(data: []const u8) usize {
     if (data.len < 14) return data.len;
     const hdr_len = std.mem.readInt(u32, data[4..8], .big);
     const num_tracks = std.mem.readInt(u16, data[10..12], .big);
-    var pos: usize = 8 + @as(usize, hdr_len);
+    var pos: usize = @min(8 +| @as(usize, hdr_len), data.len);
     var found: u16 = 0;
     while (found < num_tracks) {
-        if (pos + 8 > data.len) return data.len;
+        if (pos +| 8 > data.len) return data.len;
         if (!std.mem.eql(u8, data[pos .. pos + 4], "MTrk")) return data.len;
         const trk_len = std.mem.readInt(u32, data[pos + 4 .. pos + 8][0..4], .big);
-        pos += 8 + @as(usize, trk_len);
+        pos = @min(pos +| 8 +| @as(usize, trk_len), data.len);
         found += 1;
     }
-    return @min(pos, data.len);
+    return pos;
 }
 
 /// Pointer-based XMI/SMF image sizing for callers that lack an explicit length

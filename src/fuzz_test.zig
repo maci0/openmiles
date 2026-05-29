@@ -106,6 +106,23 @@ test "fuzz WAV PCM/ADPCM encoders with random params" {
     }
 }
 
+test "lying chunk sizes do not overflow the cursor" {
+    // FORM with a 0xFFFFFFFF body size (would overflow `8 + size` on 32-bit).
+    var form = [_]u8{ 'F', 'O', 'R', 'M', 0xFF, 0xFF, 0xFF, 0xFF } ++ [_]u8{ 'X', 'D', 'I', 'R' } ++ [_]u8{0} ** 16;
+    const fsz = openmiles.dls_container.xmiImageSize(&form);
+    try testing.expect(fsz <= form.len);
+
+    // MThd claiming a huge header length and track count.
+    var mthd = [_]u8{ 'M', 'T', 'h', 'd', 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x01, 0xFF, 0xFF, 0x01, 0xE0 } ++ [_]u8{0} ** 16;
+    const msz = openmiles.dls_container.xmiImageSize(&mthd);
+    try testing.expect(msz <= mthd.len);
+
+    // xmidiToSmf must reject (not hang/crash) a FORM/XDIR with a lying size.
+    if (openmiles.xmidiToSmf(testing.allocator, &form, 0)) |smf| {
+        testing.allocator.free(smf);
+    } else |_| {}
+}
+
 // --- Double-buffer streaming source ----------------------------------------
 
 test "fuzz StreamSource random feeds and reads" {

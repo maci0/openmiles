@@ -148,24 +148,27 @@ fn findEvntChunk(data: []const u8, seq_num: usize) ![]const u8 {
                             const eid = data[epos .. epos + 4];
                             const esz: usize = readBe32(data, epos + 4);
                             if (std.mem.eql(u8, eid, "EVNT")) {
-                                const evnt_end: usize = @min(epos + 8 + esz, iend);
+                                const evnt_end: usize = @min(epos +| 8 +| esz, iend);
                                 return data[epos + 8 .. evnt_end];
                             }
-                            epos += 8 + esz;
-                            if (esz & 1 != 0) epos += 1; // IFF even-byte padding
+                            // Saturating: a lying 32-bit chunk size must not
+                            // overflow the cursor (panic in safe / wrap->hang in
+                            // release on 32-bit usize).
+                            epos +|= 8 +| esz;
+                            if (esz & 1 != 0) epos +|= 1; // IFF even-byte padding
                         }
                         return error.NoEvntChunk;
                     }
                     count += 1;
                 }
-                ipos += 8 + isz;
-                if (isz & 1 != 0) ipos += 1;
+                ipos +|= 8 +| isz;
+                if (isz & 1 != 0) ipos +|= 1;
             }
             return error.SequenceNotFound;
         }
 
-        pos += 8 + csz;
-        if (csz & 1 != 0) pos += 1;
+        pos +|= 8 +| csz;
+        if (csz & 1 != 0) pos +|= 1;
     }
     return error.NoCatChunk;
 }
@@ -182,10 +185,10 @@ fn findBareEvnt(data: []const u8) ![]const u8 {
         const cid = data[pos .. pos + 4];
         const csz: usize = readBe32(data, pos + 4);
         if (std.mem.eql(u8, cid, "EVNT")) {
-            return data[pos + 8 .. @min(pos + 8 + csz, form_end)];
+            return data[pos + 8 .. @min(pos +| 8 +| csz, form_end)];
         }
-        pos += 8 + csz;
-        if (csz & 1 != 0) pos += 1;
+        pos +|= 8 +| csz; // saturating: untrusted 32-bit size must not overflow
+        if (csz & 1 != 0) pos +|= 1;
     }
     return error.NoEvntChunk;
 }
