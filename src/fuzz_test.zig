@@ -107,6 +107,39 @@ test "fuzz WAV PCM/ADPCM encoders with random params" {
     }
 }
 
+test "fuzz AIL_compress/decompress_ADPCM with adversarial AILSOUNDINFO" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE14);
+    const rand = prng.random();
+    var buf: [2048]u8 = undefined;
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const len = rand.intRangeAtMost(u32, 0, buf.len);
+        _ = randBytes(rand, &buf, len);
+        // data_len matches the real buffer (the API trusts the ptr/len pair);
+        // format/rate/bits/channels are adversarial.
+        var info = openmiles.AILSOUNDINFO{
+            .format = rand.int(i32),
+            .data_ptr = &buf,
+            .data_len = len,
+            .rate = if (rand.boolean()) rand.intRangeAtMost(u32, 0, 192000) else rand.int(u32),
+            .bits = if (rand.boolean()) 16 else rand.int(i32),
+            .channels = if (rand.boolean()) rand.intRangeAtMost(i32, 1, 2) else rand.int(i32),
+            .samples = rand.int(u32),
+            .block_size = rand.int(u32),
+            .initial_ptr = null,
+        };
+        var out: *anyopaque = undefined;
+        var osz: u32 = 0;
+        if (api_digital.AIL_compress_ADPCM(&info, &out, &osz) != 0) freeLock(out);
+        osz = 0;
+        // decompress: feed a (sometimes RIFF-headed) buffer back through.
+        if (len >= 16 and rand.boolean()) @memcpy(buf[0..4], "RIFF");
+        info.data_ptr = &buf;
+        info.data_len = len;
+        if (api_digital.AIL_decompress_ADPCM(&info, &out, &osz) != 0) freeLock(out);
+    }
+}
+
 test "lying chunk sizes do not overflow the cursor" {
     // FORM with a 0xFFFFFFFF body size (would overflow `8 + size` on 32-bit).
     var form = [_]u8{ 'F', 'O', 'R', 'M', 0xFF, 0xFF, 0xFF, 0xFF } ++ [_]u8{ 'X', 'D', 'I', 'R' } ++ [_]u8{0} ** 16;
