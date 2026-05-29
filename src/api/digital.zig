@@ -707,11 +707,12 @@ pub export fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque
     outsize.* = @intCast(wav.len);
     return 1;
 }
-/// Decodes ADPCM (or any miniaudio-supported compressed format) WAV to a 16-bit PCM WAV.
-/// If `out` is null, performs a full decode and returns the output WAV size (same cost as a write call).
-/// Otherwise, writes the decoded WAV into the `out` buffer.
-pub export fn AIL_decompress_ADPCM(data: *anyopaque, len: u32, out: ?*anyopaque) callconv(.winapi) i32 {
-    const raw: []const u8 = @as([*]const u8, @ptrCast(@alignCast(data)))[0..len];
+/// AIL_decompress_ADPCM(AILSOUNDINFO const *info, void **outdata, U32 *outsize)
+/// Decodes the ADPCM image described by `info` to a 16-bit PCM WAV. Allocates
+/// `outdata` (free with AIL_mem_free_lock) and sets `outsize`. Returns 1 on success.
+pub export fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsize: *u32) callconv(.winapi) i32 {
+    if (info.data_ptr == null or info.data_len == 0) return 0;
+    const raw: []const u8 = @as([*]const u8, @ptrCast(@alignCast(info.data_ptr.?)))[0..info.data_len];
     var decoder: openmiles.ma.ma_decoder = undefined;
     var config = openmiles.ma.ma_decoder_config_init(openmiles.ma.ma_format_s16, 0, 0); // preserve channel/rate from source
     if (openmiles.ma.ma_decoder_init_memory(raw.ptr, raw.len, &config, &decoder) != openmiles.ma.MA_SUCCESS) return 0;
@@ -747,10 +748,11 @@ pub export fn AIL_decompress_ADPCM(data: *anyopaque, len: u32, out: ?*anyopaque)
     };
     defer openmiles.global_allocator.free(wav);
 
-    const wav_size: i32 = @intCast(wav.len);
-    if (out == null) return wav_size; // size query
-    @memcpy(@as([*]u8, @ptrCast(@alignCast(out.?)))[0..wav.len], wav);
-    return wav_size;
+    const out_ptr: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse return 0);
+    @memcpy(out_ptr[0..wav.len], wav);
+    outdata.* = out_ptr;
+    outsize.* = @intCast(wav.len);
+    return 1;
 }
 pub export fn AIL_create_wave_synthesizer(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, flags: u32) callconv(.winapi) ?*MidiDriver {
     const dig = dig_opt orelse return null;
