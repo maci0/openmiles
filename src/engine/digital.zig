@@ -7,6 +7,7 @@ const io = root.io;
 
 const deg2rad = root.deg2rad;
 const buildWavFromPcm = root.buildWavFromPcm;
+const StreamSource = @import("stream_buffer.zig").StreamSource;
 
 pub const SampleStatus = enum(u32) {
     free = 1, // SMP_FREE
@@ -301,6 +302,10 @@ pub const Sample = struct {
     sample_processors: [2]usize = .{ 0, 0 },
     // ADPCM block size hint (stored for round-tripping; miniaudio handles decoding).
     adpcm_block_size: u32 = 0,
+    // Double-buffered streaming (MSS AIL_load_sample_buffer ping-pong). When
+    // active, `sound` is driven by `stream_src` instead of a decoder.
+    stream_src: StreamSource = undefined,
+    stream_active: bool = false,
     cached_length_frames: u64 = 0,
     reverb_node: ?*ma.ma_delay_node = null,
     reverb_room_type: f32 = 0.0,
@@ -371,6 +376,10 @@ pub const Sample = struct {
         if (self.is_initialized) {
             ma.ma_sound_uninit(&self.sound);
         }
+        if (self.stream_active) {
+            self.stream_src.deinit();
+            self.stream_active = false;
+        }
         if (self.decoder) |d| {
             _ = ma.ma_decoder_uninit(d);
             self.driver.allocator.destroy(d);
@@ -388,6 +397,10 @@ pub const Sample = struct {
         if (self.is_initialized) {
             ma.ma_sound_uninit(&self.sound);
             self.is_initialized = false;
+        }
+        if (self.stream_active) {
+            self.stream_src.deinit();
+            self.stream_active = false;
         }
         if (self.decoder) |d| {
             _ = ma.ma_decoder_uninit(d);
@@ -642,6 +655,50 @@ pub const Sample = struct {
         const channels: u16 = if (format == 0 or format == 1) 1 else 2;
         const bits: u16 = if (format == 0 or format == 2) 8 else 16;
         self.pcm_format = .{ .channels = channels, .bits = bits };
+    }
+
+    /// Bridge a StreamSource buffer-drain into the sample's registered EOB
+    /// callback. `ctx` is the owning Sample. Runs outside the stream lock.
+    fn streamEobBridge(ctx: ?*anyopaque, buf_index: i32, buf_len: u32, buf_addr: ?*anyopaque) void {
+        const self: *Sample = @ptrCast(@alignCast(ctx.?));
+        self.last_loaded_buffer = buf_index;
+        if (self.eob_callback != 0) {
+            const cb: *const fn (?*anyopaque, i32, u32, ?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eob_callback);
+            cb(@ptrCast(self), buf_index, buf_len, buf_addr);
+        }
+    }
+
+    /// Feed one buffer into the MSS double-buffer stream (zero-copy: the app
+    /// retains ownership until its EOB fires). Lazily builds the streaming
+    /// `ma_sound` on first call, using the format from `AIL_set_sample_type`.
+    /// A zero `len` submits an end-of-stream marker.
+    pub fn loadStreamBuffer(self: *Sample, index: usize, data: *anyopaque, len: u32) !void {
+        if (!self.stream_active) {
+            // Tear down any prior decoder-based playback before switching modes.
+            self.cleanupPlaybackState();
+            const fmt = self.pcm_format orelse SamplePcmFormat{ .channels = 2, .bits = 16 };
+            const rate: u32 = if (self.target_rate) |r| @intFromFloat(r) else 22050;
+            try self.stream_src.init(fmt.bits, fmt.channels, rate, streamEobBridge, self);
+            errdefer self.stream_src.deinit();
+
+            const res = ma.ma_sound_init_from_data_source(&self.driver.engine, @ptrCast(&self.stream_src.base), ma.MA_SOUND_FLAG_NO_SPATIALIZATION, null, &self.sound);
+            if (res != ma.MA_SUCCESS) return error.SampleLoadFailed;
+            self.stream_active = true;
+            self.is_initialized = true;
+            self.is_done = false;
+            ma.ma_sound_set_volume(&self.sound, self.volume);
+            ma.ma_sound_set_pan(&self.sound, self.pan);
+            ma.ma_sound_set_pitch(&self.sound, self.pitch);
+            ma.ma_sound_set_looping(&self.sound, 0);
+            _ = ma.ma_sound_set_end_callback(&self.sound, Sample.eosCallbackBridge, self);
+        }
+        self.stream_src.loadBuffer(index, data, @intCast(len));
+    }
+
+    /// Index of a stream buffer slot free to fill (0/1), or -1 if both are full.
+    pub fn streamBufferReady(self: *Sample) i32 {
+        if (!self.stream_active) return -1;
+        return self.stream_src.bufferReady();
     }
 
     pub fn reset(self: *Sample) void {

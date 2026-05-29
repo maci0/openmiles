@@ -93,12 +93,12 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_allocate_file_sample` | 🟢 Implemented | |
 | `AIL_compress_ADPCM` | 🟢 Implemented | |
 | `AIL_decompress_ADPCM` | 🟢 Implemented | |
-| `AIL_load_sample_buffer` | 🟢 Implemented | |
+| `AIL_load_sample_buffer` | 🟢 Implemented | True double-buffered streaming: with a format set via `AIL_set_sample_type`, feeds the buffer (zero-copy) into a custom `ma_data_source` that ping-pongs the two app buffers |
 | `AIL_minimum_sample_buffer_size` | 🟢 Implemented | |
 | `AIL_register_EOB_callback` | 🟢 Implemented | |
 | `AIL_register_SOB_callback` | 🟢 Implemented | |
-| `AIL_sample_buffer_info` | 🟢 Implemented | |
-| `AIL_sample_buffer_ready` | 🟢 Implemented | Returns 1 when sample is done/at-end and ready for new data; 0 while playing |
+| `AIL_sample_buffer_info` | 🟢 Implemented | Returns pos/len of both stream buffers (matches MSS `pos0/len0/pos1/len1` signature) |
+| `AIL_sample_buffer_ready` | 🟢 Implemented | Returns the index (0/1) of a free stream buffer slot, or -1 if both are full (MSS semantics) |
 | `AIL_sample_granularity` | 🟢 Implemented | |
 | `AIL_sample_reverb` | 🟢 Implemented | Returns current room_type, level, reflect_time |
 | `AIL_sample_user_data` | 🟢 Implemented | |

@@ -1737,3 +1737,93 @@ test "dls_container DLS-only and XMI-only images" {
     const d = openmiles.dls_container.findDls(&test_dls) orelse return error.NoDls;
     try testing.expectEqual(@as(usize, 24), d.len);
 }
+
+// ---------------------------------------------------------------------------
+// Double-buffered streaming source (AIL_load_sample_buffer ping-pong)
+// ---------------------------------------------------------------------------
+
+const StreamTestCtx = struct {
+    eob_count: u32 = 0,
+    last_idx: i32 = -1,
+    last_len: u32 = 0,
+};
+
+fn streamTestHook(ctx: ?*anyopaque, idx: i32, len: u32, addr: ?*anyopaque) void {
+    _ = addr;
+    const c: *StreamTestCtx = @ptrCast(@alignCast(ctx.?));
+    c.eob_count += 1;
+    c.last_idx = idx;
+    c.last_len = len;
+}
+
+test "StreamSource ping-pongs two buffers and fires EOB on drain" {
+    var ctx = StreamTestCtx{};
+    var ss: openmiles.StreamSource = undefined;
+    try ss.init(16, 2, 44100, streamTestHook, &ctx); // 16-bit stereo → 4 bytes/frame
+    defer ss.deinit();
+
+    const buf_a = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 }; // 2 frames
+    const buf_b = [_]u8{ 11, 12, 13, 14, 15, 16, 17, 18 }; // 2 frames
+    ss.loadBuffer(0, &buf_a, buf_a.len);
+    ss.loadBuffer(1, &buf_b, buf_b.len);
+    try testing.expectEqual(@as(i32, -1), ss.bufferReady()); // both full
+
+    var out: [16]u8 = undefined; // 4 frames
+    var read: u64 = 0;
+    const r = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, &out, 4, &read);
+    try testing.expectEqual(openmiles.ma.MA_SUCCESS, r);
+    try testing.expectEqual(@as(u64, 4), read);
+    try testing.expectEqualSlices(u8, &buf_a, out[0..8]);
+    try testing.expectEqualSlices(u8, &buf_b, out[8..16]);
+    // Buffer 0 drained mid-read → EOB(0) fired once, slot 0 now free.
+    try testing.expectEqual(@as(u32, 1), ctx.eob_count);
+    try testing.expectEqual(@as(i32, 0), ctx.last_idx);
+    try testing.expectEqual(@as(i32, 0), ss.bufferReady());
+}
+
+test "StreamSource zero-length buffer signals end of stream" {
+    var ss: openmiles.StreamSource = undefined;
+    try ss.init(16, 2, 44100, null, null);
+    defer ss.deinit();
+
+    const buf_a = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 }; // 2 frames
+    ss.loadBuffer(0, &buf_a, buf_a.len);
+    ss.loadBuffer(1, null, 0); // EOF marker
+
+    // miniaudio reports MA_AT_END on the read that yields 0 frames, so drain in
+    // a loop; total decoded frames must be exactly buf_a's 2 before EOF.
+    var out: [16]u8 = undefined;
+    var total: u64 = 0;
+    var hit_end = false;
+    var guard: u32 = 0;
+    while (guard < 8) : (guard += 1) {
+        var read: u64 = 0;
+        const r = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, out[@intCast(total * 4)..].ptr, 4 - total, &read);
+        total += read;
+        if (r == openmiles.ma.MA_AT_END) {
+            hit_end = true;
+            break;
+        }
+        if (read == 0) break;
+    }
+    try testing.expect(hit_end);
+    try testing.expectEqual(@as(u64, 2), total);
+    try testing.expectEqualSlices(u8, &buf_a, out[0..8]);
+}
+
+test "StreamSource underrun emits silence and keeps playing" {
+    var ss: openmiles.StreamSource = undefined;
+    try ss.init(16, 1, 22050, null, null); // 16-bit mono → 2 bytes/frame
+    defer ss.deinit();
+
+    const buf_a = [_]u8{ 9, 9 }; // 1 frame
+    ss.loadBuffer(0, &buf_a, buf_a.len);
+
+    var out: [8]u8 = [_]u8{0xAA} ** 8; // request 4 frames, only 1 available
+    var read: u64 = 0;
+    const r = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, &out, 4, &read);
+    try testing.expectEqual(openmiles.ma.MA_SUCCESS, r); // not ended — starved
+    try testing.expectEqual(@as(u64, 4), read); // padded with silence
+    try testing.expectEqualSlices(u8, &buf_a, out[0..2]);
+    try testing.expectEqualSlices(u8, &([_]u8{0} ** 6), out[2..8]); // silence
+}

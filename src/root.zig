@@ -62,6 +62,7 @@ pub const detectAudioSize = audio_detect.detectAudioSize;
 pub const detectMidiSize = audio_detect.detectMidiSize;
 
 pub const dls_container = @import("engine/dls_container.zig");
+pub const StreamSource = @import("engine/stream_buffer.zig").StreamSource;
 
 pub const get_ASI_INTERFACE = @import("engine/asi.zig").get_ASI_INTERFACE;
 

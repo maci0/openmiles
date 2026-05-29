@@ -184,7 +184,9 @@ pub export fn AIL_set_sample_file(s_opt: ?*Sample, data: *anyopaque, block: i32)
     const s = s_opt orelse return 0;
     log("AIL_set_sample_file(s={*}, data={*}, block={d})\n", .{ s, data, block });
     openmiles.clearLastError();
-    // Double-buffering (block=0/1) is not implemented; all data is treated as single-block.
+    // set_sample_file always loads a complete file image. Chunked double-buffered
+    // streaming uses AIL_set_sample_type + AIL_load_sample_buffer instead, so the
+    // block parameter is not meaningful here.
     s.load(data, -1) catch {
         openmiles.setLastError("Failed to load sample file");
         return 0;
@@ -368,55 +370,50 @@ pub export fn AIL_allocate_file_sample(driver_opt: ?*DigitalDriver, data: *anyop
 pub export fn AIL_load_sample_buffer(s_opt: ?*Sample, data: *anyopaque, len: u32, buffer_id: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.last_loaded_buffer = buffer_id;
-    const was_done = s.is_done;
-    if (s.pcm_format) |fmt| {
-        // Raw PCM data: wrap in a WAV header so miniaudio can decode it.
-        // pcm_format was set by a prior AIL_set_sample_type call.
-        const raw: []const u8 = @as([*]const u8, @ptrCast(@alignCast(data)))[0..@as(usize, len)];
-        const rate: u32 = if (s.target_rate) |r| @intFromFloat(r) else 22050;
-        const wav = openmiles.buildWavFromPcm(s.driver.allocator, raw, fmt.channels, rate, fmt.bits) catch return;
-        s.loadFromOwnedMemory(wav) catch {
-            s.driver.allocator.free(wav);
+    if (s.pcm_format != null) {
+        // Raw PCM + a known format = MSS double-buffer streaming. Feed the buffer
+        // into the ping-pong stream source (zero-copy; the app owns it until EOB).
+        const idx: usize = if (buffer_id < 0) 0 else @intCast(buffer_id);
+        s.loadStreamBuffer(idx, data, len) catch |err| {
+            openmiles.log("AIL_load_sample_buffer: stream feed failed: {any}\n", .{err});
             return;
         };
     } else {
+        // No format hint: treat as a complete encoded file image (whole-buffer).
         s.load(data, @intCast(len)) catch return;
     }
-    // Fire SOB (Start Of Buffer) callback now that a new buffer is ready.
+    // Fire SOB (Start Of Buffer) callback now that a new buffer is accepted.
     // Signature: void callback(HSAMPLE S, S32 buff_num, U32 buff_size, void const *buff_addr)
     if (s.sob_callback != 0) {
         const cb: *const fn (?*anyopaque, i32, u32, ?*anyopaque) callconv(.winapi) void = @ptrFromInt(s.sob_callback);
         cb(@ptrCast(s), buffer_id, len, data);
     }
-    // If playback had stopped (buffer ran dry), restart it now that new data is available.
-    if (was_done and s.is_initialized) {
-        s.is_done = false;
-        s.loops_remaining = 1;
-        _ = openmiles.ma.ma_sound_seek_to_pcm_frame(&s.sound, 0);
-        _ = openmiles.ma.ma_sound_start(&s.sound);
-    }
 }
 pub export fn AIL_sample_buffer_ready(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    // A buffer is "ready" when the sample has stopped/finished (is_done)
-    // or hasn't started yet. Games use this to know when to refill a
-    // double-buffer slot via AIL_load_sample_buffer.
-    if (s.is_done or !s.is_initialized) return 1;
-    if (s.is_initialized and openmiles.ma.ma_sound_at_end(&s.sound) != 0) return 1;
-    return 0;
+    // Streaming: return the index (0/1) of a free buffer slot, or -1 if both full.
+    if (s.stream_active) return s.streamBufferReady();
+    // Non-streaming whole-buffer samples: "ready" once finished or not yet started.
+    if (s.is_done or !s.is_initialized) return 0;
+    if (openmiles.ma.ma_sound_at_end(&s.sound) != 0) return 0;
+    return -1;
 }
-pub export fn AIL_sample_buffer_info(s_opt: ?*Sample, info: *anyopaque, len: *u32, buffer_id: *i32, flags: *u32) callconv(.winapi) void {
+pub export fn AIL_sample_buffer_info(s_opt: ?*Sample, pos0: *u32, len0: *u32, pos1: *u32, len1: *u32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    const addr_out: *?*anyopaque = @ptrCast(@alignCast(info));
-    if (s.owned_buffer) |buf| {
-        addr_out.* = @ptrCast(buf.ptr);
-        len.* = @intCast(buf.len);
-    } else {
-        addr_out.* = null;
-        len.* = 0;
+    if (s.stream_active) {
+        s.stream_src.bufferInfo(pos0, len0, pos1, len1);
+        return;
     }
-    buffer_id.* = s.last_loaded_buffer;
-    flags.* = 0;
+    // Non-streaming: report the single owned buffer as slot 0.
+    if (s.owned_buffer) |buf| {
+        pos0.* = 0;
+        len0.* = @intCast(buf.len);
+    } else {
+        pos0.* = 0;
+        len0.* = 0;
+    }
+    pos1.* = 0;
+    len1.* = 0;
 }
 pub export fn AIL_register_EOB_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
