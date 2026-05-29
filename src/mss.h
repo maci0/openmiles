@@ -176,7 +176,7 @@ void        MSS_CALLBACK AIL_close_filter(HFILTER filter);
 void        MSS_CALLBACK AIL_set_sample_filter(HSAMPLE S, HFILTER filter, S32 priority);
 void        MSS_CALLBACK AIL_filter_attribute(HFILTER filter, char const* name, void* val);
 void        MSS_CALLBACK AIL_set_filter_attribute(HFILTER filter, char const* name, void const* val);
-S32         MSS_CALLBACK AIL_enumerate_filters(HPROVIDER provider, HMSSENUM* next, char** name);
+S32         MSS_CALLBACK AIL_enumerate_filters(HMSSENUM* next, HPROVIDER* dest, char** name);
 S32         MSS_CALLBACK AIL_enumerate_3D_providers(HMSSENUM* next, HPROVIDER* dest, char** name);
 
 // 3D Audio API

@@ -292,13 +292,20 @@ pub export fn AIL_set_filter_attribute(filter_ptr: *anyopaque, name: [*:0]const 
     filter.setAttribute(name_slice, val.*);
 }
 const builtin_filter_name: [*:0]const u8 = "OpenMiles Low-Pass Filter";
-pub export fn AIL_enumerate_filters(provider_opt: ?*Provider, next: *?*anyopaque, name: *[*:0]const u8) callconv(.winapi) i32 {
-    _ = provider_opt;
-    if (next.* == null) {
+// AIL_enumerate_filters(HPROENUM *next, HPROVIDER *dest, C8 **name)
+// Iterator over filter providers. `dest` receives the provider handle (used by
+// AIL_ASI_provider_attribute / AIL_open_filter), `name` its display name, and
+// `next` is the opaque iteration cursor. Returns 1 while a provider remains.
+pub export fn AIL_enumerate_filters(next: *?*anyopaque, dest: *?*Provider, name: *[*:0]const u8) callconv(.winapi) i32 {
+    const idx: usize = if (next.*) |v| @intFromPtr(v) else 0;
+    if (idx == 0) {
+        dest.* = openmiles.startup_provider;
         name.* = builtin_filter_name;
         next.* = @ptrFromInt(@as(usize, 1));
         return 1;
     }
+    next.* = null;
+    dest.* = null;
     return 0;
 }
 pub export fn AIL_mem_alloc_lock(size: u32) callconv(.winapi) ?*anyopaque {
