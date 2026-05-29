@@ -130,51 +130,53 @@ fn logResolvedPath(original: []const u8, resolved: []const u8) void {
     }
 }
 
-pub fn openFile(path: []const u8, flags: std.fs.File.OpenFlags) !std.fs.File {
+pub fn openFile(io: std.Io, path: []const u8, options: std.Io.File.OpenFlags) !std.Io.File {
+    const cwd = std.Io.Dir.cwd();
     if (std.fs.path.isAbsolute(path)) {
-        return std.fs.openFileAbsolute(path, flags) catch |err| {
+        return std.Io.Dir.openFileAbsolute(io, path, options) catch |err| {
             var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
             const resolved = maybeResolveCaseInsensitivePath(path, &resolved_buf) orelse return err;
             if (std.mem.eql(u8, resolved, path)) return err;
             logResolvedPath(path, resolved);
-            return std.fs.openFileAbsolute(resolved, flags);
+            return std.Io.Dir.openFileAbsolute(io, resolved, options);
         };
     }
 
-    return std.fs.cwd().openFile(path, flags) catch |err| {
+    return cwd.openFile(io, path, options) catch |err| {
         var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
         const resolved = maybeResolveCaseInsensitivePath(path, &resolved_buf) orelse return err;
         if (std.mem.eql(u8, resolved, path)) return err;
         logResolvedPath(path, resolved);
-        return std.fs.cwd().openFile(resolved, flags);
+        return cwd.openFile(io, resolved, options);
     };
 }
 
-pub fn openDir(path: []const u8, options: std.fs.Dir.OpenOptions) !std.fs.Dir {
+pub fn openDir(io: std.Io, path: []const u8, options: std.Io.Dir.OpenOptions) !std.Io.Dir {
+    const cwd = std.Io.Dir.cwd();
     if (std.fs.path.isAbsolute(path)) {
-        return std.fs.openDirAbsolute(path, options) catch |err| {
+        return std.Io.Dir.openDirAbsolute(io, path, options) catch |err| {
             var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
             const resolved = maybeResolveCaseInsensitivePath(path, &resolved_buf) orelse return err;
             if (std.mem.eql(u8, resolved, path)) return err;
             logResolvedPath(path, resolved);
-            return std.fs.openDirAbsolute(resolved, options);
+            return std.Io.Dir.openDirAbsolute(io, resolved, options);
         };
     }
 
-    return std.fs.cwd().openDir(path, options) catch |err| {
+    return cwd.openDir(io, path, options) catch |err| {
         var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
         const resolved = maybeResolveCaseInsensitivePath(path, &resolved_buf) orelse return err;
         if (std.mem.eql(u8, resolved, path)) return err;
         logResolvedPath(path, resolved);
-        return std.fs.cwd().openDir(resolved, options);
+        return cwd.openDir(io, resolved, options);
     };
 }
 
-pub fn createFile(path: []const u8, flags: std.fs.File.CreateFlags) !std.fs.File {
+pub fn createFile(io: std.Io, path: []const u8, flags: std.Io.Dir.CreateFileOptions) !std.Io.File {
     if (std.fs.path.isAbsolute(path)) {
-        return std.fs.createFileAbsolute(path, flags);
+        return std.Io.Dir.createFileAbsolute(io, path, flags);
     }
-    return std.fs.cwd().createFile(path, flags);
+    return std.Io.Dir.cwd().createFile(io, path, flags);
 }
 
 pub fn dupeResolvedPathZ(allocator: std.mem.Allocator, path: []const u8) ![:0]u8 {

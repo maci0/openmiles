@@ -4,6 +4,23 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Translate C headers into Zig modules (replaces inline @cImport).
+    const translate_ma = b.addTranslateC(.{
+        .root_source_file = b.path("deps/miniaudio.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    translate_ma.addIncludePath(b.path("deps"));
+    const ma_mod = translate_ma.createModule();
+
+    const translate_tsf = b.addTranslateC(.{
+        .root_source_file = b.path("deps/tsf_tml.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    translate_tsf.addIncludePath(b.path("deps"));
+    const tsf_mod = translate_tsf.createModule();
+
     // Main OpenMiles module
     const mod = b.addModule("openmiles", .{
         .root_source_file = b.path("src/root.zig"),
@@ -11,6 +28,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     mod.addIncludePath(b.path("deps"));
+    mod.addImport("ma_c", ma_mod);
+    mod.addImport("tsf_c", tsf_mod);
 
     // Shared Library: drop-in replacement for mss32.dll (Miles Sound System)
     const lib = b.addLibrary(.{
@@ -44,7 +63,7 @@ pub fn build(b: *std.Build) void {
         .flags = &.{"-std=c99"},
     });
 
-    lib.addObject(c_impl);
+    lib.root_module.addObject(c_impl);
 
     b.installArtifact(lib);
 
@@ -55,11 +74,15 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .link_libc = true,
+            .imports = &.{
+                .{ .name = "ma_c", .module = ma_mod },
+                .{ .name = "tsf_c", .module = tsf_mod },
+            },
         }),
     });
     mod_tests.root_module.addIncludePath(b.path("deps"));
     mod_tests.root_module.addIncludePath(b.path("src"));
-    mod_tests.addObject(c_impl);
+    mod_tests.root_module.addObject(c_impl);
 
     const run_mod_tests = b.addRunArtifact(mod_tests);
     const test_step = b.step("test", "Run tests");
@@ -93,10 +116,10 @@ pub fn build(b: *std.Build) void {
                 .root_source_file = b.path("tests/empty.zig"),
                 .target = target,
                 .optimize = optimize,
+                .link_libc = true,
             }),
         });
-        exe.addObject(obj);
-        exe.linkLibC();
+        exe.root_module.addObject(obj);
         b.installArtifact(exe);
     }
 
@@ -112,7 +135,7 @@ pub fn build(b: *std.Build) void {
             .link_libc = true,
         }),
     });
-    mock_asi.addCSourceFile(.{
+    mock_asi.root_module.addCSourceFile(.{
         .file = b.path("src/bindings/mock_asi.c"),
         .flags = &.{"-std=c99"},
     });
@@ -129,6 +152,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("tests/native_rib_test.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
             .imports = &.{
                 .{ .name = "openmiles", .module = mod },
             },
@@ -136,7 +160,6 @@ pub fn build(b: *std.Build) void {
     });
     native_rib_test.root_module.addIncludePath(b.path("deps"));
     native_rib_test.root_module.addIncludePath(b.path("src"));
-    native_rib_test.addObject(c_impl);
-    native_rib_test.linkLibC();
+    native_rib_test.root_module.addObject(c_impl);
     b.installArtifact(native_rib_test);
 }

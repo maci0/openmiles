@@ -3,15 +3,17 @@ const logger = @import("utils/logger.zig");
 
 pub const log = logger.log;
 pub const fs_compat = @import("utils/fs_compat.zig");
+pub const DynLib = @import("utils/dynlib.zig").DynLib;
 
-pub const ma = @cImport({
-    @cInclude("miniaudio.h");
-});
+pub const ma = @import("ma_c");
+pub const tsf = @import("tsf_c");
 
-pub const tsf = @cImport({
-    @cInclude("tsf.h");
-    @cInclude("tml.h");
-});
+/// Single-threaded Io implementation suitable for sync-primitive and fs usage
+/// inside this DLL. The DLL has no `main()` to receive a `std.process.Init`,
+/// so we point at the stdlib's preallocated single-threaded instance.
+/// Mutex lock/unlock and futex primitives do not require async/concurrent
+/// facilities, so this is safe for our use.
+pub const io: std.Io = std.Io.Threaded.global_single_threaded.io();
 
 // --- Engine type re-exports ---
 
@@ -59,6 +61,8 @@ pub const streaming_sentinel_size = audio_detect.streaming_sentinel_size;
 pub const detectAudioSize = audio_detect.detectAudioSize;
 pub const detectMidiSize = audio_detect.detectMidiSize;
 
+pub const dls_container = @import("engine/dls_container.zig");
+
 pub const get_ASI_INTERFACE = @import("engine/asi.zig").get_ASI_INTERFACE;
 
 const xmidi = @import("engine/xmidi.zig");
@@ -97,8 +101,8 @@ pub const sample_3d_attr_names = [_][*:0]const u8{
 // Lives here so all modules can reach it via `openmiles` without a
 // bidirectional dependency on main.zig.
 
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-pub const default_allocator = gpa.allocator();
+var gpa_instance: std.heap.DebugAllocator(.{}) = .init;
+pub const default_allocator = gpa_instance.allocator();
 pub var global_allocator: std.mem.Allocator = default_allocator;
 
 // --- Error state ---
@@ -166,7 +170,7 @@ pub fn fileCallbackReadAll(filename: [*:0]const u8) ![]u8 {
 pub var startup_provider: ?*Provider = null;
 pub var asi_temp_counter: u32 = 0;
 
-var global_providers: std.ArrayListUnmanaged(*Provider) = .{};
+var global_providers: std.ArrayList(*Provider) = .empty;
 
 pub fn getAllProviders() []*Provider {
     return global_providers.items;
@@ -188,13 +192,13 @@ pub fn isSafePluginFilename(name: []const u8) bool {
 pub fn loadApplicationProviders(dir: []const u8) i32 {
     const alloc = global_allocator;
     var count: i32 = 0;
-    var d = fs_compat.openDir(dir, .{ .iterate = true }) catch |err| {
+    var d = fs_compat.openDir(io, dir, .{ .iterate = true }) catch |err| {
         log("loadApplicationProviders: failed to open directory '{s}': {any}\n", .{ dir, err });
         return 0;
     };
-    defer d.close();
+    defer d.close(io);
     var it = d.iterate();
-    while (it.next() catch null) |entry| {
+    while (it.next(io) catch null) |entry| {
         if (entry.kind != .file) continue;
         const name = entry.name;
         if (!isPluginExtension(name)) continue;
@@ -216,23 +220,23 @@ pub fn loadApplicationProviders(dir: []const u8) i32 {
 
 // --- Timer state ---
 
-pub var global_timers: std.ArrayListUnmanaged(*Timer) = .{};
-pub var global_timers_mutex: std.Thread.Mutex = .{};
+pub var global_timers: std.ArrayList(*Timer) = .empty;
+pub var global_timers_mutex: std.Io.Mutex = .init;
 
 pub fn startAllTimers() void {
-    global_timers_mutex.lock();
-    defer global_timers_mutex.unlock();
+    global_timers_mutex.lockUncancelable(io);
+    defer global_timers_mutex.unlock(io);
     for (global_timers.items) |t| t.start();
 }
 
 pub fn stopAllTimers() void {
-    global_timers_mutex.lock();
-    defer global_timers_mutex.unlock();
+    global_timers_mutex.lockUncancelable(io);
+    defer global_timers_mutex.unlock(io);
     for (global_timers.items) |t| t.stop();
 }
 
 pub fn releaseAllTimers() void {
-    global_timers_mutex.lock();
+    global_timers_mutex.lockUncancelable(io);
     const items = global_timers.items;
     const snapshot = global_allocator.dupe(*Timer, items) catch {
         for (items) |t| {
@@ -240,11 +244,11 @@ pub fn releaseAllTimers() void {
             t.allocator.destroy(t);
         }
         global_timers.items.len = 0;
-        global_timers_mutex.unlock();
+        global_timers_mutex.unlock(io);
         return;
     };
     global_timers.items.len = 0;
-    global_timers_mutex.unlock();
+    global_timers_mutex.unlock(io);
     defer global_allocator.free(snapshot);
     for (snapshot) |t| {
         t.stop();
@@ -288,20 +292,20 @@ pub fn isKnownDriver(ptr: *anyopaque) bool {
 
 // --- Sequence state ---
 
-var global_sequences: std.ArrayListUnmanaged(*Sequence) = .{};
-var global_sequences_mutex: std.Thread.Mutex = .{};
+var global_sequences: std.ArrayList(*Sequence) = .empty;
+var global_sequences_mutex: std.Io.Mutex = .init;
 
 pub fn registerSequence(seq: *Sequence) void {
-    global_sequences_mutex.lock();
-    defer global_sequences_mutex.unlock();
+    global_sequences_mutex.lockUncancelable(io);
+    defer global_sequences_mutex.unlock(io);
     global_sequences.append(global_allocator, seq) catch {
         log("registerSequence: allocation failed, sequence will not be tracked\n", .{});
     };
 }
 
 pub fn unregisterSequence(seq: *Sequence) void {
-    global_sequences_mutex.lock();
-    defer global_sequences_mutex.unlock();
+    global_sequences_mutex.lockUncancelable(io);
+    defer global_sequences_mutex.unlock(io);
     for (global_sequences.items, 0..) |s, i| {
         if (s == seq) {
             _ = global_sequences.swapRemove(i);
@@ -311,8 +315,8 @@ pub fn unregisterSequence(seq: *Sequence) void {
 }
 
 pub fn getActiveSequenceCount() u32 {
-    global_sequences_mutex.lock();
-    defer global_sequences_mutex.unlock();
+    global_sequences_mutex.lockUncancelable(io);
+    defer global_sequences_mutex.unlock(io);
     var count: u32 = 0;
     for (global_sequences.items) |s| {
         if (s.is_playing) count += 1;
@@ -448,30 +452,33 @@ pub fn panToMss(pan: f32) i32 {
 // --- Startup time ---
 
 var startup_ns: i64 = 0;
-var startup_ns_mutex: std.Thread.Mutex = .{};
+var startup_ns_mutex: std.Io.Mutex = .init;
 var startup_ns_ready: bool = false;
+
+fn nowNs() i64 {
+    const ts = std.Io.Timestamp.now(io, .awake);
+    return @intCast(ts.nanoseconds);
+}
 
 pub fn ensureStartupTime() void {
     if (@atomicLoad(bool, &startup_ns_ready, .acquire)) return;
-    startup_ns_mutex.lock();
-    defer startup_ns_mutex.unlock();
+    startup_ns_mutex.lockUncancelable(io);
+    defer startup_ns_mutex.unlock(io);
     if (!startup_ns_ready) {
-        startup_ns = @intCast(std.time.nanoTimestamp());
+        startup_ns = nowNs();
         @atomicStore(bool, &startup_ns_ready, true, .release);
     }
 }
 
 pub fn getMsCount() u32 {
     ensureStartupTime();
-    const now_ns: i64 = @intCast(std.time.nanoTimestamp());
-    const elapsed_ns: u64 = @intCast(@max(0, now_ns - startup_ns));
+    const elapsed_ns: u64 = @intCast(@max(0, nowNs() - startup_ns));
     return @truncate(elapsed_ns / std.time.ns_per_ms);
 }
 
 pub fn getUsCount() u32 {
     ensureStartupTime();
-    const now_ns: i64 = @intCast(std.time.nanoTimestamp());
-    const elapsed_ns: u64 = @intCast(@max(0, now_ns - startup_ns));
+    const elapsed_ns: u64 = @intCast(@max(0, nowNs() - startup_ns));
     return @truncate(elapsed_ns / std.time.ns_per_us);
 }
 
@@ -526,7 +533,7 @@ pub fn shutdown() void {
     }
     for (global_providers.items) |p| p.deinit();
     global_providers.deinit(global_allocator);
-    global_providers = .{};
+    global_providers = .empty;
     if (startup_provider) |p| {
         p.deinit();
         startup_provider = null;
@@ -567,17 +574,17 @@ pub fn closeMidiDriver(driver: *MidiDriver) void {
     // Snapshot sequences to stop, then release mutex before the potentially
     // blocking stopAndUninit calls to avoid holding the lock during audio
     // thread synchronization.
-    global_sequences_mutex.lock();
+    global_sequences_mutex.lockUncancelable(io);
     const snapshot = global_allocator.dupe(*Sequence, global_sequences.items) catch {
         // Fallback: stop sequences while holding the lock (less ideal but correct).
         for (global_sequences.items) |seq| {
             if (seq.driver == driver) seq.stopAndUninit();
         }
-        global_sequences_mutex.unlock();
+        global_sequences_mutex.unlock(io);
         driver.deinit();
         return;
     };
-    global_sequences_mutex.unlock();
+    global_sequences_mutex.unlock(io);
     defer global_allocator.free(snapshot);
     for (snapshot) |seq| {
         if (seq.driver == driver) seq.stopAndUninit();

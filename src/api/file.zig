@@ -2,9 +2,10 @@ const std = @import("std");
 const openmiles = @import("openmiles");
 const log = openmiles.log;
 const fs_compat = openmiles.fs_compat;
+const io = openmiles.io;
 
-fn openFileAnyPath(path: []const u8) ?std.fs.File {
-    return fs_compat.openFile(path, .{}) catch |err| {
+fn openFileAnyPath(path: []const u8) ?std.Io.File {
+    return fs_compat.openFile(io, path, .{}) catch |err| {
         log("Error: {any}\n", .{err});
         return null;
     };
@@ -39,16 +40,16 @@ pub export fn AIL_file_read(filename: [*:0]const u8, dest: ?*anyopaque) callconv
         openmiles.setFileError("File not found");
         return null;
     };
-    defer file.close();
-    const stat_size = (file.stat() catch {
+    defer file.close(io);
+    const file_len = file.length(io) catch {
         openmiles.setFileError("Stat failed");
         return null;
-    }).size;
-    if (stat_size <= 0) return null;
-    const size: usize = @intCast(stat_size);
+    };
+    if (file_len == 0) return null;
+    const size: usize = @intCast(file_len);
     if (dest) |d| {
         const buf: [*]u8 = @ptrCast(@alignCast(d));
-        const n = file.readAll(buf[0..size]) catch {
+        const n = file.readPositionalAll(io, buf[0..size], 0) catch {
             openmiles.setFileError("Read error");
             return null;
         };
@@ -61,7 +62,7 @@ pub export fn AIL_file_read(filename: [*:0]const u8, dest: ?*anyopaque) callconv
             openmiles.setFileError("Out of memory");
             return null;
         });
-        const n = file.readAll(buf[0..size]) catch {
+        const n = file.readPositionalAll(io, buf[0..size], 0) catch {
             std.c.free(buf);
             openmiles.setFileError("Read error");
             return null;
@@ -90,13 +91,13 @@ pub export fn AIL_file_size(filename: [*:0]const u8) callconv(.winapi) u32 {
         openmiles.setFileError("File not found");
         return 0;
     };
-    defer file.close();
-    const stat = file.stat() catch {
+    defer file.close(io);
+    const file_len = file.length(io) catch {
         openmiles.setFileError("Stat failed");
         return 0;
     };
-    if (stat.size <= 0) return 0;
-    return @intCast(@min(stat.size, std.math.maxInt(u32)));
+    if (file_len == 0) return 0;
+    return @intCast(@min(file_len, std.math.maxInt(u32)));
 }
 pub export fn AIL_file_type(data: *anyopaque, len: u32) callconv(.winapi) i32 {
     if (len < 4) return 0;
@@ -114,13 +115,13 @@ pub export fn AIL_file_type(data: *anyopaque, len: u32) callconv(.winapi) i32 {
 }
 pub export fn AIL_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32) callconv(.winapi) i32 {
     const path = std.mem.span(filename);
-    const file = fs_compat.createFile(path, .{}) catch |err| {
+    const file = fs_compat.createFile(io, path, .{}) catch |err| {
         log("Error: {any}\n", .{err});
         return 0;
     };
-    defer file.close();
+    defer file.close(io);
     const buf: [*]const u8 = @ptrCast(@alignCast(data));
-    file.writeAll(buf[0..len]) catch |err| {
+    file.writeStreamingAll(io, buf[0..len]) catch |err| {
         log("Error: {any}\n", .{err});
         return 0;
     };

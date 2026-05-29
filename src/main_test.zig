@@ -507,14 +507,14 @@ test "detectMidiSize unknown format returns sentinel" {
 
 test "getMsCount returns monotonically increasing values" {
     const t1 = openmiles.getMsCount();
-    std.Thread.sleep(50 * std.time.ns_per_ms);
+    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch {};
     const t2 = openmiles.getMsCount();
     try testing.expect(t2 > t1);
 }
 
 test "getUsCount returns monotonically increasing values" {
     const t1 = openmiles.getUsCount();
-    std.Thread.sleep(50 * std.time.ns_per_ms);
+    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch {};
     const t2 = openmiles.getUsCount();
     try testing.expect(t2 > t1);
 }
@@ -1122,7 +1122,7 @@ test "Redbook getPosition advances during playback" {
     defer rb.deinit();
 
     rb.play(1, 5);
-    std.Thread.sleep(50 * std.time.ns_per_ms);
+    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch {};
     const pos = rb.getPosition();
     try testing.expect(pos > 0);
 }
@@ -1133,10 +1133,10 @@ test "Redbook paused position is stable" {
     defer rb.deinit();
 
     rb.play(1, 5);
-    std.Thread.sleep(50 * std.time.ns_per_ms);
+    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch {};
     rb.pause();
     const p1 = rb.getPosition();
-    std.Thread.sleep(50 * std.time.ns_per_ms);
+    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch {};
     const p2 = rb.getPosition();
     try testing.expectEqual(p1, p2);
 }
@@ -1251,7 +1251,7 @@ test "Timer start and stop lifecycle" {
     timer.start();
     try testing.expect(timer.is_running);
 
-    std.Thread.sleep(50 * std.time.ns_per_ms);
+    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch {};
     timer.stop();
     try testing.expect(!timer.is_running);
 
@@ -1694,4 +1694,46 @@ test "Sequence setVolume boundary values" {
 
     seq.setVolume(-1, 0);
     try testing.expectEqual(@as(i32, 0), seq.getVolume());
+}
+
+// ---------------------------------------------------------------------------
+// DLS/XMI container split-join (AIL_find_DLS / AIL_extract_DLS / AIL_merge_*)
+// ---------------------------------------------------------------------------
+
+// Minimal but well-formed XMIDI image: FORM/XDIR group followed by CAT /XMID.
+const test_xmi = [_]u8{
+    'F', 'O', 'R', 'M', 0x00, 0x00, 0x00, 0x0E, // FORM, BE body=14
+    'X', 'D', 'I', 'R',
+    'I', 'N', 'F', 'O', 0x00, 0x00, 0x00, 0x02, 0xAA, 0xBB, // INFO chunk (2 bytes)
+    'C', 'A', 'T', ' ', 0x00, 0x00, 0x00, 0x08, // CAT, BE body=8
+    'X', 'M', 'I', 'D', 0x01, 0x02, 0x03, 0x04, // XMID + 4 payload bytes
+}; // total = 38
+
+// Minimal DLS RIFF with a colh chunk reporting 3 instruments.
+const test_dls = [_]u8{
+    'R', 'I', 'F', 'F', 0x10, 0x00, 0x00, 0x00, // RIFF, LE body=16
+    'D', 'L', 'S', ' ',
+    'c', 'o', 'l', 'h', 0x04, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, // 3 instruments
+}; // total = 24
+
+test "dls_container xmiImageSize spans FORM+CAT groups" {
+    try testing.expectEqual(@as(usize, 38), openmiles.dls_container.xmiImageSize(&test_xmi));
+    try testing.expectEqual(@as(usize, 38), openmiles.dls_container.xmiImageSizePtr(&test_xmi));
+}
+
+test "dls_container splits a merged XMI+DLS image" {
+    const merged = test_xmi ++ test_dls;
+    const dls = openmiles.dls_container.findDls(&merged) orelse return error.NoDls;
+    try testing.expectEqual(@as(usize, 24), dls.len);
+    try testing.expectEqual(@as(usize, 38), @intFromPtr(dls.ptr) - @intFromPtr(&merged[0]));
+
+    const xmi = openmiles.dls_container.findXmi(&merged) orelse return error.NoXmi;
+    try testing.expectEqual(@as(usize, 38), xmi.len);
+}
+
+test "dls_container DLS-only and XMI-only images" {
+    try testing.expect(openmiles.dls_container.findDls(&test_xmi) == null);
+    try testing.expect(openmiles.dls_container.findXmi(&test_dls) == null);
+    const d = openmiles.dls_container.findDls(&test_dls) orelse return error.NoDls;
+    try testing.expectEqual(@as(usize, 24), d.len);
 }

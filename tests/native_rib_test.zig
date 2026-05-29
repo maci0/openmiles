@@ -1,9 +1,8 @@
 const std = @import("std");
 const openmiles = @import("openmiles");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
     defer driver.deinit();

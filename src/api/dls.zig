@@ -4,6 +4,16 @@ const log = openmiles.log;
 const DigitalDriver = openmiles.DigitalDriver;
 const MidiDriver = openmiles.MidiDriver;
 const Sequence = openmiles.Sequence;
+const dls_container = openmiles.dls_container;
+
+/// Copy `src` into a buffer allocated with the C allocator so the caller can
+/// release it via `AIL_mem_free_lock` (which calls `free`). Returns null on OOM.
+fn cmemdup(src: []const u8) ?*anyopaque {
+    const p = std.c.malloc(src.len) orelse return null;
+    const dst: [*]u8 = @ptrCast(p);
+    @memcpy(dst[0..src.len], src);
+    return p;
+}
 
 pub export fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flags: u32) callconv(.winapi) ?*anyopaque {
     const driver = driver_opt orelse return null;
@@ -58,14 +68,29 @@ pub export fn AIL_filter_DLS_attribute(driver_opt: ?*MidiDriver, name: [*:0]cons
         out.* = 0.0;
     }
 }
-pub export fn AIL_filter_DLS_with_XMI(driver: *anyopaque, xmi: *anyopaque, dls: *anyopaque, out: *anyopaque, out_len: *u32, flags: u32) callconv(.winapi) i32 {
-    _ = driver;
+/// AIL_filter_DLS_with_XMI(xmi, dls, dlsout, dlssize, flags, callback)
+/// Produce a DLS bank usable by the given XMI. A fully faithful implementation
+/// prunes instruments the XMI never references; we instead pass the DLS through
+/// unmodified (a valid superset — every referenced instrument is retained, so the
+/// sequence renders identically). Returns 1 and hands back a freshly allocated
+/// copy the caller frees with AIL_mem_free_lock.
+pub export fn AIL_filter_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyopaque, dlsout: ?*?*anyopaque, dlssize: ?*u32, flags: i32, callback: ?*anyopaque) callconv(.winapi) i32 {
     _ = xmi;
-    _ = dls;
-    _ = out;
-    _ = out_len;
     _ = flags;
-    return 0;
+    _ = callback;
+    if (dlsout) |pp| pp.* = null;
+    if (dlssize) |p| p.* = 0;
+    const dp = dls orelse return 0;
+    const raw: [*]const u8 = @ptrCast(dp);
+    const sz = openmiles.detectAudioSize(raw);
+    if (sz == 0) {
+        openmiles.setLastError("AIL_filter_DLS_with_XMI: unrecognized DLS image");
+        return 0;
+    }
+    const copy = cmemdup(raw[0..sz]) orelse return 0;
+    if (dlsout) |pp| pp.* = copy;
+    if (dlssize) |p| p.* = @intCast(sz);
+    return 1;
 }
 pub export fn AIL_DLS_load_memory(driver_opt: ?*MidiDriver, mem: *anyopaque, flags: u32) callconv(.winapi) ?*anyopaque {
     const driver = driver_opt orelse return null;
@@ -110,10 +135,16 @@ pub export fn AIL_DLS_get_info(driver_opt: ?*MidiDriver, bank: *anyopaque, info:
     const driver = driver_opt orelse return 0;
     _ = bank;
     const out: *DlsInfo = @ptrCast(@alignCast(info));
+    const presets: u32 = if (driver.soundfont) |sf| blk: {
+        const n = openmiles.tsf.tsf_get_presetcount(sf);
+        break :blk if (n > 0) @intCast(n) else 0;
+    } else 0;
     out.* = .{
         .total_memory = driver.soundfont_size_bytes,
-        .preset_count = 0,
-        .instrument_count = 0,
+        .preset_count = presets,
+        // TSF exposes preset count only; SF2 instrument/sample subcounts are not
+        // surfaced separately, so report presets as the instrument count.
+        .instrument_count = presets,
         .sample_count = 0,
     };
     return if (driver.soundfont != null) 1 else 0;
@@ -171,47 +202,143 @@ pub export fn AIL_set_DLS_processor(driver_opt: ?*MidiDriver, stage: i32, proces
     driver.dls_processor = if (processor) |p| @intFromPtr(p) else 0;
     return prev;
 }
-pub export fn AIL_compress_DLS(driver: *openmiles.MidiDriver, filename: [*:0]const u8, out_filename: [*:0]const u8, flags: u32, callback: ?*anyopaque) callconv(.winapi) i32 {
-    _ = driver;
-    _ = filename;
-    _ = out_filename;
-    _ = flags;
-    _ = callback;
-    return 0;
-}
-pub export fn AIL_extract_DLS(src: *anyopaque, src_len: u32, dls_out: *anyopaque, dls_len: *u32, xmi_out: *anyopaque, xmi_len: *u32, flags: u32) callconv(.winapi) i32 {
-    _ = src;
-    _ = src_len;
-    _ = dls_out;
-    _ = dls_len;
-    _ = xmi_out;
-    _ = xmi_len;
-    _ = flags;
-    return 0;
-}
-pub export fn AIL_find_DLS(filename: [*:0]const u8, dls_out: *anyopaque, dls_len: *u32, xmi_out: *anyopaque, xmi_len: *u32, flags: u32) callconv(.winapi) i32 {
-    _ = filename;
-    _ = dls_out;
-    _ = dls_len;
-    _ = xmi_out;
-    _ = xmi_len;
-    _ = flags;
-    return 0;
-}
-pub export fn AIL_list_DLS(filename: [*:0]const u8, out_buf: *anyopaque, out_len: u32, flags: u32, callback: ?*anyopaque) callconv(.winapi) i32 {
-    _ = filename;
-    _ = out_buf;
-    _ = out_len;
-    _ = flags;
-    _ = callback;
-    return 0;
-}
-pub export fn AIL_merge_DLS_with_XMI(dls: *anyopaque, xmi: *anyopaque, out: *anyopaque, out_len: *u32) callconv(.winapi) i32 {
+/// AIL_compress_DLS(dls, compression_extension, mls, mlssize, callback)
+/// Compresses the DLS wave pool with an ASI codec. OpenMiles bundles only
+/// decoders (via miniaudio), so encoding is unsupported; returns 0 (failure).
+pub export fn AIL_compress_DLS(dls: ?*const anyopaque, compression_extension: [*:0]const u8, mls: ?*?*anyopaque, mlssize: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
     _ = dls;
-    _ = xmi;
-    _ = out;
-    _ = out_len;
+    _ = compression_extension;
+    _ = callback;
+    if (mls) |pp| pp.* = null;
+    if (mlssize) |p| p.* = 0;
+    openmiles.setLastError("AIL_compress_DLS: DLS compression (encoding) not supported");
     return 0;
+}
+
+/// AIL_extract_DLS(source, source_size, xmi_out, xmi_size, dls_out, dls_size, callback)
+/// Split a merged XMI+DLS image into freshly allocated XMI and DLS copies.
+/// Outputs are allocated with the C allocator; free each with AIL_mem_free_lock.
+/// Returns 1 if at least one sub-image was extracted, 0 otherwise.
+pub export fn AIL_extract_DLS(src: ?*const anyopaque, src_len: u32, xmi_out: ?*?*anyopaque, xmi_len: ?*u32, dls_out: ?*?*anyopaque, dls_len: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
+    _ = callback;
+    if (xmi_out) |pp| pp.* = null;
+    if (xmi_len) |p| p.* = 0;
+    if (dls_out) |pp| pp.* = null;
+    if (dls_len) |p| p.* = 0;
+    const sp = src orelse return 0;
+    const raw: [*]const u8 = @ptrCast(sp);
+    const data = raw[0..@as(usize, src_len)];
+    var found: i32 = 0;
+
+    if (dls_container.findDls(data)) |dls_img| {
+        if (cmemdup(dls_img)) |c| {
+            if (dls_out) |pp| pp.* = c;
+            if (dls_len) |p| p.* = @intCast(dls_img.len);
+            found = 1;
+        }
+        // The XMI image, when present, is everything preceding the DLS bank.
+        const off = @intFromPtr(dls_img.ptr) - @intFromPtr(data.ptr);
+        if (off > 0 and dls_container.findXmi(data[0..off]) != null) {
+            if (cmemdup(data[0..off])) |c| {
+                if (xmi_out) |pp| pp.* = c;
+                if (xmi_len) |p| p.* = @intCast(off);
+            }
+        }
+    } else if (dls_container.findXmi(data)) |xmi_img| {
+        if (cmemdup(xmi_img)) |c| {
+            if (xmi_out) |pp| pp.* = c;
+            if (xmi_len) |p| p.* = @intCast(xmi_img.len);
+            found = 1;
+        }
+    }
+    return found;
+}
+
+/// AIL_find_DLS(data, size, xmi, xmisize, dls, dlssize)
+/// Locate the XMI and DLS sub-images inside a merged image without copying;
+/// output pointers reference the original buffer. Returns 1 if a DLS bank is
+/// present, 0 otherwise (the XMI pointer is still filled in when found).
+pub export fn AIL_find_DLS(data_ptr: ?*const anyopaque, size: u32, xmi_out: ?*?*anyopaque, xmi_len: ?*u32, dls_out: ?*?*anyopaque, dls_len: ?*u32) callconv(.winapi) i32 {
+    if (xmi_out) |pp| pp.* = null;
+    if (xmi_len) |p| p.* = 0;
+    if (dls_out) |pp| pp.* = null;
+    if (dls_len) |p| p.* = 0;
+    const dp = data_ptr orelse return 0;
+    const raw: [*]const u8 = @ptrCast(dp);
+    const data = raw[0..@as(usize, size)];
+    var ok: i32 = 0;
+
+    if (dls_container.findDls(data)) |dls_img| {
+        if (dls_out) |pp| pp.* = @constCast(@ptrCast(dls_img.ptr));
+        if (dls_len) |p| p.* = @intCast(dls_img.len);
+        ok = 1;
+        const off = @intFromPtr(dls_img.ptr) - @intFromPtr(data.ptr);
+        if (off > 0 and dls_container.findXmi(data[0..off]) != null) {
+            if (xmi_out) |pp| pp.* = @constCast(@ptrCast(data.ptr));
+            if (xmi_len) |p| p.* = @intCast(off);
+        }
+    } else if (dls_container.findXmi(data)) |xmi_img| {
+        if (xmi_out) |pp| pp.* = @constCast(@ptrCast(xmi_img.ptr));
+        if (xmi_len) |p| p.* = @intCast(xmi_img.len);
+    }
+    return ok;
+}
+
+/// AIL_list_DLS(dls, lst, lst_size, flags, title)
+/// Build a human-readable listing of a DLS bank (instrument count from the
+/// `colh` chunk). Output text is C-allocated; free with AIL_mem_free_lock.
+pub export fn AIL_list_DLS(dls: ?*const anyopaque, lst: ?*?*anyopaque, lst_size: ?*u32, flags: i32, title: ?[*:0]const u8) callconv(.winapi) i32 {
+    _ = flags;
+    if (lst) |pp| pp.* = null;
+    if (lst_size) |p| p.* = 0;
+    const dp = dls orelse return 0;
+    const raw: [*]const u8 = @ptrCast(dp);
+    const sz = openmiles.detectAudioSize(raw);
+    if (sz == 0) return 0;
+    const data = raw[0..sz];
+
+    var instruments: u32 = 0;
+    if (std.mem.indexOf(u8, data, "colh")) |idx| {
+        if (idx + 12 <= data.len) {
+            instruments = std.mem.readInt(u32, data[idx + 8 .. idx + 12][0..4], .little);
+        }
+    }
+    const title_slice = if (title) |t| std.mem.span(t) else "DLS";
+    const text = std.fmt.allocPrintSentinel(openmiles.global_allocator, "{s}\nDLS bank: {d} bytes, {d} instrument(s)\n", .{ title_slice, sz, instruments }, 0) catch return 0;
+    defer openmiles.global_allocator.free(text);
+    const out = cmemdup(text[0 .. text.len + 1]) orelse return 0; // include NUL
+    if (lst) |pp| pp.* = out;
+    if (lst_size) |p| p.* = @intCast(text.len);
+    return 1;
+}
+
+/// AIL_merge_DLS_with_XMI(xmi, dls, mss, msssize)
+/// Concatenate an XMI image and a DLS bank into a single merged image (the
+/// format AIL_find_DLS/AIL_extract_DLS split). Output is C-allocated; free with
+/// AIL_mem_free_lock. Returns 1 on success.
+pub export fn AIL_merge_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyopaque, out: ?*?*anyopaque, out_len: ?*u32) callconv(.winapi) i32 {
+    if (out) |pp| pp.* = null;
+    if (out_len) |p| p.* = 0;
+    const xp = xmi orelse return 0;
+    const dp = dls orelse return 0;
+    const xraw: [*]const u8 = @ptrCast(xp);
+    const draw: [*]const u8 = @ptrCast(dp);
+
+    const xsz = dls_container.xmiImageSizePtr(xraw);
+    const dsz = openmiles.detectAudioSize(draw);
+    if (xsz == 0 or dsz == 0) {
+        openmiles.setLastError("AIL_merge_DLS_with_XMI: unrecognized XMI or DLS image");
+        return 0;
+    }
+
+    const total = xsz + dsz;
+    const buf = std.c.malloc(total) orelse return 0;
+    const dst: [*]u8 = @ptrCast(buf);
+    @memcpy(dst[0..xsz], xraw[0..xsz]);
+    @memcpy(dst[xsz .. xsz + dsz], draw[0..dsz]);
+    if (out) |pp| pp.* = buf;
+    if (out_len) |p| p.* = @intCast(total);
+    return 1;
 }
 pub export fn DLSClose(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
     AIL_DLS_unload(driver_opt, bank);

@@ -198,7 +198,7 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
         data: [8]u8,
     };
 
-    var events: std.ArrayListUnmanaged(SmfEvent) = .{};
+    var events: std.ArrayListUnmanaged(SmfEvent) = .empty;
     defer events.deinit(allocator);
     // Pre-allocate: each event is ~3 bytes minimum, note-on generates 2 events (on + synthetic off)
     try events.ensureTotalCapacity(allocator, evnt.len / 2);
@@ -345,7 +345,7 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
     }.lt);
 
     // Build MTrk data
-    var track: std.ArrayListUnmanaged(u8) = .{};
+    var track: std.ArrayListUnmanaged(u8) = .empty;
     defer track.deinit(allocator);
     // Pre-allocate: each event contributes ~4-8 bytes (VLQ delta + data), plus header/footer
     track.ensureTotalCapacity(allocator, events.items.len * 6 + 11) catch {};
@@ -364,7 +364,7 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
     try track.appendSlice(allocator, &[_]u8{ 0x00, 0xFF, 0x2F, 0x00 }); // End of Track
 
     // Assemble final SMF — exact size is known: 14 (MThd) + 8 (MTrk header) + track data
-    var smf: std.ArrayListUnmanaged(u8) = .{};
+    var smf: std.ArrayListUnmanaged(u8) = .empty;
     try smf.ensureTotalCapacity(allocator, 22 + track.items.len);
 
     // MThd

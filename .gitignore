@@ -39,6 +39,7 @@ references/
 
 # Game directories (test data — NOT part of the project)
 Guild/
+test_games/
 
 # Tool directories
 .claude/

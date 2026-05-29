@@ -181,7 +181,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_register_ICA_array` | 🟢 Implemented | Sends initial CC values per channel to TinySoundFont |
 | `AIL_true_sequence_channel` | 🟢 Implemented | Returns mapped physical channel from sequence channel_map |
 | `AIL_filter_DLS_attribute` | 🟢 Implemented | Reads Cutoff/Compression DLS prefs from MidiDriver |
-| `AIL_filter_DLS_with_XMI` | ⚪ Stub | Returns 0 |
+| `AIL_filter_DLS_with_XMI` | 🟡 Partial | Pass-through: returns full DLS copy (all XMI-referenced instruments retained); no size-pruning |
 | `AIL_set_DLS_processor` | 🟡 Partial | Callback stored for round-tripping; not invoked |
 | `AIL_set_filter_DLS_preference` | 🟢 Implemented | Stores Cutoff/Compression DLS prefs on MidiDriver |
 | `DLSMSSGetCPU` | 🟡 Partial | Delegates to digital driver CPU estimate |
@@ -195,7 +195,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_DLS_load_memory` | 🟢 Implemented | Loads SF2 soundfont from memory |
 | `AIL_DLS_unload` | 🟢 Implemented | Alias for unload_file |
 | `AIL_DLS_compact` | ⚪ Stub | No-op (miniaudio handles memory management) |
-| `AIL_DLS_get_info` | 🟢 Implemented | Returns soundfont memory footprint via DlsInfo struct |
+| `AIL_DLS_get_info` | 🟢 Implemented | Returns soundfont memory footprint + preset/instrument counts (via `tsf_get_presetcount`) in DlsInfo struct |
 | `AIL_DLS_get_reverb` / `AIL_DLS_set_reverb` | 🟢 Implemented | Stores room_type/level/reflect_time on MidiDriver |
 | `AIL_DLS_open` | 🟢 Implemented | Opens MIDI driver with DLS bank |
 | `AIL_DLS_close` | 🟢 Implemented | |
@@ -231,8 +231,10 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_register_timbre_callback` | 🟢 Implemented | Fires on Program Change |
 | `AIL_XMIDI_master_volume` / `AIL_set_XMIDI_master_volume` | 🟢 Implemented | Scales global TSF output volume |
 | `AIL_MIDI_to_XMI` | 🟢 Implemented | Passes data through as-is; AIL_init_sequence handles both SMF and XMIDI |
-| `AIL_compress_DLS` / `AIL_extract_DLS` / `AIL_find_DLS` | ⚪ Stub | Returns 0 |
-| `AIL_list_DLS` / `AIL_list_MIDI` / `AIL_merge_DLS_with_XMI` | ⚪ Stub | Returns 0 |
+| `AIL_extract_DLS` / `AIL_find_DLS` | 🟢 Implemented | Split a merged XMI+DLS image by signature (XMI=IFF FORM/CAT, DLS=RIFF `DLS `); find returns interior pointers, extract returns C-allocated copies |
+| `AIL_merge_DLS_with_XMI` | 🟢 Implemented | Concatenates XMI image + DLS bank into the merged format find/extract split |
+| `AIL_list_DLS` / `AIL_list_MIDI` | 🟢 Implemented | Build human-readable listings (DLS: size + instrument count from `colh`; MIDI: format/tracks/division) |
+| `AIL_compress_DLS` | ⚪ Stub | Returns 0; DLS wave-pool encoding unsupported (decoders only) |
 | `DLSClose` / `DLSLoadFile` / `DLSLoadMemFile` / `DLSMSSOpen` | 🟢 Implemented | Aliases for corresponding AIL_DLS_* functions |
 | `DLSUnloadFile` | 🟢 Implemented | Alias for AIL_DLS_unload |
 | `DLSCompactMemory` | ⚪ Stub | No-op (miniaudio handles memory management) |
@@ -394,7 +396,7 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 *(Appeared in MSS v4+)*
 | Function | Status | Notes |
 |----------|--------|-------|
-| `AIL_compress_ASI` | ⚪ Stub | Always returns 0 |
+| `AIL_compress_ASI` | 🟢 Implemented | Encodes input file to IMA-ADPCM WAV (~4:1) via the bundled ADPCM encoder; symmetric with `AIL_decompress_ASI` |
 | `AIL_decompress_ASI` | 🟢 Implemented | Decodes to 16-bit stereo PCM at 44100 Hz via miniaudio, writes as WAV |
 
 ## Input API
@@ -430,3 +432,16 @@ Verified end-to-end with **Europa 1400 Gold: The Guild** (TL edition) under Wine
 - `AIL_set_named_sample_file` → WAV sample loading confirmed (RIFF, 252 bytes)
 - Volume, pan, loop count, position seek, pause/resume all exercised
 - Build: `zig build -Dtarget=x86-windows -Doptimize=ReleaseSmall`
+
+## Toolchain Notes (2026-05-29, Zig 0.16)
+- Ported to Zig 0.16. `std.DynLib` dropped its Windows backend (the inner-type
+  switch now `@compileError`s on the `else`/Windows branch), which had broken the
+  RIB/ASI addon loader — the mechanism that loads real `.asi`/`.m3d`/`.flt` MSS
+  plugin DLLs into games. Replaced with `src/utils/dynlib.zig`: a Win32
+  `LoadLibraryA`/`GetProcAddress`/`FreeLibrary` loader on Windows, delegating to
+  `std.DynLib` on other targets. Plugin/addon loading is functional again.
+- Windows (`x86-windows` ReleaseSmall) and native `libmss32.so` both build clean;
+  124/124 unit tests pass. Run native tests with `-Dtarget=native-linux-musl` to
+  avoid a host-toolchain linker error (gcc 16.1.1 `crt1.o` `.sframe` relocations
+  the Zig self-linker rejects); this affects only native test-exe linking, not
+  the library or any source code.

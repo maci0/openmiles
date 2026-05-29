@@ -66,7 +66,7 @@ fn rib_unregister_interface(handle: usize) callconv(.c) void {
 
 pub const Provider = struct {
     handle: HPROVIDER,
-    lib: ?std.DynLib,
+    lib: ?root.DynLib,
     name: [:0]const u8,
     allocator: std.mem.Allocator,
     interfaces: std.ArrayListUnmanaged(*Interface),
@@ -81,7 +81,7 @@ pub const Provider = struct {
             .lib = null,
             .name = try allocator.dupeZ(u8, "unknown"),
             .allocator = allocator,
-            .interfaces = .{},
+            .interfaces = .empty,
         };
         _ = module;
         return self;
@@ -94,7 +94,7 @@ pub const Provider = struct {
             .lib = null,
             .name = try allocator.dupeZ(u8, std.fs.path.basename(path)),
             .allocator = allocator,
-            .interfaces = .{},
+            .interfaces = .empty,
         };
         errdefer {
             self.interfaces.deinit(allocator);
@@ -108,7 +108,7 @@ pub const Provider = struct {
 
         var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
         const resolved_path = fs_compat.maybeResolveCaseInsensitivePath(path, &resolved_buf) orelse path;
-        var lib = try std.DynLib.open(resolved_path);
+        var lib = try root.DynLib.open(resolved_path);
         self.lib = lib;
         errdefer {
             lib.close();

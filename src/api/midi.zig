@@ -186,13 +186,39 @@ pub export fn AIL_MIDI_to_XMI(data: *anyopaque, len: u32, out: ?*anyopaque, out_
     @memcpy(dst[0..len], src[0..len]);
     return 1;
 }
-pub export fn AIL_list_MIDI(filename: [*:0]const u8, out_buf: *anyopaque, out_len: u32, flags: u32, callback: ?*anyopaque) callconv(.winapi) i32 {
-    _ = filename;
-    _ = out_buf;
-    _ = out_len;
+/// AIL_list_MIDI(MIDI, MIDI_size, lst, lst_size, flags)
+/// Build a human-readable summary of an SMF or XMIDI image (format, track/
+/// sequence count, division). Output text is C-allocated; free with
+/// AIL_mem_free_lock. Returns 1 on success.
+pub export fn AIL_list_MIDI(midi: ?*const anyopaque, midi_size: u32, lst: ?*?*anyopaque, lst_size: ?*u32, flags: i32) callconv(.winapi) i32 {
     _ = flags;
-    _ = callback;
-    return 0;
+    if (lst) |pp| pp.* = null;
+    if (lst_size) |p| p.* = 0;
+    const mp = midi orelse return 0;
+    const raw: [*]const u8 = @ptrCast(mp);
+    if (midi_size < 12) return 0;
+    const data = raw[0..@as(usize, midi_size)];
+
+    var text: [:0]u8 = undefined;
+    if (std.mem.eql(u8, data[0..4], "MThd")) {
+        const format = std.mem.readInt(u16, data[8..10], .big);
+        const tracks = std.mem.readInt(u16, data[10..12], .big);
+        const division = std.mem.readInt(u16, data[12..14], .big);
+        text = std.fmt.allocPrintSentinel(openmiles.global_allocator, "Standard MIDI File\nFormat: {d}\nTracks: {d}\nDivision: {d} ticks/quarter\n", .{ format, tracks, division }, 0) catch return 0;
+    } else if (std.mem.eql(u8, data[0..4], "FORM")) {
+        text = std.fmt.allocPrintSentinel(openmiles.global_allocator, "XMIDI sequence\nSize: {d} bytes\n", .{midi_size}, 0) catch return 0;
+    } else {
+        openmiles.setLastError("AIL_list_MIDI: unrecognized MIDI image");
+        return 0;
+    }
+    defer openmiles.global_allocator.free(text);
+
+    const p = std.c.malloc(text.len + 1) orelse return 0;
+    const dst: [*]u8 = @ptrCast(p);
+    @memcpy(dst[0 .. text.len + 1], text[0 .. text.len + 1]); // include NUL
+    if (lst) |pp| pp.* = p;
+    if (lst_size) |pp| pp.* = @intCast(text.len);
+    return 1;
 }
 extern fn openmiles_tsf_channel_note_count(f: ?*openmiles.tsf.tsf, channel: i32) i32;
 pub export fn AIL_channel_notes(seq_opt: ?*Sequence, channel: i32) callconv(.winapi) i32 {

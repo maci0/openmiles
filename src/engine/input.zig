@@ -2,6 +2,7 @@ const std = @import("std");
 const root = @import("../root.zig");
 const ma = root.ma;
 const log = root.log;
+const io = root.io;
 
 /// Audio capture device wrapping a miniaudio ma_device in capture mode.
 /// Created via AIL_open_input, controlled via AIL_set_input_state, queried
@@ -14,13 +15,13 @@ pub const Input = struct {
     channels: u32 = 1,
     bits: u32 = 16,
     // Ring buffer of captured PCM (bounded to ~1 second)
-    buffer: std.ArrayListUnmanaged(u8) = .{},
+    buffer: std.ArrayListUnmanaged(u8) = .empty,
     max_buffer_bytes: usize = 44100 * 2, // 1s of 16-bit mono
-    mutex: std.Thread.Mutex = .{},
+    mutex: std.Io.Mutex = .init,
     is_initialized: bool = false,
     // Snapshot of the buffer handed to getInfo(). Lives until the next getInfo()
     // call so the caller's returned pointer remains valid even while capture continues.
-    snapshot: std.ArrayListUnmanaged(u8) = .{},
+    snapshot: std.ArrayListUnmanaged(u8) = .empty,
 
     pub fn init(allocator: std.mem.Allocator) !*Input {
         const self = try allocator.create(Input);
@@ -85,7 +86,7 @@ pub const Input = struct {
             in_ptr[0..byte_count];
 
         if (!self.mutex.tryLock()) return;
-        defer self.mutex.unlock();
+        defer self.mutex.unlock(io);
 
         // Ring-buffer behavior: drop oldest data if we exceed max_buffer_bytes
         if (self.buffer.items.len + incoming.len > self.max_buffer_bytes) {
@@ -117,7 +118,7 @@ pub const Input = struct {
     };
 
     pub fn getInfo(self: *Input) InputInfo {
-        self.mutex.lock();
+        self.mutex.lockUncancelable(io);
         // Swap buffer and snapshot under the lock — O(1) instead of copying.
         // The old buffer becomes the snapshot (caller reads it); the old
         // snapshot (cleared) becomes the new capture target.
@@ -125,7 +126,7 @@ pub const Input = struct {
         self.snapshot = self.buffer;
         self.buffer = tmp;
         self.buffer.clearRetainingCapacity();
-        self.mutex.unlock();
+        self.mutex.unlock(io);
         const bytes_per_sample = self.channels * (self.bits / 8);
         const samples: u32 = if (bytes_per_sample == 0) 0 else @as(u32, @intCast(self.snapshot.items.len)) / bytes_per_sample;
         return .{

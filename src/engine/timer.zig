@@ -1,5 +1,6 @@
 const std = @import("std");
 const root = @import("../root.zig");
+const io = root.io;
 
 /// Provides high-resolution periodic timer callbacks for applications, executing on a dedicated background thread.
 pub const Timer = struct {
@@ -24,22 +25,22 @@ pub const Timer = struct {
             .callback = callback,
             .allocator = allocator,
         };
-        root.global_timers_mutex.lock();
-        defer root.global_timers_mutex.unlock();
+        root.global_timers_mutex.lockUncancelable(io);
+        defer root.global_timers_mutex.unlock(io);
         try root.global_timers.append(root.global_allocator, self);
         return self;
     }
 
     pub fn deinit(self: *Timer) void {
         self.stop();
-        root.global_timers_mutex.lock();
+        root.global_timers_mutex.lockUncancelable(io);
         for (root.global_timers.items, 0..) |t, i| {
             if (t == self) {
                 _ = root.global_timers.swapRemove(i);
                 break;
             }
         }
-        root.global_timers_mutex.unlock();
+        root.global_timers_mutex.unlock(io);
         self.allocator.destroy(self);
     }
 
@@ -70,15 +71,16 @@ pub const Timer = struct {
     }
 
     fn run(self: *Timer) void {
-        var next_ns: i128 = std.time.nanoTimestamp();
+        var next_ns: i128 = std.Io.Timestamp.now(io, .awake).nanoseconds;
         while (@atomicLoad(bool, &self.is_running, .acquire)) {
             self.callback(self.getUserData());
             const period_ns: i128 = @as(i128, self.getPeriodUs()) * std.time.ns_per_us;
             next_ns += period_ns;
-            const now = std.time.nanoTimestamp();
+            const now = std.Io.Timestamp.now(io, .awake).nanoseconds;
             const remaining = next_ns - now;
             if (remaining > 0) {
-                std.Thread.sleep(@intCast(remaining));
+                const dur = std.Io.Duration.fromNanoseconds(@intCast(remaining));
+                io.sleep(dur, .awake) catch {};
             }
         }
     }

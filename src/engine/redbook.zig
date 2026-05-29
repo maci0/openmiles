@@ -1,6 +1,12 @@
 const std = @import("std");
 const root = @import("../root.zig");
 const log = root.log;
+const io = root.io;
+
+fn nowMs() i64 {
+    const ts = std.Io.Timestamp.now(io, .awake);
+    return @intCast(@divTrunc(ts.nanoseconds, std.time.ns_per_ms));
+}
 
 pub const RedbookStatus = enum(u32) {
     stopped = 0,
@@ -43,7 +49,7 @@ pub const Redbook = struct {
         self.current_track = start;
         self.track_end = end;
         self.status = .playing;
-        self.play_start_ms = std.time.milliTimestamp();
+        self.play_start_ms = nowMs();
         self.paused_position_ms = 0;
     }
 
@@ -55,14 +61,14 @@ pub const Redbook = struct {
 
     pub fn pause(self: *Redbook) void {
         if (self.status == .playing) {
-            self.paused_position_ms = std.time.milliTimestamp() - self.play_start_ms;
+            self.paused_position_ms = nowMs() - self.play_start_ms;
             self.status = .paused;
         }
     }
 
     pub fn resumePlayback(self: *Redbook) void {
         if (self.status == .paused) {
-            self.play_start_ms = std.time.milliTimestamp() - self.paused_position_ms;
+            self.play_start_ms = nowMs() - self.paused_position_ms;
             self.status = .playing;
         }
     }
@@ -76,7 +82,7 @@ pub const Redbook = struct {
             }
         }.f;
         return switch (self.status) {
-            .playing => clamp(std.time.milliTimestamp() - self.play_start_ms),
+            .playing => clamp(nowMs() - self.play_start_ms),
             .paused => clamp(self.paused_position_ms),
             .stopped => 0,
         };

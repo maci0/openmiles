@@ -30,7 +30,7 @@ pub const Filter = struct {
             .driver = driver,
             .allocator = driver.allocator,
             .lpf_node = undefined,
-            .attached_samples = .{},
+            .attached_samples = .empty,
         };
         errdefer driver.allocator.destroy(self);
         try self.initLpfNode();

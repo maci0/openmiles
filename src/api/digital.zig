@@ -569,7 +569,8 @@ pub export fn AIL_us_count() callconv(.winapi) u32 {
     return openmiles.getUsCount();
 }
 pub export fn AIL_delay(ms: u32) callconv(.winapi) void {
-    std.Thread.sleep(@as(u64, ms) * std.time.ns_per_ms);
+    const duration = std.Io.Duration.fromNanoseconds(@as(i96, ms) * std.time.ns_per_ms);
+    openmiles.io.sleep(duration, .awake) catch {};
 }
 pub export fn AIL_lock() callconv(.winapi) void {}
 pub export fn AIL_unlock() callconv(.winapi) void {}
@@ -656,13 +657,14 @@ pub export fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len:
         return 0;
     };
     defer openmiles.global_allocator.free(wav);
+    const io = openmiles.io;
     const path = std.mem.span(filename);
-    const file = openmiles.fs_compat.createFile(path, .{}) catch |err| {
+    const file = openmiles.fs_compat.createFile(io, path, .{}) catch |err| {
         log("Error: {any}\n", .{err});
         return 0;
     };
-    defer file.close();
-    file.writeAll(wav) catch |err| {
+    defer file.close(io);
+    file.writeStreamingAll(io, wav) catch |err| {
         log("Error: {any}\n", .{err});
         return 0;
     };
@@ -713,7 +715,7 @@ pub export fn AIL_decompress_ADPCM(data: *anyopaque, len: u32, out: ?*anyopaque)
     const bpf = channels * 2; // 16-bit = 2 bytes/sample
 
     // Decode all frames into a temporary list
-    var pcm = std.ArrayListUnmanaged(u8){};
+    var pcm: std.ArrayListUnmanaged(u8) = .empty;
     defer pcm.deinit(openmiles.global_allocator);
 
     var length_frames: u64 = 0;

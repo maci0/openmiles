@@ -3,6 +3,7 @@ const root = @import("../root.zig");
 const ma = root.ma;
 const log = root.log;
 const fs_compat = root.fs_compat;
+const io = root.io;
 
 const deg2rad = root.deg2rad;
 const buildWavFromPcm = root.buildWavFromPcm;
@@ -21,7 +22,7 @@ pub const DigitalDriver = struct {
     providers: std.ArrayListUnmanaged(*root.Provider),
     timers: std.ArrayListUnmanaged(*root.Timer),
     samples: std.ArrayListUnmanaged(*Sample),
-    samples_3d: std.ArrayListUnmanaged(*Sample3D) = .{},
+    samples_3d: std.ArrayListUnmanaged(*Sample3D) = .empty,
     rolloff_factor: f32 = 1.0,
     doppler_factor: f32 = 1.0,
     distance_factor: f32 = 1.0,
@@ -31,11 +32,11 @@ pub const DigitalDriver = struct {
     // round-tripping; not invoked (miniaudio manages its own processing graph).
     driver_processors: [2]usize = .{ 0, 0 },
     // Filters opened against this driver (tracked for cleanup on driver close).
-    filters: std.ArrayListUnmanaged(*root.Filter) = .{},
+    filters: std.ArrayListUnmanaged(*root.Filter) = .empty,
     // Captured output buffer for AIL_process_digital_audio. Populated by
     // the onProcess callback each time the audio thread renders a buffer.
-    capture_buf: std.ArrayListUnmanaged(f32) = .{},
-    capture_mutex: std.Thread.Mutex = .{},
+    capture_buf: std.ArrayListUnmanaged(f32) = .empty,
+    capture_mutex: std.Io.Mutex = .init,
     capture_enabled: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, frequency: u32, bits: i32, channels: u32) !*DigitalDriver {
@@ -46,10 +47,10 @@ pub const DigitalDriver = struct {
         self.* = .{
             .engine = undefined,
             .allocator = allocator,
-            .providers = .{},
-            .timers = .{},
-            .samples = .{},
-            .samples_3d = .{},
+            .providers = .empty,
+            .timers = .empty,
+            .samples = .empty,
+            .samples_3d = .empty,
         };
         var config = ma.ma_engine_config_init();
         if (@import("builtin").is_test) {
@@ -119,13 +120,13 @@ pub const DigitalDriver = struct {
 
     pub fn loadAllAsi(self: *DigitalDriver, redist_dir: []const u8) void {
         const alloc = self.allocator;
-        var d = fs_compat.openDir(redist_dir, .{ .iterate = true }) catch |err| {
+        var d = fs_compat.openDir(io, redist_dir, .{ .iterate = true }) catch |err| {
             log("loadAllAsi: failed to open directory '{s}': {any}\n", .{ redist_dir, err });
             return;
         };
-        defer d.close();
+        defer d.close(io);
         var it = d.iterate();
-        while (it.next() catch null) |entry| {
+        while (it.next(io) catch null) |entry| {
             if (entry.kind != .file) continue;
             const name = entry.name;
             if (!root.isPluginExtension(name)) continue;
@@ -176,7 +177,7 @@ pub const DigitalDriver = struct {
         const channels = ma.ma_engine_get_channels(&self.engine);
         const sample_count: usize = @as(usize, @intCast(frameCount)) * channels;
         if (!self.capture_mutex.tryLock()) return;
-        defer self.capture_mutex.unlock();
+        defer self.capture_mutex.unlock(io);
         // Keep only the latest buffer; games typically call process_digital_audio
         // once per frame expecting the most recent rendered block.
         self.capture_buf.clearRetainingCapacity();
@@ -201,7 +202,7 @@ pub const DigitalDriver = struct {
     /// number of BYTES written. Converts from float to 16-bit PCM.
     pub fn readCaptured(self: *DigitalDriver, dest: [*]u8, max_bytes: usize) u32 {
         if (!self.capture_mutex.tryLock()) return 0;
-        defer self.capture_mutex.unlock();
+        defer self.capture_mutex.unlock(io);
         const channels = ma.ma_engine_get_channels(&self.engine);
         const sample_count = self.capture_buf.items.len;
         const frame_count = if (channels == 0) 0 else sample_count / channels;
@@ -601,14 +602,14 @@ pub const Sample = struct {
 
     pub fn loadFromFile(self: *Sample, path: []const u8) !void {
         // Read file into memory so owned_buffer is set (required for AIL_quick_copy)
-        const file = fs_compat.openFile(path, .{}) catch return error.FileNotFound;
-        defer file.close();
-        const stat_size = (file.stat() catch return error.FileNotFound).size;
-        if (stat_size <= 0) return error.FileNotFound;
-        const size: usize = @intCast(stat_size);
+        const file = fs_compat.openFile(io, path, .{}) catch return error.FileNotFound;
+        defer file.close(io);
+        const file_len = file.length(io) catch return error.FileNotFound;
+        if (file_len == 0) return error.FileNotFound;
+        const size: usize = @intCast(file_len);
         const buf = try self.driver.allocator.alloc(u8, size);
         errdefer self.driver.allocator.free(buf);
-        _ = file.readAll(buf) catch return error.FileNotFound;
+        _ = file.readPositionalAll(io, buf, 0) catch return error.FileNotFound;
         // loadFromOwnedMemory takes ownership of buf directly, avoiding a redundant copy
         try self.loadFromOwnedMemory(buf);
     }
