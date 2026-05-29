@@ -209,8 +209,10 @@ pub export fn AIL_set_3D_sample_info(s: ?*anyopaque, info: ?*anyopaque) callconv
     const si: *openmiles.AILSOUNDINFO = @ptrCast(@alignCast(i));
     if (si.data_ptr == null or si.data_len == 0) return 0;
     const data: [*]const u8 = @ptrCast(si.data_ptr.?);
-    const channels: u16 = @intCast(@max(1, si.channels));
-    const bits: u16 = @intCast(if (si.bits > 0) si.bits else 16);
+    // Clamp untrusted AILSOUNDINFO fields to valid ranges before narrowing to
+    // u16 (a raw @intCast of a huge/negative i32 would panic).
+    const channels: u16 = @intCast(std.math.clamp(si.channels, 1, 8));
+    const bits: u16 = if (si.bits == 8) 8 else 16;
     sample.loadFromPcm(data[0..si.data_len], channels, si.rate, bits) catch |err| {
         log("Error: {any}\n", .{err});
         return 0;

@@ -530,6 +530,33 @@ test "fuzz AIL_MIDI_to_XMI with random data" {
     }
 }
 
+test "fuzz AIL_set_3D_sample_info with adversarial AILSOUNDINFO" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE15);
+    const rand = prng.random();
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    var buf: [1024]u8 = undefined;
+    var i: usize = 0;
+    while (i < 600) : (i += 1) {
+        const s = openmiles.Sample3D.init(driver) catch continue;
+        defer s.deinit();
+        const len = rand.intRangeAtMost(u32, 1, buf.len);
+        _ = randBytes(rand, &buf, len);
+        var info = openmiles.AILSOUNDINFO{
+            .format = rand.int(i32),
+            .data_ptr = &buf,
+            .data_len = len,
+            .rate = if (rand.boolean()) 44100 else rand.int(u32),
+            .bits = rand.int(i32), // adversarial — was @intCast'd to u16 unguarded
+            .channels = rand.int(i32), // adversarial
+            .samples = rand.int(u32),
+            .block_size = rand.int(u32),
+            .initial_ptr = null,
+        };
+        _ = api_3d.AIL_set_3D_sample_info(@ptrCast(s), &info);
+    }
+}
+
 test "fuzz 3D spatial exports with adversarial floats (C-ABI)" {
     var prng = std.Random.DefaultPrng.init(0xC0FFEE12);
     const rand = prng.random();
