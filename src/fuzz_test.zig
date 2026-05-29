@@ -251,6 +251,54 @@ test "fuzz Sequence control with adversarial values" {
     }
 }
 
+test "fuzz Filter cutoff/order with adversarial values" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE0A);
+    const rand = prng.random();
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const provider = try openmiles.Provider.init(testing.allocator, null);
+    defer provider.deinit();
+    const filter = openmiles.Filter.init(provider, driver) catch return;
+    defer filter.deinit();
+
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const f = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        switch (rand.intRangeAtMost(u8, 0, 3)) {
+            0 => filter.setAttribute("Cutoff", f),
+            1 => filter.setAttribute("Order", f),
+            2 => filter.setCutoff(@floatCast(f)),
+            3 => _ = filter.getAttribute(if (rand.boolean()) "Order" else "Cutoff"),
+            else => unreachable,
+        }
+    }
+}
+
+test "fuzz Sample3D effect setters with adversarial floats" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE0B);
+    const rand = prng.random();
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    var i: usize = 0;
+    while (i < 1500) : (i += 1) {
+        const s = openmiles.Sample3D.init(driver) catch continue;
+        defer s.deinit();
+        const a = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        const b = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        const c = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        switch (rand.intRangeAtMost(u8, 0, 5)) {
+            0 => s.setObstruction(a),
+            1 => s.setOcclusion(a),
+            2 => s.setMinMaxDistance(a, b),
+            3 => s.setVelocity(a, b, c),
+            4 => s.setOrientation(a, b, c, a, b, c),
+            5 => s.applyCone(),
+            else => unreachable,
+        }
+    }
+}
+
 test "fuzz AIL_init_sequence with random MIDI/XMI data" {
     var prng = std.Random.DefaultPrng.init(0xC0FFEE06);
     const rand = prng.random();

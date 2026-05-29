@@ -849,9 +849,9 @@ pub const Sample = struct {
 
         const sample_rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
         const channels = ma.ma_engine_get_channels(&self.driver.engine);
-        // Clamp the reflection delay to a sane span (<=10s) so huge/Inf inputs
-        // can't overflow the @intFromFloat conversion.
-        const max_delay: u64 = @as(u64, sample_rate) * 10;
+        // Clamp the reflection delay to a sane span (<=1s) so huge/Inf inputs
+        // can't overflow the @intFromFloat conversion or exceed the delay node.
+        const max_delay: u64 = @as(u64, sample_rate);
         const delay_frames: u32 = @intCast(@max(@as(u64, 1), @min(satU64(reflect_time * @as(f32, @floatFromInt(sample_rate))), max_delay)));
         // Map room_type to decay: higher room_type = longer decay tail
         const decay: f32 = @min(0.95, room_type * 0.15);

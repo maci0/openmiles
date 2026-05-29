@@ -151,7 +151,7 @@ pub const Filter = struct {
 
     /// Set the low-pass cutoff frequency in Hz and reinitialize the filter.
     pub fn setCutoff(self: *Filter, frequency: f64) void {
-        const clamped = @max(20.0, @min(frequency, 22050.0));
+        const clamped = if (std.math.isNan(frequency)) 1000.0 else @max(20.0, @min(frequency, 22050.0));
         if (clamped == self.cutoff_frequency) return;
         self.cutoff_frequency = clamped;
         if (self.lpf_initialized) {
@@ -177,7 +177,9 @@ pub const Filter = struct {
         if (std.ascii.eqlIgnoreCase(name, "cutoff")) {
             self.setCutoff(@floatCast(value));
         } else if (std.ascii.eqlIgnoreCase(name, "order")) {
-            const new_order: u32 = @intFromFloat(@max(1.0, @min(value, 4.0)));
+            // Guard NaN (which would slip past @max/@min and panic @intFromFloat).
+            const v: f32 = if (std.math.isNan(value)) 1.0 else @max(1.0, @min(value, 4.0));
+            const new_order: u32 = @intFromFloat(v);
             if (new_order != self.order) {
                 self.order = new_order;
                 // Force reinit: temporarily invalidate cutoff so setCutoff doesn't early-return
