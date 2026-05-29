@@ -222,20 +222,24 @@ pub export fn AIL_set_3D_sample_loop_block(s: ?*anyopaque, loop_start: i32, loop
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.setLoopBlock(loop_start, loop_end);
 }
-pub export fn AIL_set_3D_sample_cone(s: ?*anyopaque, inner_angle: f32, outer_angle: f32, outer_volume: f32) callconv(.winapi) void {
+// AIL_set_3D_sample_cone(H3DSAMPLE, F32 inner_angle, F32 outer_angle, S32 outer_volume)
+// outer_volume is an MSS 0-127 scalar; stored internally as a 0..1 gain.
+pub export fn AIL_set_3D_sample_cone(s: ?*anyopaque, inner_angle: f32, outer_angle: f32, outer_volume: i32) callconv(.winapi) void {
     const p = s orelse return;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.cone_inner_rad = inner_angle * openmiles.deg2rad;
     sample.cone_outer_rad = outer_angle * openmiles.deg2rad;
-    sample.cone_outer_volume = outer_volume;
+    const clamped: f32 = @floatFromInt(@min(@max(outer_volume, 0), 127));
+    sample.cone_outer_volume = clamped / 127.0;
     sample.applyCone();
 }
-pub export fn AIL_3D_sample_cone(s: ?*anyopaque, inner_angle: ?*f32, outer_angle: ?*f32, outer_volume: ?*f32) callconv(.winapi) void {
+// AIL_3D_sample_cone(H3DSAMPLE, F32* inner_angle, F32* outer_angle, S32* outer_volume)
+pub export fn AIL_3D_sample_cone(s: ?*anyopaque, inner_angle: ?*f32, outer_angle: ?*f32, outer_volume: ?*i32) callconv(.winapi) void {
     const p = s orelse return;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     if (inner_angle) |a| a.* = sample.cone_inner_rad / openmiles.deg2rad;
     if (outer_angle) |a| a.* = sample.cone_outer_rad / openmiles.deg2rad;
-    if (outer_volume) |a| a.* = sample.cone_outer_volume;
+    if (outer_volume) |a| a.* = @intFromFloat(sample.cone_outer_volume * 127.0 + 0.5);
 }
 pub export fn AIL_set_3D_sample_effects_level(s: ?*anyopaque, effects_level: f32) callconv(.winapi) void {
     const p = s orelse return;

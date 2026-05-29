@@ -58,9 +58,11 @@ pub export fn AIL_redbook_id(hb: ?*openmiles.Redbook) callconv(.winapi) [*:0]con
     _ = hb;
     return "";
 }
-pub export fn AIL_redbook_open_drive(drive: [*:0]const u8) callconv(.winapi) ?*openmiles.Redbook {
-    log("AIL_redbook_open_drive(drive={s})\n", .{drive});
-    return openmiles.Redbook.init(openmiles.global_allocator, 0) catch {
+// AIL_redbook_open_drive(S32 drive) — drive is an integer drive index, not a string.
+pub export fn AIL_redbook_open_drive(drive: i32) callconv(.winapi) ?*openmiles.Redbook {
+    log("AIL_redbook_open_drive(drive={d})\n", .{drive});
+    const which: u32 = if (drive < 0) 0 else @intCast(drive);
+    return openmiles.Redbook.init(openmiles.global_allocator, which) catch {
         openmiles.setLastError("Failed to open Redbook drive");
         return null;
     };

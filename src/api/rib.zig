@@ -203,7 +203,10 @@ pub export fn RIB_request_interface_entry(provider_opt: ?*Provider, name: [*:0]c
     }
     return 0;
 }
-pub export fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const u8, next: *?*anyopaque, entry_name: *[*:0]const u8, token: *usize) callconv(.winapi) i32 {
+// RIB_enumerate_interface(HPROVIDER provider, C8 *interface_name,
+//                         RIB_ENTRY_TYPE type, HINTENUM *next, RIB_INTERFACE_ENTRY *dest)
+// Iterates the named interface's entries, filling `dest` with each entry.
+pub export fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const u8, entry_type: u32, next: *?*anyopaque, dest: *openmiles.RIB_INTERFACE_ENTRY) callconv(.winapi) i32 {
     const provider = provider_opt orelse return 0;
     const iface_name = std.mem.span(name);
     for (provider.interfaces.items) |iface| {
@@ -213,9 +216,13 @@ pub export fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const
         var it = iface.entries.iterator();
         while (it.next()) |kv| {
             if (i == idx) {
-                // Keys were stored with dupeZ, so key.ptr is null-terminated
-                entry_name.* = @ptrCast(kv.key_ptr.*.ptr);
-                token.* = kv.value_ptr.*;
+                // Keys were stored with dupeZ, so key.ptr is null-terminated.
+                dest.* = .{
+                    .entry_type = if (entry_type == 1) .RIB_ATTRIBUTE else .RIB_FUNCTION,
+                    .name = @ptrCast(kv.key_ptr.*.ptr),
+                    .token = kv.value_ptr.*,
+                    .subtype = 0,
+                };
                 next.* = @ptrFromInt(idx + 1);
                 return 1;
             }

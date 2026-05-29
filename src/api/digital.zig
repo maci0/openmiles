@@ -374,14 +374,15 @@ pub export fn AIL_allocate_file_sample(driver_opt: ?*DigitalDriver, data: *anyop
     };
     return s;
 }
-pub export fn AIL_load_sample_buffer(s_opt: ?*Sample, data: *anyopaque, len: u32, buffer_id: i32) callconv(.winapi) void {
+// AIL_load_sample_buffer(HSAMPLE S, U32 buff_num, void const *buffer, U32 len)
+pub export fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: u32, data: *anyopaque, len: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
+    const buffer_id: i32 = @intCast(buff_num);
     s.last_loaded_buffer = buffer_id;
     if (s.pcm_format != null) {
         // Raw PCM + a known format = MSS double-buffer streaming. Feed the buffer
         // into the ping-pong stream source (zero-copy; the app owns it until EOB).
-        const idx: usize = if (buffer_id < 0) 0 else @intCast(buffer_id);
-        s.loadStreamBuffer(idx, data, len) catch |err| {
+        s.loadStreamBuffer(@intCast(buff_num), data, len) catch |err| {
             openmiles.log("AIL_load_sample_buffer: stream feed failed: {any}\n", .{err});
             return;
         };
@@ -477,8 +478,10 @@ pub export fn AIL_set_filter_preference(filter_ptr: *anyopaque, name: [*:0]const
     const v: *const f32 = @ptrCast(@alignCast(val));
     filter.setAttribute(std.mem.span(name), v.*);
 }
-pub export fn AIL_primary_digital_driver(device_num: i32) callconv(.winapi) ?*DigitalDriver {
-    _ = device_num;
+// AIL_primary_digital_driver(HDIGDRIVER new_primary) -> HDIGDRIVER
+// Passing a driver makes it the primary; null queries the current primary.
+pub export fn AIL_primary_digital_driver(new_primary: ?*DigitalDriver) callconv(.winapi) ?*DigitalDriver {
+    if (new_primary) |d| openmiles.last_digital_driver = d;
     return openmiles.last_digital_driver;
 }
 pub export fn AIL_digital_CPU_percent(driver_opt: ?*DigitalDriver) callconv(.winapi) f32 {

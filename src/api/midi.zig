@@ -243,11 +243,11 @@ pub export fn AIL_controller_value(seq_opt: ?*Sequence, channel: i32, controller
         else => return 0,
     }
 }
-pub export fn AIL_send_channel_voice_message(seq_opt: ?*Sequence, status: i32, d1: i32, d2: i32, time: i32) callconv(.winapi) void {
-    const seq = seq_opt orelse return;
-    _ = time;
-    if (seq.driver.soundfont == null) return;
-    const sf = seq.driver.soundfont.?;
+// AIL_send_channel_voice_message(HMDIDRIVER mdi, HSEQUENCE S, S32 status, S32 data_1, S32 data_2)
+pub export fn AIL_send_channel_voice_message(mdi_opt: ?*MidiDriver, seq_opt: ?*Sequence, status: i32, d1: i32, d2: i32) callconv(.winapi) void {
+    // Prefer the sequence's soundfont; fall back to the driver's when no sequence.
+    const sf_opt = if (seq_opt) |seq| seq.driver.soundfont else if (mdi_opt) |mdi| mdi.soundfont else null;
+    const sf = sf_opt orelse return;
     const tsf_mod = openmiles.tsf;
     const msg_type = status & 0xF0;
     const channel = status & 0x0F;
@@ -317,10 +317,11 @@ pub export fn AIL_register_beat_callback(seq_opt: ?*Sequence, callback: ?*anyopa
     seq.beat_callback = if (callback) |cb| @intFromPtr(cb) else 0;
     return prev;
 }
-pub export fn AIL_register_event_callback(seq_opt: ?*Sequence, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
-    const seq = seq_opt orelse return null;
-    const prev: ?*anyopaque = @ptrFromInt(seq.event_callback);
-    seq.event_callback = if (callback) |cb| @intFromPtr(cb) else 0;
+// AIL_register_event_callback(HMDIDRIVER mdi, AILEVENTCB cb) — driver-level.
+pub export fn AIL_register_event_callback(mdi_opt: ?*MidiDriver, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    const mdi = mdi_opt orelse return null;
+    const prev: ?*anyopaque = @ptrFromInt(mdi.event_callback);
+    mdi.event_callback = if (callback) |cb| @intFromPtr(cb) else 0;
     return prev;
 }
 pub export fn AIL_register_prefix_callback(seq_opt: ?*Sequence, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
@@ -335,10 +336,11 @@ pub export fn AIL_register_trigger_callback(seq_opt: ?*Sequence, callback: ?*any
     seq.trigger_callback = if (callback) |cb| @intFromPtr(cb) else 0;
     return prev;
 }
-pub export fn AIL_register_timbre_callback(seq_opt: ?*Sequence, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
-    const seq = seq_opt orelse return null;
-    const prev: ?*anyopaque = @ptrFromInt(seq.timbre_callback);
-    seq.timbre_callback = if (callback) |cb| @intFromPtr(cb) else 0;
+// AIL_register_timbre_callback(HMDIDRIVER mdi, AILTIMBRECB cb) — driver-level.
+pub export fn AIL_register_timbre_callback(mdi_opt: ?*MidiDriver, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    const mdi = mdi_opt orelse return null;
+    const prev: ?*anyopaque = @ptrFromInt(mdi.timbre_callback);
+    mdi.timbre_callback = if (callback) |cb| @intFromPtr(cb) else 0;
     return prev;
 }
 pub export fn AIL_branch_index(seq_opt: ?*Sequence, marker: u32) callconv(.winapi) void {

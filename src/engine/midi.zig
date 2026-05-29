@@ -27,6 +27,10 @@ pub const MidiDriver = struct {
     soundfont_size_bytes: u32 = 0,
     // DLS processor callback (stored but not invoked; TSF has its own pipeline)
     dls_processor: usize = 0,
+    // Driver-level MIDI callbacks (MSS registers these on HMDIDRIVER, not a
+    // sequence): AILEVENTCB(hmi, seq, status, d1, d2) and AILTIMBRECB(hmi, bank, patch).
+    event_callback: usize = 0,
+    timbre_callback: usize = 0,
     // DLS filter preferences — stored name/value pairs for AIL_set_filter_DLS_preference
     // and AIL_filter_DLS_attribute round-tripping. Simple last-set wins.
     dls_filter_pref_cutoff: f32 = 0.0,
@@ -156,13 +160,12 @@ pub const Sequence = struct {
     current_beat_in_measure: i32 = 1,
     current_measure: i32 = 1,
     beats_per_measure: i32 = 4,
-    // Callbacks
+    // Callbacks (per-sequence: beat/prefix/trigger/sequence take HSEQUENCE).
+    // event/timbre are driver-level and live on MidiDriver instead.
     beat_callback: usize = 0,
-    event_callback: usize = 0,
     prefix_callback: usize = 0,
     trigger_callback: usize = 0,
     sequence_callback: usize = 0,
-    timbre_callback: usize = 0,
     // Per-channel bank select (CC0 MSB) for timbre_callback
     channel_bank: [16]i32 = [_]i32{0} ** 16,
     // XMIDI FOR/NEXT loop stack
@@ -361,9 +364,10 @@ pub const Sequence = struct {
                         tsf.TML_PROGRAM_CHANGE => {
                             const prog = openmiles_tml_get_program(msg);
                             var allow: i32 = 1;
-                            if (self.timbre_callback != 0) {
-                                const cb: *const fn (*Sequence, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.timbre_callback);
-                                allow = cb(self, self.channel_bank[@intCast(@as(u32, @intCast(phys_ch)))], @intCast(prog));
+                            if (self.driver.timbre_callback != 0) {
+                                // AILTIMBRECB(HMDIDRIVER hmi, S32 bank, S32 patch)
+                                const cb: *const fn (?*anyopaque, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.driver.timbre_callback);
+                                allow = cb(@ptrCast(self.driver), self.channel_bank[@intCast(@as(u32, @intCast(phys_ch)))], @intCast(prog));
                             }
                             if (allow != 0) {
                                 _ = tsf.tsf_channel_set_presetnumber(self.driver.soundfont, phys_ch, prog, if (phys_ch == 9) 1 else 0);
@@ -428,10 +432,11 @@ pub const Sequence = struct {
                                     self.channel_bank[ch_idx] = @intCast(val);
                                 }
                                 _ = tsf.tsf_channel_midi_control(self.driver.soundfont, phys_ch, ctrl, val);
-                                // Notify event callback with logical channel for game compatibility
-                                if (self.event_callback != 0) {
-                                    const cb: *const fn (*Sequence, i32, i32, i32, i32) callconv(.winapi) void = @ptrFromInt(self.event_callback);
-                                    cb(self, @intCast(msg.*.channel), @intFromFloat(self.time_ms), @intCast(ctrl), @intCast(val));
+                                // AILEVENTCB(HMDIDRIVER hmi, HSEQUENCE seq, S32 status, S32 data_1, S32 data_2)
+                                // status = 0xB0 | logical channel for a control-change event.
+                                if (self.driver.event_callback != 0) {
+                                    const cb: *const fn (?*anyopaque, ?*anyopaque, i32, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.driver.event_callback);
+                                    _ = cb(@ptrCast(self.driver), @ptrCast(self), 0xB0 | @as(i32, @intCast(msg.*.channel)), @intCast(ctrl), @intCast(val));
                                 }
                             }
                         },
