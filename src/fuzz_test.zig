@@ -18,6 +18,16 @@ const openmiles = @import("openmiles");
 const api_digital = @import("api/digital.zig");
 const api_redbook = @import("api/redbook.zig");
 const api_quick = @import("api/quick.zig");
+const api_dls = @import("api/dls.zig");
+const api_midi = @import("api/midi.zig");
+const api_3d = @import("api/3d.zig");
+const api_timer = @import("api/timer.zig");
+
+fn freeLock(p: ?*anyopaque) void {
+    if (p) |ptr| api_digital.AIL_mem_free_lock(ptr);
+}
+
+fn dummyTimerCb(_: u32) callconv(.winapi) void {}
 
 const ITERS = 3000;
 
@@ -399,6 +409,113 @@ test "fuzz AIL digital sample seek/position exports with adversarial values" {
             5 => api_digital.AIL_set_sample_loop_count(s, iv),
             else => unreachable,
         }
+    }
+}
+
+test "fuzz DLS container exports (find/extract/merge/list/filter)" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE10);
+    const rand = prng.random();
+    var buf: [4096]u8 = undefined;
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const len = rand.intRangeAtMost(usize, 0, buf.len);
+        const data = randBytes(rand, &buf, len);
+        // Plant RIFF/DLS or FORM signatures to reach the real split branches.
+        if (data.len >= 12 and rand.boolean()) {
+            @memcpy(data[0..4], "RIFF");
+            @memcpy(data[8..12], "DLS ");
+            std.mem.writeInt(u32, data[4..8][0..4], @intCast(if (len >= 8) len - 8 else 0), .little);
+        }
+
+        // find_DLS returns interior pointers (do not free).
+        var xo: ?*anyopaque = null;
+        var xl: u32 = 0;
+        var do_: ?*anyopaque = null;
+        var dl: u32 = 0;
+        _ = api_dls.AIL_find_DLS(data.ptr, @intCast(len), &xo, &xl, &do_, &dl);
+
+        // extract_DLS allocates copies (free with AIL_mem_free_lock).
+        var exo: ?*anyopaque = null;
+        var exl: u32 = 0;
+        var edo: ?*anyopaque = null;
+        var edl: u32 = 0;
+        _ = api_dls.AIL_extract_DLS(data.ptr, @intCast(len), &exo, &exl, &edo, &edl, null);
+        freeLock(exo);
+        freeLock(edo);
+
+        // list_DLS allocates a text buffer.
+        var lst: ?*anyopaque = null;
+        var lsz: u32 = 0;
+        _ = api_dls.AIL_list_DLS(data.ptr, &lst, &lsz, 0, null);
+        freeLock(lst);
+
+        // merge/filter: split the buffer into two halves as xmi/dls inputs.
+        if (len >= 24) {
+            const half = len / 2;
+            var mo: ?*anyopaque = null;
+            var ml: u32 = 0;
+            _ = api_dls.AIL_merge_DLS_with_XMI(data.ptr, data[half..].ptr, &mo, &ml);
+            freeLock(mo);
+            var fo: ?*anyopaque = null;
+            var fl: u32 = 0;
+            _ = api_dls.AIL_filter_DLS_with_XMI(data.ptr, data[half..].ptr, &fo, &fl, 0, null);
+            freeLock(fo);
+        }
+    }
+}
+
+test "fuzz AIL_MIDI_to_XMI with random data" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE11);
+    const rand = prng.random();
+    var buf: [2048]u8 = undefined;
+    var out: [4096]u8 = undefined;
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const len = rand.intRangeAtMost(usize, 0, buf.len);
+        _ = randBytes(rand, &buf, len);
+        if (len >= 4 and rand.boolean()) @memcpy(buf[0..4], "MThd");
+        var out_len: u32 = out.len;
+        _ = api_midi.AIL_MIDI_to_XMI(&buf, @intCast(len), &out, &out_len, 0);
+    }
+}
+
+test "fuzz 3D spatial exports with adversarial floats (C-ABI)" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE12);
+    const rand = prng.random();
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    var i: usize = 0;
+    while (i < 1500) : (i += 1) {
+        const s = openmiles.Sample3D.init(driver) catch continue;
+        defer s.deinit();
+        const obj: *anyopaque = @ptrCast(s);
+        const a = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        const b = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        const c = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        const iv = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
+        switch (rand.intRangeAtMost(u8, 0, 4)) {
+            0 => api_3d.AIL_set_3D_position(obj, a, b, c),
+            1 => api_3d.AIL_set_3D_velocity(obj, a, b, c, a),
+            2 => api_3d.AIL_set_3D_orientation(obj, a, b, c, a, b, c),
+            3 => api_3d.AIL_set_3D_sample_distances(obj, a, b),
+            4 => api_3d.AIL_set_3D_sample_cone(obj, a, b, iv),
+            else => unreachable,
+        }
+    }
+}
+
+test "fuzz timer config with adversarial periods" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE13);
+    const rand = prng.random();
+    var i: usize = 0;
+    while (i < 500) : (i += 1) {
+        const timer = api_timer.AIL_register_timer(dummyTimerCb) orelse continue;
+        const t: *openmiles.Timer = @ptrCast(@alignCast(timer));
+        defer api_timer.AIL_release_timer_handle(t);
+        const v: u32 = @bitCast(adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)]);
+        // Includes 0 -> exercises any divide-by-zero in frequency->period.
+        if (rand.boolean()) api_timer.AIL_set_timer_frequency(t, v) else api_timer.AIL_set_timer_period(t, v);
     }
 }
 
