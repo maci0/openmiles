@@ -593,7 +593,6 @@ pub fn closeMidiDriver(driver: *MidiDriver) void {
     driver.deinit();
 }
 
-comptime {
-    _ = @import("main_test.zig");
-    _ = @import("fuzz_test.zig");
-}
+// Test entry points live in test_root.zig (the test build's root module), which
+// imports this file as the shared "openmiles" module so tests and the C-ABI api
+// wrappers reference one set of types.

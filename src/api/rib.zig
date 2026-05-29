@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const openmiles = @import("openmiles");
 const log = openmiles.log;
 const io = openmiles.io;
@@ -121,11 +122,15 @@ pub export fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callcon
     const id = @atomicRmw(u32, &openmiles.asi_temp_counter, .Add, 1, .monotonic);
     var path_buf: [512:0]u8 = undefined;
 
-    const GetTempPathA = struct {
-        extern "kernel32" fn GetTempPathA(nBufferLength: u32, lpBuffer: [*]u8) callconv(.winapi) u32;
-    }.GetTempPathA;
     var tmp_dir_buf: [260]u8 = undefined;
-    const tmp_len = GetTempPathA(tmp_dir_buf.len, &tmp_dir_buf);
+    // GetTempPathA exists only on Windows (the real deploy target); elsewhere
+    // (e.g. the native test build) fall back to a cwd-relative temp file.
+    const tmp_len: u32 = if (builtin.os.tag == .windows) blk: {
+        const GetTempPathA = struct {
+            extern "kernel32" fn GetTempPathA(nBufferLength: u32, lpBuffer: [*]u8) callconv(.winapi) u32;
+        }.GetTempPathA;
+        break :blk GetTempPathA(tmp_dir_buf.len, &tmp_dir_buf);
+    } else 0;
 
     const path: [:0]const u8 = if (tmp_len > 0)
         std.fmt.bufPrintZ(&path_buf, "{s}om_asi_{d}.dll", .{ tmp_dir_buf[0..tmp_len], id }) catch |err| {

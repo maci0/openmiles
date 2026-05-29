@@ -70,13 +70,16 @@ pub fn build(b: *std.Build) void {
     // Tests
     const mod_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/root.zig"),
+            .root_source_file = b.path("src/test_root.zig"),
             .target = target,
             .optimize = optimize,
             .link_libc = true,
             .imports = &.{
                 .{ .name = "ma_c", .module = ma_mod },
                 .{ .name = "tsf_c", .module = tsf_mod },
+                // Share the same openmiles module the api wrappers import, so
+                // test code and AIL_* exports exchange identical types.
+                .{ .name = "openmiles", .module = mod },
             },
         }),
     });

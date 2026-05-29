@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-const openmiles = @import("root.zig");
+const openmiles = @import("openmiles");
 
 test "DigitalDriver init and deinit" {
     const allocator = testing.allocator;

@@ -12,7 +12,11 @@
 
 const std = @import("std");
 const testing = std.testing;
-const openmiles = @import("root.zig");
+const openmiles = @import("openmiles");
+// C-ABI export modules — reachable now that the test build shares the openmiles
+// module with the api wrappers (see test_root.zig).
+const api_digital = @import("api/digital.zig");
+const api_redbook = @import("api/redbook.zig");
 
 const ITERS = 3000;
 
@@ -294,6 +298,46 @@ test "fuzz Sample3D effect setters with adversarial floats" {
             3 => s.setVelocity(a, b, c),
             4 => s.setOrientation(a, b, c, a, b, c),
             5 => s.applyCone(),
+            else => unreachable,
+        }
+    }
+}
+
+test "fuzz AIL_WAV_info chunk walk (C-ABI export)" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE0C);
+    const rand = prng.random();
+    var buf: [1024]u8 = undefined;
+    var info: openmiles.AILSOUNDINFO = undefined;
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        rand.bytes(&buf);
+        // Self-consistent RIFF/WAVE shell (the size-less API trusts the declared
+        // RIFF size as its bound); chunk bytes stay random to fuzz the walk.
+        @memcpy(buf[0..4], "RIFF");
+        const body = rand.intRangeAtMost(u32, 0, @as(u32, buf.len - 8));
+        std.mem.writeInt(u32, buf[4..8][0..4], body, .little);
+        @memcpy(buf[8..12], "WAVE");
+        if (rand.boolean()) @memcpy(buf[12..16], "fmt ");
+        _ = api_digital.AIL_WAV_info(&buf, &info);
+    }
+}
+
+test "fuzz AIL_redbook drive/track ops (C-ABI export)" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE0D);
+    const rand = prng.random();
+    var i: usize = 0;
+    while (i < 500) : (i += 1) {
+        const drive = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
+        const rb = api_redbook.AIL_redbook_open_drive(drive) orelse continue;
+        defer api_redbook.AIL_redbook_close(rb);
+        const t1: u32 = @bitCast(adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)]);
+        const t2: u32 = @bitCast(adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)]);
+        switch (rand.intRangeAtMost(u8, 0, 4)) {
+            0 => _ = api_redbook.AIL_redbook_play(rb, t1, t2),
+            1 => _ = api_redbook.AIL_redbook_track_info(rb, t1, null, null),
+            2 => api_redbook.AIL_redbook_set_volume(rb, @bitCast(t1)),
+            3 => _ = api_redbook.AIL_redbook_status(rb),
+            4 => _ = api_redbook.AIL_redbook_position(rb),
             else => unreachable,
         }
     }
