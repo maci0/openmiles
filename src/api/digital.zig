@@ -996,7 +996,7 @@ comptime {
             .{ .name = "AIL_enumerate_3D_sample_attributes", .stack_size = 12 },
             .{ .name = "AIL_3D_orientation", .stack_size = 28 },
             .{ .name = "AIL_3D_position", .stack_size = 16 },
-            .{ .name = "AIL_3D_velocity", .stack_size = 20 },
+            .{ .name = "AIL_3D_velocity", .stack_size = 16 },
             .{ .name = "AIL_3D_sample_distances", .stack_size = 12 },
             // Sequence extras
             .{ .name = "AIL_sequence_ms_position", .stack_size = 12 },

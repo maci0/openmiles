@@ -565,20 +565,20 @@ pub export fn AIL_3D_position(obj: *anyopaque, x: ?*f32, y: ?*f32, z: ?*f32) cal
         if (z) |p| p.* = s.pos_z;
     }
 }
-pub export fn AIL_3D_velocity(obj: *anyopaque, x: ?*f32, y: ?*f32, z: ?*f32, factor: ?*f32) callconv(.winapi) void {
+// AIL_3D_velocity(H3DPOBJECT obj, F32 *dX_per_ms, F32 *dY_per_ms, F32 *dZ_per_ms)
+// Getter takes no magnitude out-param (unlike the setter).
+pub export fn AIL_3D_velocity(obj: *anyopaque, x: ?*f32, y: ?*f32, z: ?*f32) callconv(.winapi) void {
     if (openmiles.isKnownDriver(obj)) {
         const dig: *DigitalDriver = @ptrCast(@alignCast(obj));
         const vel = dig.getListenerVelocity();
         if (x) |p| p.* = vel.x;
         if (y) |p| p.* = vel.y;
         if (z) |p| p.* = vel.z;
-        if (factor) |p| p.* = 1.0;
     } else {
         const s: *openmiles.Sample3D = @ptrCast(@alignCast(obj));
         if (x) |p| p.* = s.velocity_x;
         if (y) |p| p.* = s.velocity_y;
         if (z) |p| p.* = s.velocity_z;
-        if (factor) |p| p.* = 1.0;
     }
 }
 pub export fn AIL_3D_sample_distances(s_opt: ?*openmiles.Sample3D, max_dist: ?*f32, min_dist: ?*f32) callconv(.winapi) void {

@@ -9,6 +9,22 @@ const deg2rad = root.deg2rad;
 const buildWavFromPcm = root.buildWavFromPcm;
 const StreamSource = @import("stream_buffer.zig").StreamSource;
 
+/// Saturating f32 -> u64 (NaN/negative -> 0, overflow -> clamped). Guards the
+/// `@intFromFloat` panic when external callers pass negative/huge positions.
+fn satU64(v: f32) u64 {
+    if (!(v >= 0)) return 0; // false for NaN and negatives
+    if (v >= 1.8446744e19) return std.math.maxInt(u64);
+    return @intFromFloat(v);
+}
+
+/// Saturating f32 -> i32 (NaN -> 0, out-of-range -> clamped).
+fn satI32(v: f32) i32 {
+    if (std.math.isNan(v)) return 0;
+    if (v >= 2147483647.0) return std.math.maxInt(i32);
+    if (v <= -2147483648.0) return std.math.minInt(i32);
+    return @intFromFloat(v);
+}
+
 pub const SampleStatus = enum(u32) {
     free = 1, // SMP_FREE
     done = 2, // SMP_DONE
@@ -824,7 +840,8 @@ pub const Sample = struct {
         self.reverb_reflect_time = reflect_time;
         log("Sample.setReverb: s={*}, room={d}, level={d}, time={d}\n", .{ self, room_type, level, reflect_time });
 
-        if (level <= 0.001 or reflect_time <= 0.001) {
+        // `!(x > 0.001)` rejects NaN as well as non-positive values.
+        if (!(level > 0.001) or !(reflect_time > 0.001)) {
             self.removeReverb();
             return;
         }
@@ -832,7 +849,10 @@ pub const Sample = struct {
 
         const sample_rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
         const channels = ma.ma_engine_get_channels(&self.driver.engine);
-        const delay_frames: u32 = @intFromFloat(@max(1.0, reflect_time * @as(f32, @floatFromInt(sample_rate))));
+        // Clamp the reflection delay to a sane span (<=10s) so huge/Inf inputs
+        // can't overflow the @intFromFloat conversion.
+        const max_delay: u64 = @as(u64, sample_rate) * 10;
+        const delay_frames: u32 = @intCast(@max(@as(u64, 1), @min(satU64(reflect_time * @as(f32, @floatFromInt(sample_rate))), max_delay)));
         // Map room_type to decay: higher room_type = longer decay tail
         const decay: f32 = @min(0.95, room_type * 0.15);
 
@@ -981,8 +1001,8 @@ pub const Sample = struct {
             _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
             const rate = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
             const ms_per_frame = 1000.0 / rate;
-            pos.current = @as(i32, @intFromFloat(@as(f32, @floatFromInt(cursor)) * ms_per_frame));
-            pos.total = @as(i32, @intFromFloat(@as(f32, @floatFromInt(self.cached_length_frames)) * ms_per_frame));
+            pos.current = satI32(@as(f32, @floatFromInt(cursor)) * ms_per_frame);
+            pos.total = satI32(@as(f32, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
         }
         return pos;
     }
@@ -990,7 +1010,8 @@ pub const Sample = struct {
     pub fn setMsPosition(self: *Sample, ms: i32) void {
         if (self.is_initialized and self.decoder != null) {
             const rate = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
-            const frame = @as(u64, @intFromFloat(@as(f32, @floatFromInt(ms)) * rate / 1000.0));
+            // Negative positions clamp to the start (satU64 maps <0/NaN to 0).
+            const frame = satU64(@as(f32, @floatFromInt(ms)) * rate / 1000.0);
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
         }
     }
@@ -1440,8 +1461,8 @@ pub const Sample3D = struct {
             _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
             const rate = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
             const ms_per_frame = 1000.0 / rate;
-            pos.current = @as(i32, @intFromFloat(@as(f32, @floatFromInt(cursor)) * ms_per_frame));
-            pos.total = @as(i32, @intFromFloat(@as(f32, @floatFromInt(self.cached_length_frames)) * ms_per_frame));
+            pos.current = satI32(@as(f32, @floatFromInt(cursor)) * ms_per_frame);
+            pos.total = satI32(@as(f32, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
         }
         return pos;
     }
@@ -1449,7 +1470,7 @@ pub const Sample3D = struct {
     pub fn setMsPosition(self: *Sample3D, ms: i32) void {
         if (self.is_initialized and self.decoder != null) {
             const rate = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
-            const frame = @as(u64, @intFromFloat(@as(f32, @floatFromInt(ms)) * rate / 1000.0));
+            const frame = satU64(@as(f32, @floatFromInt(ms)) * rate / 1000.0);
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
         }
     }

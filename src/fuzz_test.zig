@@ -1,0 +1,271 @@
+//! Fuzz / robustness suite.
+//!
+//! Each test drives an API or parser with thousands of pseudo-random and
+//! adversarial inputs (truncated headers, lying length fields, huge/zero sizes)
+//! using a fixed-seed PRNG so failures reproduce. The safe-mode build turns any
+//! out-of-bounds access, integer overflow, or unreachable into a panic, so a
+//! green run means every fuzzed surface handled the garbage without UB.
+//!
+//! Pure parsers (slice-bounded) and the streaming source are fuzzed directly;
+//! the C-ABI sample/sequence entry points are fuzzed against a device-less
+//! engine (miniaudio initializes with "No Device").
+
+const std = @import("std");
+const testing = std.testing;
+const openmiles = @import("root.zig");
+
+const ITERS = 3000;
+
+/// Fill `buf` with `len` random bytes and return the slice.
+fn randBytes(rand: std.Random, buf: []u8, len: usize) []u8 {
+    const n = @min(len, buf.len);
+    rand.bytes(buf[0..n]);
+    return buf[0..n];
+}
+
+// --- Pure container/parsers -------------------------------------------------
+
+test "fuzz dls_container.findDls/findXmi/xmiImageSize" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE01);
+    const rand = prng.random();
+    var buf: [8192]u8 = undefined;
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const len = rand.intRangeAtMost(usize, 0, buf.len);
+        const data = randBytes(rand, &buf, len);
+        // Occasionally plant a real signature to exercise the parse branches.
+        if (data.len >= 12 and rand.boolean()) {
+            const sig = if (rand.boolean()) "RIFF" else "FORM";
+            @memcpy(data[0..4], sig);
+        }
+        _ = openmiles.dls_container.findDls(data);
+        _ = openmiles.dls_container.findXmi(data);
+        _ = openmiles.dls_container.xmiImageSize(data);
+    }
+}
+
+test "fuzz xmidiToSmf with random and truncated data" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE02);
+    const rand = prng.random();
+    var buf: [4096]u8 = undefined;
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const len = rand.intRangeAtMost(usize, 0, buf.len);
+        const data = randBytes(rand, &buf, len);
+        if (data.len >= 12 and rand.boolean()) {
+            @memcpy(data[0..4], "FORM");
+            if (rand.boolean()) @memcpy(data[8..12], "XDIR") else @memcpy(data[8..12], "XMID");
+        }
+        const seq = rand.intRangeAtMost(usize, 0, 4);
+        // May succeed or error; on success the result must be freed (no leak).
+        if (openmiles.xmidiToSmf(testing.allocator, data, seq)) |smf| {
+            testing.allocator.free(smf);
+        } else |_| {}
+    }
+}
+
+test "fuzz WAV PCM/ADPCM encoders with random params" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE03);
+    const rand = prng.random();
+    var pcm: [2048]u8 = undefined;
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const len = rand.intRangeAtMost(usize, 0, pcm.len);
+        _ = randBytes(rand, &pcm, len);
+        const channels = rand.intRangeAtMost(u16, 0, 8);
+        const rate = rand.intRangeAtMost(u32, 0, 192000);
+        const bits: u16 = if (rand.boolean()) 8 else 16;
+        if (openmiles.buildWavFromPcm(testing.allocator, pcm[0..len], channels, rate, bits)) |w| {
+            testing.allocator.free(w);
+        } else |_| {}
+
+        // ADPCM: pcm reinterpreted as i16 samples; bound total_per_ch to the buffer.
+        const ch_a = rand.intRangeAtMost(u16, 0, 4);
+        const samples_i16 = len / 2;
+        const max_per_ch = if (ch_a == 0) 0 else samples_i16 / ch_a;
+        const total_per_ch = if (max_per_ch == 0) 0 else rand.intRangeAtMost(usize, 0, max_per_ch);
+        const pcm16: [*]const i16 = @ptrCast(@alignCast(&pcm));
+        if (openmiles.buildAdpcmWav(testing.allocator, pcm16, total_per_ch, ch_a, rate)) |w| {
+            testing.allocator.free(w);
+        } else |_| {}
+    }
+}
+
+// --- Double-buffer streaming source ----------------------------------------
+
+test "fuzz StreamSource random feeds and reads" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE04);
+    const rand = prng.random();
+    var src_buf: [4096]u8 = undefined;
+    rand.bytes(&src_buf);
+    var out: [2048]u8 = undefined;
+
+    var trial: usize = 0;
+    while (trial < 200) : (trial += 1) {
+        const bits: u16 = if (rand.boolean()) 8 else 16;
+        const channels = rand.intRangeAtMost(u16, 1, 2);
+        var ss: openmiles.StreamSource = undefined;
+        try ss.init(bits, channels, rand.intRangeAtMost(u32, 1, 96000), null, null);
+        defer ss.deinit();
+
+        var step: usize = 0;
+        while (step < 30) : (step += 1) {
+            switch (rand.intRangeAtMost(u8, 0, 3)) {
+                0 => {
+                    const idx = rand.intRangeAtMost(usize, 0, 3); // includes out-of-range >1
+                    const off = rand.intRangeAtMost(usize, 0, src_buf.len);
+                    const blen = rand.intRangeAtMost(usize, 0, src_buf.len - off);
+                    ss.loadBuffer(idx, src_buf[off..].ptr, blen);
+                },
+                1 => {
+                    const want = rand.intRangeAtMost(u64, 0, out.len / 4);
+                    var read: u64 = 0;
+                    _ = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, &out, want, &read);
+                },
+                2 => _ = ss.bufferReady(),
+                3 => {
+                    var a: u32 = 0;
+                    var b: u32 = 0;
+                    var c: u32 = 0;
+                    var d: u32 = 0;
+                    ss.bufferInfo(&a, &b, &c, &d);
+                },
+                else => unreachable,
+            }
+        }
+    }
+}
+
+// --- C-ABI sample/sequence entry points (device-less engine) ---------------
+
+test "fuzz AIL sample buffer/address APIs with garbage" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE05);
+    const rand = prng.random();
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    var buf: [2048]u8 = undefined;
+    var i: usize = 0;
+    while (i < 400) : (i += 1) {
+        const s = openmiles.Sample.init(driver) catch continue;
+        defer s.deinit();
+        const len = rand.intRangeAtMost(usize, 0, buf.len);
+        _ = randBytes(rand, &buf, len);
+
+        // Random raw PCM format then feed buffers (exercises StreamSource path).
+        s.setType(rand.intRangeAtMost(u32, 0, 3), 0);
+        const nbuf = rand.intRangeAtMost(usize, 0, 3);
+        var k: usize = 0;
+        while (k < nbuf) : (k += 1) {
+            s.loadStreamBuffer(rand.intRangeAtMost(usize, 0, 1), &buf, @intCast(len)) catch {};
+        }
+        // Also exercise the whole-image decode path with garbage.
+        if (len > 0) s.setAddress(&buf, @intCast(len)) catch {};
+        _ = s.status();
+    }
+}
+
+const adv_i32 = [_]i32{ std.math.minInt(i32), -1_000_000, -1, 0, 1, 127, 44100, 1_000_000, std.math.maxInt(i32) };
+const adv_f32 = [_]f32{ std.math.nan(f32), std.math.inf(f32), -std.math.inf(f32), -1.0e30, -1.0, 0.0, 1.0e-30, 1.0, 1.0e30 };
+
+test "fuzz Sample scalar setters with adversarial values" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE07);
+    const rand = prng.random();
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    // A small valid 16-bit mono WAV so the sample is fully initialized.
+    const pcm = [_]u8{0} ** 256;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const s = openmiles.Sample.init(driver) catch continue;
+        defer s.deinit();
+        s.loadFromMemory(wav, false) catch continue;
+
+        const iv = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
+        const f1 = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        const f2 = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        const f3 = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        switch (rand.intRangeAtMost(u8, 0, 7)) {
+            0 => s.setVolume(iv),
+            1 => s.setPan(iv),
+            2 => s.setPlaybackRate(iv),
+            3 => s.setLoopCount(iv),
+            4 => s.setMsPosition(iv),
+            5 => s.setPosition(@bitCast(iv)),
+            6 => s.setLoopBlock(iv, adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)]),
+            7 => s.setReverb(f1, f2, f3),
+            else => unreachable,
+        }
+    }
+}
+
+test "fuzz Sample3D spatial setters with adversarial floats" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE08);
+    const rand = prng.random();
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    var i: usize = 0;
+    while (i < 1500) : (i += 1) {
+        const s = openmiles.Sample3D.init(driver) catch continue;
+        defer s.deinit();
+        const f1 = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        const f2 = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        const f3 = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        const iv = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
+        switch (rand.intRangeAtMost(u8, 0, 4)) {
+            0 => s.setPosition(f1, f2, f3),
+            1 => s.setVolume(iv),
+            2 => s.setMsPosition(iv),
+            3 => s.setPlaybackRate(iv),
+            4 => s.setLoopBlock(iv, iv),
+            else => unreachable,
+        }
+    }
+}
+
+test "fuzz Sequence control with adversarial values" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE09);
+    const rand = prng.random();
+    const mdi = try openmiles.MidiDriver.init(testing.allocator);
+    defer mdi.deinit();
+
+    var i: usize = 0;
+    while (i < 1500) : (i += 1) {
+        const seq = openmiles.Sequence.init(mdi) catch continue;
+        defer seq.deinit();
+        const iv = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
+        const iv2 = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
+        switch (rand.intRangeAtMost(u8, 0, 4)) {
+            0 => seq.setVolume(iv, iv2),
+            1 => seq.startTempoFade(iv, iv2),
+            2 => seq.setLoopCount(iv),
+            3 => seq.setMsPosition(iv),
+            4 => _ = seq.status(),
+            else => unreachable,
+        }
+    }
+}
+
+test "fuzz AIL_init_sequence with random MIDI/XMI data" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE06);
+    const rand = prng.random();
+    const mdi = try openmiles.MidiDriver.init(testing.allocator);
+    defer mdi.deinit();
+
+    var buf: [4096]u8 = undefined;
+    var i: usize = 0;
+    while (i < 500) : (i += 1) {
+        const seq = openmiles.Sequence.init(mdi) catch continue;
+        defer seq.deinit();
+        const len = rand.intRangeAtMost(usize, 0, buf.len);
+        _ = randBytes(rand, &buf, len);
+        if (rand.boolean() and len >= 4) @memcpy(buf[0..4], "MThd");
+        seq.loadMidi(buf[0..len], rand.intRangeAtMost(usize, 0, 3)) catch {};
+        _ = seq.status();
+    }
+}

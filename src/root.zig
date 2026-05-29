@@ -595,4 +595,5 @@ pub fn closeMidiDriver(driver: *MidiDriver) void {
 
 comptime {
     _ = @import("main_test.zig");
+    _ = @import("fuzz_test.zig");
 }
