@@ -2132,3 +2132,21 @@ test "v8 WAV cue markers parse from cue/labl chunks" {
     try testing.expectEqual(@as(i32, 100), api_v8b.AIL_WAV_marker_by_name(img, "start"));
     try testing.expectEqual(@as(i32, -1), api_v8b.AIL_WAV_marker_by_name(img, "nope"));
 }
+
+test "v9 bus limiter: soft-clip math + attach/detach lifecycle" {
+    // Soft-clip: below the knee passes through; peaks saturate below unity.
+    try testing.expect(@abs(openmiles.LimiterNode.softClip(0.5) - 0.5) < 0.0001);
+    const hi = openmiles.LimiterNode.softClip(2.0);
+    try testing.expect(hi > 0.7 and hi < 1.0);
+    try testing.expect(@abs(openmiles.LimiterNode.softClip(-2.0) + hi) < 0.0001); // odd symmetry
+
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const bus = api_v9.AIL_allocate_bus(drv) orelse return error.NoBus;
+    const mb: *openmiles.MixBus = @ptrCast(@alignCast(bus));
+    api_v9.AIL_bus_enable_limiter(drv, 0, 1);
+    try testing.expect(mb.limiter != null);
+    api_v9.AIL_bus_enable_limiter(drv, 0, 0);
+    try testing.expect(mb.limiter == null);
+    api_v9.AIL_bus_enable_limiter(drv, 0, 1); // re-enable; freed by driver deinit
+}

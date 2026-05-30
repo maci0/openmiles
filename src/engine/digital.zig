@@ -25,15 +25,79 @@ fn satI32(v: f32) i32 {
     return @intFromFloat(v);
 }
 
+/// A peak soft-limiter as a custom miniaudio node: passes audio below the knee
+/// untouched and saturates peaks toward unity so a bus can't clip.
+pub const LimiterNode = extern struct {
+    base: ma.ma_node_base,
+
+    const knee: f32 = 0.7;
+    pub fn softClip(x: f32) f32 {
+        const a = @abs(x);
+        if (a <= knee) return x;
+        const over = (a - knee) / (1.0 - knee);
+        const shaped = knee + (1.0 - knee) * std.math.tanh(over);
+        return if (x < 0) -shaped else shaped;
+    }
+    fn process(node: ?*ma.ma_node, ppIn: [*c][*c]const f32, pInCount: [*c]u32, ppOut: [*c][*c]f32, pOutCount: [*c]u32) callconv(.c) void {
+        _ = node;
+        const n = @min(pInCount.*, pOutCount.*);
+        const total: usize = @as(usize, n) * 2; // stereo
+        const in = ppIn[0];
+        const out = ppOut[0];
+        var i: usize = 0;
+        while (i < total) : (i += 1) out[i] = softClip(in[i]);
+        pInCount.* = n;
+        pOutCount.* = n;
+    }
+    const vtable = ma.ma_node_vtable{
+        .onProcess = &process,
+        .onGetRequiredInputFrameCount = null,
+        .inputBusCount = 1,
+        .outputBusCount = 1,
+        .flags = 0,
+    };
+};
+
 /// A v9 mixer bus: a miniaudio sound group that samples route their output to,
 /// so a submix can be controlled (volume) independently of the master.
 pub const MixBus = struct {
     group: ma.ma_sound_group,
     index: i32,
     driver: *DigitalDriver,
+    limiter: ?*LimiterNode = null,
 
     pub fn setVolume(self: *MixBus, vol: f32) void {
         ma.ma_sound_group_set_volume(&self.group, vol);
+    }
+
+    /// Insert (on) or remove (off) a peak limiter between this bus and the
+    /// engine endpoint.
+    pub fn enableLimiter(self: *MixBus, on: bool) void {
+        const eng = &self.driver.engine;
+        const endpoint = ma.ma_engine_get_endpoint(eng);
+        if (on and self.limiter == null) {
+            const node = self.driver.allocator.create(LimiterNode) catch return;
+            var chans = [_]u32{2};
+            var cfg = ma.ma_node_config_init();
+            cfg.vtable = &LimiterNode.vtable;
+            cfg.inputBusCount = 1;
+            cfg.outputBusCount = 1;
+            cfg.pInputChannels = &chans;
+            cfg.pOutputChannels = &chans;
+            if (ma.ma_node_init(ma.ma_engine_get_node_graph(eng), &cfg, null, @ptrCast(node)) != ma.MA_SUCCESS) {
+                self.driver.allocator.destroy(node);
+                return;
+            }
+            _ = ma.ma_node_attach_output_bus(@ptrCast(node), 0, endpoint, 0);
+            _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, @ptrCast(node), 0);
+            self.limiter = node;
+        } else if (!on and self.limiter != null) {
+            // Route the bus straight back to the endpoint, then free the node.
+            _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, endpoint, 0);
+            ma.ma_node_uninit(@ptrCast(self.limiter.?), null);
+            self.driver.allocator.destroy(self.limiter.?);
+            self.limiter = null;
+        }
     }
 
     /// Route a sample's output through this bus instead of straight to the
@@ -155,6 +219,7 @@ pub const DigitalDriver = struct {
 
     pub fn freeAllBusses(self: *DigitalDriver) void {
         for (self.buses.items) |bus| {
+            bus.enableLimiter(false); // detach + free any limiter node first
             ma.ma_sound_group_uninit(&bus.group);
             self.allocator.destroy(bus);
         }

@@ -217,13 +217,13 @@ pub fn AIL_bus_sample_handle(dig: ?*DigitalDriver, bus_index: i32) callconv(.win
     return @ptrCast(d.busAt(bus_index));
 }
 pub fn AIL_enable_limiter(dig: ?*DigitalDriver, on_off: i32) callconv(.winapi) void {
-    _ = dig;
-    _ = on_off;
+    // Master limiter == limiter on every bus (the master submix path here).
+    const d = dig orelse return;
+    for (d.buses.items) |bus| bus.enableLimiter(on_off != 0);
 }
 pub fn AIL_bus_enable_limiter(dig: ?*DigitalDriver, bus_index: i32, on_off: i32) callconv(.winapi) void {
-    _ = dig;
-    _ = bus_index;
-    _ = on_off;
+    const d = dig orelse return;
+    if (d.busAt(bus_index)) |bus| bus.enableLimiter(on_off != 0);
 }
 pub fn AIL_install_bus_compressor(dig: ?*DigitalDriver, bus_index: i32, filter_stage: i32, input_bus_index: i32) callconv(.winapi) i32 {
     _ = dig;
