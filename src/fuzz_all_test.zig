@@ -574,6 +574,14 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_file.AIL_file_write(rstr, scp, rsz);
     _ = api_digital.AIL_WAV_file_write(rstr, scp, rsz, ri, ri);
     _ = api_midi.AIL_MIDI_to_XMI(scp, rsz, null, &uo, ru);
+    // More memory parsers fed adversarial (zeroed-prefix) buffers.
+    if (api_quick.AIL_quick_load_mem(scp, rsz)) |qs| qs.deinit();
+    api_digital.AIL_init_sample(hs);
+    _ = api_midi.AIL_init_sequence(hq, scp, ri);
+    _ = api_dls.DLSGetInfo(hm, scp, scp);
+    _ = api_dls.DLSLoadMemFile(hm, scp, ru);
+    var rib_entry: openmiles.RIB_INTERFACE_ENTRY = undefined;
+    _ = api_rib.RIB_enumerate_interface(prov, rstr, ru, &pp, &rib_entry);
         }
     }
 }
