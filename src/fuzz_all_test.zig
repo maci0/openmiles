@@ -172,7 +172,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_rib.AIL_decompress_ASI(prov, rstr, rstr, ru);
     api_digital.AIL_delay(rand.intRangeAtMost(u32, 0, 1)); // bounded: real sleep, don't block the fuzzer
     _ = api_digital.AIL_digital_CPU_percent(hd);
-    api_digital.AIL_digital_configuration(hd, &io, &io, &io, &uo);
+    api_digital.AIL_digital_configuration(hd, &io, &io, @as([*]u8, @ptrCast(&g_scratch)));
     _ = api_v7.AIL_digital_driver_processor(hd, ri);
     _ = api_digital.AIL_digital_handle_reacquire(hd);
     _ = api_digital.AIL_digital_latency(hd);
@@ -502,7 +502,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_midi.AIL_stop_sequence(hq);
     api_timer.AIL_stop_timer(ht);
     _ = api_v9.AIL_stream_filled_percent(null);
-    api_stream.AIL_stream_info(hs, &io, &io, &io, &io, &io);
+    api_stream.AIL_stream_info(hs, &io, &io, &io, &io);
     _ = api_stream.AIL_stream_loop_count(hs);
     api_stream.AIL_stream_ms_position(hs, &io, &io);
     _ = api_stream.AIL_stream_pan(hs);

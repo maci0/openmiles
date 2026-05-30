@@ -408,12 +408,18 @@ pub export fn AIL_digital_latency(driver_opt: ?*DigitalDriver) callconv(.winapi)
     // Fallback for no-device engines (tests) or if period info unavailable
     return 10;
 }
-pub export fn AIL_digital_configuration(driver_opt: ?*DigitalDriver, rate: ?*i32, channels: ?*i32, bits: ?*i32, flags: ?*u32) callconv(.winapi) void {
+// Real MSS: AIL_digital_configuration(HDIGDRIVER dig, S32 *rate, S32 *format,
+// char *string) — rate is the mixer output rate, format a DIG_F code, and
+// string receives a short human-readable driver description.
+pub export fn AIL_digital_configuration(driver_opt: ?*DigitalDriver, rate: ?*i32, format: ?*i32, string: ?[*]u8) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     if (rate) |p| p.* = @intCast(driver.getSampleRate());
-    if (channels) |p| p.* = @intCast(driver.getChannels());
-    if (bits) |p| p.* = 16; // MSS convention: report 16-bit to match legacy expectations
-    if (flags) |p| p.* = 0;
+    if (format) |p| p.* = if (driver.getChannels() >= 2) 3 else 1; // 16-bit: 1=mono,3=stereo
+    if (string) |buf| {
+        const name = "OpenMiles (miniaudio)";
+        for (name, 0..) |c, i| buf[i] = c;
+        buf[name.len] = 0;
+    }
 }
 pub export fn AIL_get_DirectSound_info(driver_opt: ?*DigitalDriver, info: *anyopaque, size: u32) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
@@ -955,7 +961,7 @@ comptime {
             .{ .name = "AIL_set_stream_user_data", .stack_size = 12 },
             .{ .name = "AIL_stream_reverb", .stack_size = 16 },
             .{ .name = "AIL_set_stream_reverb", .stack_size = 16 },
-            .{ .name = "AIL_stream_info", .stack_size = 24 },
+            .{ .name = "AIL_stream_info", .stack_size = 20 },
             .{ .name = "AIL_set_stream_loop_block", .stack_size = 12 },
             .{ .name = "AIL_service_stream", .stack_size = 8 },
             .{ .name = "AIL_register_EOF_callback", .stack_size = 8 },
@@ -1014,7 +1020,7 @@ comptime {
             .{ .name = "AIL_primary_digital_driver", .stack_size = 4 },
             .{ .name = "AIL_digital_CPU_percent", .stack_size = 4 },
             .{ .name = "AIL_digital_latency", .stack_size = 4 },
-            .{ .name = "AIL_digital_configuration", .stack_size = 20 },
+            .{ .name = "AIL_digital_configuration", .stack_size = 16 },
             .{ .name = "AIL_get_DirectSound_info", .stack_size = 12 },
             .{ .name = "AIL_set_DirectSound_HWND", .stack_size = 8 },
             .{ .name = "AIL_set_digital_driver_processor", .stack_size = 12 },

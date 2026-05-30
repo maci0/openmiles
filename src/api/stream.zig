@@ -168,33 +168,32 @@ pub export fn AIL_set_stream_reverb(s_opt: ?*Sample, room_type: f32, level: f32,
     const s = s_opt orelse return;
     s.setReverb(room_type, level, reflect_time);
 }
-pub export fn AIL_stream_info(s_opt: ?*Sample, playback_rate: ?*i32, channels: ?*i32, bits: ?*i32, format: ?*i32, len: ?*i32) callconv(.winapi) void {
+// Real MSS: AIL_stream_info(HSTREAM, S32 *datarate, S32 *sndtype, S32 *length,
+// S32 *memory) — datarate in bytes/sec, sndtype a DIG_F format code, length in
+// bytes, memory the stream's working-buffer size.
+pub export fn AIL_stream_info(s_opt: ?*Sample, datarate: ?*i32, sndtype: ?*i32, length: ?*i32, memory: ?*i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     if (s.is_initialized and s.decoder != null) {
         const dec = s.decoder.?;
-        const rate: i32 = @intCast(dec.outputSampleRate);
-        const ch: i32 = @intCast(dec.outputChannels);
+        const ch: u64 = @intCast(dec.outputChannels);
         const bps = openmiles.ma.ma_get_bytes_per_sample(dec.outputFormat);
-        const b: i32 = if (bps > 0) @intCast(bps * 8) else 16;
-        if (playback_rate) |p| p.* = rate;
-        if (channels) |p| p.* = ch;
-        if (bits) |p| p.* = b;
-        if (format) |p| {
-            p.* = switch (ch) {
-                1 => if (b == 8) 0 else 1,
-                else => if (b == 8) 2 else 3,
-            };
-        }
+        const bps64: u64 = if (bps > 0) bps else 2;
+        const b: i32 = @intCast(bps64 * 8);
+        if (datarate) |p| p.* = @intCast(@min(@as(u64, dec.outputSampleRate) * ch * bps64, std.math.maxInt(i32)));
+        if (sndtype) |p| p.* = switch (ch) {
+            1 => if (b == 8) 0 else 1,
+            else => if (b == 8) 2 else 3,
+        };
         var length_frames: u64 = 0;
         _ = openmiles.ma.ma_sound_get_length_in_pcm_frames(&s.sound, &length_frames);
-        const bpf: u64 = if (bps > 0) @as(u64, bps) * @as(u64, @intCast(dec.outputChannels)) else 4;
-        if (len) |p| p.* = @intCast(@min(length_frames * bpf, std.math.maxInt(i32)));
+        const bpf: u64 = bps64 * ch;
+        if (length) |p| p.* = @intCast(@min(length_frames * bpf, std.math.maxInt(i32)));
+        if (memory) |p| p.* = 0; // working-buffer size not separately tracked
     } else {
-        if (playback_rate) |p| p.* = 44100;
-        if (channels) |p| p.* = 2;
-        if (bits) |p| p.* = 16;
-        if (format) |p| p.* = 3;
-        if (len) |p| p.* = 0;
+        if (datarate) |p| p.* = 44100 * 2 * 2;
+        if (sndtype) |p| p.* = 3;
+        if (length) |p| p.* = 0;
+        if (memory) |p| p.* = 0;
     }
 }
 pub export fn AIL_set_stream_loop_block(s_opt: ?*Sample, loop_start: i32, loop_end: i32) callconv(.winapi) void {

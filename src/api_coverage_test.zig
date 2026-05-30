@@ -92,7 +92,8 @@ test "coverage: digital.zig exports" {
     _ = dg.AIL_primary_digital_driver(drv);
     _ = dg.AIL_digital_CPU_percent(drv);
     _ = dg.AIL_digital_latency(drv);
-    dg.AIL_digital_configuration(drv, &i32o, &i32o, &i32o, &u32o);
+    var cfgbuf: [64]u8 = undefined;
+    dg.AIL_digital_configuration(drv, &i32o, &i32o, &cfgbuf);
     _ = dg.AIL_digital_master_volume(drv);
     dg.AIL_set_digital_master_volume(drv, 64);
     _ = dg.AIL_active_sample_count(drv);
@@ -302,7 +303,7 @@ test "coverage: stream.zig exports" {
     st.AIL_set_stream_user_data(n, 0, 0);
     st.AIL_stream_reverb(n, &f32o, &f32o, &f32o);
     st.AIL_set_stream_reverb(n, 1, 0.5, 0.1);
-    st.AIL_stream_info(n, &i32o, &i32o, &i32o, &i32o, &i32o);
+    st.AIL_stream_info(n, &i32o, &i32o, &i32o, &i32o);
     st.AIL_set_stream_loop_block(n, 0, -1);
     _ = st.AIL_service_stream(n, 1);
     _ = st.AIL_register_EOF_callback(n, null);
