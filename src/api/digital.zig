@@ -862,7 +862,12 @@ comptime {
             .{ .name = "AIL_set_3D_position", .stack_size = 16, .ver = 40 },
             .{ .name = "AIL_set_3D_velocity", .stack_size = 20, .ver = 40 },
             .{ .name = "AIL_set_3D_orientation", .stack_size = 28, .ver = 40 },
-            .{ .name = "AIL_set_3D_sample_distances", .stack_size = 12, .ver = 40 },
+            // v6+ simplified the distances calls to 3 args (@12); v4/v5 used the
+            // wider 5-arg (@20) form (v5 also adds a float_distances @20 pair).
+            .{ .name = "AIL_set_3D_sample_distances", .stack_size = 12, .ver = 60 },
+            .{ .name = "AIL_set_3D_sample_distances", .stack_size = 20, .ver = 40, .ver_max = 59, .symbol = "AIL_set_3D_sample_distances_v4" },
+            .{ .name = "AIL_set_3D_sample_float_distances", .stack_size = 20, .ver = 50, .ver_max = 59, .symbol = "AIL_set_3D_sample_float_distances_v5" },
+            .{ .name = "AIL_3D_sample_float_distances", .stack_size = 20, .ver = 50, .ver_max = 59, .symbol = "AIL_3D_sample_float_distances_v5" },
             .{ .name = "AIL_set_listener_3D_position", .stack_size = 16, .ver = 50 },
             .{ .name = "AIL_set_listener_3D_velocity", .stack_size = 20, .ver = 50 },
             .{ .name = "AIL_set_listener_3D_orientation", .stack_size = 28, .ver = 50 },
@@ -971,7 +976,8 @@ comptime {
             .{ .name = "AIL_set_direct_buffer_control", .stack_size = 8 },
             .{ .name = "AIL_start_sample_at", .stack_size = 8 },
             .{ .name = "AIL_open_stream_ex", .stack_size = 16 },
-            .{ .name = "AIL_3D_sample_distances", .stack_size = 12, .ver = 40 },
+            .{ .name = "AIL_3D_sample_distances", .stack_size = 12, .ver = 60 },
+            .{ .name = "AIL_3D_sample_distances", .stack_size = 20, .ver = 40, .ver_max = 59, .symbol = "AIL_3D_sample_distances_v4" },
             // Sequence extras
             .{ .name = "AIL_sequence_ms_position", .stack_size = 12 },
             .{ .name = "AIL_set_sequence_ms_position", .stack_size = 8 },
@@ -1080,9 +1086,11 @@ comptime {
             .{ .name = "RIB_request_interface_entry", .stack_size = 20, .ver = 40 },
             .{ .name = "RIB_enumerate_interface", .stack_size = 20, .ver = 40 },
             .{ .name = "RIB_type_string", .stack_size = 8, .ver = 40 },
-            .{ .name = "MIX_RIB_MAIN", .stack_size = 20, .ver = 40 },
-            .{ .name = "MSS_alloc_info", .stack_size = 16, .ver = 40 },
-            .{ .name = "MSS_free_info", .stack_size = 16, .ver = 40 },
+            // v9-only: v7/v8 export MIX_RIB_MAIN@8 (a different ASI entry arity);
+            // v4-v6 and v7/v8 do not export MSS_alloc_info/MSS_free_info at all.
+            .{ .name = "MIX_RIB_MAIN", .stack_size = 20, .ver = 90 },
+            .{ .name = "MSS_alloc_info", .stack_size = 16, .ver = 90 },
+            .{ .name = "MSS_free_info", .stack_size = 16, .ver = 90 },
             .{ .name = "RIB_provider_system_data", .stack_size = 8, .ver = 40 },
             .{ .name = "RIB_provider_user_data", .stack_size = 8, .ver = 40 },
             .{ .name = "RIB_set_provider_system_data", .stack_size = 12, .ver = 40 },
@@ -1127,8 +1135,12 @@ comptime {
             .{ .name = "AIL_set_mem_callbacks", .stack_size = 8, .ver = 40 },
             .{ .name = "AIL_compress_ADPCM", .stack_size = 12 },
             .{ .name = "AIL_decompress_ADPCM", .stack_size = 12 },
-            .{ .name = "AIL_open_input", .stack_size = 4, .ver = 40 },
-            .{ .name = "AIL_close_input", .stack_size = 4, .ver = 40 },
+            // v4/v5 used AIL_input_open@12 / AIL_input_close@4; v6 renamed them to
+            // the 1-arg AIL_open_input@4 / AIL_close_input@4.
+            .{ .name = "AIL_input_open", .stack_size = 12, .ver = 40, .ver_max = 59 },
+            .{ .name = "AIL_input_close", .stack_size = 4, .ver = 40, .ver_max = 59, .symbol = "AIL_close_input" },
+            .{ .name = "AIL_open_input", .stack_size = 4, .ver = 60 },
+            .{ .name = "AIL_close_input", .stack_size = 4, .ver = 60 },
             .{ .name = "AIL_set_input_state", .stack_size = 8, .ver = 40 },
             .{ .name = "AIL_input_info", .stack_size = 4, .ver = 40, .ver_max = 66 }, // renamed to get_input_info in v7
             .{ .name = "AIL_get_input_info", .stack_size = 4, .ver = 70, .symbol = "AIL_input_info" },

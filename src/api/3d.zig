@@ -84,6 +84,33 @@ pub fn AIL_set_3D_sample_distances(s: ?*anyopaque, max_dist: f32, min_dist: f32)
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     sample.setMinMaxDistance(min_dist, max_dist);
 }
+// v4/v5 ABI: AIL_(set_)3D_sample_distances were 5-arg (@20), and v5 adds a
+// *_float_distances @20 pair. Disassembly of 4.0h confirms the H3DSAMPLE handle
+// plus four trailing slots (the v6 max/min and two further distance-model values
+// whose meaning no available SDK documents). These variants satisfy the @20
+// import — applying the known max/min in v6 argument order, ignoring the extra
+// two — so v4/v5 games link and get approximately-correct distance falloff. The
+// v6+ build exports the simplified 3-arg (@12) form above.
+pub fn AIL_set_3D_sample_distances_v4(s: ?*anyopaque, max_dist: f32, min_dist: f32, a3: f32, a4: f32) callconv(.winapi) void {
+    _ = a3;
+    _ = a4;
+    AIL_set_3D_sample_distances(s, max_dist, min_dist);
+}
+pub fn AIL_3D_sample_distances_v4(s: ?*openmiles.Sample3D, max_dist: ?*f32, min_dist: ?*f32, a3: ?*f32, a4: ?*f32) callconv(.winapi) void {
+    AIL_3D_sample_distances(s, max_dist, min_dist);
+    if (a3) |p| p.* = 0;
+    if (a4) |p| p.* = 0;
+}
+pub fn AIL_set_3D_sample_float_distances_v5(s: ?*anyopaque, max_dist: f32, min_dist: f32, a3: f32, a4: f32) callconv(.winapi) void {
+    _ = a3;
+    _ = a4;
+    AIL_set_3D_sample_distances(s, max_dist, min_dist);
+}
+pub fn AIL_3D_sample_float_distances_v5(s: ?*openmiles.Sample3D, max_dist: ?*f32, min_dist: ?*f32, a3: ?*f32, a4: ?*f32) callconv(.winapi) void {
+    AIL_3D_sample_distances(s, max_dist, min_dist);
+    if (a3) |p| p.* = 0;
+    if (a4) |p| p.* = 0;
+}
 pub fn AIL_set_listener_3D_position(dig_opt: ?*DigitalDriver, x: f32, y: f32, z: f32) callconv(.winapi) void {
     const dig = dig_opt orelse return;
     dig.setListenerPosition(x, y, z);

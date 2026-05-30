@@ -686,6 +686,18 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_digital.AIL_start_sample_at(hs, ru);
     // input device open/close
     if (api_input.AIL_open_input(scp)) |inp| api_input.AIL_close_input(inp);
+    if (api_input.AIL_input_open(scp, rz, rz)) |inp| api_input.AIL_close_input(inp);
+    // v4/v5 wide-ABI distance variants
+    api_3d.AIL_set_3D_sample_distances_v4(@ptrCast(h3), rf, rf, rf, rf);
+    api_3d.AIL_set_3D_sample_float_distances_v5(@ptrCast(h3), rf, rf, rf, rf);
+    {
+        var d0: f32 = 0;
+        var d1: f32 = 0;
+        var d2: f32 = 0;
+        var d3: f32 = 0;
+        api_3d.AIL_3D_sample_distances_v4(h3, &d0, &d1, &d2, &d3);
+        api_3d.AIL_3D_sample_float_distances_v5(h3, &d0, &d1, &d2, &d3);
+    }
     // 3D provider/listener/object open-close cycle
     _ = api_3d.AIL_open_3D_provider(null);
     _ = api_3d.AIL_open_3D_provider(scp);
