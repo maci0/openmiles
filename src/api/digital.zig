@@ -1271,8 +1271,11 @@ comptime {
             // table is ABI-shaped like that release (matches the gated imports
             // in main.zig — the symbols don't exist in older-version builds).
             if (openmiles.mss_version < t.ver) continue;
+            // Real mss32.dll exports only the MSVC-decorated stdcall name
+            // `_NAME@stack`; emit just that so our export set (and thus the
+            // alphabetical ordinal numbering) matches the reference DLL.
             const canonical = std.fmt.comptimePrint("{s}@{d}", .{ t.name, t.stack_size });
-            asm (std.fmt.comptimePrint(".section .drectve\n .ascii \" /EXPORT:{s}={s} /EXPORT:_{s}={s} /EXPORT:_{s}={s}\"\n .text\n", .{ t.name, canonical, t.name, canonical, canonical, canonical }));
+            asm (std.fmt.comptimePrint(".section .drectve\n .ascii \" /EXPORT:_{s}={s}\"\n .text\n", .{ canonical, canonical }));
         }
         // Manual exports for problematic symbols (RIB is v4+).
         if (openmiles.mss_version >= 40)
