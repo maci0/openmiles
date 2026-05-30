@@ -253,4 +253,13 @@ pub fn build(b: *std.Build) void {
     native_rib_test.root_module.addIncludePath(b.path("src"));
     native_rib_test.root_module.addObject(nrt.c_impl);
     b.installArtifact(native_rib_test);
+
+    // Install the test media (WAV/MIDI/SoundFont) next to the test exes so the
+    // harnesses find them relative to their own directory (they look up
+    // test_media/test.{wav,mid,sf2}).
+    b.installDirectory(.{
+        .source_dir = b.path("test_media"),
+        .install_dir = .bin,
+        .install_subdir = "test_media",
+    });
 }
