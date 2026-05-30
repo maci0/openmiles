@@ -1956,3 +1956,24 @@ test "v9 sample groups operate on samples by id" {
     api_v9.AIL_stop_sample_group(drv, 1234, 0);
     try testing.expectEqual(@as(i32, 9), api_v9.AIL_sample_id(a));
 }
+
+const api_v7 = @import("api/v7.zig");
+test "v9 update_sample_3D_position dead-reckons by velocity" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    api_v7.AIL_set_sample_3D_position(s, 0, 0, 0);
+    api_v7.AIL_set_sample_3D_velocity(s, 10, 0, 0, 0); // 10 units/sec on +x
+    api_v7.AIL_update_sample_3D_position(s, 1000); // advance 1 second
+    const p = openmiles.ma.ma_sound_get_position(&s.sound);
+    try testing.expect(p.x > 9.0 and p.x < 11.0); // ~10
+    // NaN dt is ignored (no crash, position unchanged).
+    api_v7.AIL_update_sample_3D_position(s, std.math.nan(f32));
+    const p2 = openmiles.ma.ma_sound_get_position(&s.sound);
+    try testing.expect(p2.x > 9.0 and p2.x < 11.0);
+}

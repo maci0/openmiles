@@ -61,8 +61,13 @@ pub fn AIL_set_sample_3D_distances(obj: ?*Sample, max_dist: f32, min_dist: f32, 
     }
 }
 pub fn AIL_update_sample_3D_position(obj: ?*Sample, dt_ms: f32) callconv(.winapi) void {
-    _ = obj;
-    _ = dt_ms; // miniaudio integrates position from velocity internally
+    const s = obj orelse return;
+    if (!s.is_initialized) return;
+    if (!(dt_ms == dt_ms) or std.math.isInf(dt_ms)) return; // NaN/Inf guard
+    const dt_s = dt_ms / 1000.0;
+    const p = ma.ma_sound_get_position(&s.sound);
+    const v = ma.ma_sound_get_velocity(&s.sound);
+    ma.ma_sound_set_position(&s.sound, p.x + v.x * dt_s, p.y + v.y * dt_s, p.z + v.z * dt_s);
 }
 
 pub fn AIL_sample_3D_position(obj: ?*Sample, x: ?*f32, y: ?*f32, z: ?*f32) callconv(.winapi) void {
@@ -214,8 +219,12 @@ pub fn AIL_set_listener_3D_velocity_vector(dig_opt: ?*DigitalDriver, dx: f32, dy
     d.setListenerVelocity(dx, dy, dz);
 }
 pub fn AIL_update_listener_3D_position(dig_opt: ?*DigitalDriver, dt_ms: f32) callconv(.winapi) void {
-    _ = dig_opt;
-    _ = dt_ms;
+    const dig = dig_opt orelse return;
+    if (!(dt_ms == dt_ms) or std.math.isInf(dt_ms)) return; // NaN/Inf guard
+    const dt_s = dt_ms / 1000.0;
+    const p = dig.getListenerPosition();
+    const v = dig.getListenerVelocity();
+    dig.setListenerPosition(p.x + v.x * dt_s, p.y + v.y * dt_s, p.z + v.z * dt_s);
 }
 
 // --- Master volume / reverb / room (reuse DigitalDriver) ---------------------
