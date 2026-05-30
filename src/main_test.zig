@@ -2485,3 +2485,31 @@ test "set_lfo, enable_limit and move_var steps round-trip" {
     cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
     try testing.expect(cur == null);
 }
+
+test "set_blend step round-trips name, count and per-sound curves" {
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    var in_min = [_]f32{ 0.1, 0.2 };
+    var in_max = [_]f32{ 0.9, 1.0 };
+    var out_min = [_]f32{ 0.0, 0.1 };
+    var out_max = [_]f32{ 1.0, 0.8 };
+    var min_p = [_]f32{ -1.0, -0.5 };
+    var max_p = [_]f32{ 1.0, 0.5 };
+    _ = api_v9.AIL_add_setblend_event_step(ev, cstr("blend1"), 2, &in_min, &in_max, &out_min, &out_max, &min_p, &max_p);
+    const str = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    defer std.c.free(str);
+
+    var buf: [1024]u8 align(8) = undefined;
+    var sp: ?*openmiles.event.EVENT_STEP_INFO = null;
+    var cur: ?*const anyopaque = @ptrCast(str);
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.set_blend), sp.?.type);
+    const b = sp.?.u.blend;
+    try testing.expectEqualStrings("blend1", b.name.str.?[0..@intCast(b.name.len)]);
+    try testing.expectEqual(@as(u8, 2), b.count);
+    try testing.expectApproxEqAbs(@as(f32, 0.1), b.inmin[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), b.inmax[1], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, -0.5), b.minp[1], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), b.maxp[1], 0.0001);
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expect(cur == null);
+}
