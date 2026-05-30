@@ -46,20 +46,115 @@ fn cstrlen(p: [*:0]const u8) usize {
 }
 
 
-pub fn AIL_WAV_marker_by_index(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    return 0;
+// --- WAV cue-point ("marker") parsing -------------------------------------
+// A RIFF/WAVE image can carry a 'cue ' chunk (a list of cue points, each with a
+// sample offset) and a LIST/adtl/'labl' chunk mapping cue ids to names. These
+// helpers walk those chunks with full bounds checking so a malformed/truncated
+// image is rejected rather than over-read.
+
+fn wavImageLen(p: [*]const u8) ?usize {
+    // RIFF<size>WAVE ; total image = size + 8.
+    if (p[0] != 'R' or p[1] != 'I' or p[2] != 'F' or p[3] != 'F') return null;
+    if (p[8] != 'W' or p[9] != 'A' or p[10] != 'V' or p[11] != 'E') return null;
+    const riff = std.mem.readInt(u32, p[4..8], .little);
+    return @as(usize, riff) + 8;
 }
-pub fn AIL_WAV_marker_by_name(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    return 0;
+
+const WavCue = struct { id: u32, offset: u32 };
+
+/// Find a chunk by fourcc within [12, len). Returns (data_offset, data_len).
+fn findChunk(img: []const u8, fourcc: *const [4]u8) ?struct { off: usize, len: usize } {
+    var i: usize = 12;
+    while (i + 8 <= img.len) {
+        const csz = std.mem.readInt(u32, img[i + 4 ..][0..4], .little);
+        const data = i + 8;
+        if (data > img.len) break;
+        const avail = img.len - data;
+        const clen = @min(@as(usize, csz), avail);
+        if (std.mem.eql(u8, img[i..][0..4], fourcc)) return .{ .off = data, .len = clen };
+        i = data + clen + (clen & 1); // chunks are word-aligned
+    }
+    return null;
 }
-pub fn AIL_WAV_marker_count(a0: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    return 0;
+
+/// Name for cue `id` from the LIST/adtl/labl chunks, or null. The returned
+/// slice points into the image (NUL-terminated there).
+fn cueLabel(img: []const u8, id: u32) ?[*:0]const u8 {
+    const list = findChunk(img, "LIST") orelse return null;
+    if (list.len < 4 or !std.mem.eql(u8, img[list.off..][0..4], "adtl")) return null;
+    var i: usize = list.off + 4;
+    const end = list.off + list.len;
+    while (i + 8 <= end) {
+        const csz = std.mem.readInt(u32, img[i + 4 ..][0..4], .little);
+        const data = i + 8;
+        if (data > end) break;
+        const clen = @min(@as(usize, csz), end - data);
+        if (std.mem.eql(u8, img[i..][0..4], "labl") and clen >= 4) {
+            const lid = std.mem.readInt(u32, img[data..][0..4], .little);
+            if (lid == id) {
+                const str_start = data + 4;
+                // Require a NUL terminator within the chunk.
+                if (std.mem.indexOfScalar(u8, img[str_start .. data + clen], 0) != null)
+                    return @ptrCast(img.ptr + str_start);
+            }
+        }
+        i = data + clen + (clen & 1);
+    }
+    return null;
+}
+
+fn wavCueAt(img: []const u8, n: usize) ?WavCue {
+    const cue = findChunk(img, "cue ") orelse return null;
+    if (cue.len < 4) return null;
+    const count = std.mem.readInt(u32, img[cue.off..][0..4], .little);
+    if (n >= count) return null;
+    const rec = cue.off + 4 + n * 24; // each cue point is 24 bytes
+    if (rec + 24 > img.len) return null;
+    return .{
+        .id = std.mem.readInt(u32, img[rec..][0..4], .little),
+        .offset = std.mem.readInt(u32, img[rec + 20 ..][0..4], .little), // dwSampleOffset
+    };
+}
+
+pub fn AIL_WAV_marker_count(wav_image: ?*const anyopaque) callconv(.winapi) i32 {
+    const raw = wav_image orelse return 0;
+    const p: [*]const u8 = @ptrCast(raw);
+    const len = wavImageLen(p) orelse return 0;
+    const img = p[0..len];
+    const cue = findChunk(img, "cue ") orelse return 0;
+    if (cue.len < 4) return 0;
+    return @intCast(@min(std.mem.readInt(u32, img[cue.off..][0..4], .little), std.math.maxInt(i32)));
+}
+
+pub fn AIL_WAV_marker_by_index(wav_image: ?*const anyopaque, n: i32, name: ?*?[*:0]const u8) callconv(.winapi) i32 {
+    const raw = wav_image orelse return -1;
+    if (n < 0) return -1;
+    const p: [*]const u8 = @ptrCast(raw);
+    const len = wavImageLen(p) orelse return -1;
+    const img = p[0..len];
+    const c = wavCueAt(img, @intCast(n)) orelse return -1;
+    if (name) |np| np.* = cueLabel(img, c.id);
+    return @intCast(@min(c.offset, std.math.maxInt(i32)));
+}
+
+pub fn AIL_WAV_marker_by_name(wav_image: ?*const anyopaque, name: ?[*:0]const u8) callconv(.winapi) i32 {
+    const raw = wav_image orelse return -1;
+    const want = name orelse return -1;
+    const want_s = std.mem.span(want);
+    const p: [*]const u8 = @ptrCast(raw);
+    const len = wavImageLen(p) orelse return -1;
+    const img = p[0..len];
+    const cue = findChunk(img, "cue ") orelse return -1;
+    if (cue.len < 4) return -1;
+    const count = std.mem.readInt(u32, img[cue.off..][0..4], .little);
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const c = wavCueAt(img, i) orelse break;
+        if (cueLabel(img, c.id)) |lbl| {
+            if (std.mem.eql(u8, std.mem.span(lbl), want_s)) return @intCast(@min(c.offset, std.math.maxInt(i32)));
+        }
+    }
+    return -1;
 }
 pub fn AIL_add_apply_environment_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: i32) callconv(.winapi) i32 {
     _ = a0;

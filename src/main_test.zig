@@ -2068,3 +2068,67 @@ test "v8 5.1 volume levels round-trip" {
     api_v8b.AIL_sample_51_volume_levels(s, &fl, &fr, &fc, &lfe, &bl, &br);
     try testing.expect(@abs(fc - 0.3) < 0.001 and @abs(lfe - 0.4) < 0.001 and @abs(br - 0.6) < 0.001);
 }
+
+test "v8 WAV cue markers parse from cue/labl chunks" {
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(testing.allocator);
+    const al = testing.allocator;
+    const H = struct {
+        b: *std.ArrayListUnmanaged(u8),
+        a: std.mem.Allocator,
+        fn s(self: @This(), bytes: []const u8) !void {
+            try self.b.appendSlice(self.a, bytes);
+        }
+        fn u32le(self: @This(), v: u32) !void {
+            var t: [4]u8 = undefined;
+            std.mem.writeInt(u32, &t, v, .little);
+            try self.b.appendSlice(self.a, &t);
+        }
+        fn u16le(self: @This(), v: u16) !void {
+            var t: [2]u8 = undefined;
+            std.mem.writeInt(u16, &t, v, .little);
+            try self.b.appendSlice(self.a, &t);
+        }
+    };
+    const h = H{ .b = &buf, .a = al };
+    try h.s("RIFF");
+    const riff_size_pos = buf.items.len;
+    try h.u32le(0); // patched later
+    try h.s("WAVE");
+    try h.s("fmt ");
+    try h.u32le(16);
+    try h.u16le(1);
+    try h.u16le(1);
+    try h.u32le(8000);
+    try h.u32le(16000);
+    try h.u16le(2);
+    try h.u16le(16);
+    try h.s("data");
+    try h.u32le(0);
+    try h.s("cue ");
+    try h.u32le(4 + 24);
+    try h.u32le(1); // count
+    try h.u32le(1); // id
+    try h.u32le(100); // position
+    try h.s("data");
+    try h.u32le(0);
+    try h.u32le(0);
+    try h.u32le(100); // sampleOffset
+    try h.s("LIST");
+    try h.u32le(4 + 8 + 4 + 6);
+    try h.s("adtl");
+    try h.s("labl");
+    try h.u32le(4 + 6);
+    try h.u32le(1); // cue id
+    try h.s("start\x00");
+    std.mem.writeInt(u32, buf.items[riff_size_pos..][0..4], @intCast(buf.items.len - 8), .little);
+
+    const img: *const anyopaque = @ptrCast(buf.items.ptr);
+    try testing.expectEqual(@as(i32, 1), api_v8b.AIL_WAV_marker_count(img));
+    var name: ?[*:0]const u8 = null;
+    try testing.expectEqual(@as(i32, 100), api_v8b.AIL_WAV_marker_by_index(img, 0, &name));
+    try testing.expect(name != null);
+    try testing.expectEqualStrings("start", std.mem.span(name.?));
+    try testing.expectEqual(@as(i32, 100), api_v8b.AIL_WAV_marker_by_name(img, "start"));
+    try testing.expectEqual(@as(i32, -1), api_v8b.AIL_WAV_marker_by_name(img, "nope"));
+}
