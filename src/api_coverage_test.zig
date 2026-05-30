@@ -44,6 +44,10 @@ fn sc() *anyopaque {
     return @ptrCast(&scratch);
 }
 
+fn freeLock(p: ?*anyopaque) void {
+    if (p) |ptr| dg.AIL_mem_free_lock(ptr);
+}
+
 test "coverage: digital.zig exports" {
     // Lifecycle / globals.
     _ = dg.AIL_startup();
@@ -74,9 +78,9 @@ test "coverage: digital.zig exports" {
     const s = try openmiles.Sample.init(drv);
     defer s.deinit();
     s.loadFromMemory(wav, false) catch {};
-    prov = openmiles.Provider.init(alloc, null) catch null;
-    defer if (prov) |p| p.deinit();
-    const filt: ?*anyopaque = dg.AIL_open_filter(prov, drv);
+    const myprov = openmiles.Provider.init(alloc, null) catch null;
+    defer if (myprov) |p| p.deinit();
+    const filt: ?*anyopaque = dg.AIL_open_filter(myprov, drv);
 
     // Driver-level.
     _ = dg.AIL_primary_digital_driver(drv);
@@ -381,4 +385,194 @@ test "coverage: file/input.zig exports" {
         _ = inp.AIL_get_input_info(ipt);
         inp.AIL_close_input(ipt);
     }
+}
+
+test "coverage: midi.zig exports" {
+    const mdi = md.AIL_open_midi_driver(0) orelse return;
+    defer md.AIL_close_midi_driver(mdi);
+    const mp: *anyopaque = @ptrCast(mdi);
+    _ = md.AIL_open_XMIDI_driver(0);
+    const seq = md.AIL_allocate_sequence_handle(mdi) orelse return;
+    defer md.AIL_release_sequence_handle(seq);
+
+    // Minimal valid SMF so the size-less init_sequence detects a real length.
+    const smf = [_]u8{
+        'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0, 0, 1, 0, 0x60,
+        'M', 'T', 'r', 'k', 0, 0, 0, 4, 0, 0xFF, 0x2F, 0,
+    };
+    _ = md.AIL_init_sequence(seq, @constCast(@ptrCast(&smf)), 0);
+
+    md.AIL_start_sequence(seq);
+    md.AIL_pause_sequence(seq);
+    md.AIL_resume_sequence(seq);
+    md.AIL_stop_sequence(seq);
+    md.AIL_end_sequence(seq);
+    _ = md.AIL_sequence_status(seq);
+    md.AIL_set_sequence_volume(seq, 64, 0);
+    md.AIL_set_sequence_loop_count(seq, 1);
+    md.AIL_sequence_ms_position(seq, &i32o, &i32o);
+    md.AIL_set_sequence_ms_position(seq, 0);
+    _ = md.AIL_sequence_loop_count(seq);
+    _ = md.AIL_sequence_volume(seq);
+    _ = md.AIL_sequence_tempo(seq);
+    md.AIL_set_sequence_tempo(seq, 120, 0);
+    _ = md.AIL_active_sequence_count(mp);
+    md.AIL_sequence_position(seq, &i32o, &i32o);
+    _ = md.AIL_sequence_user_data(seq, 0);
+    md.AIL_set_sequence_user_data(seq, 0, 0);
+    _ = md.AIL_true_sequence_channel(seq, 0);
+    md.AIL_map_sequence_channel(seq, 0, 1);
+    _ = md.AIL_register_sequence_callback(seq, null);
+    _ = md.AIL_XMIDI_master_volume(mdi);
+    md.AIL_set_XMIDI_master_volume(mdi, 64);
+    _ = md.AIL_channel_notes(seq, 0);
+    _ = md.AIL_controller_value(seq, 0, 7);
+    md.AIL_send_channel_voice_message(mdi, seq, 0x90, 60, 64);
+    md.AIL_send_sysex_message(seq, sc());
+    _ = md.AIL_lock_channel(seq);
+    md.AIL_release_channel(seq, 0);
+    _ = md.AIL_register_beat_callback(seq, null);
+    _ = md.AIL_register_event_callback(mdi, null);
+    _ = md.AIL_register_prefix_callback(seq, null);
+    _ = md.AIL_register_trigger_callback(seq, null);
+    _ = md.AIL_register_timbre_callback(mdi, null);
+    md.AIL_branch_index(seq, 0);
+    md.AIL_register_ICA_array(seq, sc());
+
+    // Driver-handle legacy / conversion.
+    md.AIL_MIDI_handle_release(mp);
+    _ = md.AIL_MIDI_handle_reacquire(mp);
+    var hmo: *anyopaque = undefined;
+    _ = md.AIL_midiOutOpen(mp, &hmo, 0);
+    md.AIL_midiOutClose(mp);
+    var out_len: u32 = scratch.len;
+    _ = md.AIL_MIDI_to_XMI(@constCast(@ptrCast(&smf)), smf.len, sc(), &out_len, 0);
+    var lst: ?*anyopaque = null;
+    var lsz: u32 = 0;
+    if (md.AIL_list_MIDI(@ptrCast(&smf), smf.len, &lst, &lsz, 0) != 0) freeLock(lst);
+}
+
+test "coverage: dls.zig exports" {
+    const nd: ?*openmiles.MidiDriver = null;
+    _ = dl.AIL_DLS_load_file(nd, "/nonexistent", 0);
+    dl.AIL_DLS_unload_file(nd, sc());
+    dl.AIL_set_filter_DLS_preference(nd, "Cutoff", sc());
+    dl.AIL_filter_DLS_attribute(nd, "Cutoff", sc());
+    _ = dl.AIL_DLS_load_memory(nd, sc(), 0);
+    dl.AIL_DLS_unload(nd, sc());
+    dl.AIL_DLS_compact(nd);
+    _ = dl.AIL_DLS_get_info(nd, sc(), sc());
+    dl.AIL_DLS_get_reverb(nd, &f32o, &f32o, &f32o);
+    dl.AIL_DLS_set_reverb(nd, 1, 0.5, 0.1);
+    _ = dl.AIL_DLS_open(null, null, null, 44100, 16, 2, 0);
+    dl.AIL_DLS_close(nd, 0);
+    _ = dl.AIL_set_DLS_processor(nd, 0, null);
+    dl.DLSClose(nd, sc());
+    dl.DLSCompactMemory(nd);
+    _ = dl.DLSGetInfo(nd, sc(), sc());
+    _ = dl.DLSLoadFile(nd, "/nonexistent", 0);
+    _ = dl.DLSLoadMemFile(nd, sc(), 0);
+    _ = dl.DLSMSSOpen(null, null, null, 44100, 16, 2, 0);
+    _ = dl.DLSMSSGetCPU(nd);
+    dl.DLSSetAttribute(nd, "Cutoff", sc());
+    dl.DLSUnloadAll(nd);
+    dl.DLSUnloadFile(nd, sc());
+
+    // Buffer-based DLS/XMI container ops (allocate outputs -> free).
+    var a: ?*anyopaque = null;
+    var b: ?*anyopaque = null;
+    var c: ?*anyopaque = null;
+    _ = dl.AIL_find_DLS(sc(), 16, &a, &u32o, &b, &u32o);
+    a = null;
+    b = null;
+    if (dl.AIL_extract_DLS(sc(), 16, &a, &u32o, &b, &u32o, null) != 0) {
+        freeLock(a);
+        freeLock(b);
+    }
+    c = null;
+    if (dl.AIL_merge_DLS_with_XMI(sc(), sc(), &c, &u32o) != 0) freeLock(c);
+    c = null;
+    if (dl.AIL_list_DLS(sc(), &c, &u32o, 0, null) != 0) freeLock(c);
+    c = null;
+    if (dl.AIL_filter_DLS_with_XMI(sc(), sc(), &c, &u32o, 0, null) != 0) freeLock(c);
+    c = null;
+    if (dl.AIL_compress_DLS(sc(), "raw", &c, &u32o, null) != 0) freeLock(c);
+}
+
+test "coverage: rib.zig exports" {
+    const np: ?*openmiles.Provider = null;
+    _ = rib.RIB_provider_library_handle();
+    _ = rib.RIB_load_application_providers(".");
+    var rnext: ?*anyopaque = null;
+    var rhandle: ?*openmiles.Provider = null;
+    _ = rib.RIB_enumerate_providers("ASI codec", &rnext, &rhandle);
+    _ = rib.RIB_request_interface(np, "ASI codec", 0, sc());
+    _ = rib.RIB_find_files_provider("ASI codec", "x", "x", ".", "x");
+    _ = rib.RIB_register_interface(np, "x", 0, sc());
+    rib.RIB_unregister_interface(np, "x", 0, sc());
+    _ = rib.RIB_error();
+    _ = rib.RIB_find_file_provider("ASI codec", "x", "x");
+    _ = rib.RIB_load_provider_library("/nonexistent");
+    rib.RIB_free_provider_library(np);
+    rib.RIB_free_provider_handle(np);
+    _ = rib.RIB_request_interface_entry(np, "x", "y", null);
+    var entry: openmiles.RIB_INTERFACE_ENTRY = undefined;
+    rnext = null;
+    _ = rib.RIB_enumerate_interface(np, "x", 0, &rnext, &entry);
+    _ = rib.RIB_type_string(1);
+    _ = rib.RIB_provider_system_data(np, 0);
+    _ = rib.RIB_provider_user_data(np, 0);
+    rib.RIB_set_provider_system_data(np, 0, 0);
+    rib.RIB_set_provider_user_data(np, 0, 0);
+    _ = rib.RIB_find_file_dec_provider("ASI codec", "x", "x", ".", "x");
+    _ = rib.RIB_find_provider("ASI codec", "x", "y");
+    const ph = rib.RIB_alloc_provider_handle(sc());
+    if (ph) |p| rib.RIB_free_provider_handle(@ptrCast(@alignCast(p)));
+    _ = rib.AIL_open_ASI_provider(sc(), 0);
+    rib.AIL_close_ASI_provider(np);
+    _ = rib.AIL_ASI_provider_attribute(np, "x");
+    dg_request_eob();
+    _ = rib.AIL_compress_ASI(np, "/nonexistent", "/tmp/om_x", 0);
+    _ = rib.AIL_decompress_ASI(np, "/nonexistent", "/tmp/om_x", 0);
+}
+
+fn dg_request_eob() void {
+    const n: ?*openmiles.Sample = null;
+    rib.AIL_request_EOB_ASI_reset(n, 0);
+}
+
+test "coverage: lifecycle / driver open-close exports" {
+    // Digital driver open/close + sample handle alloc/release.
+    const drv = dg.AIL_open_digital_driver(44100, 16, 2, 0);
+    if (drv) |d| {
+        const sh = dg.AIL_allocate_sample_handle(d);
+        if (sh) |h| dg.AIL_release_sample_handle(h);
+        dg.AIL_close_digital_driver(d);
+    }
+
+    // waveOut wrappers.
+    var wdrv: ?*openmiles.DigitalDriver = null;
+    _ = dg.AIL_waveOutOpen(&wdrv, null, 0, null);
+    if (wdrv) |w| dg.AIL_waveOutClose(w);
+
+    // WAV file write.
+    const wbytes = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    _ = dg.AIL_WAV_file_write("/tmp/om_cov.wav", @constCast(@ptrCast(&wbytes)), wbytes.len, 44100, 16);
+
+    // XMIDI driver close (open covered in midi test).
+    const xm = md.AIL_open_XMIDI_driver(0);
+    if (xm) |x| md.AIL_close_XMIDI_driver(x);
+
+    // Quick API lifecycle + file loads (nonexistent -> graceful null).
+    _ = qk.AIL_quick_startup(1, 0, 44100, 16, 2);
+    _ = qk.AIL_quick_load("/nonexistent_om");
+    _ = qk.AIL_quick_load_and_play("/nonexistent_om", 1, 0);
+    qk.AIL_quick_shutdown();
+
+    // DllMain (DLL_PROCESS_ATTACH = 1).
+    var hinst: u8 = 0;
+    _ = dg.DllMain(@ptrCast(&hinst), 1, null);
+
+    // Global teardown last.
+    dg.AIL_shutdown();
 }
