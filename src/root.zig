@@ -486,6 +486,18 @@ pub fn getUsCount() u32 {
     return @truncate(elapsed_ns / std.time.ns_per_us);
 }
 
+/// 64-bit millisecond/microsecond counters since startup (MSS v9 AIL_*_count64).
+pub fn getMsCount64() u64 {
+    ensureStartupTime();
+    const elapsed_ns: u64 = @intCast(@max(0, nowNs() - startup_ns));
+    return elapsed_ns / std.time.ns_per_ms;
+}
+pub fn getUsCount64() u64 {
+    ensureStartupTime();
+    const elapsed_ns: u64 = @intCast(@max(0, nowNs() - startup_ns));
+    return elapsed_ns / std.time.ns_per_us;
+}
+
 // --- Lifecycle functions ---
 // These encapsulate the startup/shutdown and driver open/close sequences so that
 // both the standard API (AIL_startup, AIL_open_digital_driver, …) and the Quick

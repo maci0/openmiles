@@ -1,9 +1,34 @@
-//! MSS v8 additive API (stubbed). Soundbank/event/preset system, 5.1
-//! surround, in-memory I/O, WAV markers, util helpers — gated at v8+ and
-//! additive over v3-v7. Signatures from the MSS 9.x SDK mss.h. These subsystems
-//! have no OpenMiles engine equivalent yet, so they link and return safe defaults.
+//! MSS v8 additive API. The faithfully-implementable pieces are real here —
+//! in-memory I/O (AIL_mem_*), case-insensitive string compares, float-to-ascii,
+//! 5.1 volumes mapped to the engine, and sample 3D/rate helpers. The soundbank /
+//! event / preset / environment system (a proprietary data-driven layer) has no
+//! OpenMiles engine equivalent and is stubbed to link and return safe defaults.
+//! Signatures from the MSS 9.x SDK mss.h.
 const std = @import("std");
 const openmiles = @import("openmiles");
+const Sample = openmiles.Sample;
+const ma = openmiles.ma;
+
+/// MILESMEM: an in-memory byte stream (AIL_mem_* family).
+const MemStream = struct {
+    buf: []u8,
+    len: usize, // valid bytes (for read views == buf.len; for write grows)
+    pos: usize = 0,
+    owns: bool, // buf was allocated by us (free on close)
+    writable: bool,
+    err: bool = false,
+
+    fn create(self_buf: []u8, length: usize, owns: bool, writable: bool) ?*MemStream {
+        const m = openmiles.global_allocator.create(MemStream) catch return null;
+        m.* = .{ .buf = self_buf, .len = length, .owns = owns, .writable = writable };
+        return m;
+    }
+};
+
+fn cstrlen(p: [*:0]const u8) usize {
+    return std.mem.len(p);
+}
+
 
 pub export fn AIL_WAV_marker_by_index(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
@@ -206,10 +231,15 @@ pub export fn AIL_find_marker_in_list(a0: i32, a1: ?*anyopaque, a2: ?*anyopaque)
     _ = a2;
     return 0;
 }
-pub export fn AIL_ftoa(a0: f32, a1: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub export fn AIL_ftoa(v: f32, buf: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    const b = buf orelse return null;
+    const out = @as([*]u8, @ptrCast(b));
+    const slice = std.fmt.bufPrint(out[0..32], "{d}\x00", .{v}) catch {
+        out[0] = 0;
+        return b;
+    };
+    _ = slice;
+    return b;
 }
 pub export fn AIL_get_event_contents(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
@@ -234,67 +264,90 @@ pub export fn AIL_indent(a0: i32) callconv(.winapi) void {
     _ = a0;
 
 }
-pub export fn AIL_mem_close(a0: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-
+pub export fn AIL_mem_close(mem: ?*anyopaque) callconv(.winapi) void {
+    const m: *MemStream = @ptrCast(@alignCast(mem orelse return));
+    if (m.owns) openmiles.global_allocator.free(m.buf);
+    openmiles.global_allocator.destroy(m);
 }
-pub export fn AIL_mem_create(a0: i32) callconv(.winapi) void {
-    _ = a0;
-
+pub export fn AIL_mem_create(size: i32) callconv(.winapi) ?*anyopaque {
+    if (size <= 0) return null;
+    const buf = openmiles.global_allocator.alloc(u8, @intCast(size)) catch return null;
+    const m = MemStream.create(buf, 0, true, true) orelse {
+        openmiles.global_allocator.free(buf);
+        return null;
+    };
+    return @ptrCast(m);
 }
-pub export fn AIL_mem_create_from_existing(a0: ?*anyopaque, a1: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub export fn AIL_mem_create_from_existing(data: ?*anyopaque, size: i32) callconv(.winapi) ?*anyopaque {
+    const d = data orelse return null;
+    if (size <= 0) return null;
+    const view = @as([*]u8, @ptrCast(d))[0..@intCast(size)];
+    const m = MemStream.create(view, @intCast(size), false, true) orelse return null;
+    return @ptrCast(m);
 }
-pub export fn AIL_mem_error(a0: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-
+pub export fn AIL_mem_error(mem: ?*anyopaque) callconv(.winapi) i32 {
+    const m: *MemStream = @ptrCast(@alignCast(mem orelse return 1));
+    return if (m.err) 1 else 0;
 }
-pub export fn AIL_mem_open(a0: ?*anyopaque, a1: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub export fn AIL_mem_open(data: ?*anyopaque, size: i32) callconv(.winapi) ?*anyopaque {
+    const d = data orelse return null;
+    if (size < 0) return null;
+    const view = @as([*]u8, @ptrCast(@constCast(d)))[0..@intCast(size)];
+    const m = MemStream.create(view, @intCast(size), false, false) orelse return null;
+    return @ptrCast(m);
 }
-pub export fn AIL_mem_pos(a0: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-
+pub export fn AIL_mem_pos(mem: ?*anyopaque) callconv(.winapi) i32 {
+    const m: *MemStream = @ptrCast(@alignCast(mem orelse return 0));
+    return @intCast(@min(m.pos, @as(usize, std.math.maxInt(i32))));
 }
-pub export fn AIL_mem_printc(a0: ?*anyopaque, a1: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub export fn AIL_mem_printc(mem: ?*anyopaque, c: i32) callconv(.winapi) i32 {
+    var ch: [1]u8 = .{@truncate(@as(u32, @bitCast(c)))};
+    return AIL_mem_write(mem, &ch, 1);
 }
-pub export fn AIL_mem_printf(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub export fn AIL_mem_printf(mem: ?*anyopaque, fmt: ?*anyopaque) callconv(.winapi) i32 {
+    // Variadic formatting is not bridged; write the format string verbatim.
+    return AIL_mem_prints(mem, fmt);
 }
-pub export fn AIL_mem_prints(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub export fn AIL_mem_prints(mem: ?*anyopaque, str: ?*anyopaque) callconv(.winapi) i32 {
+    const sp = str orelse return 0;
+    const cstr: [*:0]const u8 = @ptrCast(sp);
+    const len = std.mem.len(cstr);
+    if (len == 0) return 0;
+    return AIL_mem_write(mem, @constCast(@ptrCast(sp)), @intCast(@min(len, @as(usize, std.math.maxInt(i32)))));
 }
-pub export fn AIL_mem_read(a0: ?*anyopaque, a1: ?*anyopaque, a2: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-
+pub export fn AIL_mem_read(mem: ?*anyopaque, dst: ?*anyopaque, n: i32) callconv(.winapi) i32 {
+    const m: *MemStream = @ptrCast(@alignCast(mem orelse return 0));
+    const d = dst orelse return 0;
+    if (n <= 0) return 0;
+    const want: usize = @intCast(n);
+    const avail = if (m.pos < m.len) m.len - m.pos else 0;
+    const take = @min(want, avail);
+    @memcpy(@as([*]u8, @ptrCast(d))[0..take], m.buf[m.pos .. m.pos + take]);
+    m.pos += take;
+    return @intCast(take);
 }
-pub export fn AIL_mem_seek(a0: ?*anyopaque, a1: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub export fn AIL_mem_seek(mem: ?*anyopaque, pos: i32) callconv(.winapi) i32 {
+    const m: *MemStream = @ptrCast(@alignCast(mem orelse return -1));
+    const p: usize = if (pos < 0) 0 else @intCast(pos);
+    m.pos = @min(p, m.buf.len);
+    return @intCast(m.pos);
 }
-pub export fn AIL_mem_size(a0: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-
+pub export fn AIL_mem_size(mem: ?*anyopaque) callconv(.winapi) i32 {
+    const m: *MemStream = @ptrCast(@alignCast(mem orelse return 0));
+    return @intCast(@min(m.len, @as(usize, std.math.maxInt(i32))));
 }
-pub export fn AIL_mem_write(a0: ?*anyopaque, a1: ?*anyopaque, a2: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-
+pub export fn AIL_mem_write(mem: ?*anyopaque, src: ?*anyopaque, n: i32) callconv(.winapi) i32 {
+    const m: *MemStream = @ptrCast(@alignCast(mem orelse return 0));
+    const sp = src orelse return 0;
+    if (n <= 0 or !m.writable) return 0;
+    const want: usize = @intCast(n);
+    const room = if (m.pos < m.buf.len) m.buf.len - m.pos else 0;
+    const take = @min(want, room);
+    if (take < want) m.err = true; // truncated write
+    @memcpy(m.buf[m.pos .. m.pos + take], @as([*]const u8, @ptrCast(sp))[0..take]);
+    m.pos += take;
+    if (m.pos > m.len) m.len = m.pos;
+    return @intCast(take);
 }
 pub export fn AIL_next_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32) callconv(.winapi) ?*anyopaque {
     _ = a0;
@@ -383,9 +436,9 @@ pub export fn AIL_sample_playback_delay(a0: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
     return 0;
 }
-pub export fn AIL_sample_playback_rate_factor(a0: ?*anyopaque) callconv(.winapi) f32 {
-    _ = a0;
-    return 0;
+pub export fn AIL_sample_playback_rate_factor(s_opt: ?*Sample) callconv(.winapi) f32 {
+    const s = s_opt orelse return 1.0;
+    return if (s.v7_rate_factor > 0) s.v7_rate_factor else 1.0;
 }
 pub export fn AIL_sample_speaker_scale_factors(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32) callconv(.winapi) void {
     _ = a0;
@@ -404,44 +457,43 @@ pub export fn AIL_sample_stage_property(a0: ?*anyopaque, a1: i32, a2: ?*anyopaqu
     _ = a6;
     return 0;
 }
-pub export fn AIL_set_sample_51_volume_levels(a0: ?*anyopaque, a1: f32, a2: f32, a3: f32, a4: f32, a5: f32, a6: f32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    _ = a4;
-    _ = a5;
-    _ = a6;
-
+pub export fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, fl: f32, fr: f32, fc: f32, lfe: f32, bl: f32, br: f32) callconv(.winapi) void {
+    _ = fc;
+    _ = lfe;
+    _ = bl;
+    _ = br;
+    const s = s_opt orelse return;
+    // Engine is stereo; drive volume from the front L/R pair.
+    s.setVolume(@intFromFloat(std.math.clamp(@max(fl, fr), 0.0, 1.0) * 127.0));
+    const sum = fl + fr;
+    if (sum > 0.0001) s.setPan(@intFromFloat(std.math.clamp(fr / sum, 0.0, 1.0) * 127.0));
 }
-pub export fn AIL_set_sample_51_volume_pan(a0: ?*anyopaque, a1: f32, a2: f32, a3: f32, a4: f32, a5: f32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    _ = a4;
-    _ = a5;
-
+pub export fn AIL_set_sample_51_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32, fb: f32, lfe: f32, fc: f32) callconv(.winapi) void {
+    _ = fb;
+    _ = lfe;
+    _ = fc;
+    const s = s_opt orelse return;
+    s.setVolume(@intFromFloat(std.math.clamp(volume, 0.0, 1.0) * 127.0));
+    s.setPan(@intFromFloat(std.math.clamp(pan, 0.0, 1.0) * 127.0));
 }
 pub export fn AIL_set_sample_buffer_count(a0: ?*anyopaque, a1: i32) callconv(.winapi) i32 {
     _ = a0;
     _ = a1;
     return 0;
 }
-pub export fn AIL_set_sample_is_3D(a0: ?*anyopaque, a1: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub export fn AIL_set_sample_is_3D(s_opt: ?*Sample, is_3D: i32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    if (s.is_initialized) ma.ma_sound_set_spatialization_enabled(&s.sound, if (is_3D != 0) ma.MA_TRUE else ma.MA_FALSE);
 }
 pub export fn AIL_set_sample_playback_delay(a0: ?*anyopaque, a1: i32) callconv(.winapi) void {
     _ = a0;
     _ = a1;
 
 }
-pub export fn AIL_set_sample_playback_rate_factor(a0: ?*anyopaque, a1: f32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub export fn AIL_set_sample_playback_rate_factor(s_opt: ?*Sample, factor: f32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    if (s.is_initialized and factor > 0) ma.ma_sound_set_pitch(&s.sound, factor);
+    s.v7_rate_factor = factor;
 }
 pub export fn AIL_set_sample_speaker_scale_factors(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32) callconv(.winapi) void {
     _ = a0;
@@ -455,16 +507,28 @@ pub export fn AIL_sound_asset_filename(a0: ?*anyopaque, a1: i32) callconv(.winap
     _ = a1;
 
 }
-pub export fn AIL_stricmp(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub export fn AIL_stricmp(a: ?*anyopaque, b: ?*anyopaque) callconv(.winapi) i32 {
+    const pa: [*:0]const u8 = @ptrCast(a orelse return 0);
+    const pb: [*:0]const u8 = @ptrCast(b orelse return 0);
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        const ca = std.ascii.toLower(pa[i]);
+        const cb = std.ascii.toLower(pb[i]);
+        if (ca != cb) return @as(i32, ca) - @as(i32, cb);
+        if (ca == 0) return 0;
+    }
 }
-pub export fn AIL_strnicmp(a0: ?*anyopaque, a1: ?*anyopaque, a2: u32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-
+pub export fn AIL_strnicmp(a: ?*anyopaque, b: ?*anyopaque, n: u32) callconv(.winapi) i32 {
+    const pa: [*:0]const u8 = @ptrCast(a orelse return 0);
+    const pb: [*:0]const u8 = @ptrCast(b orelse return 0);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const ca = std.ascii.toLower(pa[i]);
+        const cb = std.ascii.toLower(pb[i]);
+        if (ca != cb) return @as(i32, ca) - @as(i32, cb);
+        if (ca == 0) return 0;
+    }
+    return 0;
 }
 pub export fn AIL_sys_debug(a0: ?*anyopaque) callconv(.winapi) void {
     _ = a0;

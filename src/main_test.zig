@@ -1827,3 +1827,52 @@ test "StreamSource underrun emits silence and keeps playing" {
     try testing.expectEqualSlices(u8, &buf_a, out[0..2]);
     try testing.expectEqualSlices(u8, &([_]u8{0} ** 6), out[2..8]); // silence
 }
+
+// --- MSS v8/v9 implemented utilities ----------------------------------------
+const api_v8 = @import("api/v8.zig");
+const api_v9 = @import("api/v9.zig");
+
+test "v8 AIL_mem in-memory stream round-trips" {
+    const m = api_v8.AIL_mem_create(64) orelse return error.NoMem;
+    defer api_v8.AIL_mem_close(m);
+    var src = "hello world".*;
+    try testing.expectEqual(@as(i32, 11), api_v8.AIL_mem_write(m, &src, 11));
+    try testing.expectEqual(@as(i32, 11), api_v8.AIL_mem_pos(m));
+    try testing.expectEqual(@as(i32, 11), api_v8.AIL_mem_size(m));
+    try testing.expectEqual(@as(i32, 0), api_v8.AIL_mem_seek(m, 0));
+    var dst: [16]u8 = undefined;
+    try testing.expectEqual(@as(i32, 11), api_v8.AIL_mem_read(m, &dst, 11));
+    try testing.expectEqualSlices(u8, "hello world", dst[0..11]);
+    // Read past end returns 0; write past capacity truncates + flags error.
+    try testing.expectEqual(@as(i32, 0), api_v8.AIL_mem_read(m, &dst, 8));
+}
+
+test "v8 AIL_mem_open read-only view" {
+    var data = "abcdef".*;
+    const m = api_v8.AIL_mem_open(&data, 6) orelse return error.NoMem;
+    defer api_v8.AIL_mem_close(m);
+    var dst: [8]u8 = undefined;
+    try testing.expectEqual(@as(i32, 3), api_v8.AIL_mem_read(m, &dst, 3));
+    try testing.expectEqualSlices(u8, "abc", dst[0..3]);
+}
+
+test "v8 case-insensitive string compares" {
+    var a = "Hello".*;
+    var b = "hELLo".*;
+    var c = "World".*;
+    try testing.expectEqual(@as(i32, 0), api_v8.AIL_stricmp(&a, &b));
+    try testing.expect(api_v8.AIL_stricmp(&a, &c) != 0);
+    try testing.expectEqual(@as(i32, 0), api_v8.AIL_strnicmp(&a, &c, 0));
+    var d = "HELxx".*;
+    try testing.expectEqual(@as(i32, 0), api_v8.AIL_strnicmp(&a, &d, 3));
+    try testing.expect(api_v8.AIL_strnicmp(&a, &d, 4) != 0);
+}
+
+test "v9 64-bit counters and time conversions" {
+    const t0 = api_v9.AIL_ms_count64();
+    const us0 = api_v9.AIL_us_count64();
+    try testing.expect(api_v9.AIL_ms_count64() >= t0);
+    try testing.expect(us0 >= t0); // us >= ms in absolute count
+    try testing.expectEqual(@as(u64, 5000), api_v9.AIL_ms_to_time(5));
+    try testing.expectEqual(@as(u64, 5), api_v9.AIL_time_to_ms(5000));
+}

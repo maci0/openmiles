@@ -23,6 +23,7 @@ const api_dls = @import("api/dls.zig");
 const api_midi = @import("api/midi.zig");
 const api_3d = @import("api/3d.zig");
 const api_timer = @import("api/timer.zig");
+const api_v8 = @import("api/v8.zig");
 
 fn freeLock(p: ?*anyopaque) void {
     if (p) |ptr| api_memory.AIL_mem_free_lock(ptr);
@@ -614,5 +615,68 @@ test "fuzz AIL_init_sequence with random MIDI/XMI data" {
         if (rand.boolean() and len >= 4) @memcpy(buf[0..4], "MThd");
         seq.loadMidi(buf[0..len], rand.intRangeAtMost(usize, 0, 3)) catch {};
         _ = seq.status();
+    }
+}
+
+test "fuzz v8 AIL_mem in-memory stream ops" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE20);
+    const rand = prng.random();
+    var payload: [4096]u8 = undefined;
+    rand.bytes(&payload);
+    var io_buf: [2048]u8 = undefined;
+    var trial: usize = 0;
+    while (trial < 300) : (trial += 1) {
+        const cap = rand.intRangeAtMost(i32, 0, 1024);
+        const m = api_v8.AIL_mem_create(cap) orelse continue;
+        defer api_v8.AIL_mem_close(m);
+        var step: usize = 0;
+        while (step < 40) : (step += 1) {
+            switch (rand.intRangeAtMost(u8, 0, 5)) {
+                0 => {
+                    const off = rand.intRangeAtMost(usize, 0, payload.len);
+                    const n = rand.intRangeAtMost(i32, -8, @intCast(payload.len - off));
+                    _ = api_v8.AIL_mem_write(m, payload[off..].ptr, n);
+                },
+                1 => {
+                    const n = rand.intRangeAtMost(i32, -8, @intCast(io_buf.len));
+                    _ = api_v8.AIL_mem_read(m, &io_buf, n);
+                },
+                2 => _ = api_v8.AIL_mem_seek(m, rand.intRangeAtMost(i32, -100, 2000)),
+                3 => _ = api_v8.AIL_mem_pos(m),
+                4 => _ = api_v8.AIL_mem_size(m),
+                5 => _ = api_v8.AIL_mem_printc(m, rand.int(i32)),
+                else => unreachable,
+            }
+        }
+    }
+    // create_from_existing / open views over random data.
+    var v: usize = 0;
+    while (v < 200) : (v += 1) {
+        const sz = rand.intRangeAtMost(i32, 0, @intCast(payload.len));
+        const m = api_v8.AIL_mem_open(&payload, sz) orelse continue;
+        defer api_v8.AIL_mem_close(m);
+        _ = api_v8.AIL_mem_read(m, &io_buf, rand.intRangeAtMost(i32, 0, @intCast(io_buf.len)));
+        _ = api_v8.AIL_mem_write(m, &io_buf, 4); // read-only: must reject, not crash
+    }
+}
+
+test "fuzz v8 case-insensitive compares with random NUL-terminated buffers" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE21);
+    const rand = prng.random();
+    var a: [64]u8 = undefined;
+    var b: [64]u8 = undefined;
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        rand.bytes(&a);
+        rand.bytes(&b);
+        // Ensure NUL somewhere so the C-string walk terminates within the buffer.
+        a[rand.intRangeAtMost(usize, 0, a.len - 1)] = 0;
+        a[a.len - 1] = 0;
+        b[rand.intRangeAtMost(usize, 0, b.len - 1)] = 0;
+        b[b.len - 1] = 0;
+        _ = api_v8.AIL_stricmp(&a, &b);
+        _ = api_v8.AIL_strnicmp(&a, &b, rand.int(u32));
+        var fbuf: [40]u8 = undefined;
+        _ = api_v8.AIL_ftoa(@bitCast(rand.int(u32)), &fbuf);
     }
 }

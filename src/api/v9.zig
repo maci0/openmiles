@@ -92,7 +92,7 @@ pub export fn AIL_get_soundbank_name(a0: ?*anyopaque) callconv(.winapi) ?*anyopa
     return null;
 }
 pub export fn AIL_get_time() callconv(.winapi) u64 {
-    return 0;
+    return openmiles.getUsCount64(); // Miles "time" is a microsecond tick
 }
 pub export fn AIL_mem_alloc_lock_info(a0: u32, a1: ?*anyopaque, a2: u32) callconv(.winapi) ?*anyopaque {
     _ = a0;
@@ -101,11 +101,10 @@ pub export fn AIL_mem_alloc_lock_info(a0: u32, a1: ?*anyopaque, a2: u32) callcon
     return null;
 }
 pub export fn AIL_ms_count64() callconv(.winapi) u64 {
-    return 0;
+    return openmiles.getMsCount64();
 }
-pub export fn AIL_ms_to_time(a0: u64) callconv(.winapi) u64 {
-    _ = a0;
-    return 0;
+pub export fn AIL_ms_to_time(ms: u64) callconv(.winapi) u64 {
+    return ms *| 1000; // ms -> microsecond ticks
 }
 pub export fn AIL_resolve_raw_environment_preset(a0: ?*anyopaque, a1: i32) callconv(.winapi) i32 {
     _ = a0;
@@ -128,9 +127,8 @@ pub export fn AIL_sample_ms_lookup(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque) ca
     _ = a2;
     return 0;
 }
-pub export fn AIL_sleep(a0: u32) callconv(.winapi) void {
-    _ = a0;
-
+pub export fn AIL_sleep(ms: u32) callconv(.winapi) void {
+    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(@as(u64, ms) *| std.time.ns_per_ms), .awake) catch {};
 }
 pub export fn AIL_sound_asset_info(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
@@ -143,9 +141,8 @@ pub export fn AIL_stream_filled_percent(a0: ?*anyopaque) callconv(.winapi) f32 {
     _ = a0;
     return 0;
 }
-pub export fn AIL_time_to_ms(a0: u64) callconv(.winapi) u64 {
-    _ = a0;
-    return 0;
+pub export fn AIL_time_to_ms(t: u64) callconv(.winapi) u64 {
+    return t / 1000;
 }
 pub export fn AIL_timer_thread_handle(a0: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
@@ -162,5 +159,5 @@ pub export fn AIL_unapply_raw_sound_preset(a0: ?*anyopaque, a1: ?*anyopaque) cal
     return 0;
 }
 pub export fn AIL_us_count64() callconv(.winapi) u64 {
-    return 0;
+    return openmiles.getUsCount64();
 }
