@@ -15,6 +15,17 @@ const openmiles = @import("openmiles");
 
 const dg = @import("api/digital.zig");
 const td = @import("api/3d.zig");
+const st = @import("api/stream.zig");
+const qk = @import("api/quick.zig");
+const rb = @import("api/redbook.zig");
+const tm = @import("api/timer.zig");
+const fl = @import("api/file.zig");
+const inp = @import("api/input.zig");
+const md = @import("api/midi.zig");
+const dl = @import("api/dls.zig");
+const rib = @import("api/rib.zig");
+
+fn dummyTimerCb(_: u32) callconv(.winapi) void {}
 
 // Crash-verification smoke test: use a plain allocator (no leak abort). Leak
 // checking of the parsing paths is done in fuzz_test.zig with testing.allocator.
@@ -251,4 +262,123 @@ test "coverage: 3d.zig exports" {
     _ = td.AIL_enumerate_3D_sample_attributes(s3, &next, &namep);
     var sinfo: openmiles.AILSOUNDINFO = .{ .format = 0, .data_ptr = sc(), .data_len = 16, .rate = 8000, .bits = 16, .channels = 1, .samples = 0, .block_size = 0, .initial_ptr = null };
     _ = td.AIL_set_3D_sample_info(s3, &sinfo);
+}
+
+test "coverage: stream.zig exports" {
+    const drv = try openmiles.DigitalDriver.init(alloc, 44100, 16, 2);
+    defer drv.deinit();
+    // open_stream with null filename returns null; all others null-guard.
+    _ = st.AIL_open_stream(drv, null, 0);
+    const n: ?*openmiles.Sample = null;
+    st.AIL_close_stream(n);
+    st.AIL_start_stream(n);
+    st.AIL_pause_stream(n, 1);
+    st.AIL_set_stream_volume(n, 64);
+    st.AIL_set_stream_loop_count(n, 1);
+    _ = st.AIL_register_stream_callback(n, null);
+    st.AIL_auto_service_stream(n, 1);
+    st.AIL_set_stream_playback_rate(n, 22050);
+    st.AIL_set_stream_pan(n, 64);
+    st.AIL_set_stream_ms_position(n, 0);
+    _ = st.AIL_stream_status(n);
+    _ = st.AIL_stream_playback_rate(n);
+    _ = st.AIL_stream_volume(n);
+    _ = st.AIL_stream_pan(n);
+    _ = st.AIL_stream_loop_count(n);
+    st.AIL_stream_ms_position(n, &i32o, &i32o);
+    _ = st.AIL_stream_position(n);
+    st.AIL_set_stream_position(n, 0);
+    _ = st.AIL_stream_user_data(n, 0);
+    st.AIL_set_stream_user_data(n, 0, 0);
+    st.AIL_stream_reverb(n, &f32o, &f32o, &f32o);
+    st.AIL_set_stream_reverb(n, 1, 0.5, 0.1);
+    st.AIL_stream_info(n, &i32o, &i32o, &i32o, &i32o, &i32o);
+    st.AIL_set_stream_loop_block(n, 0, -1);
+    _ = st.AIL_service_stream(n, 1);
+    _ = st.AIL_register_EOF_callback(n, null);
+    _ = st.AIL_set_stream_processor(n, 0, null);
+    st.AIL_filter_stream_attribute(n, "Cutoff", sc());
+    st.AIL_set_filter_stream_preference(n, "Cutoff", sc());
+}
+
+test "coverage: quick.zig exports" {
+    const n: ?*openmiles.Sample = null;
+    _ = qk.AIL_quick_copy(n);
+    qk.AIL_quick_unload(n);
+    qk.AIL_quick_play(n, 1);
+    qk.AIL_quick_stop(n);
+    _ = qk.AIL_quick_status(n);
+    qk.AIL_quick_set_volume(n, 64);
+    qk.AIL_quick_set_speed(n, 22050);
+    _ = qk.AIL_quick_ms_length(n);
+    _ = qk.AIL_quick_ms_position(n);
+    qk.AIL_quick_set_ms_position(n, 0);
+    qk.AIL_quick_halt(n);
+    qk.AIL_quick_set_reverb(n, 1, 0.5, 0.1);
+    _ = qk.AIL_quick_type(n);
+    var qs: ?*openmiles.Sample = null;
+    var qd: ?*openmiles.DigitalDriver = null;
+    var qm: ?*openmiles.MidiDriver = null;
+    qk.AIL_quick_handles(&qs, &qd, &qm);
+    // load_mem with a too-short/garbage buffer (no driver open) -> null.
+    _ = qk.AIL_quick_load_mem(sc(), 0);
+}
+
+test "coverage: redbook.zig exports" {
+    const h = rb.AIL_redbook_open_drive(0) orelse return;
+    defer rb.AIL_redbook_close(h);
+    _ = rb.AIL_redbook_play(h, 1, 2);
+    _ = rb.AIL_redbook_stop(h);
+    _ = rb.AIL_redbook_pause(h);
+    _ = rb.AIL_redbook_resume(h);
+    _ = rb.AIL_redbook_status(h);
+    _ = rb.AIL_redbook_tracks(h);
+    _ = rb.AIL_redbook_eject(h);
+    _ = rb.AIL_redbook_retract(h);
+    _ = rb.AIL_redbook_id(h);
+    _ = rb.AIL_redbook_position(h);
+    _ = rb.AIL_redbook_track(h);
+    rb.AIL_redbook_track_info(h, 1, &u32o, &u32o);
+    rb.AIL_redbook_set_volume(h, 64);
+    _ = rb.AIL_redbook_volume(h);
+    const h2 = rb.AIL_redbook_open(0);
+    if (h2) |hh| rb.AIL_redbook_close(hh);
+}
+
+test "coverage: timer.zig exports" {
+    const t = tm.AIL_register_timer(dummyTimerCb) orelse return;
+    const tt: *openmiles.Timer = @ptrCast(@alignCast(t));
+    tm.AIL_set_timer_frequency(tt, 60);
+    tm.AIL_set_timer_period(tt, 16000);
+    tm.AIL_set_timer_user_data(tt, 0);
+    tm.AIL_set_timer_divisor(tt, 1);
+    tm.AIL_set_timer_user(tt, 0);
+    tm.AIL_start_timer(tt);
+    tm.AIL_stop_timer(tt);
+    _ = tm.AIL_get_timer_highest_delay();
+    tm.AIL_release_timer_handle(tt); // frees tt
+    // A second timer exercises the *_all_timers paths (which free it).
+    _ = tm.AIL_register_timer(dummyTimerCb) orelse return;
+    tm.AIL_start_all_timers();
+    tm.AIL_stop_all_timers();
+    tm.AIL_release_all_timers();
+}
+
+test "coverage: file/input.zig exports" {
+    _ = fl.AIL_file_error();
+    _ = fl.AIL_file_size("/nonexistent_om_test");
+    _ = fl.AIL_file_type(sc(), 16);
+    _ = fl.AIL_file_read("/nonexistent_om_test", null);
+    _ = fl.AIL_file_write("/tmp/om_cov_test.bin", sc(), 4);
+    fl.AIL_set_file_callbacks(null, null, null, null);
+    fl.AIL_set_file_async_callbacks(null, null, null, null, null);
+
+    // input: device-less; open may fail gracefully.
+    const ip = inp.AIL_open_input(sc());
+    if (ip) |p| {
+        const ipt: *openmiles.Input = @ptrCast(@alignCast(p));
+        inp.AIL_set_input_state(ipt, 0);
+        _ = inp.AIL_get_input_info(ipt);
+        inp.AIL_close_input(ipt);
+    }
 }
