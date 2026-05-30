@@ -25,6 +25,8 @@ comptime {
     _ = @import("api/filter.zig");
     _ = @import("api/memory.zig");
     _ = @import("api/v7.zig");
+    _ = @import("api/v8.zig");
+    _ = @import("api/v9.zig");
     _ = @import("api/stream.zig");
     _ = @import("api/redbook.zig");
     _ = @import("api/input.zig");

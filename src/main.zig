@@ -26,4 +26,6 @@ comptime {
     if (mss_version >= 50) _ = @import("api/3d.zig"); // 3D audio (v5+)
     if (mss_version >= 60) _ = @import("api/filter.zig"); // Filter API (v6+)
     if (mss_version >= 70) _ = @import("api/v7.zig"); // Unified v7+ API (additive)
+    if (mss_version >= 80) _ = @import("api/v8.zig"); // Soundbank/event/5.1 (v8+)
+    if (mss_version >= 90) _ = @import("api/v9.zig"); // v9 additions
 }
