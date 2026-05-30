@@ -66,6 +66,8 @@ pub const detectMidiSize = audio_detect.detectMidiSize;
 
 pub const dls_container = @import("engine/dls_container.zig");
 pub const StreamSource = @import("engine/stream_buffer.zig").StreamSource;
+pub const soundbank = @import("engine/soundbank.zig");
+pub const Bank = soundbank.Bank;
 
 pub const get_ASI_INTERFACE = @import("engine/asi.zig").get_ASI_INTERFACE;
 
@@ -166,6 +168,27 @@ pub fn fileCallbackReadAll(filename: [*:0]const u8) ![]u8 {
     errdefer global_allocator.free(buf);
     const bytes_read = read_fn(handle, buf.ptr, file_size);
     if (bytes_read != file_size) return error.ReadFailed;
+    return buf;
+}
+
+/// Read a whole file via the app's file callbacks when set, otherwise directly
+/// from the filesystem. Caller frees the returned buffer with global_allocator.
+pub fn readWholeFile(path: []const u8) ![]u8 {
+    if (cb_file_open != null) {
+        var zbuf: [std.fs.max_path_bytes:0]u8 = undefined;
+        if (path.len >= zbuf.len) return error.NameTooLong;
+        @memcpy(zbuf[0..path.len], path);
+        zbuf[path.len] = 0;
+        return fileCallbackReadAll(@ptrCast(&zbuf));
+    }
+    const f = fs_compat.openFile(io, path, .{}) catch return error.FileNotFound;
+    defer f.close(io);
+    const sz = f.length(io) catch return error.UnknownSize;
+    if (sz == 0 or sz > 256 * 1024 * 1024) return error.BadSize;
+    const buf = try global_allocator.alloc(u8, @intCast(sz));
+    errdefer global_allocator.free(buf);
+    const n = f.readPositionalAll(io, buf, 0) catch return error.ReadFailed;
+    if (n < buf.len) return error.ReadFailed;
     return buf;
 }
 

@@ -87,9 +87,9 @@ pub export fn AIL_find_sound_preset(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.
     _ = a1;
     return null;
 }
-pub export fn AIL_get_soundbank_name(a0: ?*anyopaque) callconv(.winapi) ?*anyopaque {
-    _ = a0;
-    return null;
+pub export fn AIL_get_soundbank_name(bank: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return null));
+    return @constCast(@ptrCast(b.name()));
 }
 pub export fn AIL_get_time() callconv(.winapi) u64 {
     return openmiles.getUsCount64(); // Miles "time" is a microsecond tick

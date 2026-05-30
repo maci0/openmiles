@@ -9,6 +9,22 @@ const openmiles = @import("openmiles");
 const Sample = openmiles.Sample;
 const ma = openmiles.ma;
 
+const MSS_FIRST: usize = std.math.maxInt(usize);
+
+/// Shared enumerator over a bank asset table (sounds/events/presets/envs).
+fn enumerateAssets(bank: ?*anyopaque, next: ?*anyopaque, name: ?*anyopaque, kind: openmiles.soundbank.AssetKind) i32 {
+    const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return 0));
+    const np: *usize = @ptrCast(@alignCast(next orelse return 0));
+    const out: *?*anyopaque = @ptrCast(@alignCast(name orelse return 0));
+    const idx: usize = if (np.* == MSS_FIRST) 0 else np.*;
+    if (idx >= b.assetCount(kind)) return 0;
+    const nm = b.assetName(kind, @intCast(idx)) orelse return 0;
+    out.* = @constCast(@ptrCast(nm));
+    np.* = idx + 1;
+    return 1;
+}
+
+
 /// MILESMEM: an in-memory byte stream (AIL_mem_* family).
 const MemStream = struct {
     buf: []u8,
@@ -138,9 +154,9 @@ pub export fn AIL_close_event(a0: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     _ = a0;
     return null;
 }
-pub export fn AIL_close_soundbank(a0: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-
+pub export fn AIL_close_soundbank(bank: ?*anyopaque) callconv(.winapi) void {
+    const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return));
+    b.deinit();
 }
 pub export fn AIL_create_event() callconv(.winapi) ?*anyopaque {
     return null;
@@ -153,19 +169,13 @@ pub export fn AIL_debug_log(a0: ?*anyopaque) callconv(.winapi) void {
     _ = a0;
 
 }
-pub export fn AIL_enumerate_environment_presets(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    return 0;
+pub export fn AIL_enumerate_environment_presets(bank: ?*anyopaque, next: ?*anyopaque, list: ?*anyopaque, name: ?*anyopaque) callconv(.winapi) i32 {
+    _ = list;
+    return enumerateAssets(bank, next, name, .environments);
 }
-pub export fn AIL_enumerate_events(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    return 0;
+pub export fn AIL_enumerate_events(bank: ?*anyopaque, next: ?*anyopaque, list: ?*anyopaque, name: ?*anyopaque) callconv(.winapi) i32 {
+    _ = list;
+    return enumerateAssets(bank, next, name, .events);
 }
 pub export fn AIL_enumerate_filter_properties(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
@@ -198,18 +208,12 @@ pub export fn AIL_enumerate_sample_stage_properties(a0: ?*anyopaque, a1: i32, a2
     _ = a3;
     return 0;
 }
-pub export fn AIL_enumerate_sound_assets(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    return 0;
+pub export fn AIL_enumerate_sound_assets(bank: ?*anyopaque, next: ?*anyopaque, name: ?*anyopaque) callconv(.winapi) i32 {
+    return enumerateAssets(bank, next, name, .sounds);
 }
-pub export fn AIL_enumerate_sound_presets(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    return 0;
+pub export fn AIL_enumerate_sound_presets(bank: ?*anyopaque, next: ?*anyopaque, list: ?*anyopaque, name: ?*anyopaque) callconv(.winapi) i32 {
+    _ = list;
+    return enumerateAssets(bank, next, name, .presets);
 }
 pub export fn AIL_file_type_named(a0: ?*anyopaque, a1: ?*anyopaque, a2: u32) callconv(.winapi) i32 {
     _ = a0;
@@ -252,13 +256,13 @@ pub export fn AIL_get_marker_list(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.wi
     _ = a1;
 
 }
-pub export fn AIL_get_soundbank_filename(a0: ?*anyopaque) callconv(.winapi) ?*anyopaque {
-    _ = a0;
-    return null;
+pub export fn AIL_get_soundbank_filename(bank: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return null));
+    return @constCast(@ptrCast(b.filename.ptr));
 }
-pub export fn AIL_get_soundbank_mem_usage(a0: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    return 0;
+pub export fn AIL_get_soundbank_mem_usage(bank: ?*anyopaque) callconv(.winapi) i32 {
+    const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return 0));
+    return b.metaSize();
 }
 pub export fn AIL_indent(a0: i32) callconv(.winapi) void {
     _ = a0;
@@ -356,10 +360,28 @@ pub export fn AIL_next_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopa
     _ = a3;
     return null;
 }
-pub export fn AIL_open_soundbank(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) ?*anyopaque {
-    _ = a0;
-    _ = a1;
-    return null;
+pub export fn AIL_open_soundbank(filename: ?*anyopaque, name: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    const fn_ptr = filename orelse return null;
+    const fname: [*:0]const u8 = @ptrCast(fn_ptr);
+    const fname_slice = std.mem.span(fname);
+    // Read the file via the configured callbacks / filesystem.
+    const image = openmiles.readWholeFile(fname_slice) catch return null;
+    defer openmiles.global_allocator.free(image);
+    const bank = openmiles.soundbank.loadFromMemory(openmiles.global_allocator, fname_slice, image) catch {
+        openmiles.setLastError("Failed to open sound bank");
+        return null;
+    };
+    // Optional name check (4-char bank name).
+    if (name) |np| {
+        const want: [*:0]const u8 = @ptrCast(np);
+        const have = bank.name();
+        if (!std.ascii.eqlIgnoreCase(std.mem.span(want), std.mem.span(have))) {
+            bank.deinit();
+            openmiles.setLastError("Bank name mismatch");
+            return null;
+        }
+    }
+    return @ptrCast(bank);
 }
 pub export fn AIL_output_filter_driver_property(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;

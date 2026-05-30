@@ -715,3 +715,34 @@ test "fuzz v7/v8 unified sample setters with adversarial floats" {
         }
     }
 }
+
+test "fuzz SoundBank loader with random and mutated banks" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE23);
+    const rand = prng.random();
+    var buf: [1024]u8 = undefined;
+    const tag: u32 = (@as(u32, 'B') << 24) | (@as(u32, 'A') << 16) | (@as(u32, 'N') << 8) | 'K';
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const len = rand.intRangeAtMost(usize, 0, buf.len);
+        rand.bytes(buf[0..len]);
+        // Often plant a valid-ish header so the parser walks deeper.
+        if (len >= 60 and rand.boolean()) {
+            std.mem.writeInt(u32, buf[0..4], tag, .little);
+            std.mem.writeInt(i32, buf[4..8], 8, .little);
+            std.mem.writeInt(i32, buf[8..12], @intCast(rand.intRangeAtMost(usize, 0, len)), .little);
+            // random counts/offsets already from rand.bytes
+        }
+        if (openmiles.soundbank.loadFromMemory(testing.allocator, "fuzz.bank", buf[0..len])) |bank| {
+            // If it loaded, exercise the accessors on adversarial indices.
+            _ = bank.name();
+            _ = bank.metaSize();
+            inline for (.{ openmiles.soundbank.AssetKind.events, .environments, .presets, .sounds }) |k| {
+                var j: u32 = 0;
+                const cnt = bank.assetCount(k);
+                while (j < @min(cnt, 64)) : (j += 1) _ = bank.assetName(k, j);
+                _ = bank.assetName(k, rand.int(u32));
+            }
+            bank.deinit();
+        } else |_| {}
+    }
+}

@@ -1876,3 +1876,61 @@ test "v9 64-bit counters and time conversions" {
     try testing.expectEqual(@as(u64, 5000), api_v9.AIL_ms_to_time(5));
     try testing.expectEqual(@as(u64, 5), api_v9.AIL_time_to_ms(5000));
 }
+
+// --- MSS v8 SoundBank loader (synthetic bank) -------------------------------
+
+fn buildSyntheticBank(buf: []u8) usize {
+    @memset(buf, 0);
+    const w = std.mem.writeInt;
+    // Header
+    w(u32, buf[0..4], (@as(u32, 'B') << 24) | (@as(u32, 'A') << 16) | (@as(u32, 'N') << 8) | 'K', .little); // Tag
+    w(i32, buf[4..8], 8, .little); // Version
+    // meta_size filled below
+    w(u32, buf[20..24], 0, .little); // events off (count 0)
+    w(u32, buf[24..28], 0, .little); // envs
+    w(u32, buf[28..32], 0, .little); // presets
+    w(u32, buf[32..36], 60, .little); // sounds table at offset 60
+    w(u32, buf[40..44], 0, .little); // event_count
+    w(u32, buf[44..48], 0, .little); // env_count
+    w(u32, buf[48..52], 0, .little); // preset_count
+    w(u32, buf[52..56], 2, .little); // sound_count
+    @memcpy(buf[56..60], "TST\x00"); // SoundBankName[4]
+    // Sounds table (2 AssetEntry, 8 bytes each) at 60
+    w(u32, buf[60..64], 76, .little); // Sounds[0].NameOffset
+    w(u32, buf[64..68], 0, .little);
+    w(u32, buf[68..72], 81, .little); // Sounds[1].NameOffset
+    w(u32, buf[72..76], 0, .little);
+    // String table
+    @memcpy(buf[76..81], "kick\x00");
+    @memcpy(buf[81..87], "snare\x00");
+    const meta_size: usize = 87;
+    w(i32, buf[8..12], @intCast(meta_size), .little);
+    return meta_size;
+}
+
+test "v8 SoundBank loads and enumerates assets (synthetic)" {
+    var img: [128]u8 = undefined;
+    const sz = buildSyntheticBank(&img);
+    const bank = try openmiles.soundbank.loadFromMemory(testing.allocator, "test.bank", img[0..sz]);
+    defer bank.deinit();
+    try testing.expectEqual(@as(i32, @intCast(sz)), bank.metaSize());
+    try testing.expectEqualStrings("TST", std.mem.span(bank.name()));
+    try testing.expectEqual(@as(u32, 2), bank.assetCount(.sounds));
+    try testing.expectEqualStrings("kick", std.mem.span(bank.assetName(.sounds, 0).?));
+    try testing.expectEqualStrings("snare", std.mem.span(bank.assetName(.sounds, 1).?));
+    try testing.expect(bank.assetName(.sounds, 2) == null); // out of range
+    try testing.expectEqual(@as(u32, 0), bank.assetCount(.events));
+}
+
+test "v8 SoundBank rejects non-bank and truncated data" {
+    try testing.expectError(error.TooShort, openmiles.soundbank.loadFromMemory(testing.allocator, "x", "short"));
+    var img: [128]u8 = undefined;
+    const sz = buildSyntheticBank(&img);
+    // Corrupt the tag.
+    img[0] = 'X';
+    try testing.expectError(error.NotABank, openmiles.soundbank.loadFromMemory(testing.allocator, "x", img[0..sz]));
+    // Lying sound_count -> asset table escapes meta.
+    _ = buildSyntheticBank(&img);
+    std.mem.writeInt(u32, img[52..56], 1000, .little);
+    try testing.expectError(error.BadAssetTable, openmiles.soundbank.loadFromMemory(testing.allocator, "x", img[0..sz]));
+}
