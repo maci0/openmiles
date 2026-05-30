@@ -2010,3 +2010,26 @@ test "v9 set_sample_3D_volume_falloff maps graph range to distance attenuation" 
     try testing.expect(@abs(openmiles.ma.ma_sound_get_min_distance(&s.sound) - 2.0) < 0.01);
     try testing.expect(@abs(openmiles.ma.ma_sound_get_max_distance(&s.sound) - 50.0) < 0.01);
 }
+
+test "v9 bus mixer allocates, routes samples, and frees" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    // Allocate a bus and route the sample to it.
+    const bus = api_v9.AIL_allocate_bus(drv) orelse return error.NoBus;
+    try testing.expectEqual(@as(usize, 1), drv.buses.items.len);
+    api_v9.AIL_set_sample_bus(s, 0);
+    try testing.expectEqual(@as(i32, 0), api_v9.AIL_sample_bus(s));
+    // bus_sample_handle(0) returns the same bus object.
+    try testing.expectEqual(bus, api_v9.AIL_bus_sample_handle(drv, 0).?);
+    // Bus volume control reaches the group without crashing.
+    const mb: *openmiles.MixBus = @ptrCast(@alignCast(bus));
+    mb.setVolume(0.5);
+    api_v9.AIL_free_all_busses(drv);
+    try testing.expectEqual(@as(usize, 0), drv.buses.items.len);
+}

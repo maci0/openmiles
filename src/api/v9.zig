@@ -23,6 +23,8 @@ pub fn AIL_sample_id(s_opt: ?*Sample) callconv(.winapi) i32 {
 pub fn AIL_set_sample_bus(s_opt: ?*Sample, bus_index: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.v9_bus = bus_index;
+    // Route the sample's output through the bus submix if it exists.
+    if (s.driver.busAt(bus_index)) |bus| _ = bus.route(s);
 }
 pub fn AIL_sample_bus(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
@@ -203,16 +205,16 @@ const DigitalDriver = openmiles.DigitalDriver;
 
 // --- Bus mixer / limiter ---
 pub fn AIL_allocate_bus(dig: ?*DigitalDriver) callconv(.winapi) ?*anyopaque {
-    _ = dig;
-    return null;
+    const d = dig orelse return null;
+    return @ptrCast(d.allocateBus());
 }
 pub fn AIL_free_all_busses(dig: ?*DigitalDriver) callconv(.winapi) void {
-    _ = dig;
+    const d = dig orelse return;
+    d.freeAllBusses();
 }
 pub fn AIL_bus_sample_handle(dig: ?*DigitalDriver, bus_index: i32) callconv(.winapi) ?*anyopaque {
-    _ = dig;
-    _ = bus_index;
-    return null;
+    const d = dig orelse return null;
+    return @ptrCast(d.busAt(bus_index));
 }
 pub fn AIL_enable_limiter(dig: ?*DigitalDriver, on_off: i32) callconv(.winapi) void {
     _ = dig;

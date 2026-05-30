@@ -25,6 +25,30 @@ fn satI32(v: f32) i32 {
     return @intFromFloat(v);
 }
 
+/// A v9 mixer bus: a miniaudio sound group that samples route their output to,
+/// so a submix can be controlled (volume) independently of the master.
+pub const MixBus = struct {
+    group: ma.ma_sound_group,
+    index: i32,
+    driver: *DigitalDriver,
+
+    pub fn setVolume(self: *MixBus, vol: f32) void {
+        ma.ma_sound_group_set_volume(&self.group, vol);
+    }
+
+    /// Route a sample's output through this bus instead of straight to the
+    /// engine endpoint. Returns true on success.
+    pub fn route(self: *MixBus, s: *Sample) bool {
+        if (!s.is_initialized) return false;
+        return ma.ma_node_attach_output_bus(
+            @ptrCast(&s.sound.engineNode),
+            0,
+            @ptrCast(&self.group.engineNode),
+            0,
+        ) == ma.MA_SUCCESS;
+    }
+};
+
 pub const SampleStatus = enum(u32) {
     free = 1, // SMP_FREE
     done = 2, // SMP_DONE
@@ -41,6 +65,8 @@ pub const DigitalDriver = struct {
     samples: std.ArrayListUnmanaged(*Sample),
     // v9 system-state stack: saved master-volume per push level.
     system_state_stack: std.ArrayListUnmanaged(f32) = .empty,
+    // v9 bus mixer: submix groups samples can be routed to.
+    buses: std.ArrayListUnmanaged(*MixBus) = .empty,
     samples_3d: std.ArrayListUnmanaged(*Sample3D) = .empty,
     rolloff_factor: f32 = 1.0,
     doppler_factor: f32 = 1.0,
@@ -106,9 +132,40 @@ pub const DigitalDriver = struct {
         return self;
     }
 
+    /// Allocate a new mixer bus (a miniaudio sound group) samples can route to.
+    pub fn allocateBus(self: *DigitalDriver) ?*MixBus {
+        const bus = self.allocator.create(MixBus) catch return null;
+        bus.* = .{ .group = undefined, .index = @intCast(self.buses.items.len), .driver = self };
+        if (ma.ma_sound_group_init(&self.engine, 0, null, &bus.group) != ma.MA_SUCCESS) {
+            self.allocator.destroy(bus);
+            return null;
+        }
+        self.buses.append(self.allocator, bus) catch {
+            ma.ma_sound_group_uninit(&bus.group);
+            self.allocator.destroy(bus);
+            return null;
+        };
+        return bus;
+    }
+
+    pub fn busAt(self: *DigitalDriver, index: i32) ?*MixBus {
+        if (index < 0 or index >= self.buses.items.len) return null;
+        return self.buses.items[@intCast(index)];
+    }
+
+    pub fn freeAllBusses(self: *DigitalDriver) void {
+        for (self.buses.items) |bus| {
+            ma.ma_sound_group_uninit(&bus.group);
+            self.allocator.destroy(bus);
+        }
+        self.buses.clearRetainingCapacity();
+    }
+
     pub fn deinit(self: *DigitalDriver) void {
         if (root.last_digital_driver == self) root.last_digital_driver = null;
         root.unregisterDriver(self);
+        self.freeAllBusses();
+        self.buses.deinit(self.allocator);
         self.system_state_stack.deinit(self.allocator);
         for (self.providers.items) |p| {
             p.deinit();
