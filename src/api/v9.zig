@@ -9,6 +9,37 @@ pub export fn AIL_IO_thread_handle(a0: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
     return 0;
 }
+
+// --- v9 per-sample attributes (synchronized control / buses / system levels) ---
+const Sample = openmiles.Sample;
+pub export fn AIL_set_sample_id(s_opt: ?*Sample, id: i32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    s.v9_id = id;
+}
+pub export fn AIL_sample_id(s_opt: ?*Sample) callconv(.winapi) i32 {
+    const s = s_opt orelse return 0;
+    return s.v9_id;
+}
+pub export fn AIL_set_sample_bus(s_opt: ?*Sample, bus_index: i32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    s.v9_bus = bus_index;
+}
+pub export fn AIL_sample_bus(s_opt: ?*Sample) callconv(.winapi) i32 {
+    const s = s_opt orelse return 0;
+    return s.v9_bus;
+}
+pub export fn AIL_set_sample_level_mask(s_opt: ?*Sample, mask: u8) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    s.v9_level_mask = mask;
+}
+pub export fn AIL_sample_level_mask(s_opt: ?*Sample) callconv(.winapi) u8 {
+    const s = s_opt orelse return 0;
+    return s.v9_level_mask;
+}
+pub export fn AIL_set_sample_3D_spread(s_opt: ?*Sample, spread: f32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    s.v9_spread = spread;
+}
 pub export fn AIL_add_clear_state_event_step(a0: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
     return 0;

@@ -1292,6 +1292,13 @@ comptime {
             .{ .name = "AIL_unapply_raw_environment_preset", .stack_size = 8, .ver = 90 },
             .{ .name = "AIL_unapply_raw_sound_preset", .stack_size = 8, .ver = 90 },
             .{ .name = "AIL_us_count64", .stack_size = 0, .ver = 90 },
+            .{ .name = "AIL_set_sample_id", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_sample_id", .stack_size = 4, .ver = 90 },
+            .{ .name = "AIL_set_sample_bus", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_sample_bus", .stack_size = 4, .ver = 90 },
+            .{ .name = "AIL_set_sample_level_mask", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_sample_level_mask", .stack_size = 4, .ver = 90 },
+            .{ .name = "AIL_set_sample_3D_spread", .stack_size = 8, .ver = 90 },
         };
         for (targets) |t| {
             // Skip exports outside the targeted MSS version's window so the

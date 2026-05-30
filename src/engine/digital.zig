@@ -337,6 +337,11 @@ pub const Sample = struct {
     v7_occlusion: f32 = 0.0,
     v7_exclusion: f32 = 0.0,
     v7_rate_factor: f32 = 1.0,
+    // v9 sample attributes (synchronized control / buses / system levels).
+    v9_id: i32 = 0,
+    v9_bus: i32 = 0,
+    v9_level_mask: u8 = 0xFF,
+    v9_spread: f32 = 0.0,
 
     fn eosCallbackBridge(pUserData: ?*anyopaque, pSound: ?*ma.ma_sound) callconv(.c) void {
         _ = pSound;
