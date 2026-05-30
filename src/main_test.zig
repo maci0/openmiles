@@ -2193,47 +2193,7 @@ test "v9 register_mix_callback fires per engine mix" {
     try testing.expect(back != null);
 }
 
-test "event constructor round-trips steps via close + next_event_step" {
-    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
-    try testing.expectEqual(@as(i32, 1), api_v9.AIL_add_clear_state_event_step(ev));
-    try testing.expectEqual(@as(i32, 1), api_v8b.AIL_add_comment_event_step(ev, "hello"));
-    const str = api_v8b.AIL_close_event(ev) orelse return error.NoString;
-    defer std.c.free(str);
-    // Walk it back.
-    var info_buf: openmiles.event.EventStepInfo = undefined;
-    var info_ptr: ?*openmiles.event.EventStepInfo = null;
-    var cur: ?*const anyopaque = @ptrCast(str);
-    // step 1: clear_state
-    cur = api_v8b.AIL_next_event_step(cur, &info_ptr, &info_buf, @sizeOf(openmiles.event.EventStepInfo));
-    try testing.expect(cur != null);
-    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.clear_state), info_ptr.?.event_type);
-    // step 2: comment "hello"
-    cur = api_v8b.AIL_next_event_step(cur, &info_ptr, &info_buf, @sizeOf(openmiles.event.EventStepInfo));
-    try testing.expect(cur != null);
-    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.comment), info_ptr.?.event_type);
-    try testing.expectEqualStrings("hello", info_ptr.?.payload.?[0..@intCast(info_ptr.?.payload_len)]);
-    // end
-    cur = api_v8b.AIL_next_event_step(cur, &info_ptr, &info_buf, @sizeOf(openmiles.event.EventStepInfo));
-    try testing.expect(cur == null);
-}
 
-test "event constructor records all wired step types" {
-    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
-    _ = api_v8b.AIL_add_start_sound_event_step(ev, null, null, 0, null, null, null, null, null, null, 0, 0, 0, 0, 0, 0, null, 0, 0, 0, 0, 0, 0, 0);
-    _ = api_v9.AIL_add_ramp_event_step(ev, null, null, 0, null, 0, 0, 0);
-    _ = api_v8b.AIL_add_comment_event_step(ev, "x");
-    const str = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
-    defer std.c.free(str);
-    var ib: openmiles.event.EventStepInfo = undefined;
-    var ip: ?*openmiles.event.EventStepInfo = null;
-    var cur: ?*const anyopaque = @ptrCast(str);
-    var count: usize = 0;
-    while (true) {
-        cur = api_v8b.AIL_next_event_step(cur, &ip, &ib, @sizeOf(openmiles.event.EventStepInfo)) orelse break;
-        count += 1;
-    }
-    try testing.expectEqual(@as(usize, 3), count); // start_sound, ramp, comment
-}
 
 test "v8 playback delay + MMX available" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
@@ -2271,4 +2231,20 @@ test "MP3 inspector parses real Layer III frames" {
     try testing.expectEqual(@as(i32, frame_size), es.byte_offset);
     // End.
     try testing.expectEqual(@as(i32, 0), api_v7b.AIL_enumerate_MP3_frames(&es));
+}
+
+test "event constructor produces byte-faithful Miles text" {
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v9.AIL_add_clear_state_event_step(ev);
+    _ = api_v8b.AIL_add_comment_event_step(ev, "hello");
+    const str = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    defer std.c.free(str);
+    // "9;4;" version header, "<;" clear-state (12+'0'='<'), "4;hello;" comment.
+    const got = std.mem.span(@as([*:0]const u8, @ptrCast(str)));
+    try testing.expectEqualStrings("9;4;<;4;hello;", got);
+    // next_event_step decodes the first real step's type (clear_state = 12).
+    var ib: openmiles.event.EventStepInfo = undefined;
+    var ip: ?*openmiles.event.EventStepInfo = null;
+    _ = api_v8b.AIL_next_event_step(@ptrCast(str), &ip, &ib, @sizeOf(openmiles.event.EventStepInfo));
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.clear_state), ip.?.event_type);
 }

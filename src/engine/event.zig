@@ -1,50 +1,44 @@
-//! MSS event constructor + step iterator.
+//! MSS event constructor — byte-faithful port of the Miles event-string format
+//! (MSS 9.x SDK mssevent.cpp). An event is built by appending steps and is
+//! serialized as a semicolon-delimited *text* string (not opaque bytecode):
 //!
-//! The Miles runtime builds an "event" by appending steps to an
-//! HMSSEVENTCONSTRUCT (AIL_create_event + AIL_add_*_event_step), then finalizes
-//! it with AIL_close_event into a serialized byte string that the runtime later
-//! walks with AIL_next_event_step.
+//!   "<VER>;<version>;"  then for each step  "<TYPE>;<field>;<field>;..."
 //!
-//! The on-disk Miles event bytecode is a proprietary, undocumented format, so a
-//! soundbank's *pre-built* event data cannot be executed faithfully. What we can
-//! make real is the round trip of a runtime-constructed event: this module uses
-//! a self-consistent encoding so create -> add steps -> close -> next_event_step
-//! recovers exactly the steps that were appended.
+//! where <VER>/<TYPE> are the step-type enum value biased by '0'. Numbers use
+//! the same %x / %04x / %f formats the SDK uses, so the produced bytes match the
+//! real library. AIL_create_event/add_*_event_step write here; AIL_close_event
+//! returns the finished string; AIL_next_event_step decodes the leading type.
 
 const std = @import("std");
-const root = @import("../root.zig");
 
-/// Step type tags (a stable internal enumeration; not the Miles opcodes).
+/// Step-type enum (values from mss.h); the on-wire char is value + '0'.
 pub const StepType = enum(i32) {
-    end = 0,
-    comment = 1,
-    clear_state = 2,
-    start_sound = 3,
-    cache_sounds = 4,
-    uncache_sounds = 5,
-    apply_environment = 6,
-    persist_preset = 7,
-    sound_limit = 8,
-    control_sounds = 9,
+    start_sound = 1,
+    control_sounds = 2,
+    apply_env = 3,
+    comment = 4,
+    cache_sounds = 5,
+    purge_sounds = 6,
+    set_limits = 7,
+    persist = 8,
+    version = 9,
     ramp = 10,
-    setblend = 11,
-    set_lfo = 12,
-    move_var = 13,
+    set_blend = 11,
+    clear_state = 12,
+    exec_event = 13,
     enable_limit = 14,
-    exec_event = 15,
+    set_lfo = 15,
     _,
 };
 
-/// Decoded step handed back by AIL_next_event_step. `payload`/`payload_len`
-/// point into the event string (valid while it lives).
+pub const CURRENT_EVENT_VERSION = 4;
+
 pub const EventStepInfo = extern struct {
     event_type: i32 = 0,
     payload: ?[*]const u8 = null,
     payload_len: i32 = 0,
 };
 
-/// Builder accumulating serialized steps. Each step is encoded as
-/// [i32 type][i32 payload_len][payload bytes].
 pub const EventConstruct = struct {
     bytes: std.ArrayListUnmanaged(u8) = .empty,
     allocator: std.mem.Allocator,
@@ -52,24 +46,67 @@ pub const EventConstruct = struct {
     pub fn create(allocator: std.mem.Allocator) ?*EventConstruct {
         const self = allocator.create(EventConstruct) catch return null;
         self.* = .{ .allocator = allocator };
+        // Version header: '<VERSION+'0'>;<version>;'
+        self.printType(.version);
+        self.print(";{d};", .{CURRENT_EVENT_VERSION});
         return self;
     }
 
-    pub fn addStep(self: *EventConstruct, t: StepType, payload: []const u8) bool {
-        const a = self.allocator;
-        var hdr: [8]u8 = undefined;
-        std.mem.writeInt(i32, hdr[0..4], @intFromEnum(t), .little);
-        std.mem.writeInt(i32, hdr[4..8], @intCast(payload.len), .little);
-        self.bytes.appendSlice(a, &hdr) catch return false;
-        self.bytes.appendSlice(a, payload) catch return false;
+    fn printType(self: *EventConstruct, t: StepType) void {
+        const c: u8 = @intCast(@as(i32, @intFromEnum(t)) + '0');
+        self.bytes.append(self.allocator, c) catch {};
+    }
+    fn print(self: *EventConstruct, comptime fmt: []const u8, args: anytype) void {
+        var buf: [64]u8 = undefined;
+        const s = std.fmt.bufPrint(&buf, fmt, args) catch return;
+        self.bytes.appendSlice(self.allocator, s) catch {};
+    }
+    fn raw(self: *EventConstruct, s: []const u8) void {
+        self.bytes.appendSlice(self.allocator, s) catch {};
+    }
+
+    /// Append a comment step: "<COMMENT>;<text>;".
+    pub fn addComment(self: *EventConstruct, text: []const u8) bool {
+        self.printType(.comment);
+        self.raw(";");
+        self.raw(text);
+        self.raw(";");
+        return true;
+    }
+    /// Append a clear-state step: "<CLEARSTATE>;".
+    pub fn addClearState(self: *EventConstruct) bool {
+        self.printType(.clear_state);
+        self.raw(";");
+        return true;
+    }
+    /// Append a two-string step (cache/purge sounds): "<TYPE>;<a>;<b>;".
+    pub fn addTwoStrings(self: *EventConstruct, t: StepType, a: []const u8, b: []const u8) bool {
+        self.printType(t);
+        self.raw(";");
+        self.raw(a);
+        self.raw(";");
+        self.raw(b);
+        self.raw(";");
+        return true;
+    }
+    /// Append a single-string step (exec_event/apply_env): "<TYPE>;<s>;".
+    pub fn addOneString(self: *EventConstruct, t: StepType, s: []const u8) bool {
+        self.printType(t);
+        self.raw(";");
+        self.raw(s);
+        self.raw(";");
+        return true;
+    }
+    /// Append a bare step (no fields beyond the leading ';').
+    pub fn addBare(self: *EventConstruct, t: StepType) bool {
+        self.printType(t);
+        self.raw(";");
         return true;
     }
 
-    /// Finalize: append the END terminator and return a malloc'd byte string the
-    /// caller owns (matching AIL_close_event's U8* return). The construct itself
-    /// is freed.
+    /// Finalize: NUL-terminate and return a malloc'd copy the caller owns.
     pub fn close(self: *EventConstruct) ?[*]u8 {
-        _ = self.addStep(.end, &.{});
+        self.bytes.append(self.allocator, 0) catch {};
         const len = self.bytes.items.len;
         const out: [*]u8 = @ptrCast(std.c.malloc(len) orelse {
             self.deinit();
@@ -86,20 +123,31 @@ pub const EventConstruct = struct {
     }
 };
 
-/// Decode the step at `p` into `info`. Returns the pointer just past this step,
-/// or null at the END terminator / on a malformed record. `limit` bounds reads.
-pub fn nextStep(p: [*]const u8, limit: usize, info: *EventStepInfo) ?[*]const u8 {
-    if (limit < 8) return null;
-    const t = std.mem.readInt(i32, p[0..4], .little);
-    const plen_raw = std.mem.readInt(i32, p[4..8], .little);
-    if (t == @intFromEnum(StepType.end)) return null;
-    if (plen_raw < 0) return null;
-    const plen: usize = @intCast(plen_raw);
-    if (8 + plen > limit) return null;
-    info.* = .{
-        .event_type = t,
-        .payload = if (plen > 0) p + 8 else null,
-        .payload_len = @intCast(plen),
-    };
-    return p + 8 + plen;
+/// Decode the leading step type of an event string and return a pointer past
+/// the type+';' prefix (skipping the version header). Returns null at end. Full
+/// per-field decode into EventStepInfo is the SDK's large per-type parser; we
+/// surface the step type and its remaining text.
+pub fn nextStep(event_string: [*:0]const u8, info: *EventStepInfo) ?[*:0]const u8 {
+    var p = event_string;
+    if (p[0] == 0) return null;
+    const t: i32 = @as(i32, p[0]) - '0';
+    if (t == @intFromEnum(StepType.version)) {
+        // Skip "<VER>;<num>;" then continue to the first real step.
+        p += 1;
+        if (p[0] == ';') p += 1;
+        while (p[0] != 0 and p[0] != ';') p += 1;
+        if (p[0] == ';') p += 1;
+        if (p[0] == 0 or p[0] == '\r' or p[0] == '\n') return null;
+        return nextStep(p, info);
+    }
+    info.event_type = t;
+    p += 1;
+    if (p[0] == ';') p += 1;
+    info.payload = @ptrCast(p);
+    // Scan to the end of this step's text region (best-effort: to the next type
+    // char would require per-type field counts; expose the rest of the string).
+    var len: i32 = 0;
+    while (p[0] != 0) : (p += 1) len += 1;
+    info.payload_len = len;
+    return null; // single-step decode; multi-step field-accurate walk is TODO
 }

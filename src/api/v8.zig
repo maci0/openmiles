@@ -160,18 +160,18 @@ pub fn AIL_add_apply_environment_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
-    return if (e.addStep(.apply_environment, &.{})) 1 else 0;
+    return if (e.addBare(.apply_env)) 1 else 0;
 }
 pub fn AIL_add_cache_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
-    return if (e.addStep(.cache_sounds, &.{})) 1 else 0;
+    return if (e.addBare(.cache_sounds)) 1 else 0;
 }
 pub fn AIL_add_comment_event_step(event: ?*anyopaque, comment: ?[*:0]const u8) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(event orelse return 0));
     const c = if (comment) |p| std.mem.span(p) else "";
-    return if (e.addStep(.comment, c)) 1 else 0;
+    return if (e.addComment(c)) 1 else 0;
 }
 pub fn AIL_add_control_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque, a6: i32, a7: f32, a8: i32, a9: i32) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
@@ -184,7 +184,7 @@ pub fn AIL_add_control_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?
     _ = a7;
     _ = a8;
     _ = a9;
-    return if (e.addStep(.control_sounds, &.{})) 1 else 0;
+    return if (e.addBare(.control_sounds)) 1 else 0;
 }
 pub fn AIL_add_persist_preset_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: i32) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
@@ -192,13 +192,13 @@ pub fn AIL_add_persist_preset_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?
     _ = a2;
     _ = a3;
     _ = a4;
-    return if (e.addStep(.persist_preset, &.{})) 1 else 0;
+    return if (e.addBare(.persist)) 1 else 0;
 }
 pub fn AIL_add_sound_limit_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
-    return if (e.addStep(.sound_limit, &.{})) 1 else 0;
+    return if (e.addBare(.set_limits)) 1 else 0;
 }
 pub fn AIL_add_start_sound_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32, a4: ?*anyopaque, a5: ?*anyopaque, a6: ?*anyopaque, a7: ?*anyopaque, a8: ?*anyopaque, a9: ?*anyopaque, a10: u32, a11: i32, a12: i32, a13: i32, a14: i32, a15: i32, a16: ?*anyopaque, a17: f32, a18: f32, a19: f32, a20: f32, a21: f32, a22: i32, a23: i32) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
@@ -225,13 +225,13 @@ pub fn AIL_add_start_sound_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*an
     _ = a21;
     _ = a22;
     _ = a23;
-    return if (e.addStep(.start_sound, &.{})) 1 else 0;
+    return if (e.addBare(.start_sound)) 1 else 0;
 }
 pub fn AIL_add_uncache_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
-    return if (e.addStep(.uncache_sounds, &.{})) 1 else 0;
+    return if (e.addBare(.purge_sounds)) 1 else 0;
 }
 pub fn AIL_apply_environment_preset(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
@@ -481,17 +481,18 @@ pub fn AIL_mem_write(mem: ?*anyopaque, src: ?*anyopaque, n: i32) callconv(.winap
     return @intCast(take);
 }
 // AIL_next_event_step(eventString, &stepInfo, buffer, bufferSize) — decode the
-// next step of a serialized event string. Writes a pointer to a decoded
-// EventStepInfo (built in the caller's scratch buffer) and returns the pointer
-// just past this step, or null at the end. The event string is NUL-... no, it
-// is length-implicit; we bound reads by the END terminator.
+// next step of the serialized event text. Writes a decoded EventStepInfo into
+// the caller's scratch buffer and returns the pointer past this step, or null at
+// the end (the event string is NUL-terminated).
 pub fn AIL_next_event_step(event_string: ?*const anyopaque, step_out: ?*?*openmiles.event.EventStepInfo, buffer: ?*anyopaque, buffer_size: i32) callconv(.winapi) ?*const anyopaque {
-    const p: [*]const u8 = @ptrCast(event_string orelse return null);
+    const p: [*:0]const u8 = @ptrCast(event_string orelse return null);
     const buf = buffer orelse return null;
     if (buffer_size < @sizeOf(openmiles.event.EventStepInfo)) return null;
     const info: *openmiles.event.EventStepInfo = @ptrCast(@alignCast(buf));
-    // The event string is self-terminated by an END record; allow generous span.
-    const next = openmiles.event.nextStep(p, std.math.maxInt(i32), info) orelse return null;
+    const next = openmiles.event.nextStep(p, info) orelse {
+        if (step_out) |so| so.* = info;
+        return null;
+    };
     if (step_out) |so| so.* = info;
     return @ptrCast(next);
 }
