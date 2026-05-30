@@ -57,7 +57,7 @@ pub export fn AIL_quick_load_mem(data: *anyopaque, size: u32) callconv(.winapi) 
             openmiles.setLastError("Failed to allocate sample for quick load");
             return null;
         };
-        s.load(data, @intCast(size)) catch {
+        s.load(data, @intCast(@min(size, @as(u32, std.math.maxInt(i32))))) catch {
             openmiles.setLastError("Failed to load quick sample from memory");
             s.deinit();
             return null;

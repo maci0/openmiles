@@ -388,7 +388,7 @@ pub export fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: u32, data: *anyo
         };
     } else {
         // No format hint: treat as a complete encoded file image (whole-buffer).
-        s.load(data, @intCast(len)) catch return;
+        s.load(data, @intCast(@min(len, @as(u32, std.math.maxInt(i32))))) catch return;
     }
     // Fire SOB (Start Of Buffer) callback now that a new buffer is accepted.
     // Signature: void callback(HSAMPLE S, S32 buff_num, U32 buff_size, void const *buff_addr)
