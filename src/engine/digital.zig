@@ -45,6 +45,11 @@ pub const DigitalDriver = struct {
     distance_factor: f32 = 1.0,
     room_type: i32 = 0,
     speaker_type: i32 = 0,
+    // MSS v7 unified-API master-reverb / room state (stored; queried back).
+    v7_master_reverb_decay: f32 = 0.0,
+    v7_master_reverb_dry: f32 = 1.0,
+    v7_master_reverb_wet: f32 = 0.0,
+    v7_room_type: i32 = 0,
     // DSP processor callbacks [input_stage, output_stage]. Stored for query
     // round-tripping; not invoked (miniaudio manages its own processing graph).
     driver_processors: [2]usize = .{ 0, 0 },
@@ -327,6 +332,10 @@ pub const Sample = struct {
     reverb_room_type: f32 = 0.0,
     reverb_level: f32 = 0.0,
     reverb_reflect_time: f32 = 0.0,
+    // MSS v7 unified-API attenuation hints (stored; queried back).
+    v7_obstruction: f32 = 0.0,
+    v7_occlusion: f32 = 0.0,
+    v7_exclusion: f32 = 0.0,
 
     fn eosCallbackBridge(pUserData: ?*anyopaque, pSound: ?*ma.ma_sound) callconv(.c) void {
         _ = pSound;

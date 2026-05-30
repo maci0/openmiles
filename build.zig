@@ -7,6 +7,7 @@ fn parseMssVersion(s: []const u8) ?u16 {
         .{ .k = "5", .v = 50 },   .{ .k = "6", .v = 66 },
         .{ .k = "6.0", .v = 60 }, .{ .k = "6.1", .v = 61 },
         .{ .k = "6.5", .v = 65 }, .{ .k = "6.6", .v = 66 },
+        .{ .k = "7", .v = 70 },
     };
     for (map) |m| {
         if (std.mem.eql(u8, s, m.k)) return m.v;
@@ -21,7 +22,7 @@ pub fn build(b: *std.Build) void {
     // Target MSS version: gates which API groups are compiled/exported so the
     // DLL is ABI-shaped like a specific Miles release. Encoded major*10+minor:
     // 30=3.x, 40=4.x, 50=5.x, 60=6.0, 61=6.1, 65=6.5, 66=6.6 (default newest).
-    const mss_version_str = b.option([]const u8, "mss-version", "Target MSS version (3,4,5,6,6.0,6.1,6.5,6.6)") orelse "6.6";
+    const mss_version_str = b.option([]const u8, "mss-version", "Target MSS version (3,4,5,6,6.0,6.1,6.5,6.6,7)") orelse "7";
     const mss_version: u16 = parseMssVersion(mss_version_str) orelse {
         std.debug.print("invalid -Dmss-version='{s}' (use 3,4,5,6,6.0,6.1,6.5,6.6)\n", .{mss_version_str});
         std.process.exit(1);

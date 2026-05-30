@@ -587,3 +587,98 @@ test "coverage: lifecycle / driver open-close exports" {
     // Global teardown last.
     dg.AIL_shutdown();
 }
+
+test "coverage: v7.zig unified exports" {
+    const v7 = @import("api/v7.zig");
+    const drv = try openmiles.DigitalDriver.init(alloc, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm7: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav7 = try openmiles.buildWavFromPcm(alloc, &pcm7, 1, 8000, 16);
+    defer alloc.free(wav7);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    s.loadFromMemory(wav7, false) catch {};
+
+    // Unified 3D on the sample.
+    v7.AIL_set_sample_3D_position(s, 1, 2, 3);
+    v7.AIL_set_sample_3D_velocity(s, 0, 0, 0, 1);
+    v7.AIL_set_sample_3D_velocity_vector(s, 0, 0, 0);
+    v7.AIL_set_sample_3D_orientation(s, 0, 0, 1, 0, 1, 0);
+    v7.AIL_set_sample_3D_cone(s, 0, 360, 0.5);
+    v7.AIL_set_sample_3D_distances(s, 100, 1, 0);
+    v7.AIL_update_sample_3D_position(s, 0.016);
+    v7.AIL_sample_3D_position(s, &f32o, &f32o, &f32o);
+    v7.AIL_sample_3D_velocity(s, &f32o, &f32o, &f32o);
+    v7.AIL_sample_3D_orientation(s, &f32o, &f32o, &f32o, &f32o, &f32o, &f32o);
+    v7.AIL_sample_3D_cone(s, &f32o, &f32o, &f32o);
+    v7.AIL_sample_3D_distances(s, &f32o, &f32o, &i32o);
+
+    // Unified volume / pan / reverb / low-pass.
+    v7.AIL_set_sample_volume_levels(s, 0.8, 0.6);
+    v7.AIL_sample_volume_levels(s, &f32o, &f32o);
+    v7.AIL_sample_volume_pan(s, &f32o, &f32o);
+    v7.AIL_set_sample_low_pass_cut_off(s, 0, 8000);
+    _ = v7.AIL_sample_low_pass_cut_off(s, 0);
+    v7.AIL_set_sample_reverb_levels(s, 0.7, 0.3);
+    v7.AIL_sample_reverb_levels(s, &f32o, &f32o);
+    var si: openmiles.AILSOUNDINFO = .{ .format = 0, .data_ptr = sc(), .data_len = 16, .rate = 8000, .bits = 16, .channels = 1, .samples = 0, .block_size = 0, .initial_ptr = null };
+    v7.AIL_set_sample_info(s, &si);
+    v7.AIL_set_sample_obstruction(s, 0.5);
+    _ = v7.AIL_sample_obstruction(s);
+    v7.AIL_set_sample_occlusion(s, 0.5);
+    _ = v7.AIL_sample_occlusion(s);
+    v7.AIL_set_sample_exclusion(s, 0.5);
+    _ = v7.AIL_sample_exclusion(s);
+
+    // Listener + master + room.
+    v7.AIL_listener_3D_position(drv, &f32o, &f32o, &f32o);
+    v7.AIL_listener_3D_velocity(drv, &f32o, &f32o, &f32o);
+    v7.AIL_listener_3D_orientation(drv, &f32o, &f32o, &f32o, &f32o, &f32o, &f32o);
+    v7.AIL_set_listener_3D_velocity_vector(drv, 0, 0, 0);
+    v7.AIL_update_listener_3D_position(drv, 0.016);
+    _ = v7.AIL_digital_master_volume_level(drv);
+    v7.AIL_set_digital_master_volume_level(drv, 0.9);
+    v7.AIL_set_digital_master_reverb(drv, 0, 1.0, 0.02, 0.5);
+    v7.AIL_digital_master_reverb(drv, 0, &f32o, &f32o, &f32o);
+    v7.AIL_set_digital_master_reverb_levels(drv, 0, 0.8, 0.2);
+    v7.AIL_digital_master_reverb_levels(drv, 0, &f32o, &f32o);
+    v7.AIL_set_room_type(drv, 0, 3);
+    _ = v7.AIL_room_type(drv, 0);
+
+    // Redbook + quick + bridges + stubs.
+    const h = rb.AIL_redbook_open_drive(0);
+    if (h) |hh| {
+        v7.AIL_redbook_set_volume_level(hh, 0.5);
+        _ = v7.AIL_redbook_volume_level(hh);
+        rb.AIL_redbook_close(hh);
+    }
+    v7.AIL_quick_set_low_pass_cut_off(s, 0, 8000);
+    v7.AIL_quick_set_reverb_levels(s, 0.7, 0.3);
+    _ = v7.AIL_stream_sample_handle(s);
+    _ = v7.AIL_DLS_sample_handle(null);
+    _ = v7.AIL_find_filter("x", &prov);
+    _ = v7.AIL_background_CPU_percent();
+    _ = v7.AIL_sample_processor(s, 0);
+    _ = v7.AIL_digital_driver_processor(drv, 0);
+    v7.AIL_sample_stage_attribute(s, "x", sc());
+    v7.AIL_set_sample_stage_preference(s, "x", sc());
+    _ = v7.AIL_enumerate_sample_stage_attributes(s, &next, sc());
+    v7.AIL_sample_channel_levels(s, null, null, &f32o, 0);
+    v7.AIL_set_sample_channel_levels(s, null, null, &f32o, 0);
+    _ = v7.AIL_listener_relative_receiver_array(drv, &i32o);
+    v7.AIL_set_listener_relative_receiver_array(drv, null, 0);
+    v7.AIL_speaker_configuration(drv, &i32o, &i32o, &f32o, sc());
+    v7.AIL_set_speaker_configuration(drv, null, 2, 1);
+    v7.AIL_speaker_reverb_levels(drv, null, null, null);
+    v7.AIL_set_speaker_reverb_levels(drv, &f32o, &f32o, null, 0);
+    v7.AIL_calculate_3D_channel_levels(drv, s, 0, &f32o, sc());
+    _ = v7.AIL_digital_output_filter(drv);
+    v7.AIL_output_filter_driver_attribute(null, "x", sc());
+    v7.AIL_set_output_filter_driver_preference(null, "x", sc());
+    _ = v7.AIL_enumerate_output_filter_driver_attributes(null, &next, sc());
+    _ = v7.AIL_enumerate_output_filter_sample_attributes(null, &next, sc());
+    _ = v7.AIL_inspect_MP3(sc(), sc(), 0);
+    _ = v7.AIL_enumerate_MP3_frames(sc());
+    _ = v7.RIB_load_static_provider_library(null, "x");
+    _ = v7.RIB_MAIN(null, "x");
+}
