@@ -60,10 +60,20 @@ are compiled and exported, so the DLL is ABI-shaped like that Miles release:
 | 5 | 3D audio |
 | 6 | Filter API |
 
-A lower-versioned DLL omits the newer groups' exports (e.g. a v3 build has no
-RIB/ASI plugin loader or 3D exports), matching what games of that era expect.
-Note: the Filter (v6) and memory-callback (v4) functions live alongside the v3
-digital core and are always exported regardless of `-Dmss-version`.
+A lower-versioned DLL omits the newer groups' exports entirely, byte-for-byte
+matching what games of that era expect. Example export-table sizes:
+
+| `-Dmss-version` | Exports |
+|-----------------|---------|
+| 3 | 231 |
+| 4 | 287 |
+| 5 | 357 |
+| 6.x | 368 |
+
+(The RIB/ASI plugin loader is absent from a v3 build; 3D from <v5; Filter from
+<v6.) The plugin ABI itself — `RIB_INTERFACE_ENTRY` layout and the ASI/RIB
+callback signatures — is stable across MSS v4–v6, so a `.asi` plugin built for
+any v4+ release loads into any v4+ build.
 
 > **Note:** Native builds on macOS aarch64 (Apple Silicon) are not supported because Zig's stage2 backend does not implement the `aarch64_aapcs_win` calling convention used by the stdcall exports. Use Linux or Windows for native builds, or cross-compile to `x86-windows`.
 

@@ -254,68 +254,6 @@ pub export fn AIL_set_sample_loop_count(s_opt: ?*Sample, count: i32) callconv(.w
     log("AIL_set_sample_loop_count(s={*}, count={d})\n", .{ s, count });
     s.setLoopCount(count);
 }
-pub export fn AIL_open_filter(provider_opt: ?*Provider, driver_opt: ?*DigitalDriver) callconv(.winapi) ?*anyopaque {
-    const provider = provider_opt orelse return null;
-    const driver = driver_opt orelse return null;
-    log("AIL_open_filter(provider={*}, driver={*})\n", .{ provider, driver });
-    const filter = Filter.init(provider, driver) catch |err| {
-        log("Error: {any}\n", .{err});
-        return null;
-    };
-    return @ptrCast(filter);
-}
-pub export fn AIL_close_filter(filter_ptr: *anyopaque) callconv(.winapi) void {
-    log("AIL_close_filter(filter={*})\n", .{filter_ptr});
-    const filter: *Filter = @ptrCast(@alignCast(filter_ptr));
-    filter.deinit();
-}
-pub export fn AIL_set_sample_filter(HSAMPLE_opt: ?*Sample, filter_ptr: *anyopaque, priority: i32) callconv(.winapi) void {
-    const HSAMPLE = HSAMPLE_opt orelse return;
-    _ = priority;
-    log("AIL_set_sample_filter(HSAMPLE={*}, filter={*})\n", .{ HSAMPLE, filter_ptr });
-    const filter: *Filter = @ptrCast(@alignCast(filter_ptr));
-    filter.attachSample(HSAMPLE);
-}
-pub export fn AIL_filter_attribute(filter_ptr: *anyopaque, name: [*:0]const u8, value: *anyopaque) callconv(.winapi) void {
-    log("AIL_filter_attribute(filter={*}, name={s})\n", .{ filter_ptr, name });
-    const filter: *const Filter = @ptrCast(@alignCast(filter_ptr));
-    const name_slice = std.mem.span(name);
-    const result = filter.getAttribute(name_slice);
-    const out: *f32 = @ptrCast(@alignCast(value));
-    out.* = result;
-}
-pub export fn AIL_set_filter_attribute(filter_ptr: *anyopaque, name: [*:0]const u8, value: *anyopaque) callconv(.winapi) void {
-    const val: *const f32 = @ptrCast(@alignCast(value));
-    log("AIL_set_filter_attribute(filter={*}, name={s}, value={d})\n", .{ filter_ptr, name, val.* });
-    const filter: *Filter = @ptrCast(@alignCast(filter_ptr));
-    const name_slice = std.mem.span(name);
-    filter.setAttribute(name_slice, val.*);
-}
-const builtin_filter_name: [*:0]const u8 = "OpenMiles Low-Pass Filter";
-// AIL_enumerate_filters(HPROENUM *next, HPROVIDER *dest, C8 **name)
-// Iterator over filter providers. `dest` receives the provider handle (used by
-// AIL_ASI_provider_attribute / AIL_open_filter), `name` its display name, and
-// `next` is the opaque iteration cursor. Returns 1 while a provider remains.
-pub export fn AIL_enumerate_filters(next: *?*anyopaque, dest: *?*Provider, name: *[*:0]const u8) callconv(.winapi) i32 {
-    const idx: usize = if (next.*) |v| @intFromPtr(v) else 0;
-    if (idx == 0) {
-        dest.* = openmiles.startup_provider;
-        name.* = builtin_filter_name;
-        next.* = @ptrFromInt(@as(usize, 1));
-        return 1;
-    }
-    next.* = null;
-    dest.* = null;
-    return 0;
-}
-pub export fn AIL_mem_alloc_lock(size: u32) callconv(.winapi) ?*anyopaque {
-    log("AIL_mem_alloc_lock(size={d})\n", .{size});
-    return std.c.malloc(size);
-}
-pub export fn AIL_mem_free_lock(ptr: *anyopaque) callconv(.winapi) void {
-    log("AIL_mem_free_lock(ptr={*})\n", .{ptr});
-    std.c.free(ptr);
-}
 pub export fn AIL_sample_user_data(s_opt: ?*Sample, index: i32) callconv(.winapi) u32 {
     const s = s_opt orelse return 0;
     const idx: usize = @intCast(@min(@max(index, 0), 7));
@@ -441,42 +379,6 @@ pub export fn AIL_set_sample_processor(s_opt: ?*Sample, stage: i32, processor: ?
     const prev: ?*anyopaque = @ptrFromInt(s.sample_processors[idx]);
     s.sample_processors[idx] = if (processor) |p| @intFromPtr(p) else 0;
     return prev;
-}
-const filter_attr_names = [_][*:0]const u8{ "Cutoff", "Order" };
-pub export fn AIL_enumerate_filter_attributes(filter: *anyopaque, next: *?*anyopaque, name: *[*:0]const u8) callconv(.winapi) i32 {
-    _ = filter;
-    const idx: usize = if (next.* == null) 0 else @intFromPtr(next.*);
-    if (idx >= filter_attr_names.len) return 0;
-    name.* = filter_attr_names[idx];
-    next.* = @ptrFromInt(idx + 1);
-    return 1;
-}
-pub export fn AIL_enumerate_filter_sample_attributes(filter: *anyopaque, next: *?*anyopaque, name: *[*:0]const u8) callconv(.winapi) i32 {
-    _ = filter;
-    const idx: usize = if (next.* == null) 0 else @intFromPtr(next.*);
-    if (idx >= filter_attr_names.len) return 0;
-    name.* = filter_attr_names[idx];
-    next.* = @ptrFromInt(idx + 1);
-    return 1;
-}
-pub export fn AIL_filter_sample_attribute(s_opt: ?*Sample, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
-    const s = s_opt orelse return;
-    if (s.attached_filter) |filter| {
-        const out: *f32 = @ptrCast(@alignCast(val));
-        out.* = filter.getAttribute(std.mem.span(name));
-    }
-}
-pub export fn AIL_set_filter_sample_preference(s_opt: ?*Sample, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
-    const s = s_opt orelse return;
-    if (s.attached_filter) |filter| {
-        const v: *const f32 = @ptrCast(@alignCast(val));
-        filter.setAttribute(std.mem.span(name), v.*);
-    }
-}
-pub export fn AIL_set_filter_preference(filter_ptr: *anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
-    const filter: *Filter = @ptrCast(@alignCast(filter_ptr));
-    const v: *const f32 = @ptrCast(@alignCast(val));
-    filter.setAttribute(std.mem.span(name), v.*);
 }
 // AIL_primary_digital_driver(HDIGDRIVER new_primary) -> HDIGDRIVER
 // Passing a driver makes it the primary; null queries the current primary.
@@ -677,18 +579,6 @@ pub export fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len:
     };
     return 1;
 }
-var stored_malloc_fn: ?*anyopaque = null;
-var stored_free_fn: ?*anyopaque = null;
-pub export fn AIL_mem_use_malloc(malloc_fn: ?*anyopaque) callconv(.winapi) void {
-    stored_malloc_fn = malloc_fn;
-}
-pub export fn AIL_mem_use_free(free_fn: ?*anyopaque) callconv(.winapi) void {
-    stored_free_fn = free_fn;
-}
-pub export fn AIL_set_mem_callbacks(malloc_fn: ?*anyopaque, free_fn: ?*anyopaque) callconv(.winapi) void {
-    stored_malloc_fn = malloc_fn;
-    stored_free_fn = free_fn;
-}
 /// Allocates a new buffer which must be freed by the caller using AIL_mem_free_lock.
 pub export fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsize: *u32) callconv(.winapi) i32 {
     if (info.data_ptr == null or info.data_len == 0) return 0;
@@ -882,12 +772,12 @@ comptime {
             .{ .name = "RIB_enumerate_providers", .stack_size = 12, .ver = 40 },
             .{ .name = "RIB_request_interface", .stack_size = 16, .ver = 40 },
             .{ .name = "RIB_find_files_provider", .stack_size = 20, .ver = 40 },
-            .{ .name = "AIL_open_filter", .stack_size = 8 },
-            .{ .name = "AIL_close_filter", .stack_size = 4 },
-            .{ .name = "AIL_set_sample_filter", .stack_size = 12 },
-            .{ .name = "AIL_filter_attribute", .stack_size = 12 },
-            .{ .name = "AIL_set_filter_attribute", .stack_size = 12 },
-            .{ .name = "AIL_enumerate_filters", .stack_size = 12 },
+            .{ .name = "AIL_open_filter", .stack_size = 8, .ver = 60 },
+            .{ .name = "AIL_close_filter", .stack_size = 4, .ver = 60 },
+            .{ .name = "AIL_set_sample_filter", .stack_size = 12, .ver = 60 },
+            .{ .name = "AIL_filter_attribute", .stack_size = 12, .ver = 60 },
+            .{ .name = "AIL_set_filter_attribute", .stack_size = 12, .ver = 60 },
+            .{ .name = "AIL_enumerate_filters", .stack_size = 12, .ver = 60 },
             .{ .name = "AIL_enumerate_3D_providers", .stack_size = 12, .ver = 50 },
             .{ .name = "AIL_allocate_3D_sample_handle", .stack_size = 4, .ver = 50 },
             .{ .name = "AIL_release_3D_sample_handle", .stack_size = 4, .ver = 50 },
@@ -935,8 +825,8 @@ comptime {
             .{ .name = "AIL_ASI_provider_attribute", .stack_size = 8, .ver = 40 },
             .{ .name = "AIL_compress_ASI", .stack_size = 16, .ver = 40 },
             .{ .name = "AIL_decompress_ASI", .stack_size = 16, .ver = 40 },
-            .{ .name = "AIL_mem_alloc_lock", .stack_size = 4 },
-            .{ .name = "AIL_mem_free_lock", .stack_size = 4 },
+            .{ .name = "AIL_mem_alloc_lock", .stack_size = 4, .ver = 40 },
+            .{ .name = "AIL_mem_free_lock", .stack_size = 4, .ver = 40 },
             // 3D Sample control
             .{ .name = "AIL_start_3D_sample", .stack_size = 4, .ver = 50 },
             .{ .name = "AIL_stop_3D_sample", .stack_size = 4, .ver = 50 },
@@ -1064,12 +954,12 @@ comptime {
             .{ .name = "AIL_filter_stream_attribute", .stack_size = 12 },
             .{ .name = "AIL_set_filter_stream_preference", .stack_size = 12 },
             // Filter extras
-            .{ .name = "AIL_enumerate_filter_attributes", .stack_size = 12 },
-            .{ .name = "AIL_enumerate_filter_sample_attributes", .stack_size = 12 },
-            .{ .name = "AIL_filter_sample_attribute", .stack_size = 12 },
-            .{ .name = "AIL_set_filter_sample_preference", .stack_size = 12 },
+            .{ .name = "AIL_enumerate_filter_attributes", .stack_size = 12, .ver = 60 },
+            .{ .name = "AIL_enumerate_filter_sample_attributes", .stack_size = 12, .ver = 60 },
+            .{ .name = "AIL_filter_sample_attribute", .stack_size = 12, .ver = 60 },
+            .{ .name = "AIL_set_filter_sample_preference", .stack_size = 12, .ver = 60 },
             .{ .name = "AIL_set_filter_DLS_preference", .stack_size = 12 },
-            .{ .name = "AIL_set_filter_preference", .stack_size = 12 },
+            .{ .name = "AIL_set_filter_preference", .stack_size = 12, .ver = 60 },
             .{ .name = "AIL_filter_DLS_attribute", .stack_size = 12 },
             .{ .name = "AIL_filter_DLS_with_XMI", .stack_size = 24 },
             // Quick API extras
@@ -1144,9 +1034,9 @@ comptime {
             .{ .name = "AIL_file_write", .stack_size = 12 },
             .{ .name = "AIL_WAV_info", .stack_size = 8 },
             .{ .name = "AIL_WAV_file_write", .stack_size = 20 },
-            .{ .name = "AIL_mem_use_malloc", .stack_size = 4 },
-            .{ .name = "AIL_mem_use_free", .stack_size = 4 },
-            .{ .name = "AIL_set_mem_callbacks", .stack_size = 8 },
+            .{ .name = "AIL_mem_use_malloc", .stack_size = 4, .ver = 40 },
+            .{ .name = "AIL_mem_use_free", .stack_size = 4, .ver = 40 },
+            .{ .name = "AIL_set_mem_callbacks", .stack_size = 8, .ver = 40 },
             .{ .name = "AIL_compress_ADPCM", .stack_size = 12 },
             .{ .name = "AIL_decompress_ADPCM", .stack_size = 12 },
             .{ .name = "AIL_open_input", .stack_size = 4, .ver = 40 },

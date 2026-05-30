@@ -16,6 +16,7 @@ const openmiles = @import("openmiles");
 // C-ABI export modules — reachable now that the test build shares the openmiles
 // module with the api wrappers (see test_root.zig).
 const api_digital = @import("api/digital.zig");
+const api_memory = @import("api/memory.zig");
 const api_redbook = @import("api/redbook.zig");
 const api_quick = @import("api/quick.zig");
 const api_dls = @import("api/dls.zig");
@@ -24,7 +25,7 @@ const api_3d = @import("api/3d.zig");
 const api_timer = @import("api/timer.zig");
 
 fn freeLock(p: ?*anyopaque) void {
-    if (p) |ptr| api_digital.AIL_mem_free_lock(ptr);
+    if (p) |ptr| api_memory.AIL_mem_free_lock(ptr);
 }
 
 fn dummyTimerCb(_: u32) callconv(.winapi) void {}

@@ -14,6 +14,8 @@ const testing = std.testing;
 const openmiles = @import("openmiles");
 
 const dg = @import("api/digital.zig");
+const flt = @import("api/filter.zig");
+const mem = @import("api/memory.zig");
 const td = @import("api/3d.zig");
 const st = @import("api/stream.zig");
 const qk = @import("api/quick.zig");
@@ -49,7 +51,7 @@ fn sc() *anyopaque {
 }
 
 fn freeLock(p: ?*anyopaque) void {
-    if (p) |ptr| dg.AIL_mem_free_lock(ptr);
+    if (p) |ptr| mem.AIL_mem_free_lock(ptr);
 }
 
 test "coverage: digital.zig exports" {
@@ -84,7 +86,7 @@ test "coverage: digital.zig exports" {
     s.loadFromMemory(wav, false) catch {};
     const myprov = openmiles.Provider.init(alloc, null) catch null;
     defer if (myprov) |p| p.deinit();
-    const filt: ?*anyopaque = dg.AIL_open_filter(myprov, drv);
+    const filt: ?*anyopaque = flt.AIL_open_filter(myprov, drv);
 
     // Driver-level.
     _ = dg.AIL_primary_digital_driver(drv);
@@ -142,29 +144,29 @@ test "coverage: digital.zig exports" {
     _ = dg.AIL_set_sample_file(s, @ptrCast(wav.ptr), -1);
     _ = dg.AIL_set_named_sample_file(s, "wav", @ptrCast(wav.ptr), @intCast(wav.len), 0);
     dg.AIL_load_sample_buffer(s, 0, sc(), 0);
-    dg.AIL_filter_sample_attribute(s, "Cutoff", sc());
-    dg.AIL_set_filter_sample_preference(s, "Cutoff", sc());
+    flt.AIL_filter_sample_attribute(s, "Cutoff", sc());
+    flt.AIL_set_filter_sample_preference(s, "Cutoff", sc());
 
     // Filter-level (real filter handle).
     if (filt) |f| {
-        dg.AIL_filter_attribute(f, "Cutoff", sc());
-        dg.AIL_set_filter_attribute(f, "Cutoff", sc());
-        dg.AIL_set_filter_preference(f, "Cutoff", sc());
-        _ = dg.AIL_enumerate_filter_attributes(f, &next, &namep);
+        flt.AIL_filter_attribute(f, "Cutoff", sc());
+        flt.AIL_set_filter_attribute(f, "Cutoff", sc());
+        flt.AIL_set_filter_preference(f, "Cutoff", sc());
+        _ = flt.AIL_enumerate_filter_attributes(f, &next, &namep);
         next = null;
-        _ = dg.AIL_enumerate_filter_sample_attributes(f, &next, &namep);
-        dg.AIL_set_sample_filter(s, f, 0);
-        dg.AIL_close_filter(f);
+        _ = flt.AIL_enumerate_filter_sample_attributes(f, &next, &namep);
+        flt.AIL_set_sample_filter(s, f, 0);
+        flt.AIL_close_filter(f);
     }
     next = null;
-    _ = dg.AIL_enumerate_filters(&next, &prov, &namep);
+    _ = flt.AIL_enumerate_filters(&next, &prov, &namep);
 
     // Allocators / misc.
-    const m = dg.AIL_mem_alloc_lock(16);
-    if (m) |mp| dg.AIL_mem_free_lock(mp);
-    dg.AIL_mem_use_malloc(null);
-    dg.AIL_mem_use_free(null);
-    dg.AIL_set_mem_callbacks(null, null);
+    const m = mem.AIL_mem_alloc_lock(16);
+    if (m) |mp| mem.AIL_mem_free_lock(mp);
+    mem.AIL_mem_use_malloc(null);
+    mem.AIL_mem_use_free(null);
+    mem.AIL_set_mem_callbacks(null, null);
     _ = dg.AIL_allocate_file_sample(drv, @ptrCast(wav.ptr), 0);
 
     // WAV info / encoders.
@@ -172,8 +174,8 @@ test "coverage: digital.zig exports" {
     _ = dg.AIL_WAV_info(@ptrCast(wav.ptr), &info);
     info = .{ .format = 0, .data_ptr = @ptrCast(&pcm), .data_len = pcm.len, .rate = 8000, .bits = 16, .channels = 1, .samples = 0, .block_size = 0, .initial_ptr = null };
     var outp: *anyopaque = undefined;
-    if (dg.AIL_compress_ADPCM(&info, &outp, &u32o) != 0) dg.AIL_mem_free_lock(outp);
-    if (dg.AIL_decompress_ADPCM(&info, &outp, &u32o) != 0) dg.AIL_mem_free_lock(outp);
+    if (dg.AIL_compress_ADPCM(&info, &outp, &u32o) != 0) mem.AIL_mem_free_lock(outp);
+    if (dg.AIL_decompress_ADPCM(&info, &outp, &u32o) != 0) mem.AIL_mem_free_lock(outp);
 
     // Wave synth.
     const synth = dg.AIL_create_wave_synthesizer(drv, null, null, 0);
