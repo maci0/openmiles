@@ -2033,3 +2033,22 @@ test "v9 bus mixer allocates, routes samples, and frees" {
     api_v9.AIL_free_all_busses(drv);
     try testing.expectEqual(@as(usize, 0), drv.buses.items.len);
 }
+
+const api_v8b = @import("api/v8.zig");
+test "v8 sample channel_count and loop_block report real state" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [128]u8 align(2) = [_]u8{0} ** 128;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16); // mono
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    var mask: u32 = 0;
+    try testing.expectEqual(@as(i32, 1), api_v8b.AIL_sample_channel_count(s, &mask)); // mono
+    try testing.expectEqual(@as(u32, 0x4), mask); // FC
+    // No loop set yet.
+    var ls: i32 = -1;
+    var le: i32 = -1;
+    try testing.expectEqual(@as(i32, 0), api_v8b.AIL_sample_loop_block(s, &ls, &le));
+}

@@ -458,24 +458,28 @@ pub fn AIL_sample_51_volume_pan(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaqu
     _ = a5;
 
 }
-pub fn AIL_sample_buffer_available(a0: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    return 0;
+pub fn AIL_sample_buffer_available(s_opt: ?*Sample) callconv(.winapi) i32 {
+    const s = s_opt orelse return 0;
+    return if (s.stream_active) 1 else 0; // at least one slot free to refill
 }
-pub fn AIL_sample_buffer_count(a0: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    return 0;
+pub fn AIL_sample_buffer_count(s_opt: ?*Sample) callconv(.winapi) i32 {
+    const s = s_opt orelse return 0;
+    return if (s.stream_active) 2 else 1; // ping-pong double buffer while streaming
 }
-pub fn AIL_sample_channel_count(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    return 0;
+pub fn AIL_sample_channel_count(s_opt: ?*Sample, mask: ?*u32) callconv(.winapi) i32 {
+    const s = s_opt orelse return 0;
+    const ch: i32 = if (s.decoder) |d| @intCast(d.outputChannels) else if (s.pcm_format) |f| @intCast(f.channels) else 2;
+    // Speaker mask: FL|FR for stereo, FC for mono (the common cases).
+    if (mask) |m| m.* = if (ch >= 2) 0x3 else 0x4;
+    return ch;
 }
-pub fn AIL_sample_loop_block(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    return 0;
+pub fn AIL_sample_loop_block(s_opt: ?*Sample, loop_start: ?*i32, loop_end: ?*i32) callconv(.winapi) i32 {
+    const s = s_opt orelse return 0;
+    const bpf: u64 = s.bytesPerFrame();
+    const sat = std.math.maxInt(i32);
+    if (loop_start) |p| p.* = @intCast(@min(s.loop_start_frame *| bpf, sat));
+    if (loop_end) |p| p.* = @intCast(@min(s.loop_end_frame *| bpf, sat));
+    return if (s.loop_end_frame > 0) 1 else 0;
 }
 pub fn AIL_sample_output_levels(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: i32) callconv(.winapi) f32 {
     _ = a0;
