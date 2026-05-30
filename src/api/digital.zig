@@ -344,22 +344,31 @@ pub export fn AIL_sample_buffer_ready(s_opt: ?*Sample) callconv(.winapi) i32 {
     if (openmiles.ma.ma_sound_at_end(&s.sound) != 0) return 0;
     return -1;
 }
-pub export fn AIL_sample_buffer_info(s_opt: ?*Sample, pos0: *u32, len0: *u32, pos1: *u32, len1: *u32) callconv(.winapi) void {
-    const s = s_opt orelse return;
+// Real MSS: S32 AIL_sample_buffer_info(HSAMPLE S, S32 buff_num, U32 *pos,
+// U32 *len, U32 *used, U32 *free) @24 — report play position/length and the
+// used/free buffer counts for the requested double-buffer slot.
+pub export fn AIL_sample_buffer_info(s_opt: ?*Sample, buff_num: i32, pos: ?*u32, len: ?*u32, used: ?*u32, free_count: ?*u32) callconv(.winapi) i32 {
+    if (pos) |p| p.* = 0;
+    if (len) |p| p.* = 0;
+    if (used) |p| p.* = 0;
+    if (free_count) |p| p.* = 0;
+    const s = s_opt orelse return 0;
     if (s.stream_active) {
-        s.stream_src.bufferInfo(pos0, len0, pos1, len1);
-        return;
+        var p0: u32 = 0;
+        var l0: u32 = 0;
+        var p1: u32 = 0;
+        var l1: u32 = 0;
+        s.stream_src.bufferInfo(&p0, &l0, &p1, &l1);
+        const even = @mod(buff_num, 2) == 0;
+        if (pos) |p| p.* = if (even) p0 else p1;
+        if (len) |p| p.* = if (even) l0 else l1;
+        return 1;
     }
-    // Non-streaming: report the single owned buffer as slot 0.
     if (s.owned_buffer) |buf| {
-        pos0.* = 0;
-        len0.* = @intCast(buf.len);
-    } else {
-        pos0.* = 0;
-        len0.* = 0;
+        if (len) |p| p.* = @intCast(buf.len);
+        return 1;
     }
-    pos1.* = 0;
-    len1.* = 0;
+    return 0;
 }
 pub export fn AIL_register_EOB_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
@@ -977,7 +986,7 @@ comptime {
             .{ .name = "AIL_allocate_file_sample", .stack_size = 12 },
             .{ .name = "AIL_load_sample_buffer", .stack_size = 16 },
             .{ .name = "AIL_sample_buffer_ready", .stack_size = 4 },
-            .{ .name = "AIL_sample_buffer_info", .stack_size = 20 },
+            .{ .name = "AIL_sample_buffer_info", .stack_size = 24 },
             .{ .name = "AIL_register_EOB_callback", .stack_size = 8 },
             .{ .name = "AIL_register_SOB_callback", .stack_size = 8 },
             .{ .name = "AIL_set_sample_processor", .stack_size = 12 },
@@ -1092,7 +1101,7 @@ comptime {
             .{ .name = "AIL_create_wave_synthesizer", .stack_size = 16 },
             .{ .name = "AIL_destroy_wave_synthesizer", .stack_size = 4 },
             .{ .name = "AIL_waveOutClose", .stack_size = 4 },
-            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 8, .ver = 40 },
+            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 12, .ver = 40 },
             // DLS utilities
             .{ .name = "AIL_compress_DLS", .stack_size = 20 },
             .{ .name = "AIL_extract_DLS", .stack_size = 28 },
@@ -1299,6 +1308,48 @@ comptime {
             .{ .name = "AIL_set_sample_level_mask", .stack_size = 8, .ver = 90 },
             .{ .name = "AIL_sample_level_mask", .stack_size = 4, .ver = 90 },
             .{ .name = "AIL_set_sample_3D_spread", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_allocate_bus", .stack_size = 4, .ver = 90 },
+            .{ .name = "AIL_free_all_busses", .stack_size = 4, .ver = 90 },
+            .{ .name = "AIL_bus_sample_handle", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_enable_limiter", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_bus_enable_limiter", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_install_bus_compressor", .stack_size = 16, .ver = 90 },
+            .{ .name = "AIL_digital_mixed_samples", .stack_size = 4, .ver = 90 },
+            .{ .name = "AIL_register_mix_callback", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_end_fade_sample", .stack_size = 4, .ver = 90 },
+            .{ .name = "AIL_sample_mixed_ms", .stack_size = 4, .ver = 90 },
+            .{ .name = "AIL_sample_schedule_time", .stack_size = 4, .ver = 90 },
+            .{ .name = "AIL_schedule_start_sample", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_set_sample_loop_samples", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_push_system_state", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_pop_system_state", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_system_state_level", .stack_size = 4, .ver = 90 },
+            .{ .name = "AIL_set_async_callbacks", .stack_size = 28, .ver = 90 },
+            .{ .name = "AIL_start_sample_group", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_stop_sample_group", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_resume_sample_group", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_end_sample_group", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_set_sample_3D_volume_falloff", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_set_sample_3D_exclusion_falloff", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_set_sample_3D_lowpass_falloff", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_set_sample_3D_spread_falloff", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_set_sample_3D_position_segments", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_enqueue_event_start", .stack_size = 0, .ver = 90 },
+            .{ .name = "AIL_enqueue_event_cancel", .stack_size = 4, .ver = 90 },
+            .{ .name = "AIL_enqueue_event_context", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_enqueue_event_end_named", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_enqueue_event_selection", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_enqueue_event_filter", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_enqueue_event_variablef", .stack_size = 12, .ver = 90 },
+            .{ .name = "AIL_enqueue_event_buffer", .stack_size = 16, .ver = 90 },
+            .{ .name = "AIL_enqueue_event_position", .stack_size = 16, .ver = 90 },
+            .{ .name = "AIL_enqueue_event_velocity", .stack_size = 20, .ver = 90 },
+            .{ .name = "AIL_event_system_command_queue_remaining", .stack_size = 0, .ver = 90 },
+            .{ .name = "AIL_set_event_settings", .stack_size = 4, .ver = 90 },
+            .{ .name = "AIL_set_event_sample_functions", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_add_enable_limit_event_step", .stack_size = 8, .ver = 90 },
+            .{ .name = "AIL_add_move_var_event_step", .stack_size = 20, .ver = 90 },
+            .{ .name = "AIL_add_set_lfo_event_step", .stack_size = 40, .ver = 90 },
         };
         for (targets) |t| {
             // Skip exports outside the targeted MSS version's window so the

@@ -280,9 +280,11 @@ pub export fn RIB_find_provider(name: [*:0]const u8, property: [*:0]const u8, va
     _ = RIB_enumerate_providers(name, null, &handle);
     return handle;
 }
-pub export fn AIL_request_EOB_ASI_reset(s_opt: ?*Sample, flags: u32) callconv(.winapi) void {
+// Real MSS: AIL_request_EOB_ASI_reset(HSAMPLE S, U32 buff_num, S32 new_stream_position) @12.
+pub export fn AIL_request_EOB_ASI_reset(s_opt: ?*Sample, buff_num: u32, new_stream_position: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    _ = flags;
+    _ = buff_num;
+    _ = new_stream_position;
     if (s.is_initialized) {
         _ = openmiles.ma.ma_sound_seek_to_pcm_frame(&s.sound, s.loop_start_frame);
         s.is_done = false;

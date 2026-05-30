@@ -324,7 +324,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_midi.AIL_register_timbre_callback(hm, null);
     api_v8.AIL_register_trace_callback(null);
     _ = api_midi.AIL_register_trigger_callback(hq, null);
-    api_rib.AIL_request_EOB_ASI_reset(hs, ru);
+    api_rib.AIL_request_EOB_ASI_reset(hs, ru, ri);
     _ = api_v9.AIL_resolve_raw_environment_preset(null, ri);
     _ = api_v9.AIL_resolve_raw_sound_preset(null, null, ri);
     api_3d.AIL_resume_3D_sample(@as(?*anyopaque, @ptrCast(h3)));
@@ -340,7 +340,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_v8.AIL_sample_51_volume_pan(null, null, null, null, null, null);
     _ = api_v8.AIL_sample_buffer_available(null);
     _ = api_v8.AIL_sample_buffer_count(null);
-    api_digital.AIL_sample_buffer_info(hs, &uo, &uo, &uo, &uo);
+    _ = api_digital.AIL_sample_buffer_info(hs, ri, &uo, &uo, &uo, &uo);
     _ = api_digital.AIL_sample_buffer_ready(hs);
     _ = api_v8.AIL_sample_channel_count(null, null);
     api_v7.AIL_sample_channel_levels(hs, null, null, &fo, rszi);
