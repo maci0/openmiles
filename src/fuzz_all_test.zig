@@ -590,6 +590,93 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_dls.DLSLoadMemFile(hm, scp, ru);
     var rib_entry: openmiles.RIB_INTERFACE_ENTRY = undefined;
     _ = api_rib.RIB_enumerate_interface(prov, rstr, ru, &pp, &rib_entry);
+    // --- functions added this session (v8/v9 subsystems) ---
+    const h3a: ?*anyopaque = @ptrCast(h3);
+    api_3d.AIL_3D_update_position(h3a, rf);
+    api_3d.AIL_3D_auto_update_position(h3a, ri);
+    api_v9.AIL_set_sample_id(hs, ri);
+    _ = api_v9.AIL_sample_id(hs);
+    api_v9.AIL_set_sample_bus(hs, ri);
+    _ = api_v9.AIL_sample_bus(hs);
+    api_v9.AIL_set_sample_level_mask(hs, @truncate(ru));
+    _ = api_v9.AIL_sample_level_mask(hs);
+    api_v9.AIL_set_sample_3D_spread(hs, rf);
+    api_v9.AIL_set_sample_3D_volume_falloff(hs, scp, rszi);
+    api_v9.AIL_set_sample_3D_exclusion_falloff(hs, scp, rszi);
+    api_v9.AIL_set_sample_3D_lowpass_falloff(hs, scp, rszi);
+    api_v9.AIL_set_sample_3D_spread_falloff(hs, scp, rszi);
+    api_v9.AIL_set_sample_3D_position_segments(hs, scp, rszi);
+    _ = api_v9.AIL_digital_mixed_samples(hd);
+    _ = api_v9.AIL_register_mix_callback(hd, null);
+    api_v9.AIL_end_fade_sample(hs);
+    _ = api_v9.AIL_sample_mixed_ms(hs);
+    _ = api_v9.AIL_sample_schedule_time(hs);
+    api_v9.AIL_schedule_start_sample(hs, ru64);
+    _ = api_v9.AIL_set_sample_loop_samples(hs, ri, ri);
+    api_v9.AIL_push_system_state(hd, ru, ri);
+    api_v9.AIL_pop_system_state(hd, ri);
+    _ = api_v9.AIL_system_state_level(hd);
+    api_v9.AIL_set_async_callbacks(null, null, null, null, null, null, null);
+    api_v9.AIL_start_sample_group(hd, ri, ri);
+    api_v9.AIL_stop_sample_group(hd, ri, ri);
+    api_v9.AIL_resume_sample_group(hd, ri, ri);
+    api_v9.AIL_end_sample_group(hd, ri);
+    // bus mixer (alloc + exercise + free so it stays bounded)
+    _ = api_v9.AIL_allocate_bus(hd);
+    _ = api_v9.AIL_bus_sample_handle(hd, ri);
+    api_v9.AIL_enable_limiter(hd, ri);
+    api_v9.AIL_bus_enable_limiter(hd, ri, ri);
+    _ = api_v9.AIL_install_bus_compressor(hd, ri, ri, ri);
+    api_v9.AIL_free_all_busses(hd);
+    // event command queue
+    api_v9.AIL_enqueue_event_start();
+    api_v9.AIL_enqueue_event_cancel(ri);
+    api_v9.AIL_enqueue_event_context(scp, ri);
+    api_v9.AIL_enqueue_event_end_named(scp, scp);
+    api_v9.AIL_enqueue_event_selection(scp, ri);
+    api_v9.AIL_enqueue_event_filter(scp, ri, ri);
+    api_v9.AIL_enqueue_event_variablef(scp, rf, ri);
+    api_v9.AIL_enqueue_event_buffer(scp, ri, scp, ri);
+    api_v9.AIL_enqueue_event_position(scp, rf, rf, rf);
+    api_v9.AIL_enqueue_event_velocity(scp, rf, rf, rf, ri);
+    _ = api_v9.AIL_event_system_command_queue_remaining();
+    api_v9.AIL_set_event_settings(ri);
+    api_v9.AIL_set_event_sample_functions(null, null);
+    _ = api_digital.AIL_get_DirectSound3D_info(scp, scp, scp, ru);
+    _ = api_digital.AIL_set_direct_buffer_control(hs, ru);
+    api_midi.AIL_midiOutClose(scp);
+    if (api_quick.AIL_quick_copy(hs)) |qc| qc.deinit();
+    if (api_digital.AIL_allocate_file_sample(hd, scp, rsz)) |fsamp| fsamp.deinit();
+    if (api_v8.AIL_mem_create()) |m| api_v8.AIL_mem_close(m, null, null);
+    api_memory.AIL_mem_use_free(null);
+    // event constructor + steps + decode
+    if (api_v8.AIL_create_event()) |evh| {
+        _ = api_v8.AIL_add_comment_event_step(evh, rstr);
+        _ = api_v9.AIL_add_clear_state_event_step(evh);
+        _ = api_v9.AIL_add_exec_event_event_step(evh, rstr);
+        _ = api_v9.AIL_add_ramp_event_step(evh, scp, scp, rf, scp, ri, ri, ri);
+        _ = api_v9.AIL_add_setblend_event_step(evh, scp, ri, scp, scp, scp, scp, scp, scp);
+        _ = api_v9.AIL_add_set_lfo_event_step(evh, scp, scp, ri, rf, rf, rf, ri, ri, ri);
+        _ = api_v9.AIL_add_move_var_event_step(evh, scp, scp, scp, ri);
+        _ = api_v9.AIL_add_enable_limit_event_step(evh, scp);
+        _ = api_v8.AIL_add_cache_sounds_event_step(evh, scp, scp);
+        _ = api_v8.AIL_add_uncache_sounds_event_step(evh, scp, scp);
+        _ = api_v8.AIL_add_apply_environment_event_step(evh, scp, ri);
+        _ = api_v8.AIL_add_control_sounds_event_step(evh, scp, scp, scp, scp, scp, ri, rf, ri, ri);
+        _ = api_v8.AIL_add_persist_preset_event_step(evh, scp, scp, scp, ri);
+        _ = api_v8.AIL_add_sound_limit_event_step(evh, scp, scp);
+        _ = api_v8.AIL_add_start_sound_event_step(evh, scp, scp, ri, scp, scp, scp, scp, scp, scp, ru, ri, ri, ri, ri, ri, scp, rf, rf, rf, rf, rf, ri, ri);
+        if (api_v8.AIL_close_event(evh)) |estr| {
+            var stepbuf: [512]u8 align(8) = undefined;
+            var sout: ?*openmiles.event.EVENT_STEP_INFO = null;
+            var cur: ?*const anyopaque = @ptrCast(estr);
+            var guard: u32 = 0;
+            while (cur != null and guard < 64) : (guard += 1) {
+                cur = api_v8.AIL_next_event_step(cur, &sout, &stepbuf, stepbuf.len);
+            }
+            std.c.free(estr);
+        }
+    }
         }
     }
 }
