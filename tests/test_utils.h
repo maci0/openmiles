@@ -5,7 +5,9 @@
 #include <stdio.h>
 
 #ifdef _WIN32
-#define MSS_DECORATE(name, bytes) #name "@" #bytes
+/* MSVC stdcall decoration: a leading underscore plus the @<argbytes> suffix,
+ * e.g. _AIL_startup@0 — matches the real mss32.dll export names. */
+#define MSS_DECORATE(name, bytes) "_" #name "@" #bytes
 #else
 #define MSS_DECORATE(name, bytes) #name
 #endif

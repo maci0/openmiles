@@ -7,42 +7,42 @@ const io = openmiles.io;
 const Sample = openmiles.Sample;
 const Provider = openmiles.Provider;
 
-pub export fn RIB_alloc_provider_handle(module: *anyopaque) callconv(.winapi) ?*Provider {
+pub fn RIB_alloc_provider_handle(module: *anyopaque) callconv(.winapi) ?*Provider {
     log("RIB_alloc_provider_handle(module={*})\n", .{module});
     return Provider.init(openmiles.global_allocator, module) catch |err| {
         log("Error: {any}\n", .{err});
         return null;
     };
 }
-pub export fn RIB_free_provider_handle(provider_opt: ?*Provider) callconv(.winapi) void {
+pub fn RIB_free_provider_handle(provider_opt: ?*Provider) callconv(.winapi) void {
     const provider = provider_opt orelse return;
     log("RIB_free_provider_handle(provider={*})\n", .{provider});
     provider.deinit();
 }
-pub export fn RIB_register_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) void {
+pub fn RIB_register_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) void {
     const provider = provider_opt orelse return;
     log("RIB_register_interface(provider={*}, name={s}, count={d}, entries={*})\n", .{ provider, name, count, entries });
     provider.registerInterface(std.mem.span(name), count, entries) catch |err| {
         log("RIB_register_interface: failed: {any}\n", .{err});
     };
 }
-pub export fn RIB_unregister_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) void {
+pub fn RIB_unregister_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) void {
     const provider = provider_opt orelse return;
     log("RIB_unregister_interface(provider={*}, name={s}, count={d}, entries={*})\n", .{ provider, name, count, entries });
     provider.unregisterInterface(std.mem.span(name));
 }
-pub export fn RIB_provider_library_handle() callconv(.winapi) ?*anyopaque {
+pub fn RIB_provider_library_handle() callconv(.winapi) ?*anyopaque {
     log("RIB_provider_library_handle()\n", .{});
     if (openmiles.getCurrentLoadingProvider()) |p| return @ptrCast(p);
     return @ptrCast(openmiles.startup_provider);
 }
-pub export fn RIB_load_application_providers(dir: [*:0]const u8) callconv(.winapi) i32 {
+pub fn RIB_load_application_providers(dir: [*:0]const u8) callconv(.winapi) i32 {
     const dir_str = std.mem.span(dir);
     log("RIB_load_application_providers(dir={s})\n", .{dir_str});
     const count = openmiles.loadApplicationProviders(dir_str);
     return if (count >= 0) 1 else 0;
 }
-pub export fn RIB_enumerate_providers(name: [*:0]const u8, next: ?*?*anyopaque, handle: ?*?*Provider) callconv(.winapi) i32 {
+pub fn RIB_enumerate_providers(name: [*:0]const u8, next: ?*?*anyopaque, handle: ?*?*Provider) callconv(.winapi) i32 {
     const iface_name = std.mem.span(name);
     log("RIB_enumerate_providers(name='{s}', next={*}, handle={*})\n", .{ iface_name, next, handle });
 
@@ -76,7 +76,7 @@ pub export fn RIB_enumerate_providers(name: [*:0]const u8, next: ?*?*anyopaque, 
     if (handle) |h| h.* = null;
     return 0;
 }
-pub export fn RIB_request_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) i32 {
+pub fn RIB_request_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) i32 {
     const provider = provider_opt orelse return 0;
     log("RIB_request_interface(provider={*}, name={s}, count={d}, entries={*})\n", .{ provider, name, count, entries });
     const iface_name = std.mem.span(name);
@@ -107,13 +107,13 @@ pub export fn RIB_request_interface(provider_opt: ?*Provider, name: [*:0]const u
 
     return 0;
 }
-pub export fn RIB_find_files_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8, search_dir: [*:0]const u8, file_ext: [*:0]const u8) callconv(.winapi) ?*Provider {
+pub fn RIB_find_files_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8, search_dir: [*:0]const u8, file_ext: [*:0]const u8) callconv(.winapi) ?*Provider {
     log("RIB_find_files_provider(name='{s}', property='{s}', filename='{s}', search_dir='{s}', file_ext='{s}')\n", .{ std.mem.span(name), std.mem.span(property), std.mem.span(filename), std.mem.span(search_dir), std.mem.span(file_ext) });
     var handle: ?*Provider = null;
     _ = RIB_enumerate_providers(name, null, &handle);
     return handle;
 }
-pub export fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.winapi) ?*Provider {
+pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.winapi) ?*Provider {
     log("AIL_open_ASI_provider(buffer={*}, size={d})\n", .{ buffer, size });
     if (size < 2) return null;
     const raw: []const u8 = @as([*]const u8, @ptrCast(@alignCast(buffer)))[0..size];
@@ -162,12 +162,12 @@ pub export fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callcon
         return null;
     };
 }
-pub export fn AIL_close_ASI_provider(provider_opt: ?*Provider) callconv(.winapi) void {
+pub fn AIL_close_ASI_provider(provider_opt: ?*Provider) callconv(.winapi) void {
     const provider = provider_opt orelse return;
     log("AIL_close_ASI_provider(provider={*})\n", .{provider});
     provider.deinit();
 }
-pub export fn AIL_ASI_provider_attribute(provider_opt: ?*Provider, name: [*:0]const u8) callconv(.winapi) ?*anyopaque {
+pub fn AIL_ASI_provider_attribute(provider_opt: ?*Provider, name: [*:0]const u8) callconv(.winapi) ?*anyopaque {
     const provider = provider_opt orelse return null;
     log("AIL_ASI_provider_attribute(provider={*}, name={s})\n", .{ provider, name });
     const attr_name = std.mem.span(name);
@@ -176,27 +176,27 @@ pub export fn AIL_ASI_provider_attribute(provider_opt: ?*Provider, name: [*:0]co
     }
     return null;
 }
-pub export fn RIB_error() callconv(.winapi) [*:0]const u8 {
+pub fn RIB_error() callconv(.winapi) [*:0]const u8 {
     return "No error";
 }
-pub export fn RIB_find_file_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8) callconv(.winapi) ?*Provider {
+pub fn RIB_find_file_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8) callconv(.winapi) ?*Provider {
     log("RIB_find_file_provider(name='{s}', property='{s}', filename='{s}')\n", .{ std.mem.span(name), std.mem.span(property), std.mem.span(filename) });
     var handle: ?*Provider = null;
     _ = RIB_enumerate_providers(name, null, &handle);
     return handle;
 }
-pub export fn RIB_load_provider_library(path: [*:0]const u8) callconv(.winapi) ?*Provider {
+pub fn RIB_load_provider_library(path: [*:0]const u8) callconv(.winapi) ?*Provider {
     const p = openmiles.Provider.load(openmiles.global_allocator, std.mem.span(path)) catch |err| {
         log("Error: {any}\n", .{err});
         return null;
     };
     return p;
 }
-pub export fn RIB_free_provider_library(provider_opt: ?*Provider) callconv(.winapi) void {
+pub fn RIB_free_provider_library(provider_opt: ?*Provider) callconv(.winapi) void {
     const provider = provider_opt orelse return;
     provider.deinit();
 }
-pub export fn RIB_request_interface_entry(provider_opt: ?*Provider, name: [*:0]const u8, entry_name: [*:0]const u8, token: ?*usize) callconv(.winapi) i32 {
+pub fn RIB_request_interface_entry(provider_opt: ?*Provider, name: [*:0]const u8, entry_name: [*:0]const u8, token: ?*usize) callconv(.winapi) i32 {
     const provider = provider_opt orelse return 0;
     for (provider.interfaces.items) |iface| {
         if (std.mem.eql(u8, iface.name, std.mem.span(name))) {
@@ -211,7 +211,7 @@ pub export fn RIB_request_interface_entry(provider_opt: ?*Provider, name: [*:0]c
 // RIB_enumerate_interface(HPROVIDER provider, C8 *interface_name,
 //                         RIB_ENTRY_TYPE type, HINTENUM *next, RIB_INTERFACE_ENTRY *dest)
 // Iterates the named interface's entries, filling `dest` with each entry.
-pub export fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const u8, entry_type: u32, next: *?*anyopaque, dest: *openmiles.RIB_INTERFACE_ENTRY) callconv(.winapi) i32 {
+pub fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const u8, entry_type: u32, next: *?*anyopaque, dest: *openmiles.RIB_INTERFACE_ENTRY) callconv(.winapi) i32 {
     const provider = provider_opt orelse return 0;
     const iface_name = std.mem.span(name);
     for (provider.interfaces.items) |iface| {
@@ -238,7 +238,7 @@ pub export fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const
     next.* = null;
     return 0;
 }
-pub export fn RIB_type_string(data_type: u32) callconv(.winapi) [*:0]const u8 {
+pub fn RIB_type_string(data_type: u32) callconv(.winapi) [*:0]const u8 {
     return switch (data_type) {
         0 => "none",
         1 => "decimal",
@@ -250,38 +250,38 @@ pub export fn RIB_type_string(data_type: u32) callconv(.winapi) [*:0]const u8 {
         else => "unknown",
     };
 }
-pub export fn RIB_provider_system_data(provider_opt: ?*Provider, index: u32) callconv(.winapi) usize {
+pub fn RIB_provider_system_data(provider_opt: ?*Provider, index: u32) callconv(.winapi) usize {
     const provider = provider_opt orelse return 0;
     if (index < 8) return provider.system_data[index];
     return 0;
 }
-pub export fn RIB_provider_user_data(provider_opt: ?*Provider, index: u32) callconv(.winapi) usize {
+pub fn RIB_provider_user_data(provider_opt: ?*Provider, index: u32) callconv(.winapi) usize {
     const provider = provider_opt orelse return 0;
     if (index < 8) return provider.user_data[index];
     return 0;
 }
-pub export fn RIB_set_provider_system_data(provider_opt: ?*Provider, index: u32, value: usize) callconv(.winapi) void {
+pub fn RIB_set_provider_system_data(provider_opt: ?*Provider, index: u32, value: usize) callconv(.winapi) void {
     const provider = provider_opt orelse return;
     if (index < 8) provider.system_data[index] = value;
 }
-pub export fn RIB_set_provider_user_data(provider_opt: ?*Provider, index: u32, value: usize) callconv(.winapi) void {
+pub fn RIB_set_provider_user_data(provider_opt: ?*Provider, index: u32, value: usize) callconv(.winapi) void {
     const provider = provider_opt orelse return;
     if (index < 8) provider.user_data[index] = value;
 }
-pub export fn RIB_find_file_dec_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8, search_dir: [*:0]const u8, file_ext: [*:0]const u8) callconv(.winapi) ?*Provider {
+pub fn RIB_find_file_dec_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8, search_dir: [*:0]const u8, file_ext: [*:0]const u8) callconv(.winapi) ?*Provider {
     log("RIB_find_file_dec_provider(name='{s}', property='{s}', filename='{s}', search_dir='{s}', file_ext='{s}')\n", .{ std.mem.span(name), std.mem.span(property), std.mem.span(filename), std.mem.span(search_dir), std.mem.span(file_ext) });
     var handle: ?*Provider = null;
     _ = RIB_enumerate_providers(name, null, &handle);
     return handle;
 }
-pub export fn RIB_find_provider(name: [*:0]const u8, property: [*:0]const u8, value: [*:0]const u8) callconv(.winapi) ?*Provider {
+pub fn RIB_find_provider(name: [*:0]const u8, property: [*:0]const u8, value: [*:0]const u8) callconv(.winapi) ?*Provider {
     log("RIB_find_provider(name='{s}', property='{s}', value='{s}')\n", .{ std.mem.span(name), std.mem.span(property), std.mem.span(value) });
     var handle: ?*Provider = null;
     _ = RIB_enumerate_providers(name, null, &handle);
     return handle;
 }
 // Real MSS: AIL_request_EOB_ASI_reset(HSAMPLE S, U32 buff_num, S32 new_stream_position) @12.
-pub export fn AIL_request_EOB_ASI_reset(s_opt: ?*Sample, buff_num: u32, new_stream_position: i32) callconv(.winapi) void {
+pub fn AIL_request_EOB_ASI_reset(s_opt: ?*Sample, buff_num: u32, new_stream_position: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     _ = buff_num;
     _ = new_stream_position;
@@ -296,7 +296,7 @@ pub export fn AIL_request_EOB_ASI_reset(s_opt: ?*Sample, buff_num: u32, new_stre
 /// OpenMiles ships only decoders for the perceptual codecs (MP3/Vorbis) via
 /// miniaudio, so IMA-ADPCM — the one encoder we have — is the compressed output
 /// here, mirroring AIL_compress_ADPCM. Returns 1 on success, 0 on failure.
-pub export fn AIL_compress_ASI(info_opt: ?*const openmiles.AILSOUNDINFO, ext: ?[*:0]const u8, outdata: ?*?*anyopaque, outsize: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
+pub fn AIL_compress_ASI(info_opt: ?*const openmiles.AILSOUNDINFO, ext: ?[*:0]const u8, outdata: ?*?*anyopaque, outsize: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
     _ = ext;
     _ = callback;
     const info = info_opt orelse return 0;
@@ -316,7 +316,7 @@ pub export fn AIL_compress_ASI(info_opt: ?*const openmiles.AILSOUNDINFO, ext: ?[
 /// Decode a compressed in-memory audio image (any format miniaudio recognizes)
 /// to a PCM WAV image returned in wav/wavsize (freshly malloc'd). Returns 1 on
 /// success, 0 on failure.
-pub export fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]const u8, wav_out: ?*?*anyopaque, wavsize: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
+pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]const u8, wav_out: ?*?*anyopaque, wavsize: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
     _ = ext;
     _ = callback;
     const data = indata orelse return 0;

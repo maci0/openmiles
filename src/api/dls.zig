@@ -15,7 +15,7 @@ fn cmemdup(src: []const u8) ?*anyopaque {
     return p;
 }
 
-pub export fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flags: u32) callconv(.winapi) ?*anyopaque {
+pub fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flags: u32) callconv(.winapi) ?*anyopaque {
     const driver = driver_opt orelse return null;
     log("AIL_DLS_load_file(driver={*}, filename={s}, flags={d})\n", .{ driver, filename, flags });
     openmiles.clearLastError();
@@ -41,12 +41,12 @@ pub export fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u
         return null;
     };
 }
-pub export fn AIL_DLS_unload_file(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
+pub fn AIL_DLS_unload_file(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     log("AIL_DLS_unload_file(driver={*}, bank={*})\n", .{ driver, bank });
     driver.unloadDLS(bank);
 }
-pub export fn AIL_set_filter_DLS_preference(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
+pub fn AIL_set_filter_DLS_preference(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     const name_slice = std.mem.span(name);
     const v: *const f32 = @ptrCast(@alignCast(val));
@@ -56,7 +56,7 @@ pub export fn AIL_set_filter_DLS_preference(driver_opt: ?*MidiDriver, name: [*:0
         driver.dls_filter_pref_compression = v.*;
     }
 }
-pub export fn AIL_filter_DLS_attribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
+pub fn AIL_filter_DLS_attribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     const name_slice = std.mem.span(name);
     const out: *f32 = @ptrCast(@alignCast(val));
@@ -74,7 +74,7 @@ pub export fn AIL_filter_DLS_attribute(driver_opt: ?*MidiDriver, name: [*:0]cons
 /// unmodified (a valid superset — every referenced instrument is retained, so the
 /// sequence renders identically). Returns 1 and hands back a freshly allocated
 /// copy the caller frees with AIL_mem_free_lock.
-pub export fn AIL_filter_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyopaque, dlsout: ?*?*anyopaque, dlssize: ?*u32, flags: i32, callback: ?*anyopaque) callconv(.winapi) i32 {
+pub fn AIL_filter_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyopaque, dlsout: ?*?*anyopaque, dlssize: ?*u32, flags: i32, callback: ?*anyopaque) callconv(.winapi) i32 {
     _ = xmi;
     _ = flags;
     _ = callback;
@@ -92,7 +92,7 @@ pub export fn AIL_filter_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyop
     if (dlssize) |p| p.* = @intCast(sz);
     return 1;
 }
-pub export fn AIL_DLS_load_memory(driver_opt: ?*MidiDriver, mem: *anyopaque, flags: u32) callconv(.winapi) ?*anyopaque {
+pub fn AIL_DLS_load_memory(driver_opt: ?*MidiDriver, mem: *anyopaque, flags: u32) callconv(.winapi) ?*anyopaque {
     const driver = driver_opt orelse return null;
     _ = flags;
     // No size parameter provided — detect buffer size from the file header to avoid OOB reads.
@@ -115,11 +115,11 @@ pub export fn AIL_DLS_load_memory(driver_opt: ?*MidiDriver, mem: *anyopaque, fla
     tsf_mod.tsf_set_output(driver.soundfont, tsf_mod.TSF_STEREO_INTERLEAVED, 44100, 0);
     return @ptrCast(driver.soundfont.?);
 }
-pub export fn AIL_DLS_unload(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
+pub fn AIL_DLS_unload(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     driver.unloadDLS(bank);
 }
-pub export fn AIL_DLS_compact(driver_opt: ?*MidiDriver) callconv(.winapi) void {
+pub fn AIL_DLS_compact(driver_opt: ?*MidiDriver) callconv(.winapi) void {
     _ = driver_opt;
 }
 // MSS DLS_INFO structure (6.6-era): first field is total memory usage in bytes.
@@ -131,7 +131,7 @@ const DlsInfo = extern struct {
     sample_count: u32,
 };
 
-pub export fn AIL_DLS_get_info(driver_opt: ?*MidiDriver, bank: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
+pub fn AIL_DLS_get_info(driver_opt: ?*MidiDriver, bank: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
     _ = bank;
     const out: *DlsInfo = @ptrCast(@alignCast(info));
@@ -149,19 +149,19 @@ pub export fn AIL_DLS_get_info(driver_opt: ?*MidiDriver, bank: *anyopaque, info:
     };
     return if (driver.soundfont != null) 1 else 0;
 }
-pub export fn AIL_DLS_get_reverb(driver_opt: ?*MidiDriver, room_type: ?*f32, level: ?*f32, reflect_time: ?*f32) callconv(.winapi) void {
+pub fn AIL_DLS_get_reverb(driver_opt: ?*MidiDriver, room_type: ?*f32, level: ?*f32, reflect_time: ?*f32) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     if (room_type) |p| p.* = driver.dls_reverb_room_type;
     if (level) |p| p.* = driver.dls_reverb_level;
     if (reflect_time) |p| p.* = driver.dls_reverb_reflect_time;
 }
-pub export fn AIL_DLS_set_reverb(driver_opt: ?*MidiDriver, room_type: f32, level: f32, reflect_time: f32) callconv(.winapi) void {
+pub fn AIL_DLS_set_reverb(driver_opt: ?*MidiDriver, room_type: f32, level: f32, reflect_time: f32) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     driver.dls_reverb_room_type = room_type;
     driver.dls_reverb_level = level;
     driver.dls_reverb_reflect_time = reflect_time;
 }
-pub export fn AIL_DLS_open(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, freq: u32, bits: i32, channels: i32, flags: u32) callconv(.winapi) ?*openmiles.MidiDriver {
+pub fn AIL_DLS_open(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, freq: u32, bits: i32, channels: i32, flags: u32) callconv(.winapi) ?*openmiles.MidiDriver {
     _ = dig_opt orelse return null;
     _ = seq;
     _ = freq;
@@ -189,13 +189,13 @@ pub export fn AIL_DLS_open(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*any
     }
     return driver;
 }
-pub export fn AIL_DLS_close(driver_opt: ?*MidiDriver, flags: u32) callconv(.winapi) void {
+pub fn AIL_DLS_close(driver_opt: ?*MidiDriver, flags: u32) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     _ = flags;
     if (openmiles.last_midi_driver == driver) openmiles.last_midi_driver = null;
     driver.deinit();
 }
-pub export fn AIL_set_DLS_processor(driver_opt: ?*MidiDriver, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+pub fn AIL_set_DLS_processor(driver_opt: ?*MidiDriver, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const driver = driver_opt orelse return null;
     _ = stage;
     const prev: ?*anyopaque = @ptrFromInt(driver.dls_processor);
@@ -205,7 +205,7 @@ pub export fn AIL_set_DLS_processor(driver_opt: ?*MidiDriver, stage: i32, proces
 /// AIL_compress_DLS(dls, compression_extension, mls, mlssize, callback)
 /// Compresses the DLS wave pool with an ASI codec. OpenMiles bundles only
 /// decoders (via miniaudio), so encoding is unsupported; returns 0 (failure).
-pub export fn AIL_compress_DLS(dls: ?*const anyopaque, compression_extension: [*:0]const u8, mls: ?*?*anyopaque, mlssize: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
+pub fn AIL_compress_DLS(dls: ?*const anyopaque, compression_extension: [*:0]const u8, mls: ?*?*anyopaque, mlssize: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
     _ = dls;
     _ = compression_extension;
     _ = callback;
@@ -219,7 +219,7 @@ pub export fn AIL_compress_DLS(dls: ?*const anyopaque, compression_extension: [*
 /// Split a merged XMI+DLS image into freshly allocated XMI and DLS copies.
 /// Outputs are allocated with the C allocator; free each with AIL_mem_free_lock.
 /// Returns 1 if at least one sub-image was extracted, 0 otherwise.
-pub export fn AIL_extract_DLS(src: ?*const anyopaque, src_len: u32, xmi_out: ?*?*anyopaque, xmi_len: ?*u32, dls_out: ?*?*anyopaque, dls_len: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
+pub fn AIL_extract_DLS(src: ?*const anyopaque, src_len: u32, xmi_out: ?*?*anyopaque, xmi_len: ?*u32, dls_out: ?*?*anyopaque, dls_len: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
     _ = callback;
     if (xmi_out) |pp| pp.* = null;
     if (xmi_len) |p| p.* = 0;
@@ -258,7 +258,7 @@ pub export fn AIL_extract_DLS(src: ?*const anyopaque, src_len: u32, xmi_out: ?*?
 /// Locate the XMI and DLS sub-images inside a merged image without copying;
 /// output pointers reference the original buffer. Returns 1 if a DLS bank is
 /// present, 0 otherwise (the XMI pointer is still filled in when found).
-pub export fn AIL_find_DLS(data_ptr: ?*const anyopaque, size: u32, xmi_out: ?*?*anyopaque, xmi_len: ?*u32, dls_out: ?*?*anyopaque, dls_len: ?*u32) callconv(.winapi) i32 {
+pub fn AIL_find_DLS(data_ptr: ?*const anyopaque, size: u32, xmi_out: ?*?*anyopaque, xmi_len: ?*u32, dls_out: ?*?*anyopaque, dls_len: ?*u32) callconv(.winapi) i32 {
     if (xmi_out) |pp| pp.* = null;
     if (xmi_len) |p| p.* = 0;
     if (dls_out) |pp| pp.* = null;
@@ -287,7 +287,7 @@ pub export fn AIL_find_DLS(data_ptr: ?*const anyopaque, size: u32, xmi_out: ?*?*
 /// AIL_list_DLS(dls, lst, lst_size, flags, title)
 /// Build a human-readable listing of a DLS bank (instrument count from the
 /// `colh` chunk). Output text is C-allocated; free with AIL_mem_free_lock.
-pub export fn AIL_list_DLS(dls: ?*const anyopaque, lst: ?*?*anyopaque, lst_size: ?*u32, flags: i32, title: ?[*:0]const u8) callconv(.winapi) i32 {
+pub fn AIL_list_DLS(dls: ?*const anyopaque, lst: ?*?*anyopaque, lst_size: ?*u32, flags: i32, title: ?[*:0]const u8) callconv(.winapi) i32 {
     _ = flags;
     if (lst) |pp| pp.* = null;
     if (lst_size) |p| p.* = 0;
@@ -316,7 +316,7 @@ pub export fn AIL_list_DLS(dls: ?*const anyopaque, lst: ?*?*anyopaque, lst_size:
 /// Concatenate an XMI image and a DLS bank into a single merged image (the
 /// format AIL_find_DLS/AIL_extract_DLS split). Output is C-allocated; free with
 /// AIL_mem_free_lock. Returns 1 on success.
-pub export fn AIL_merge_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyopaque, out: ?*?*anyopaque, out_len: ?*u32) callconv(.winapi) i32 {
+pub fn AIL_merge_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyopaque, out: ?*?*anyopaque, out_len: ?*u32) callconv(.winapi) i32 {
     if (out) |pp| pp.* = null;
     if (out_len) |p| p.* = 0;
     const xp = xmi orelse return 0;
@@ -340,25 +340,25 @@ pub export fn AIL_merge_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyopa
     if (out_len) |p| p.* = @intCast(total);
     return 1;
 }
-pub export fn DLSClose(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
+pub fn DLSClose(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
     AIL_DLS_unload(driver_opt, bank);
 }
-pub export fn DLSCompactMemory(driver_opt: ?*MidiDriver) callconv(.winapi) void {
+pub fn DLSCompactMemory(driver_opt: ?*MidiDriver) callconv(.winapi) void {
     AIL_DLS_compact(driver_opt);
 }
-pub export fn DLSGetInfo(driver_opt: ?*MidiDriver, bank: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
+pub fn DLSGetInfo(driver_opt: ?*MidiDriver, bank: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
     return AIL_DLS_get_info(driver_opt, bank, info);
 }
-pub export fn DLSLoadFile(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flags: u32) callconv(.winapi) ?*anyopaque {
+pub fn DLSLoadFile(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flags: u32) callconv(.winapi) ?*anyopaque {
     return AIL_DLS_load_file(driver_opt, filename, flags);
 }
-pub export fn DLSLoadMemFile(driver_opt: ?*MidiDriver, mem: *anyopaque, flags: u32) callconv(.winapi) ?*anyopaque {
+pub fn DLSLoadMemFile(driver_opt: ?*MidiDriver, mem: *anyopaque, flags: u32) callconv(.winapi) ?*anyopaque {
     return AIL_DLS_load_memory(driver_opt, mem, flags);
 }
-pub export fn DLSMSSOpen(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, freq: u32, bits: i32, channels: i32, flags: u32) callconv(.winapi) ?*openmiles.MidiDriver {
+pub fn DLSMSSOpen(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, freq: u32, bits: i32, channels: i32, flags: u32) callconv(.winapi) ?*openmiles.MidiDriver {
     return AIL_DLS_open(dig_opt, seq, dls, freq, bits, channels, flags);
 }
-pub export fn DLSMSSGetCPU(driver_opt: ?*MidiDriver) callconv(.winapi) f32 {
+pub fn DLSMSSGetCPU(driver_opt: ?*MidiDriver) callconv(.winapi) f32 {
     _ = driver_opt;
     // MidiDriver param unused; estimates CPU from active sample count on the primary digital driver.
     if (openmiles.last_digital_driver) |dig| {
@@ -367,7 +367,7 @@ pub export fn DLSMSSGetCPU(driver_opt: ?*MidiDriver) callconv(.winapi) f32 {
     }
     return 0.0;
 }
-pub export fn DLSSetAttribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
+pub fn DLSSetAttribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     const name_slice = std.mem.span(name);
     const v: *const f32 = @ptrCast(@alignCast(val));
@@ -377,7 +377,7 @@ pub export fn DLSSetAttribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val
         driver.dls_filter_pref_compression = v.*;
     }
 }
-pub export fn DLSUnloadAll(driver_opt: ?*MidiDriver) callconv(.winapi) void {
+pub fn DLSUnloadAll(driver_opt: ?*MidiDriver) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     if (driver.soundfont) |sf| {
         if (driver.owns_soundfont) openmiles.tsf.tsf_close(sf);
@@ -386,6 +386,6 @@ pub export fn DLSUnloadAll(driver_opt: ?*MidiDriver) callconv(.winapi) void {
         driver.soundfont_size_bytes = 0;
     }
 }
-pub export fn DLSUnloadFile(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
+pub fn DLSUnloadFile(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
     AIL_DLS_unload(driver_opt, bank);
 }

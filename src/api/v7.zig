@@ -27,32 +27,32 @@ fn enable3D(s: *Sample) void {
     if (s.is_initialized) ma.ma_sound_set_spatialization_enabled(&s.sound, ma.MA_TRUE);
 }
 
-pub export fn AIL_set_sample_3D_position(obj: ?*Sample, x: f32, y: f32, z: f32) callconv(.winapi) void {
+pub fn AIL_set_sample_3D_position(obj: ?*Sample, x: f32, y: f32, z: f32) callconv(.winapi) void {
     const s = obj orelse return;
     enable3D(s);
     if (s.is_initialized) ma.ma_sound_set_position(&s.sound, x, y, z);
 }
-pub export fn AIL_set_sample_3D_velocity(obj: ?*Sample, dx: f32, dy: f32, dz: f32, magnitude: f32) callconv(.winapi) void {
+pub fn AIL_set_sample_3D_velocity(obj: ?*Sample, dx: f32, dy: f32, dz: f32, magnitude: f32) callconv(.winapi) void {
     _ = magnitude;
     const s = obj orelse return;
     if (s.is_initialized) ma.ma_sound_set_velocity(&s.sound, dx, dy, dz);
 }
-pub export fn AIL_set_sample_3D_velocity_vector(obj: ?*Sample, dx: f32, dy: f32, dz: f32) callconv(.winapi) void {
+pub fn AIL_set_sample_3D_velocity_vector(obj: ?*Sample, dx: f32, dy: f32, dz: f32) callconv(.winapi) void {
     const s = obj orelse return;
     if (s.is_initialized) ma.ma_sound_set_velocity(&s.sound, dx, dy, dz);
 }
-pub export fn AIL_set_sample_3D_orientation(obj: ?*Sample, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) callconv(.winapi) void {
+pub fn AIL_set_sample_3D_orientation(obj: ?*Sample, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) callconv(.winapi) void {
     _ = ux;
     _ = uy;
     _ = uz;
     const s = obj orelse return;
     if (s.is_initialized) ma.ma_sound_set_direction(&s.sound, fx, fy, fz);
 }
-pub export fn AIL_set_sample_3D_cone(obj: ?*Sample, inner_angle: f32, outer_angle: f32, outer_volume_level: f32) callconv(.winapi) void {
+pub fn AIL_set_sample_3D_cone(obj: ?*Sample, inner_angle: f32, outer_angle: f32, outer_volume_level: f32) callconv(.winapi) void {
     const s = obj orelse return;
     if (s.is_initialized) ma.ma_sound_set_cone(&s.sound, inner_angle * openmiles.deg2rad, outer_angle * openmiles.deg2rad, std.math.clamp(outer_volume_level, 0.0, 1.0));
 }
-pub export fn AIL_set_sample_3D_distances(obj: ?*Sample, max_dist: f32, min_dist: f32, auto_3D_wet_atten: i32) callconv(.winapi) void {
+pub fn AIL_set_sample_3D_distances(obj: ?*Sample, max_dist: f32, min_dist: f32, auto_3D_wet_atten: i32) callconv(.winapi) void {
     _ = auto_3D_wet_atten;
     const s = obj orelse return;
     if (s.is_initialized) {
@@ -60,26 +60,26 @@ pub export fn AIL_set_sample_3D_distances(obj: ?*Sample, max_dist: f32, min_dist
         ma.ma_sound_set_max_distance(&s.sound, max_dist);
     }
 }
-pub export fn AIL_update_sample_3D_position(obj: ?*Sample, dt_ms: f32) callconv(.winapi) void {
+pub fn AIL_update_sample_3D_position(obj: ?*Sample, dt_ms: f32) callconv(.winapi) void {
     _ = obj;
     _ = dt_ms; // miniaudio integrates position from velocity internally
 }
 
-pub export fn AIL_sample_3D_position(obj: ?*Sample, x: ?*f32, y: ?*f32, z: ?*f32) callconv(.winapi) void {
+pub fn AIL_sample_3D_position(obj: ?*Sample, x: ?*f32, y: ?*f32, z: ?*f32) callconv(.winapi) void {
     const s = obj orelse return;
     const v = if (s.is_initialized) ma.ma_sound_get_position(&s.sound) else ma.ma_vec3f{ .x = 0, .y = 0, .z = 0 };
     if (x) |p| p.* = v.x;
     if (y) |p| p.* = v.y;
     if (z) |p| p.* = v.z;
 }
-pub export fn AIL_sample_3D_velocity(obj: ?*Sample, dx: ?*f32, dy: ?*f32, dz: ?*f32) callconv(.winapi) void {
+pub fn AIL_sample_3D_velocity(obj: ?*Sample, dx: ?*f32, dy: ?*f32, dz: ?*f32) callconv(.winapi) void {
     const s = obj orelse return;
     const v = if (s.is_initialized) ma.ma_sound_get_velocity(&s.sound) else ma.ma_vec3f{ .x = 0, .y = 0, .z = 0 };
     if (dx) |p| p.* = v.x;
     if (dy) |p| p.* = v.y;
     if (dz) |p| p.* = v.z;
 }
-pub export fn AIL_sample_3D_orientation(obj: ?*Sample, fx: ?*f32, fy: ?*f32, fz: ?*f32, ux: ?*f32, uy: ?*f32, uz: ?*f32) callconv(.winapi) void {
+pub fn AIL_sample_3D_orientation(obj: ?*Sample, fx: ?*f32, fy: ?*f32, fz: ?*f32, ux: ?*f32, uy: ?*f32, uz: ?*f32) callconv(.winapi) void {
     const s = obj orelse return;
     const d = if (s.is_initialized) ma.ma_sound_get_direction(&s.sound) else ma.ma_vec3f{ .x = 0, .y = 0, .z = 1 };
     if (fx) |p| p.* = d.x;
@@ -89,7 +89,7 @@ pub export fn AIL_sample_3D_orientation(obj: ?*Sample, fx: ?*f32, fy: ?*f32, fz:
     if (uy) |p| p.* = 1;
     if (uz) |p| p.* = 0;
 }
-pub export fn AIL_sample_3D_cone(obj: ?*Sample, inner_angle: ?*f32, outer_angle: ?*f32, outer_volume_level: ?*f32) callconv(.winapi) void {
+pub fn AIL_sample_3D_cone(obj: ?*Sample, inner_angle: ?*f32, outer_angle: ?*f32, outer_volume_level: ?*f32) callconv(.winapi) void {
     const s = obj orelse return;
     var inner: f32 = 0;
     var outer: f32 = 6.2831855;
@@ -99,7 +99,7 @@ pub export fn AIL_sample_3D_cone(obj: ?*Sample, inner_angle: ?*f32, outer_angle:
     if (outer_angle) |p| p.* = outer / openmiles.deg2rad;
     if (outer_volume_level) |p| p.* = gain;
 }
-pub export fn AIL_sample_3D_distances(obj: ?*Sample, max_dist: ?*f32, min_dist: ?*f32, auto_3D_wet_atten: ?*i32) callconv(.winapi) void {
+pub fn AIL_sample_3D_distances(obj: ?*Sample, max_dist: ?*f32, min_dist: ?*f32, auto_3D_wet_atten: ?*i32) callconv(.winapi) void {
     const s = obj orelse return;
     if (max_dist) |p| p.* = if (s.is_initialized) ma.ma_sound_get_max_distance(&s.sound) else 0;
     if (min_dist) |p| p.* = if (s.is_initialized) ma.ma_sound_get_min_distance(&s.sound) else 0;
@@ -108,7 +108,7 @@ pub export fn AIL_sample_3D_distances(obj: ?*Sample, max_dist: ?*f32, min_dist: 
 
 // --- Unified sample volume / pan / reverb / low-pass (reuse v6 engine) --------
 
-pub export fn AIL_set_sample_volume_levels(s_opt: ?*Sample, left_level: f32, right_level: f32) callconv(.winapi) void {
+pub fn AIL_set_sample_volume_levels(s_opt: ?*Sample, left_level: f32, right_level: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     const vol = std.math.clamp(@max(left_level, right_level), 0.0, 1.0);
     s.setVolume(@intFromFloat(vol * 127.0));
@@ -116,39 +116,39 @@ pub export fn AIL_set_sample_volume_levels(s_opt: ?*Sample, left_level: f32, rig
     const sum = left_level + right_level;
     if (sum > 0.0001) s.setPan(@intFromFloat(std.math.clamp(right_level / sum, 0.0, 1.0) * 127.0));
 }
-pub export fn AIL_sample_volume_levels(s_opt: ?*Sample, left_level: ?*f32, right_level: ?*f32) callconv(.winapi) void {
+pub fn AIL_sample_volume_levels(s_opt: ?*Sample, left_level: ?*f32, right_level: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     const v: f32 = @as(f32, @floatFromInt(s.original_volume)) / 127.0;
     if (left_level) |p| p.* = v;
     if (right_level) |p| p.* = v;
 }
-pub export fn AIL_sample_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32) callconv(.winapi) void {
+pub fn AIL_sample_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     if (volume) |p| p.* = @as(f32, @floatFromInt(s.original_volume)) / 127.0;
     if (pan) |p| p.* = s.pan;
 }
-pub export fn AIL_set_sample_low_pass_cut_off(s_opt: ?*Sample, channel: i32, cut_off: f32) callconv(.winapi) void {
+pub fn AIL_set_sample_low_pass_cut_off(s_opt: ?*Sample, channel: i32, cut_off: f32) callconv(.winapi) void {
     _ = channel;
     const s = s_opt orelse return;
     if (s.attached_filter) |f| f.setCutoff(@floatCast(cut_off));
 }
-pub export fn AIL_sample_low_pass_cut_off(s_opt: ?*Sample, channel: i32) callconv(.winapi) f32 {
+pub fn AIL_sample_low_pass_cut_off(s_opt: ?*Sample, channel: i32) callconv(.winapi) f32 {
     _ = channel;
     const s = s_opt orelse return 0;
     if (s.attached_filter) |f| return @floatCast(f.getCutoff());
     return 0;
 }
-pub export fn AIL_set_sample_reverb_levels(s_opt: ?*Sample, dry_level: f32, wet_level: f32) callconv(.winapi) void {
+pub fn AIL_set_sample_reverb_levels(s_opt: ?*Sample, dry_level: f32, wet_level: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     _ = dry_level;
     s.setReverb(s.reverb_room_type, std.math.clamp(wet_level, 0.0, 1.0), if (s.reverb_reflect_time > 0) s.reverb_reflect_time else 0.05);
 }
-pub export fn AIL_sample_reverb_levels(s_opt: ?*Sample, dry_level: ?*f32, wet_level: ?*f32) callconv(.winapi) void {
+pub fn AIL_sample_reverb_levels(s_opt: ?*Sample, dry_level: ?*f32, wet_level: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     if (dry_level) |p| p.* = 1.0 - s.reverb_level;
     if (wet_level) |p| p.* = s.reverb_level;
 }
-pub export fn AIL_set_sample_info(s_opt: ?*Sample, info: *const AILSOUNDINFO) callconv(.winapi) void {
+pub fn AIL_set_sample_info(s_opt: ?*Sample, info: *const AILSOUNDINFO) callconv(.winapi) void {
     const s = s_opt orelse return;
     const ch: u16 = if (info.channels >= 2) 2 else 1;
     const bits: u16 = if (info.bits == 8) 8 else 16;
@@ -157,48 +157,48 @@ pub export fn AIL_set_sample_info(s_opt: ?*Sample, info: *const AILSOUNDINFO) ca
 
 // Obstruction / occlusion / exclusion: stored attenuation hints (reuse Sample3D
 // semantics but on the unified handle; applied as a wet/volume hint).
-pub export fn AIL_set_sample_obstruction(s_opt: ?*Sample, obstruction: f32) callconv(.winapi) void {
+pub fn AIL_set_sample_obstruction(s_opt: ?*Sample, obstruction: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.v7_obstruction = std.math.clamp(obstruction, 0.0, 1.0);
 }
-pub export fn AIL_sample_obstruction(s_opt: ?*Sample) callconv(.winapi) f32 {
+pub fn AIL_sample_obstruction(s_opt: ?*Sample) callconv(.winapi) f32 {
     const s = s_opt orelse return 0;
     return s.v7_obstruction;
 }
-pub export fn AIL_set_sample_occlusion(s_opt: ?*Sample, occlusion: f32) callconv(.winapi) void {
+pub fn AIL_set_sample_occlusion(s_opt: ?*Sample, occlusion: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.v7_occlusion = std.math.clamp(occlusion, 0.0, 1.0);
 }
-pub export fn AIL_sample_occlusion(s_opt: ?*Sample) callconv(.winapi) f32 {
+pub fn AIL_sample_occlusion(s_opt: ?*Sample) callconv(.winapi) f32 {
     const s = s_opt orelse return 0;
     return s.v7_occlusion;
 }
-pub export fn AIL_set_sample_exclusion(s_opt: ?*Sample, exclusion: f32) callconv(.winapi) void {
+pub fn AIL_set_sample_exclusion(s_opt: ?*Sample, exclusion: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.v7_exclusion = std.math.clamp(exclusion, 0.0, 1.0);
 }
-pub export fn AIL_sample_exclusion(s_opt: ?*Sample) callconv(.winapi) f32 {
+pub fn AIL_sample_exclusion(s_opt: ?*Sample) callconv(.winapi) f32 {
     const s = s_opt orelse return 0;
     return s.v7_exclusion;
 }
 
 // --- Listener (reuse the engine's miniaudio listener) ------------------------
 
-pub export fn AIL_listener_3D_position(dig_opt: ?*DigitalDriver, x: ?*f32, y: ?*f32, z: ?*f32) callconv(.winapi) void {
+pub fn AIL_listener_3D_position(dig_opt: ?*DigitalDriver, x: ?*f32, y: ?*f32, z: ?*f32) callconv(.winapi) void {
     const d = dig_opt orelse return;
     const v = d.getListenerPosition();
     if (x) |p| p.* = v.x;
     if (y) |p| p.* = v.y;
     if (z) |p| p.* = v.z;
 }
-pub export fn AIL_listener_3D_velocity(dig_opt: ?*DigitalDriver, dx: ?*f32, dy: ?*f32, dz: ?*f32) callconv(.winapi) void {
+pub fn AIL_listener_3D_velocity(dig_opt: ?*DigitalDriver, dx: ?*f32, dy: ?*f32, dz: ?*f32) callconv(.winapi) void {
     const d = dig_opt orelse return;
     const v = d.getListenerVelocity();
     if (dx) |p| p.* = v.x;
     if (dy) |p| p.* = v.y;
     if (dz) |p| p.* = v.z;
 }
-pub export fn AIL_listener_3D_orientation(dig_opt: ?*DigitalDriver, fx: ?*f32, fy: ?*f32, fz: ?*f32, ux: ?*f32, uy: ?*f32, uz: ?*f32) callconv(.winapi) void {
+pub fn AIL_listener_3D_orientation(dig_opt: ?*DigitalDriver, fx: ?*f32, fy: ?*f32, fz: ?*f32, ux: ?*f32, uy: ?*f32, uz: ?*f32) callconv(.winapi) void {
     const d = dig_opt orelse return;
     const face = d.getListenerDirection();
     const up = d.getListenerWorldUp();
@@ -209,57 +209,57 @@ pub export fn AIL_listener_3D_orientation(dig_opt: ?*DigitalDriver, fx: ?*f32, f
     if (uy) |p| p.* = up.y;
     if (uz) |p| p.* = up.z;
 }
-pub export fn AIL_set_listener_3D_velocity_vector(dig_opt: ?*DigitalDriver, dx: f32, dy: f32, dz: f32) callconv(.winapi) void {
+pub fn AIL_set_listener_3D_velocity_vector(dig_opt: ?*DigitalDriver, dx: f32, dy: f32, dz: f32) callconv(.winapi) void {
     const d = dig_opt orelse return;
     d.setListenerVelocity(dx, dy, dz);
 }
-pub export fn AIL_update_listener_3D_position(dig_opt: ?*DigitalDriver, dt_ms: f32) callconv(.winapi) void {
+pub fn AIL_update_listener_3D_position(dig_opt: ?*DigitalDriver, dt_ms: f32) callconv(.winapi) void {
     _ = dig_opt;
     _ = dt_ms;
 }
 
 // --- Master volume / reverb / room (reuse DigitalDriver) ---------------------
 
-pub export fn AIL_digital_master_volume_level(dig_opt: ?*DigitalDriver) callconv(.winapi) f32 {
+pub fn AIL_digital_master_volume_level(dig_opt: ?*DigitalDriver) callconv(.winapi) f32 {
     const d = dig_opt orelse return 0;
     return d.getMasterVolume();
 }
-pub export fn AIL_set_digital_master_volume_level(dig_opt: ?*DigitalDriver, master_volume: f32) callconv(.winapi) void {
+pub fn AIL_set_digital_master_volume_level(dig_opt: ?*DigitalDriver, master_volume: f32) callconv(.winapi) void {
     const d = dig_opt orelse return;
     d.setMasterVolume(std.math.clamp(master_volume, 0.0, 1.0));
 }
-pub export fn AIL_set_digital_master_reverb(dig_opt: ?*DigitalDriver, bus_index: i32, reverb_decay_time: f32, reverb_predelay: f32, reverb_damping: f32) callconv(.winapi) void {
+pub fn AIL_set_digital_master_reverb(dig_opt: ?*DigitalDriver, bus_index: i32, reverb_decay_time: f32, reverb_predelay: f32, reverb_damping: f32) callconv(.winapi) void {
     _ = bus_index;
     _ = reverb_predelay;
     _ = reverb_damping;
     const d = dig_opt orelse return;
     d.v7_master_reverb_decay = reverb_decay_time;
 }
-pub export fn AIL_digital_master_reverb(dig_opt: ?*DigitalDriver, bus_index: i32, reverb_time: ?*f32, reverb_predelay: ?*f32, reverb_damping: ?*f32) callconv(.winapi) void {
+pub fn AIL_digital_master_reverb(dig_opt: ?*DigitalDriver, bus_index: i32, reverb_time: ?*f32, reverb_predelay: ?*f32, reverb_damping: ?*f32) callconv(.winapi) void {
     _ = bus_index;
     const d = dig_opt orelse return;
     if (reverb_time) |p| p.* = d.v7_master_reverb_decay;
     if (reverb_predelay) |p| p.* = 0;
     if (reverb_damping) |p| p.* = 0;
 }
-pub export fn AIL_set_digital_master_reverb_levels(dig_opt: ?*DigitalDriver, bus_index: i32, dry_level: f32, wet_level: f32) callconv(.winapi) void {
+pub fn AIL_set_digital_master_reverb_levels(dig_opt: ?*DigitalDriver, bus_index: i32, dry_level: f32, wet_level: f32) callconv(.winapi) void {
     _ = bus_index;
     const d = dig_opt orelse return;
     d.v7_master_reverb_dry = dry_level;
     d.v7_master_reverb_wet = wet_level;
 }
-pub export fn AIL_digital_master_reverb_levels(dig_opt: ?*DigitalDriver, bus_index: i32, dry_level: ?*f32, wet_level: ?*f32) callconv(.winapi) void {
+pub fn AIL_digital_master_reverb_levels(dig_opt: ?*DigitalDriver, bus_index: i32, dry_level: ?*f32, wet_level: ?*f32) callconv(.winapi) void {
     _ = bus_index;
     const d = dig_opt orelse return;
     if (dry_level) |p| p.* = d.v7_master_reverb_dry;
     if (wet_level) |p| p.* = d.v7_master_reverb_wet;
 }
-pub export fn AIL_set_room_type(dig_opt: ?*DigitalDriver, bus_index: i32, room_type: i32) callconv(.winapi) void {
+pub fn AIL_set_room_type(dig_opt: ?*DigitalDriver, bus_index: i32, room_type: i32) callconv(.winapi) void {
     _ = bus_index;
     const d = dig_opt orelse return;
     d.v7_room_type = room_type;
 }
-pub export fn AIL_room_type(dig_opt: ?*DigitalDriver, bus_index: i32) callconv(.winapi) i32 {
+pub fn AIL_room_type(dig_opt: ?*DigitalDriver, bus_index: i32) callconv(.winapi) i32 {
     _ = bus_index;
     const d = dig_opt orelse return 0;
     return d.v7_room_type;
@@ -267,43 +267,43 @@ pub export fn AIL_room_type(dig_opt: ?*DigitalDriver, bus_index: i32) callconv(.
 
 // --- Redbook volume (reuse) --------------------------------------------------
 
-pub export fn AIL_redbook_set_volume_level(hand: ?*Redbook, volume: f32) callconv(.winapi) void {
+pub fn AIL_redbook_set_volume_level(hand: ?*Redbook, volume: f32) callconv(.winapi) void {
     const rb = hand orelse return;
     rb.volume = @intFromFloat(std.math.clamp(volume, 0.0, 1.0) * 127.0);
 }
-pub export fn AIL_redbook_volume_level(hand: ?*Redbook) callconv(.winapi) f32 {
+pub fn AIL_redbook_volume_level(hand: ?*Redbook) callconv(.winapi) f32 {
     const rb = hand orelse return 0;
     return @as(f32, @floatFromInt(rb.volume)) / 127.0;
 }
 
 // --- Quick API extras (reuse) ------------------------------------------------
 
-pub export fn AIL_quick_set_low_pass_cut_off(audio: ?*Sample, channel: i32, cut_off: f32) callconv(.winapi) void {
+pub fn AIL_quick_set_low_pass_cut_off(audio: ?*Sample, channel: i32, cut_off: f32) callconv(.winapi) void {
     AIL_set_sample_low_pass_cut_off(audio, channel, cut_off);
 }
-pub export fn AIL_quick_set_reverb_levels(audio: ?*Sample, dry_level: f32, wet_level: f32) callconv(.winapi) void {
+pub fn AIL_quick_set_reverb_levels(audio: ?*Sample, dry_level: f32, wet_level: f32) callconv(.winapi) void {
     AIL_set_sample_reverb_levels(audio, dry_level, wet_level);
 }
 
 // --- Stream/DLS handle bridges ----------------------------------------------
 
-pub export fn AIL_stream_sample_handle(stream: ?*Sample) callconv(.winapi) ?*anyopaque {
+pub fn AIL_stream_sample_handle(stream: ?*Sample) callconv(.winapi) ?*anyopaque {
     return @ptrCast(stream); // a stream IS a Sample in OpenMiles
 }
-pub export fn AIL_DLS_sample_handle(dls: ?*MidiDriver) callconv(.winapi) ?*anyopaque {
+pub fn AIL_DLS_sample_handle(dls: ?*MidiDriver) callconv(.winapi) ?*anyopaque {
     _ = dls;
     return null;
 }
 
 // --- find_filter (reuse the built-in filter provider) ------------------------
 
-pub export fn AIL_find_filter(name: [*:0]const u8, ret: ?*?*openmiles.Provider) callconv(.winapi) i32 {
+pub fn AIL_find_filter(name: [*:0]const u8, ret: ?*?*openmiles.Provider) callconv(.winapi) i32 {
     _ = name;
     if (ret) |p| p.* = openmiles.startup_provider;
     return if (openmiles.startup_provider != null) 1 else 0;
 }
 
-pub export fn AIL_background_CPU_percent() callconv(.winapi) f32 {
+pub fn AIL_background_CPU_percent() callconv(.winapi) f32 {
     return 0;
 }
 
@@ -311,76 +311,76 @@ pub export fn AIL_background_CPU_percent() callconv(.winapi) f32 {
 // Multichannel speaker/receiver, output-filter providers, MP3 frame inspection,
 // and pipeline-stage processors return defaults so v7 titles link and run.
 
-pub export fn AIL_sample_processor(s_opt: ?*Sample, pipeline_stage: i32) callconv(.winapi) ?*anyopaque {
+pub fn AIL_sample_processor(s_opt: ?*Sample, pipeline_stage: i32) callconv(.winapi) ?*anyopaque {
     _ = s_opt;
     _ = pipeline_stage;
     return null;
 }
-pub export fn AIL_digital_driver_processor(dig_opt: ?*DigitalDriver, pipeline_stage: i32) callconv(.winapi) ?*anyopaque {
+pub fn AIL_digital_driver_processor(dig_opt: ?*DigitalDriver, pipeline_stage: i32) callconv(.winapi) ?*anyopaque {
     _ = dig_opt;
     _ = pipeline_stage;
     return null;
 }
-pub export fn AIL_sample_stage_attribute(s_opt: ?*Sample, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
+pub fn AIL_sample_stage_attribute(s_opt: ?*Sample, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     _ = s_opt;
     _ = name;
     _ = val;
 }
-pub export fn AIL_set_sample_stage_preference(s_opt: ?*Sample, name: [*:0]const u8, val: *const anyopaque) callconv(.winapi) void {
+pub fn AIL_set_sample_stage_preference(s_opt: ?*Sample, name: [*:0]const u8, val: *const anyopaque) callconv(.winapi) void {
     _ = s_opt;
     _ = name;
     _ = val;
 }
-pub export fn AIL_enumerate_sample_stage_attributes(s_opt: ?*Sample, next: *?*anyopaque, dest: *anyopaque) callconv(.winapi) i32 {
+pub fn AIL_enumerate_sample_stage_attributes(s_opt: ?*Sample, next: *?*anyopaque, dest: *anyopaque) callconv(.winapi) i32 {
     _ = s_opt;
     _ = dest;
     next.* = null;
     return 0;
 }
-pub export fn AIL_sample_channel_levels(s_opt: ?*Sample, src: ?*const anyopaque, dst: ?*const anyopaque, levels: ?*f32, n_levels: i32) callconv(.winapi) void {
+pub fn AIL_sample_channel_levels(s_opt: ?*Sample, src: ?*const anyopaque, dst: ?*const anyopaque, levels: ?*f32, n_levels: i32) callconv(.winapi) void {
     _ = s_opt;
     _ = src;
     _ = dst;
     _ = levels;
     _ = n_levels;
 }
-pub export fn AIL_set_sample_channel_levels(s_opt: ?*Sample, src: ?*const anyopaque, dst: ?*const anyopaque, levels: ?*const f32, n_levels: i32) callconv(.winapi) void {
+pub fn AIL_set_sample_channel_levels(s_opt: ?*Sample, src: ?*const anyopaque, dst: ?*const anyopaque, levels: ?*const f32, n_levels: i32) callconv(.winapi) void {
     _ = s_opt;
     _ = src;
     _ = dst;
     _ = levels;
     _ = n_levels;
 }
-pub export fn AIL_listener_relative_receiver_array(dig_opt: ?*DigitalDriver, n_receivers: ?*i32) callconv(.winapi) ?*anyopaque {
+pub fn AIL_listener_relative_receiver_array(dig_opt: ?*DigitalDriver, n_receivers: ?*i32) callconv(.winapi) ?*anyopaque {
     _ = dig_opt;
     if (n_receivers) |p| p.* = 0;
     return null;
 }
-pub export fn AIL_set_listener_relative_receiver_array(dig_opt: ?*DigitalDriver, array: ?*anyopaque, n_receivers: i32) callconv(.winapi) void {
+pub fn AIL_set_listener_relative_receiver_array(dig_opt: ?*DigitalDriver, array: ?*anyopaque, n_receivers: i32) callconv(.winapi) void {
     _ = dig_opt;
     _ = array;
     _ = n_receivers;
 }
-pub export fn AIL_speaker_configuration(dig_opt: ?*DigitalDriver, n_physical: ?*i32, n_logical: ?*i32, falloff_power: ?*f32, channel_spec: ?*anyopaque) callconv(.winapi) void {
+pub fn AIL_speaker_configuration(dig_opt: ?*DigitalDriver, n_physical: ?*i32, n_logical: ?*i32, falloff_power: ?*f32, channel_spec: ?*anyopaque) callconv(.winapi) void {
     _ = dig_opt;
     _ = channel_spec;
     if (n_physical) |p| p.* = 2;
     if (n_logical) |p| p.* = 2;
     if (falloff_power) |p| p.* = 1;
 }
-pub export fn AIL_set_speaker_configuration(dig_opt: ?*DigitalDriver, array: ?*anyopaque, n_channels: i32, falloff_power: f32) callconv(.winapi) void {
+pub fn AIL_set_speaker_configuration(dig_opt: ?*DigitalDriver, array: ?*anyopaque, n_channels: i32, falloff_power: f32) callconv(.winapi) void {
     _ = dig_opt;
     _ = array;
     _ = n_channels;
     _ = falloff_power;
 }
-pub export fn AIL_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array: ?*?*f32, dry_array: ?*?*f32, speaker_index_array: ?*?*const anyopaque) callconv(.winapi) void {
+pub fn AIL_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array: ?*?*f32, dry_array: ?*?*f32, speaker_index_array: ?*?*const anyopaque) callconv(.winapi) void {
     _ = dig_opt;
     if (wet_array) |p| p.* = null;
     if (dry_array) |p| p.* = null;
     if (speaker_index_array) |p| p.* = null;
 }
-pub export fn AIL_set_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array: ?*f32, dry_array: ?*f32, speaker_index_array: ?*const anyopaque, n_levels: i32) callconv(.winapi) void {
+pub fn AIL_set_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array: ?*f32, dry_array: ?*f32, speaker_index_array: ?*const anyopaque, n_levels: i32) callconv(.winapi) void {
     _ = dig_opt;
     _ = wet_array;
     _ = dry_array;
@@ -392,7 +392,7 @@ pub export fn AIL_set_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array:
 // internally), so these report success and leave the caller's channel_levels
 // untouched. The signature grew across versions: v7 @56 (14 args), v8+ @68
 // (adds listener up-vector + doppler velocity/shift).
-pub export fn AIL_calculate_3D_channel_levels(
+pub fn AIL_calculate_3D_channel_levels(
     dig: ?*DigitalDriver,
     channel_levels: ?*f32,
     speaker_array: ?*anyopaque,
@@ -432,7 +432,7 @@ pub export fn AIL_calculate_3D_channel_levels(
 }
 // v7 form: 14 args @56 (no listener up-vector / doppler). Exported as
 // _AIL_calculate_3D_channel_levels@56 for v7 only.
-pub export fn AIL_calculate_3D_channel_levels_v7(
+pub fn AIL_calculate_3D_channel_levels_v7(
     dig: ?*DigitalDriver,
     channel_levels: ?*f32,
     speaker_array: ?*anyopaque,
@@ -464,48 +464,48 @@ pub export fn AIL_calculate_3D_channel_levels_v7(
     _ = rolloff_factor;
     return 0;
 }
-pub export fn AIL_digital_output_filter(dig_opt: ?*DigitalDriver) callconv(.winapi) ?*anyopaque {
+pub fn AIL_digital_output_filter(dig_opt: ?*DigitalDriver) callconv(.winapi) ?*anyopaque {
     _ = dig_opt;
     return null;
 }
-pub export fn AIL_output_filter_driver_attribute(lib: ?*anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
+pub fn AIL_output_filter_driver_attribute(lib: ?*anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     _ = lib;
     _ = name;
     _ = val;
 }
-pub export fn AIL_set_output_filter_driver_preference(lib: ?*anyopaque, name: [*:0]const u8, val: *const anyopaque) callconv(.winapi) void {
+pub fn AIL_set_output_filter_driver_preference(lib: ?*anyopaque, name: [*:0]const u8, val: *const anyopaque) callconv(.winapi) void {
     _ = lib;
     _ = name;
     _ = val;
 }
-pub export fn AIL_enumerate_output_filter_driver_attributes(lib: ?*anyopaque, next: *?*anyopaque, dest: *anyopaque) callconv(.winapi) i32 {
+pub fn AIL_enumerate_output_filter_driver_attributes(lib: ?*anyopaque, next: *?*anyopaque, dest: *anyopaque) callconv(.winapi) i32 {
     _ = lib;
     _ = dest;
     next.* = null;
     return 0;
 }
-pub export fn AIL_enumerate_output_filter_sample_attributes(lib: ?*anyopaque, next: *?*anyopaque, dest: *anyopaque) callconv(.winapi) i32 {
+pub fn AIL_enumerate_output_filter_sample_attributes(lib: ?*anyopaque, next: *?*anyopaque, dest: *anyopaque) callconv(.winapi) i32 {
     _ = lib;
     _ = dest;
     next.* = null;
     return 0;
 }
-pub export fn AIL_inspect_MP3(inspection_state: ?*anyopaque, mp3_image: ?*anyopaque, image_size: i32) callconv(.winapi) i32 {
+pub fn AIL_inspect_MP3(inspection_state: ?*anyopaque, mp3_image: ?*anyopaque, image_size: i32) callconv(.winapi) i32 {
     _ = inspection_state;
     _ = mp3_image;
     _ = image_size;
     return 0;
 }
-pub export fn AIL_enumerate_MP3_frames(inspection_state: ?*anyopaque) callconv(.winapi) i32 {
+pub fn AIL_enumerate_MP3_frames(inspection_state: ?*anyopaque) callconv(.winapi) i32 {
     _ = inspection_state;
     return 0;
 }
-pub export fn RIB_load_static_provider_library(main_fn: ?*anyopaque, description: [*:0]const u8) callconv(.winapi) ?*anyopaque {
+pub fn RIB_load_static_provider_library(main_fn: ?*anyopaque, description: [*:0]const u8) callconv(.winapi) ?*anyopaque {
     _ = main_fn;
     _ = description;
     return null;
 }
-pub export fn RIB_MAIN(self: ?*anyopaque, dll_name: [*:0]const u8) callconv(.winapi) i32 {
+pub fn RIB_MAIN(self: ?*anyopaque, dll_name: [*:0]const u8) callconv(.winapi) i32 {
     _ = self;
     _ = dll_name;
     return 0;

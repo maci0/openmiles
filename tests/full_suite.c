@@ -82,7 +82,7 @@ int play_test_main(int argc, char** argv) {
     LOAD_FUNC_EX(AIL_set_digital_master_volume, 8);
     LOAD_FUNC_EX(AIL_allocate_sample_handle, 4);
     LOAD_FUNC_EX(AIL_release_sample_handle, 4);
-    LOAD_FUNC_EX(AIL_init_sample, 4);
+    LOAD_FUNC_EX(AIL_init_sample, 8); /* v8+ ABI: AIL_init_sample(HSAMPLE, S32 format) */
     LOAD_FUNC_EX(AIL_set_sample_file, 12);
     LOAD_FUNC_EX(AIL_start_sample, 4);
     LOAD_FUNC_EX(AIL_stop_sample, 4);

@@ -10,31 +10,31 @@ const Filter = openmiles.Filter;
 const MidiDriver = openmiles.MidiDriver;
 const AILSOUNDINFO = openmiles.AILSOUNDINFO;
 
-pub export fn AIL_startup() callconv(.winapi) void {
+pub fn AIL_startup() callconv(.winapi) void {
     log("ENTER AIL_startup\n", .{});
     openmiles.startup();
     log("EXIT AIL_startup\n", .{});
 }
-pub export fn AIL_shutdown() callconv(.winapi) void {
+pub fn AIL_shutdown() callconv(.winapi) void {
     log("AIL_shutdown()\n", .{});
     openmiles.shutdown();
 }
-pub export fn AIL_set_redist_directory(path: [*:0]const u8) callconv(.winapi) void {
+pub fn AIL_set_redist_directory(path: [*:0]const u8) callconv(.winapi) void {
     log("AIL_set_redist_directory(path={s})\n", .{path});
     openmiles.setRedistDirectory(std.mem.span(path));
 }
-pub export fn AIL_last_error() callconv(.winapi) [*:0]const u8 {
+pub fn AIL_last_error() callconv(.winapi) [*:0]const u8 {
     if (openmiles.last_error_buf[0] == 0) return "";
     return &openmiles.last_error_buf;
 }
-pub export fn AIL_get_preference(number: u32) callconv(.winapi) i32 {
+pub fn AIL_get_preference(number: u32) callconv(.winapi) i32 {
     return openmiles.getPreference(number);
 }
-pub export fn AIL_set_preference(number: u32, value: i32) callconv(.winapi) i32 {
+pub fn AIL_set_preference(number: u32, value: i32) callconv(.winapi) i32 {
     log("AIL_set_preference(number={d}, value={d})\n", .{ number, value });
     return openmiles.setPreference(number, value);
 }
-pub export fn AIL_waveOutOpen(drvr_ptr: ?*?*DigitalDriver, lphwo: ?*u32, device_id: i32, format: ?*anyopaque) callconv(.winapi) u32 {
+pub fn AIL_waveOutOpen(drvr_ptr: ?*?*DigitalDriver, lphwo: ?*u32, device_id: i32, format: ?*anyopaque) callconv(.winapi) u32 {
     log("AIL_waveOutOpen(drvr_ptr={*}, lphwo={*}, device_id={d}, format={*})\n", .{ drvr_ptr, lphwo, device_id, format });
     if (drvr_ptr) |ptr| {
         const driver = openmiles.DigitalDriver.init(openmiles.global_allocator, 44100, 16, 2) catch |err| {
@@ -48,17 +48,17 @@ pub export fn AIL_waveOutOpen(drvr_ptr: ?*?*DigitalDriver, lphwo: ?*u32, device_
     }
     return 0; // MMSYSERR_NOERROR
 }
-pub export fn AIL_digital_handle_release(driver_opt: ?*DigitalDriver) callconv(.winapi) i32 {
+pub fn AIL_digital_handle_release(driver_opt: ?*DigitalDriver) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
     log("AIL_digital_handle_release(driver={*})\n", .{driver});
     return 1;
 }
-pub export fn AIL_digital_handle_reacquire(driver_opt: ?*DigitalDriver) callconv(.winapi) i32 {
+pub fn AIL_digital_handle_reacquire(driver_opt: ?*DigitalDriver) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
     log("AIL_digital_handle_reacquire(driver={*})\n", .{driver});
     return 1;
 }
-pub export fn AIL_set_named_sample_file(s_opt: ?*Sample, file_type: [*:0]const u8, file_image: *const anyopaque, size: i32, flags: u32) callconv(.winapi) i32 {
+pub fn AIL_set_named_sample_file(s_opt: ?*Sample, file_type: [*:0]const u8, file_image: *const anyopaque, size: i32, flags: u32) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     log("AIL_set_named_sample_file(s={*}, type={s}, image={*}, size={d}, flags={d})\n", .{ s, file_type, file_image, size, flags });
     openmiles.clearLastError();
@@ -91,78 +91,78 @@ pub export fn AIL_set_named_sample_file(s_opt: ?*Sample, file_type: [*:0]const u
     };
     return 1;
 }
-pub export fn AIL_sample_volume(s_opt: ?*Sample) callconv(.winapi) i32 {
+pub fn AIL_sample_volume(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     return s.original_volume;
 }
-pub export fn AIL_sample_pan(s_opt: ?*Sample) callconv(.winapi) i32 {
+pub fn AIL_sample_pan(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     return openmiles.panToMss(s.pan);
 }
-pub export fn AIL_sample_playback_rate(s_opt: ?*Sample) callconv(.winapi) i32 {
+pub fn AIL_sample_playback_rate(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     return openmiles.satI32(s.target_rate orelse 44100.0);
 }
-pub export fn AIL_set_sample_volume_pan(s_opt: ?*Sample, volume: i32, pan: i32) callconv(.winapi) void {
+pub fn AIL_set_sample_volume_pan(s_opt: ?*Sample, volume: i32, pan: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_set_sample_volume_pan(s={*}, volume={d}, pan={d})\n", .{ s, volume, pan });
     s.setVolumePan(volume, pan);
 }
-pub export fn AIL_active_sample_count(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
+pub fn AIL_active_sample_count(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
     const driver = driver_opt orelse return 0;
     return driver.getActiveSampleCount();
 }
-pub export fn AIL_sample_ms_position(s_opt: ?*Sample, total_ms: ?*i32, current_ms: ?*i32) callconv(.winapi) void {
+pub fn AIL_sample_ms_position(s_opt: ?*Sample, total_ms: ?*i32, current_ms: ?*i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     const pos = s.getMsPosition();
     if (total_ms) |t| t.* = pos.total;
     if (current_ms) |c| c.* = pos.current;
 }
-pub export fn AIL_set_sample_ms_position(s_opt: ?*Sample, ms: i32) callconv(.winapi) void {
+pub fn AIL_set_sample_ms_position(s_opt: ?*Sample, ms: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_set_sample_ms_position(s={*}, ms={d})\n", .{ s, ms });
     s.setMsPosition(ms);
 }
-pub export fn AIL_sample_position(s_opt: ?*Sample) callconv(.winapi) u32 {
+pub fn AIL_sample_position(s_opt: ?*Sample) callconv(.winapi) u32 {
     const s = s_opt orelse return 0;
     return s.getPosition();
 }
-pub export fn AIL_set_sample_position(s_opt: ?*Sample, pos: u32) callconv(.winapi) void {
+pub fn AIL_set_sample_position(s_opt: ?*Sample, pos: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_set_sample_position(s={*}, pos={d})\n", .{ s, pos });
     s.setPosition(pos);
 }
-pub export fn AIL_sample_loop_count(s_opt: ?*Sample) callconv(.winapi) i32 {
+pub fn AIL_sample_loop_count(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     return s.loop_count;
 }
-pub export fn AIL_register_EOS_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+pub fn AIL_register_EOS_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
     log("AIL_register_EOS_callback(s={*}, callback={*})\n", .{ s, callback });
     const prev: ?*anyopaque = @ptrFromInt(s.eos_callback);
     s.eos_callback = if (callback) |cb| @intFromPtr(cb) else 0;
     return prev;
 }
-pub export fn AIL_open_digital_driver(frequency: u32, bits: i32, channels: i32, flags: u32) callconv(.winapi) ?*DigitalDriver {
+pub fn AIL_open_digital_driver(frequency: u32, bits: i32, channels: i32, flags: u32) callconv(.winapi) ?*DigitalDriver {
     log("AIL_open_digital_driver(freq={d}, bits={d}, chans={d}, flags={d})\n", .{ frequency, bits, channels, flags });
     return openmiles.openDigitalDriver(frequency, bits, channels);
 }
-pub export fn AIL_close_digital_driver(driver_opt: ?*DigitalDriver) callconv(.winapi) void {
+pub fn AIL_close_digital_driver(driver_opt: ?*DigitalDriver) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     log("AIL_close_digital_driver(driver={*})\n", .{driver});
     openmiles.closeDigitalDriver(driver);
 }
-pub export fn AIL_serve() callconv(.winapi) void {}
-pub export fn AIL_set_digital_master_volume(driver_opt: ?*DigitalDriver, master_volume: i32) callconv(.winapi) void {
+pub fn AIL_serve() callconv(.winapi) void {}
+pub fn AIL_set_digital_master_volume(driver_opt: ?*DigitalDriver, master_volume: i32) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     log("AIL_set_digital_master_volume(driver={*}, volume={d})\n", .{ driver, master_volume });
     driver.setMasterVolume(openmiles.mssVolumeToGain(master_volume));
 }
-pub export fn AIL_digital_master_volume(driver_opt: ?*DigitalDriver) callconv(.winapi) i32 {
+pub fn AIL_digital_master_volume(driver_opt: ?*DigitalDriver) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
     return openmiles.gainToMssVolume(driver.getMasterVolume());
 }
-pub export fn AIL_allocate_sample_handle(driver_opt: ?*DigitalDriver) callconv(.winapi) ?*Sample {
+pub fn AIL_allocate_sample_handle(driver_opt: ?*DigitalDriver) callconv(.winapi) ?*Sample {
     const driver = driver_opt orelse return null;
     log("AIL_allocate_sample_handle(driver={*})\n", .{driver});
     return openmiles.Sample.init(driver) catch |err| {
@@ -170,25 +170,25 @@ pub export fn AIL_allocate_sample_handle(driver_opt: ?*DigitalDriver) callconv(.
         return null;
     };
 }
-pub export fn AIL_release_sample_handle(s_opt: ?*Sample) callconv(.winapi) void {
+pub fn AIL_release_sample_handle(s_opt: ?*Sample) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_release_sample_handle(s={*})\n", .{s});
     s.deinit();
 }
-pub export fn AIL_init_sample(s_opt: ?*Sample) callconv(.winapi) void {
+pub fn AIL_init_sample(s_opt: ?*Sample) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_init_sample(s={*})\n", .{s});
     s.reset();
 }
 // v8+ gained a `format` argument: S32 AIL_init_sample(HSAMPLE S, S32 format) @8.
 // Exported as _AIL_init_sample@8 for v8/v9 via a symbol override.
-pub export fn AIL_init_sample_v8(s_opt: ?*Sample, format: i32) callconv(.winapi) i32 {
+pub fn AIL_init_sample_v8(s_opt: ?*Sample, format: i32) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     _ = format; // output format selection: the miniaudio mixer is format-agnostic
     s.reset();
     return 1;
 }
-pub export fn AIL_set_sample_file(s_opt: ?*Sample, data: *anyopaque, block: i32) callconv(.winapi) i32 {
+pub fn AIL_set_sample_file(s_opt: ?*Sample, data: *anyopaque, block: i32) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     log("AIL_set_sample_file(s={*}, data={*}, block={d})\n", .{ s, data, block });
     openmiles.clearLastError();
@@ -201,109 +201,109 @@ pub export fn AIL_set_sample_file(s_opt: ?*Sample, data: *anyopaque, block: i32)
     };
     return 1;
 }
-pub export fn AIL_set_sample_address(s_opt: ?*Sample, data: *anyopaque, size: u32) callconv(.winapi) void {
+pub fn AIL_set_sample_address(s_opt: ?*Sample, data: *anyopaque, size: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_set_sample_address(s={*}, data={*}, size={d})\n", .{ s, data, size });
     s.setAddress(data, size) catch |err| {
         log("AIL_set_sample_address: failed: {any}\n", .{err});
     };
 }
-pub export fn AIL_set_sample_type(s_opt: ?*Sample, format: u32, flags: u32) callconv(.winapi) void {
+pub fn AIL_set_sample_type(s_opt: ?*Sample, format: u32, flags: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_set_sample_type(s={*}, format={d}, flags={d})\n", .{ s, format, flags });
     s.setType(format, flags);
 }
-pub export fn AIL_start_sample(s_opt: ?*Sample) callconv(.winapi) void {
+pub fn AIL_start_sample(s_opt: ?*Sample) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_start_sample(s={*})\n", .{s});
     s.start();
 }
-pub export fn AIL_stop_sample(s_opt: ?*Sample) callconv(.winapi) void {
+pub fn AIL_stop_sample(s_opt: ?*Sample) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_stop_sample(s={*})\n", .{s});
     s.stop();
 }
-pub export fn AIL_pause_sample(s_opt: ?*Sample) callconv(.winapi) void {
+pub fn AIL_pause_sample(s_opt: ?*Sample) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_pause_sample(s={*})\n", .{s});
     s.pause();
 }
-pub export fn AIL_resume_sample(s_opt: ?*Sample) callconv(.winapi) void {
+pub fn AIL_resume_sample(s_opt: ?*Sample) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_resume_sample(s={*})\n", .{s});
     s.resumePlayback();
 }
-pub export fn AIL_end_sample(s_opt: ?*Sample) callconv(.winapi) void {
+pub fn AIL_end_sample(s_opt: ?*Sample) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_end_sample(s={*})\n", .{s});
     s.end();
 }
-pub export fn AIL_sample_status(s_opt: ?*Sample) callconv(.winapi) u32 {
+pub fn AIL_sample_status(s_opt: ?*Sample) callconv(.winapi) u32 {
     const s = s_opt orelse return 0;
     return @intFromEnum(s.status());
 }
-pub export fn AIL_set_sample_volume(s_opt: ?*Sample, volume: i32) callconv(.winapi) void {
+pub fn AIL_set_sample_volume(s_opt: ?*Sample, volume: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_set_sample_volume(s={*}, volume={d})\n", .{ s, volume });
     s.setVolume(volume);
 }
-pub export fn AIL_set_sample_pan(s_opt: ?*Sample, pan: i32) callconv(.winapi) void {
+pub fn AIL_set_sample_pan(s_opt: ?*Sample, pan: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_set_sample_pan(s={*}, pan={d})\n", .{ s, pan });
     s.setPan(pan);
 }
-pub export fn AIL_set_sample_playback_rate(s_opt: ?*Sample, rate: i32) callconv(.winapi) void {
+pub fn AIL_set_sample_playback_rate(s_opt: ?*Sample, rate: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_set_sample_playback_rate(s={*}, rate={d})\n", .{ s, rate });
     s.setPlaybackRate(rate);
 }
-pub export fn AIL_set_sample_loop_count(s_opt: ?*Sample, count: i32) callconv(.winapi) void {
+pub fn AIL_set_sample_loop_count(s_opt: ?*Sample, count: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_set_sample_loop_count(s={*}, count={d})\n", .{ s, count });
     s.setLoopCount(count);
 }
-pub export fn AIL_sample_user_data(s_opt: ?*Sample, index: i32) callconv(.winapi) u32 {
+pub fn AIL_sample_user_data(s_opt: ?*Sample, index: i32) callconv(.winapi) u32 {
     const s = s_opt orelse return 0;
     const idx: usize = @intCast(@min(@max(index, 0), 7));
     return s.user_data[idx];
 }
-pub export fn AIL_set_sample_user_data(s_opt: ?*Sample, index: i32, value: u32) callconv(.winapi) void {
+pub fn AIL_set_sample_user_data(s_opt: ?*Sample, index: i32, value: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
     const idx: usize = @intCast(@min(@max(index, 0), 7));
     s.user_data[idx] = value;
 }
-pub export fn AIL_sample_reverb(s_opt: ?*Sample, room_type: ?*f32, level: ?*f32, reflect_time: ?*f32) callconv(.winapi) void {
+pub fn AIL_sample_reverb(s_opt: ?*Sample, room_type: ?*f32, level: ?*f32, reflect_time: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     const rev = s.getReverb();
     if (room_type) |p| p.* = rev.room_type;
     if (level) |p| p.* = rev.level;
     if (reflect_time) |p| p.* = rev.reflect_time;
 }
-pub export fn AIL_set_sample_reverb(s_opt: ?*Sample, room_type: f32, level: f32, reflect_time: f32) callconv(.winapi) void {
+pub fn AIL_set_sample_reverb(s_opt: ?*Sample, room_type: f32, level: f32, reflect_time: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.setReverb(room_type, level, reflect_time);
 }
-pub export fn AIL_set_sample_loop_block(s_opt: ?*Sample, loop_start: i32, loop_end: i32) callconv(.winapi) void {
+pub fn AIL_set_sample_loop_block(s_opt: ?*Sample, loop_start: i32, loop_end: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.setLoopBlock(loop_start, loop_end);
 }
-pub export fn AIL_set_sample_adpcm_block_size(s_opt: ?*Sample, block_size: u32) callconv(.winapi) void {
+pub fn AIL_set_sample_adpcm_block_size(s_opt: ?*Sample, block_size: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.adpcm_block_size = block_size;
 }
-pub export fn AIL_sample_granularity(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
+pub fn AIL_sample_granularity(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
     const driver = driver_opt orelse return 0;
     _ = driver;
     return 512;
 }
-pub export fn AIL_minimum_sample_buffer_size(driver_opt: ?*DigitalDriver, rate: i32, format: i32) callconv(.winapi) u32 {
+pub fn AIL_minimum_sample_buffer_size(driver_opt: ?*DigitalDriver, rate: i32, format: i32) callconv(.winapi) u32 {
     const driver = driver_opt orelse return 0;
     _ = driver;
     _ = rate;
     _ = format;
     return 2048;
 }
-pub export fn AIL_allocate_file_sample(driver_opt: ?*DigitalDriver, data: *anyopaque, flags: u32) callconv(.winapi) ?*Sample {
+pub fn AIL_allocate_file_sample(driver_opt: ?*DigitalDriver, data: *anyopaque, flags: u32) callconv(.winapi) ?*Sample {
     const driver = driver_opt orelse return null;
     log("AIL_allocate_file_sample\n", .{});
     _ = flags;
@@ -321,7 +321,7 @@ pub export fn AIL_allocate_file_sample(driver_opt: ?*DigitalDriver, data: *anyop
     return s;
 }
 // AIL_load_sample_buffer(HSAMPLE S, U32 buff_num, void const *buffer, U32 len)
-pub export fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: u32, data: *anyopaque, len: u32) callconv(.winapi) void {
+pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: u32, data: *anyopaque, len: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
     const buffer_id: i32 = @bitCast(buff_num); // just a stored id; don't panic on high bit
     s.last_loaded_buffer = buffer_id;
@@ -343,7 +343,7 @@ pub export fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: u32, data: *anyo
         cb(@ptrCast(s), buffer_id, len, data);
     }
 }
-pub export fn AIL_sample_buffer_ready(s_opt: ?*Sample) callconv(.winapi) i32 {
+pub fn AIL_sample_buffer_ready(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     // Streaming: return the index (0/1) of a free buffer slot, or -1 if both full.
     if (s.stream_active) return s.streamBufferReady();
@@ -354,7 +354,7 @@ pub export fn AIL_sample_buffer_ready(s_opt: ?*Sample) callconv(.winapi) i32 {
 }
 // v3-v7 form: 5 args @20 — both double-buffer slots (pos/len each). Exported as
 // _AIL_sample_buffer_info@20 for v3-v7.
-pub export fn AIL_sample_buffer_info_old(s_opt: ?*Sample, pos0: ?*u32, len0: ?*u32, pos1: ?*u32, len1: ?*u32) callconv(.winapi) void {
+pub fn AIL_sample_buffer_info_old(s_opt: ?*Sample, pos0: ?*u32, len0: ?*u32, pos1: ?*u32, len1: ?*u32) callconv(.winapi) void {
     if (pos0) |p| p.* = 0;
     if (len0) |p| p.* = 0;
     if (pos1) |p| p.* = 0;
@@ -377,7 +377,7 @@ pub export fn AIL_sample_buffer_info_old(s_opt: ?*Sample, pos0: ?*u32, len0: ?*u
 // v8+ form: S32 AIL_sample_buffer_info(HSAMPLE S, S32 buff_num, U32 *pos,
 // U32 *len, U32 *used, U32 *free) @24 — report play position/length and the
 // used/free buffer counts for the requested double-buffer slot.
-pub export fn AIL_sample_buffer_info(s_opt: ?*Sample, buff_num: i32, pos: ?*u32, len: ?*u32, used: ?*u32, free_count: ?*u32) callconv(.winapi) i32 {
+pub fn AIL_sample_buffer_info(s_opt: ?*Sample, buff_num: i32, pos: ?*u32, len: ?*u32, used: ?*u32, free_count: ?*u32) callconv(.winapi) i32 {
     if (pos) |p| p.* = 0;
     if (len) |p| p.* = 0;
     if (used) |p| p.* = 0;
@@ -400,19 +400,19 @@ pub export fn AIL_sample_buffer_info(s_opt: ?*Sample, buff_num: i32, pos: ?*u32,
     }
     return 0;
 }
-pub export fn AIL_register_EOB_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+pub fn AIL_register_EOB_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
     const prev: ?*anyopaque = @ptrFromInt(s.eob_callback);
     s.eob_callback = if (callback) |cb| @intFromPtr(cb) else 0;
     return prev;
 }
-pub export fn AIL_register_SOB_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+pub fn AIL_register_SOB_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
     const prev: ?*anyopaque = @ptrFromInt(s.sob_callback);
     s.sob_callback = if (callback) |cb| @intFromPtr(cb) else 0;
     return prev;
 }
-pub export fn AIL_set_sample_processor(s_opt: ?*Sample, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+pub fn AIL_set_sample_processor(s_opt: ?*Sample, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
     const idx: usize = @intCast(@min(@max(stage, 0), 1));
     const prev: ?*anyopaque = @ptrFromInt(s.sample_processors[idx]);
@@ -421,11 +421,11 @@ pub export fn AIL_set_sample_processor(s_opt: ?*Sample, stage: i32, processor: ?
 }
 // AIL_primary_digital_driver(HDIGDRIVER new_primary) -> HDIGDRIVER
 // Passing a driver makes it the primary; null queries the current primary.
-pub export fn AIL_primary_digital_driver(new_primary: ?*DigitalDriver) callconv(.winapi) ?*DigitalDriver {
+pub fn AIL_primary_digital_driver(new_primary: ?*DigitalDriver) callconv(.winapi) ?*DigitalDriver {
     if (new_primary) |d| openmiles.last_digital_driver = d;
     return openmiles.last_digital_driver;
 }
-pub export fn AIL_digital_CPU_percent(driver_opt: ?*DigitalDriver) callconv(.winapi) f32 {
+pub fn AIL_digital_CPU_percent(driver_opt: ?*DigitalDriver) callconv(.winapi) f32 {
     const driver = driver_opt orelse return 0.0;
     // Estimate CPU load from the ratio of active sounds to a nominal budget.
     // miniaudio doesn't expose CPU usage directly; this approximation is
@@ -435,7 +435,7 @@ pub export fn AIL_digital_CPU_percent(driver_opt: ?*DigitalDriver) callconv(.win
     const pct = (active / nominal_budget) * 100.0;
     return @min(pct, 100.0);
 }
-pub export fn AIL_digital_latency(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
+pub fn AIL_digital_latency(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
     const driver = driver_opt orelse return 0;
     if (driver.getDevice()) |device| {
         const period = device.playback.internalPeriodSizeInFrames;
@@ -450,7 +450,7 @@ pub export fn AIL_digital_latency(driver_opt: ?*DigitalDriver) callconv(.winapi)
 // Real MSS: AIL_digital_configuration(HDIGDRIVER dig, S32 *rate, S32 *format,
 // char *string) — rate is the mixer output rate, format a DIG_F code, and
 // string receives a short human-readable driver description.
-pub export fn AIL_digital_configuration(driver_opt: ?*DigitalDriver, rate: ?*i32, format: ?*i32, string: ?[*]u8) callconv(.winapi) void {
+pub fn AIL_digital_configuration(driver_opt: ?*DigitalDriver, rate: ?*i32, format: ?*i32, string: ?[*]u8) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     if (rate) |p| p.* = @intCast(driver.getSampleRate());
     if (format) |p| p.* = if (driver.getChannels() >= 2) 3 else 1; // 16-bit: 1=mono,3=stereo
@@ -462,42 +462,42 @@ pub export fn AIL_digital_configuration(driver_opt: ?*DigitalDriver, rate: ?*i32
 }
 // Legacy 3.x exports. The DirectSound-specific ones have no meaning on the
 // miniaudio backend (no DirectSound buffers/DS3D), so they report "unsupported".
-pub export fn AIL_get_DirectSound3D_info(s: ?*anyopaque, ds3d: ?*anyopaque, caps: ?*anyopaque, size: u32) callconv(.winapi) void {
+pub fn AIL_get_DirectSound3D_info(s: ?*anyopaque, ds3d: ?*anyopaque, caps: ?*anyopaque, size: u32) callconv(.winapi) void {
     _ = s;
     _ = ds3d;
     _ = caps;
     _ = size;
 }
-pub export fn AIL_set_direct_buffer_control(s_opt: ?*Sample, command: u32) callconv(.winapi) i32 {
+pub fn AIL_set_direct_buffer_control(s_opt: ?*Sample, command: u32) callconv(.winapi) i32 {
     _ = s_opt;
     _ = command;
     return 0; // no DirectSound secondary buffer to control
 }
-pub export fn AIL_start_sample_at(s_opt: ?*Sample, offset: u32) callconv(.winapi) void {
+pub fn AIL_start_sample_at(s_opt: ?*Sample, offset: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.setPosition(offset);
     s.start();
 }
-pub export fn AIL_get_DirectSound_info(driver_opt: ?*DigitalDriver, info: *anyopaque, size: u32) callconv(.winapi) i32 {
+pub fn AIL_get_DirectSound_info(driver_opt: ?*DigitalDriver, info: *anyopaque, size: u32) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
     _ = driver;
     _ = info;
     _ = size;
     return 0;
 }
-pub export fn AIL_set_DirectSound_HWND(driver_opt: ?*DigitalDriver, hwnd: *anyopaque) callconv(.winapi) void {
+pub fn AIL_set_DirectSound_HWND(driver_opt: ?*DigitalDriver, hwnd: *anyopaque) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     _ = driver;
     _ = hwnd;
 }
-pub export fn AIL_set_digital_driver_processor(driver_opt: ?*DigitalDriver, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+pub fn AIL_set_digital_driver_processor(driver_opt: ?*DigitalDriver, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const driver = driver_opt orelse return null;
     const idx: usize = @intCast(@min(@max(stage, 0), 1));
     const prev: ?*anyopaque = @ptrFromInt(driver.driver_processors[idx]);
     driver.driver_processors[idx] = if (processor) |p| @intFromPtr(p) else 0;
     return prev;
 }
-pub export fn AIL_process_digital_audio(driver_opt: ?*DigitalDriver, dest: ?*anyopaque, count: u32, mono_dest: ?*anyopaque, mono_count: u32, flags: u32) callconv(.winapi) i32 {
+pub fn AIL_process_digital_audio(driver_opt: ?*DigitalDriver, dest: ?*anyopaque, count: u32, mono_dest: ?*anyopaque, mono_count: u32, flags: u32) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
     _ = flags;
     driver.enableCapture();
@@ -528,7 +528,7 @@ pub export fn AIL_process_digital_audio(driver_opt: ?*DigitalDriver, dest: ?*any
 // AIL_process_digital_audio would emit for the given source(s) resampled to the
 // destination rate/format. AILMIXINFO begins with an AILSOUNDINFO, so the first
 // source's length/rate drive the estimate.
-pub export fn AIL_size_processed_digital_audio(dest_rate: u32, dest_format: u32, num_srcs: i32, src: ?*const anyopaque) callconv(.winapi) i32 {
+pub fn AIL_size_processed_digital_audio(dest_rate: u32, dest_format: u32, num_srcs: i32, src: ?*const anyopaque) callconv(.winapi) i32 {
     if (num_srcs <= 0 or dest_rate == 0) return 0;
     const sp = src orelse return 0;
     const info: *const openmiles.AILSOUNDINFO = @ptrCast(@alignCast(sp));
@@ -539,36 +539,36 @@ pub export fn AIL_size_processed_digital_audio(dest_rate: u32, dest_format: u32,
     const bytes = out_samples * dest_bps * dest_ch;
     return @intCast(@min(bytes, std.math.maxInt(i32)));
 }
-pub export fn AIL_ms_count() callconv(.winapi) u32 {
+pub fn AIL_ms_count() callconv(.winapi) u32 {
     return openmiles.getMsCount();
 }
-pub export fn AIL_us_count() callconv(.winapi) u32 {
+pub fn AIL_us_count() callconv(.winapi) u32 {
     return openmiles.getUsCount();
 }
-pub export fn AIL_delay(ms: u32) callconv(.winapi) void {
+pub fn AIL_delay(ms: u32) callconv(.winapi) void {
     const duration = std.Io.Duration.fromNanoseconds(@as(i96, ms) * std.time.ns_per_ms);
     openmiles.io.sleep(duration, .awake) catch {};
 }
-pub export fn AIL_lock() callconv(.winapi) void {}
-pub export fn AIL_unlock() callconv(.winapi) void {}
-pub export fn AIL_lock_mutex() callconv(.winapi) void {}
-pub export fn AIL_unlock_mutex() callconv(.winapi) void {}
-pub export fn AIL_background() callconv(.winapi) ?*anyopaque {
+pub fn AIL_lock() callconv(.winapi) void {}
+pub fn AIL_unlock() callconv(.winapi) void {}
+pub fn AIL_lock_mutex() callconv(.winapi) void {}
+pub fn AIL_unlock_mutex() callconv(.winapi) void {}
+pub fn AIL_background() callconv(.winapi) ?*anyopaque {
     return null;
 }
-pub export fn AIL_MMX_available() callconv(.winapi) i32 {
+pub fn AIL_MMX_available() callconv(.winapi) i32 {
     return 0;
 }
-pub export fn AIL_HWND() callconv(.winapi) ?*anyopaque {
+pub fn AIL_HWND() callconv(.winapi) ?*anyopaque {
     return null;
 }
-pub export fn AIL_set_error(msg: [*:0]const u8) callconv(.winapi) void {
+pub fn AIL_set_error(msg: [*:0]const u8) callconv(.winapi) void {
     openmiles.setLastError(std.mem.span(msg));
 }
 // AIL_debug_printf and AIL_sprintf are implemented in C (src/bindings/c_impl.c)
 // to avoid Zig stage2_llvm miscompilation of C varargs on Windows.
 
-pub export fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
+pub fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
     const raw: [*]const u8 = @ptrCast(@alignCast(data));
     if (raw[0] != 'R' or raw[1] != 'I' or raw[2] != 'F' or raw[3] != 'F') return 0;
     if (raw[8] != 'W' or raw[9] != 'A' or raw[10] != 'V' or raw[11] != 'E') return 0;
@@ -627,7 +627,7 @@ pub export fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi)
     out.initial_ptr = if (audio_format != 1) data_ptr else null;
     return 1;
 }
-pub export fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, rate: i32, bits: i32) callconv(.winapi) i32 {
+pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, rate: i32, bits: i32) callconv(.winapi) i32 {
     // Reject nonsensical sample rate / bit depth rather than panicking on the
     // narrowing cast when a caller passes adversarial values.
     if (rate <= 0 or bits <= 0 or bits > 32) return 0;
@@ -651,7 +651,7 @@ pub export fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len:
     return 1;
 }
 /// Allocates a new buffer which must be freed by the caller using AIL_mem_free_lock.
-pub export fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsize: *u32) callconv(.winapi) i32 {
+pub fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsize: *u32) callconv(.winapi) i32 {
     if (info.data_ptr == null or info.data_len == 0) return 0;
     if (info.bits != 16) return 0; // IMA ADPCM only encodes from 16-bit PCM
     const channels: u16 = @intCast(@max(1, @min(2, info.channels)));
@@ -671,7 +671,7 @@ pub export fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque
 /// AIL_decompress_ADPCM(AILSOUNDINFO const *info, void **outdata, U32 *outsize)
 /// Decodes the ADPCM image described by `info` to a 16-bit PCM WAV. Allocates
 /// `outdata` (free with AIL_mem_free_lock) and sets `outsize`. Returns 1 on success.
-pub export fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsize: *u32) callconv(.winapi) i32 {
+pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsize: *u32) callconv(.winapi) i32 {
     if (info.data_ptr == null or info.data_len == 0) return 0;
     const raw: []const u8 = @as([*]const u8, @ptrCast(@alignCast(info.data_ptr.?)))[0..info.data_len];
     var decoder: openmiles.ma.ma_decoder = undefined;
@@ -715,7 +715,7 @@ pub export fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaq
     outsize.* = @intCast(wav.len);
     return 1;
 }
-pub export fn AIL_create_wave_synthesizer(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, flags: u32) callconv(.winapi) ?*MidiDriver {
+pub fn AIL_create_wave_synthesizer(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, flags: u32) callconv(.winapi) ?*MidiDriver {
     const dig = dig_opt orelse return null;
     _ = dig;
     _ = seq;
@@ -733,16 +733,16 @@ pub export fn AIL_create_wave_synthesizer(dig_opt: ?*DigitalDriver, seq: ?*Seque
     }
     return driver;
 }
-pub export fn AIL_destroy_wave_synthesizer(synth: *MidiDriver) callconv(.winapi) void {
+pub fn AIL_destroy_wave_synthesizer(synth: *MidiDriver) callconv(.winapi) void {
     if (openmiles.last_midi_driver == synth) openmiles.last_midi_driver = null;
     synth.deinit();
 }
-pub export fn AIL_waveOutClose(driver_opt: ?*DigitalDriver) callconv(.winapi) void {
+pub fn AIL_waveOutClose(driver_opt: ?*DigitalDriver) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     if (openmiles.last_digital_driver == driver) openmiles.last_digital_driver = null;
     driver.deinit();
 }
-pub export fn DllMain(hinstDLL: *anyopaque, fdwReason: u32, lpvReserved: ?*anyopaque) callconv(.winapi) i32 {
+pub fn DllMain(hinstDLL: *anyopaque, fdwReason: u32, lpvReserved: ?*anyopaque) callconv(.winapi) i32 {
     _ = hinstDLL;
     _ = fdwReason;
     _ = lpvReserved;
@@ -1385,26 +1385,33 @@ comptime {
             .{ .name = "AIL_add_move_var_event_step", .stack_size = 20, .ver = 90 },
             .{ .name = "AIL_add_set_lfo_event_step", .stack_size = 40, .ver = 90 },
         };
+        // Emit one PE export per active target, as the MSVC-decorated stdcall
+        // name `_NAME@stack`, via @export rather than `export fn`. A bare
+        // `export fn` would ALSO leak the underscore-less `NAME@stack` symbol,
+        // doubling the table and shifting the alphabetical ordinal numbering
+        // away from the reference DLL. With @export only the decorated name is
+        // emitted; Zig appends the `@stack` suffix from each function's own
+        // arity, so the per-version arity variants resolve automatically. The
+        // function is located by name (or `symbol` override) across the api
+        // modules — none of which import this one, so there is no cycle.
+        const mods = .{
+            @This(),                  @import("3d.zig"),     @import("stream.zig"),
+            @import("quick.zig"),     @import("redbook.zig"), @import("timer.zig"),
+            @import("file.zig"),      @import("input.zig"),  @import("midi.zig"),
+            @import("dls.zig"),       @import("rib.zig"),    @import("filter.zig"),
+            @import("memory.zig"),    @import("v7.zig"),     @import("v8.zig"),
+            @import("v9.zig"),
+        };
         for (targets) |t| {
-            // Skip exports outside the targeted MSS version's window so the
-            // export table is ABI-shaped like that release (matches the gated
-            // imports in main.zig). `ver` is the first version to export the
-            // symbol; `ver_max` the last (for renamed/removed APIs).
             if (openmiles.mss_version < t.ver or openmiles.mss_version > t.ver_max) continue;
-            // Real mss32.dll exports only the MSVC-decorated stdcall name
-            // `_NAME@stack`; emit just that so our export set (and thus the
-            // alphabetical ordinal numbering) matches the reference DLL. When a
-            // `symbol` override is given the export name differs from the COFF
-            // symbol it resolves to (used for renamed APIs sharing one impl).
-            const canonical = std.fmt.comptimePrint("{s}@{d}", .{ t.name, t.stack_size });
-            const sym = std.fmt.comptimePrint("{s}@{d}", .{ t.symbol orelse t.name, t.stack_size });
-            asm (std.fmt.comptimePrint(".section .drectve\n .ascii \" /EXPORT:_{s}={s}\"\n .text\n", .{ canonical, sym }));
+            const fname = t.symbol orelse t.name;
+            for (mods) |m| {
+                if (@hasDecl(m, fname)) {
+                    @export(&@field(m, fname), .{ .name = "_" ++ t.name, .linkage = .strong });
+                    break;
+                }
+            }
         }
-        // Manual exports for problematic symbols (RIB is v4+).
-        if (openmiles.mss_version >= 40)
-            asm (".section .drectve\n .ascii \" /EXPORT:_RIB_provider_library_handle@0=RIB_provider_library_handle@0\"\n .text\n");
-        // DllMain is also covered by the targets loop above, but keep explicit alias for safety
-        @export(&DllMain, .{ .name = "_DllMain@12", .linkage = .strong });
         // Export the CRT-provided DllMainCRTStartup (defined in dllcrt2.obj, not our code)
         asm (".section .drectve\n .ascii \" /EXPORT:DllMainCRTStartup=_DllMainCRTStartup@12 /EXPORT:_DllMainCRTStartup@12\"\n .text\n");
         // Variadic functions use callconv(.c), generating `_FuncName` in COFF (not `_FuncName@N`).
