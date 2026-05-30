@@ -25,6 +25,7 @@ pub const DigitalDriver = digital_mod.DigitalDriver;
 pub const Sample = digital_mod.Sample;
 pub const MixBus = digital_mod.MixBus;
 pub const LimiterNode = digital_mod.LimiterNode;
+pub const CompressorNode = digital_mod.CompressorNode;
 pub const Sample3D = digital_mod.Sample3D;
 pub const SampleStatus = digital_mod.SampleStatus;
 pub const SamplePcmFormat = digital_mod.SamplePcmFormat;

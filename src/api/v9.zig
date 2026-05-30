@@ -226,11 +226,12 @@ pub fn AIL_bus_enable_limiter(dig: ?*DigitalDriver, bus_index: i32, on_off: i32)
     if (d.busAt(bus_index)) |bus| bus.enableLimiter(on_off != 0);
 }
 pub fn AIL_install_bus_compressor(dig: ?*DigitalDriver, bus_index: i32, filter_stage: i32, input_bus_index: i32) callconv(.winapi) i32 {
-    _ = dig;
-    _ = bus_index;
     _ = filter_stage;
-    _ = input_bus_index;
-    return 0;
+    _ = input_bus_index; // sidechain input not modeled; main-path compression
+    const d = dig orelse return 0;
+    const bus = d.busAt(bus_index) orelse return 0;
+    bus.installCompressor(true);
+    return 1;
 }
 
 // --- Mixer status / scheduling / per-sample misc ---

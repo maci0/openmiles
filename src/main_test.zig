@@ -2150,3 +2150,24 @@ test "v9 bus limiter: soft-clip math + attach/detach lifecycle" {
     try testing.expect(mb.limiter == null);
     api_v9.AIL_bus_enable_limiter(drv, 0, 1); // re-enable; freed by driver deinit
 }
+
+test "v9 bus compressor installs and reduces peaks" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const bus = api_v9.AIL_allocate_bus(drv) orelse return error.NoBus;
+    const mb: *openmiles.MixBus = @ptrCast(@alignCast(bus));
+    try testing.expectEqual(@as(i32, 1), api_v9.AIL_install_bus_compressor(drv, 0, 0, -1));
+    try testing.expect(mb.compressor != null);
+    // Drive a loud block through the node's process and confirm the envelope
+    // pulls gain below unity (peaks are compressed).
+    const node = mb.compressor.?;
+    var in_buf = [_]f32{0.9} ** 64; // 32 stereo frames at 0.9 (> threshold 0.5)
+    var out_buf = [_]f32{0} ** 64;
+    var ip: [*c]const f32 = &in_buf;
+    var op: [*c]f32 = &out_buf;
+    var inc: u32 = 32;
+    var outc: u32 = 32;
+    openmiles.CompressorNode.process(@ptrCast(node), &ip, &inc, &op, &outc);
+    try testing.expect(node.env < 1.0); // gain reduced
+    try testing.expect(out_buf[0] < 0.9); // output attenuated
+}

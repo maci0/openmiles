@@ -58,6 +58,46 @@ pub const LimiterNode = extern struct {
     };
 };
 
+/// A peak compressor as a custom miniaudio node: smoothly reduces gain on signal
+/// above the threshold by the given ratio (envelope follower with fast attack /
+/// slow release).
+pub const CompressorNode = extern struct {
+    base: ma.ma_node_base,
+    env: f32 = 1.0,
+
+    const threshold: f32 = 0.5;
+    const ratio: f32 = 4.0;
+    const attack: f32 = 0.25; // per-sample smoothing toward a lower gain
+    const release: f32 = 0.0015; // slower recovery
+    pub fn process(node: ?*ma.ma_node, ppIn: [*c][*c]const f32, pInCount: [*c]u32, ppOut: [*c][*c]f32, pOutCount: [*c]u32) callconv(.c) void {
+        const self: *CompressorNode = @ptrCast(@alignCast(node.?));
+        const n = @min(pInCount.*, pOutCount.*);
+        const in = ppIn[0];
+        const out = ppOut[0];
+        var f: usize = 0;
+        while (f < n) : (f += 1) {
+            const l = in[f * 2];
+            const r = in[f * 2 + 1];
+            const peak = @max(@abs(l), @abs(r));
+            var target: f32 = 1.0;
+            if (peak > threshold) target = (threshold + (peak - threshold) / ratio) / peak;
+            const coef: f32 = if (target < self.env) attack else release;
+            self.env += (target - self.env) * coef;
+            out[f * 2] = l * self.env;
+            out[f * 2 + 1] = r * self.env;
+        }
+        pInCount.* = n;
+        pOutCount.* = n;
+    }
+    const vtable = ma.ma_node_vtable{
+        .onProcess = &process,
+        .onGetRequiredInputFrameCount = null,
+        .inputBusCount = 1,
+        .outputBusCount = 1,
+        .flags = 0,
+    };
+};
+
 /// A v9 mixer bus: a miniaudio sound group that samples route their output to,
 /// so a submix can be controlled (volume) independently of the master.
 pub const MixBus = struct {
@@ -65,6 +105,7 @@ pub const MixBus = struct {
     index: i32,
     driver: *DigitalDriver,
     limiter: ?*LimiterNode = null,
+    compressor: ?*CompressorNode = null,
 
     pub fn setVolume(self: *MixBus, vol: f32) void {
         ma.ma_sound_group_set_volume(&self.group, vol);
@@ -97,6 +138,38 @@ pub const MixBus = struct {
             ma.ma_node_uninit(@ptrCast(self.limiter.?), null);
             self.driver.allocator.destroy(self.limiter.?);
             self.limiter = null;
+        }
+    }
+
+    /// Install (or, with on=false, remove) a compressor between this bus and the
+    /// engine endpoint. One effect node per bus; installing replaces any
+    /// existing limiter on the slot.
+    pub fn installCompressor(self: *MixBus, on: bool) void {
+        const eng = &self.driver.engine;
+        const endpoint = ma.ma_engine_get_endpoint(eng);
+        if (on and self.compressor == null) {
+            const node = self.driver.allocator.create(CompressorNode) catch return;
+            node.env = 1.0;
+            var chans = [_]u32{2};
+            var cfg = ma.ma_node_config_init();
+            cfg.vtable = &CompressorNode.vtable;
+            cfg.inputBusCount = 1;
+            cfg.outputBusCount = 1;
+            cfg.pInputChannels = &chans;
+            cfg.pOutputChannels = &chans;
+            if (ma.ma_node_init(ma.ma_engine_get_node_graph(eng), &cfg, null, @ptrCast(node)) != ma.MA_SUCCESS) {
+                self.driver.allocator.destroy(node);
+                return;
+            }
+            node.env = 1.0; // ma_node_init zeroed our state; restore unity gain
+            _ = ma.ma_node_attach_output_bus(@ptrCast(node), 0, endpoint, 0);
+            _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, @ptrCast(node), 0);
+            self.compressor = node;
+        } else if (!on and self.compressor != null) {
+            _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, endpoint, 0);
+            ma.ma_node_uninit(@ptrCast(self.compressor.?), null);
+            self.driver.allocator.destroy(self.compressor.?);
+            self.compressor = null;
         }
     }
 
@@ -219,7 +292,8 @@ pub const DigitalDriver = struct {
 
     pub fn freeAllBusses(self: *DigitalDriver) void {
         for (self.buses.items) |bus| {
-            bus.enableLimiter(false); // detach + free any limiter node first
+            bus.enableLimiter(false); // detach + free any effect nodes first
+            bus.installCompressor(false);
             ma.ma_sound_group_uninit(&bus.group);
             self.allocator.destroy(bus);
         }
