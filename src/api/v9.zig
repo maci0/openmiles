@@ -438,12 +438,14 @@ pub fn AIL_add_enable_limit_event_step(a0: ?*anyopaque, a1: ?*anyopaque) callcon
     return if (e.addBare(.enable_limit)) 1 else 0;
 }
 pub fn AIL_add_move_var_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: i32) callconv(.winapi) i32 {
-    const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
+    // "move var" has no entry in the Miles EVENT_STEPTYPE enum, so there is no
+    // step to emit; validate the handle and report success.
+    _ = @as(*openmiles.event.EventConstruct, @ptrCast(@alignCast(a0 orelse return 0)));
     _ = a1;
     _ = a2;
     _ = a3;
     _ = a4;
-    return blk: { _ = e; break :blk true; };
+    return 1;
 }
 pub fn AIL_add_set_lfo_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32, a4: f32, a5: f32, a6: f32, a7: i32, a8: i32, a9: i32) callconv(.winapi) i32 {
     const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
