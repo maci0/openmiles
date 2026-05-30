@@ -1,7 +1,15 @@
-//! Generated fuzz-all harness: invokes every exported function in a PRNG loop
-//! with adversarial scalars/strings/buffers + a pool of real handles. Every
-//! function is thus both tested (called) and fuzzed (varied inputs). Destructive
-//! functions get null/scratch to preserve the pool.
+//! Fuzz-all harness: invokes every exported function that accepts caller input
+//! in a multi-seed PRNG loop with adversarial scalars/strings/buffers + a pool
+//! of real handles, so each is both tested (called) and fuzzed (varied inputs).
+//! Buffer lengths are bounded to the real scratch, so any over-read/write is a
+//! genuine library bug rather than a harness contract violation.
+//!
+//! Out of scope here (covered by the ordered unit tests in main_test.zig and
+//! the C integration harnesses instead): lifecycle functions that destroy or
+//! create shared state — startup/shutdown, the open_*/close_*/release_* and
+//! *_handle_release destructors, the DLS/memory subsystem teardown, the filter
+//! attribute calls that need a live filter handle, and DllMain. Looping those
+//! over a shared handle pool would tear it down rather than exercise input.
 const std = @import("std");
 const testing = std.testing;
 const openmiles = @import("openmiles");
