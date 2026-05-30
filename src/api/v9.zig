@@ -46,10 +46,10 @@ pub fn AIL_add_clear_state_event_step(event: ?*anyopaque) callconv(.winapi) i32 
     const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(event orelse return 0));
     return if (e.addClearState()) 1 else 0;
 }
-pub fn AIL_add_exec_event_event_step(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) i32 {
+pub fn AIL_add_exec_event_event_step(a0: ?*anyopaque, event_name: ?[*:0]const u8) callconv(.winapi) i32 {
     const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
-    _ = a1;
-    return if (e.addBare(.exec_event)) 1 else 0;
+    const name = if (event_name) |p| std.mem.span(p) else "";
+    return if (e.addOneString(.exec_event, name)) 1 else 0;
 }
 pub fn AIL_add_ramp_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: f32, a4: ?*anyopaque, a5: i32, a6: i32, a7: i32) callconv(.winapi) i32 {
     const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));

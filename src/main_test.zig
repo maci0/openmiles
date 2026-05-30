@@ -2233,18 +2233,34 @@ test "MP3 inspector parses real Layer III frames" {
     try testing.expectEqual(@as(i32, 0), api_v7b.AIL_enumerate_MP3_frames(&es));
 }
 
-test "event constructor produces byte-faithful Miles text" {
+
+test "event constructor + decoder round-trip (byte-faithful text)" {
     const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
     _ = api_v9.AIL_add_clear_state_event_step(ev);
     _ = api_v8b.AIL_add_comment_event_step(ev, "hello");
+    _ = api_v9.AIL_add_exec_event_event_step(ev, "boom");
     const str = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
     defer std.c.free(str);
-    // "9;4;" version header, "<;" clear-state (12+'0'='<'), "4;hello;" comment.
-    const got = std.mem.span(@as([*:0]const u8, @ptrCast(str)));
-    try testing.expectEqualStrings("9;4;<;4;hello;", got);
-    // next_event_step decodes the first real step's type (clear_state = 12).
-    var ib: openmiles.event.EventStepInfo = undefined;
-    var ip: ?*openmiles.event.EventStepInfo = null;
-    _ = api_v8b.AIL_next_event_step(@ptrCast(str), &ip, &ib, @sizeOf(openmiles.event.EventStepInfo));
-    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.clear_state), ip.?.event_type);
+    // Byte-exact Miles text.
+    try testing.expectEqualStrings("9;4;<;4;hello;=;boom;", std.mem.span(@as([*:0]const u8, @ptrCast(str))));
+    // Decode each step.
+    var buf: [512]u8 align(8) = undefined;
+    var sp: ?*openmiles.event.EVENT_STEP_INFO = null;
+    var cur: ?*const anyopaque = @ptrCast(str);
+    // clear_state
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.clear_state), sp.?.type);
+    // comment "hello"
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.comment), sp.?.type);
+    const c = sp.?.u.comment.comment;
+    try testing.expectEqualStrings("hello", c.str.?[0..@intCast(c.len)]);
+    // exec_event "boom"
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.exec_event), sp.?.type);
+    const e2 = sp.?.u.exec.eventname;
+    try testing.expectEqualStrings("boom", e2.str.?[0..@intCast(e2.len)]);
+    // end
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expect(cur == null);
 }

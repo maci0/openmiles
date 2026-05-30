@@ -484,12 +484,16 @@ pub fn AIL_mem_write(mem: ?*anyopaque, src: ?*anyopaque, n: i32) callconv(.winap
 // next step of the serialized event text. Writes a decoded EventStepInfo into
 // the caller's scratch buffer and returns the pointer past this step, or null at
 // the end (the event string is NUL-terminated).
-pub fn AIL_next_event_step(event_string: ?*const anyopaque, step_out: ?*?*openmiles.event.EventStepInfo, buffer: ?*anyopaque, buffer_size: i32) callconv(.winapi) ?*const anyopaque {
+pub fn AIL_next_event_step(event_string: ?*const anyopaque, step_out: ?*?*openmiles.event.EVENT_STEP_INFO, buffer: ?*anyopaque, buffer_size: i32) callconv(.winapi) ?*const anyopaque {
     const p: [*:0]const u8 = @ptrCast(event_string orelse return null);
     const buf = buffer orelse return null;
-    if (buffer_size < @sizeOf(openmiles.event.EventStepInfo)) return null;
-    const info: *openmiles.event.EventStepInfo = @ptrCast(@alignCast(buf));
-    const next = openmiles.event.nextStep(p, info) orelse {
+    const ssz = @sizeOf(openmiles.event.EVENT_STEP_INFO);
+    if (buffer_size < 0 or @as(usize, @intCast(buffer_size)) < ssz) return null;
+    const info: *openmiles.event.EVENT_STEP_INFO = @ptrCast(@alignCast(buf));
+    // Strings are copied into the buffer space following the struct.
+    const scratch_ptr: [*]u8 = @as([*]u8, @ptrCast(buf)) + ssz;
+    const scratch = scratch_ptr[0 .. @as(usize, @intCast(buffer_size)) - ssz];
+    const next = openmiles.event.nextStep(p, info, scratch) orelse {
         if (step_out) |so| so.* = info;
         return null;
     };
