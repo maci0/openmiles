@@ -6,16 +6,21 @@ const openmiles = @import("openmiles");
 // root.zig (the `openmiles` module) to keep the dependency graph one-way:
 //   main.zig  -->  api/*.zig  -->  openmiles (root.zig)
 
+const mss_version = @import("build_options").mss_version;
+
 comptime {
-    _ = @import("api/3d.zig");
+    // Always present (Core/Digital/Sample/Stream/MIDI/Redbook/Timer ship since v3).
+    _ = @import("api/digital.zig");
     _ = @import("api/dls.zig");
     _ = @import("api/midi.zig");
-    _ = @import("api/rib.zig");
     _ = @import("api/timer.zig");
-    _ = @import("api/quick.zig");
-    _ = @import("api/digital.zig");
     _ = @import("api/stream.zig");
     _ = @import("api/redbook.zig");
-    _ = @import("api/input.zig");
     _ = @import("api/file.zig");
+
+    // Version-gated API groups so the export table matches the target release.
+    if (mss_version >= 40) _ = @import("api/rib.zig"); // RIB/ASI + compression (v4+)
+    if (mss_version >= 40) _ = @import("api/quick.zig"); // Quick API (v4+)
+    if (mss_version >= 40) _ = @import("api/input.zig"); // Input recording (v4+)
+    if (mss_version >= 50) _ = @import("api/3d.zig"); // 3D audio (v5+)
 }

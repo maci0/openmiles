@@ -1,8 +1,34 @@
 const std = @import("std");
 
+/// Map an MSS version string to the packed major*10+minor encoding.
+fn parseMssVersion(s: []const u8) ?u16 {
+    const map = [_]struct { k: []const u8, v: u16 }{
+        .{ .k = "3", .v = 30 },   .{ .k = "4", .v = 40 },
+        .{ .k = "5", .v = 50 },   .{ .k = "6", .v = 66 },
+        .{ .k = "6.0", .v = 60 }, .{ .k = "6.1", .v = 61 },
+        .{ .k = "6.5", .v = 65 }, .{ .k = "6.6", .v = 66 },
+    };
+    for (map) |m| {
+        if (std.mem.eql(u8, s, m.k)) return m.v;
+    }
+    return null;
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    // Target MSS version: gates which API groups are compiled/exported so the
+    // DLL is ABI-shaped like a specific Miles release. Encoded major*10+minor:
+    // 30=3.x, 40=4.x, 50=5.x, 60=6.0, 61=6.1, 65=6.5, 66=6.6 (default newest).
+    const mss_version_str = b.option([]const u8, "mss-version", "Target MSS version (3,4,5,6,6.0,6.1,6.5,6.6)") orelse "6.6";
+    const mss_version: u16 = parseMssVersion(mss_version_str) orelse {
+        std.debug.print("invalid -Dmss-version='{s}' (use 3,4,5,6,6.0,6.1,6.5,6.6)\n", .{mss_version_str});
+        std.process.exit(1);
+    };
+    const build_opts = b.addOptions();
+    build_opts.addOption(u16, "mss_version", mss_version);
+    const build_opts_mod = build_opts.createModule();
 
     // Translate C headers into Zig modules (replaces inline @cImport).
     const translate_ma = b.addTranslateC(.{
@@ -30,6 +56,7 @@ pub fn build(b: *std.Build) void {
     mod.addIncludePath(b.path("deps"));
     mod.addImport("ma_c", ma_mod);
     mod.addImport("tsf_c", tsf_mod);
+    mod.addImport("build_options", build_opts_mod);
 
     // Shared Library: drop-in replacement for mss32.dll (Miles Sound System)
     const lib = b.addLibrary(.{
@@ -41,6 +68,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "openmiles", .module = mod },
+                .{ .name = "build_options", .module = build_opts_mod },
             },
             .link_libc = true,
         }),
@@ -80,6 +108,7 @@ pub fn build(b: *std.Build) void {
                 // Share the same openmiles module the api wrappers import, so
                 // test code and AIL_* exports exchange identical types.
                 .{ .name = "openmiles", .module = mod },
+                .{ .name = "build_options", .module = build_opts_mod },
             },
         }),
     });

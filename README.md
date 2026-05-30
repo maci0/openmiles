@@ -43,7 +43,27 @@ zig build test
 
 # Cross-compile for Windows (game deployment)
 zig build -Dtarget=x86-windows -Doptimize=ReleaseSmall
+
+# Target a specific MSS version's API surface (ABI-shape the export table)
+zig build -Dtarget=x86-windows -Doptimize=ReleaseSmall -Dmss-version=5
 ```
+
+### Targeting an MSS version
+
+`-Dmss-version=<3|4|5|6|6.0|6.1|6.5|6.6>` (default `6.6`) gates which API groups
+are compiled and exported, so the DLL is ABI-shaped like that Miles release:
+
+| Version | Adds |
+|---------|------|
+| 3 | Core, Digital, Sample, Streaming, MIDI, Redbook, Timer |
+| 4 | RIB/ASI plugin system + ASI compression, Quick API, Input recording |
+| 5 | 3D audio |
+| 6 | Filter API |
+
+A lower-versioned DLL omits the newer groups' exports (e.g. a v3 build has no
+RIB/ASI plugin loader or 3D exports), matching what games of that era expect.
+Note: the Filter (v6) and memory-callback (v4) functions live alongside the v3
+digital core and are always exported regardless of `-Dmss-version`.
 
 > **Note:** Native builds on macOS aarch64 (Apple Silicon) are not supported because Zig's stage2 backend does not implement the `aarch64_aapcs_win` calling convention used by the stdcall exports. Use Linux or Windows for native builds, or cross-compile to `x86-windows`.
 
