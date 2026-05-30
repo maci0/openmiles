@@ -552,14 +552,19 @@ pub fn AIL_sample_51_volume_levels(s_opt: ?*Sample, fl: ?*f32, fr: ?*f32, fc: ?*
     if (bl) |p| p.* = s.v51_levels[4];
     if (br) |p| p.* = s.v51_levels[5];
 }
-pub fn AIL_sample_51_volume_pan(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    _ = a4;
-    _ = a5;
-
+pub fn AIL_sample_51_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32, fb_pan: ?*f32, center_level: ?*f32, lfe_level: ?*f32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    const fl = s.v51_levels[0];
+    const fr = s.v51_levels[1];
+    const bl = s.v51_levels[4];
+    const br = s.v51_levels[5];
+    if (volume) |p| p.* = @max(@max(fl, fr), @max(bl, br));
+    const lr = fl + fr;
+    if (pan) |p| p.* = if (lr > 0.0001) fr / lr else 0.5; // left..right balance
+    const fb = (fl + fr) + (bl + br);
+    if (fb_pan) |p| p.* = if (fb > 0.0001) (bl + br) / fb else 0.5; // front..back
+    if (center_level) |p| p.* = s.v51_levels[2];
+    if (lfe_level) |p| p.* = s.v51_levels[3];
 }
 pub fn AIL_sample_buffer_available(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
@@ -592,9 +597,9 @@ pub fn AIL_sample_output_levels(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaqu
     _ = a4;
     return 0;
 }
-pub fn AIL_sample_playback_delay(a0: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    return 0;
+pub fn AIL_sample_playback_delay(s_opt: ?*Sample) callconv(.winapi) i32 {
+    const s = s_opt orelse return 0;
+    return s.v9_playback_delay;
 }
 pub fn AIL_sample_playback_rate_factor(s_opt: ?*Sample) callconv(.winapi) f32 {
     const s = s_opt orelse return 1.0;
@@ -642,10 +647,9 @@ pub fn AIL_set_sample_is_3D(s_opt: ?*Sample, is_3D: i32) callconv(.winapi) void 
     const s = s_opt orelse return;
     if (s.is_initialized) ma.ma_sound_set_spatialization_enabled(&s.sound, if (is_3D != 0) ma.MA_TRUE else ma.MA_FALSE);
 }
-pub fn AIL_set_sample_playback_delay(a0: ?*anyopaque, a1: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub fn AIL_set_sample_playback_delay(s_opt: ?*Sample, delay_ms: i32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    s.v9_playback_delay = delay_ms;
 }
 pub fn AIL_set_sample_playback_rate_factor(s_opt: ?*Sample, factor: f32) callconv(.winapi) void {
     const s = s_opt orelse return;

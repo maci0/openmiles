@@ -1831,6 +1831,7 @@ test "StreamSource underrun emits silence and keeps playing" {
 // --- MSS v8/v9 implemented utilities ----------------------------------------
 const api_v8 = @import("api/v8.zig");
 const api_v9 = @import("api/v9.zig");
+const dg = @import("api/digital.zig");
 
 test "v8 AIL_mem in-memory stream round-trips" {
     const m = api_v8.AIL_mem_create() orelse return error.NoMem;
@@ -2232,4 +2233,14 @@ test "event constructor records all wired step types" {
         count += 1;
     }
     try testing.expectEqual(@as(usize, 3), count); // start_sound, ramp, comment
+}
+
+test "v8 playback delay + MMX available" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    api_v8b.AIL_set_sample_playback_delay(s, 250);
+    try testing.expectEqual(@as(i32, 250), api_v8b.AIL_sample_playback_delay(s));
+    try testing.expectEqual(@as(i32, 1), dg.AIL_MMX_available());
 }

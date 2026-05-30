@@ -554,6 +554,7 @@ pub const Sample = struct {
     v9_level_mask: u8 = 0xFF,
     v9_spread: f32 = 0.0,
     v9_schedule_time: u64 = 0,
+    v9_playback_delay: i32 = 0, // ms before playback starts (AIL_set_sample_playback_delay)
     // 5.1 per-speaker volume levels: FL, FR, FC, LFE, BL, BR.
     v51_levels: [6]f32 = [_]f32{1.0} ** 6,
 

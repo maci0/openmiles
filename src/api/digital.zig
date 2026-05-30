@@ -557,7 +557,8 @@ pub fn AIL_background() callconv(.winapi) ?*anyopaque {
     return null;
 }
 pub fn AIL_MMX_available() callconv(.winapi) i32 {
-    return 0;
+    // The 32-bit Windows target always runs on an x86 with MMX (Pentium MMX, 1997+).
+    return 1;
 }
 pub fn AIL_HWND() callconv(.winapi) ?*anyopaque {
     return null;
