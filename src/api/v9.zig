@@ -58,15 +58,9 @@ pub fn AIL_add_ramp_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque
 }
 pub fn AIL_add_setblend_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: i32, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque, a6: ?*anyopaque, a7: ?*anyopaque, a8: ?*anyopaque) callconv(.winapi) i32 {
     const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    _ = a4;
-    _ = a5;
-    _ = a6;
-    _ = a7;
-    _ = a8;
-    return if (e.addBare(.set_blend)) 1 else 0;
+    // SDK: name(a1), soundcount(a2), inmin, inmax, outmin, outmax, minp, maxp.
+    const ok = e.addSetBlend(a1, a2, @ptrCast(@alignCast(a3)), @ptrCast(@alignCast(a4)), @ptrCast(@alignCast(a5)), @ptrCast(@alignCast(a6)), @ptrCast(@alignCast(a7)), @ptrCast(@alignCast(a8)));
+    return if (ok) 1 else 0;
 }
 pub fn AIL_apply_raw_environment_preset(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
@@ -428,31 +422,20 @@ pub fn AIL_set_event_sample_functions(a0: ?*anyopaque, a1: ?*anyopaque) callconv
 // --- Event-step builders (event VM bytecode) ---
 pub fn AIL_add_enable_limit_event_step(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) i32 {
     const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
-    _ = a1;
-    return if (e.addBare(.enable_limit)) 1 else 0;
+    const name = if (a1) |p| std.mem.span(@as([*:0]const u8, @ptrCast(p))) else "";
+    return if (e.addOneString(.enable_limit, name)) 1 else 0;
 }
-pub fn AIL_add_move_var_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: i32) callconv(.winapi) i32 {
-    // "move var" has no entry in the Miles EVENT_STEPTYPE enum, so there is no
-    // step to emit; validate the handle and report success.
-    _ = @as(*openmiles.event.EventConstruct, @ptrCast(@alignCast(a0 orelse return 0)));
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    _ = a4;
-    return 1;
-}
-pub fn AIL_add_set_lfo_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32, a4: f32, a5: f32, a6: f32, a7: i32, a8: i32, a9: i32) callconv(.winapi) i32 {
+pub fn AIL_add_move_var_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque) callconv(.winapi) i32 {
     const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    _ = a4;
-    _ = a5;
-    _ = a6;
-    _ = a7;
-    _ = a8;
-    _ = a9;
-    return if (e.addBare(.set_lfo)) 1 else 0;
+    // SDK: name(a1), times F32[2](a2), interp_types S32[2](a3), values F32[3](a4).
+    const ok = e.addMoveVar(a1, @ptrCast(@alignCast(a2)), @ptrCast(@alignCast(a3)), @ptrCast(@alignCast(a4)));
+    return if (ok) 1 else 0;
+}
+pub fn AIL_add_set_lfo_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque, a5: i32, a6: i32, a7: i32, a8: i32, a9: i32) callconv(.winapi) i32 {
+    const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
+    // SDK: name(a1), base(a2), amp(a3), freq(a4), invert(a5), polarity(a6),
+    // waveform(a7), dutycycle(a8), isLFO(a9).
+    return if (e.addSetLfo(a1, a2, a3, a4, a5, a6, a7, a8, a9)) 1 else 0;
 }
 
 // --- Memory subsystem (v9) ---

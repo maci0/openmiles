@@ -25,6 +25,7 @@ pub const StepType = enum(i32) {
     exec_event = 13,
     enable_limit = 14,
     set_lfo = 15,
+    move_var = 16,
     _,
 };
 
@@ -96,6 +97,12 @@ pub const BlendStep = extern struct {
 };
 pub const ExecStep = extern struct { eventname: MSSStringC = .{} };
 pub const EnableLimitStep = extern struct { limitname: MSSStringC = .{} };
+pub const MoveVarStep = extern struct {
+    name: MSSStringC = .{},
+    times: [2]f32 = [_]f32{0} ** 2,
+    interp_types: [2]i32 = [_]i32{0} ** 2,
+    values: [3]f32 = [_]f32{0} ** 3,
+};
 pub const SetLfoStep = extern struct {
     name: MSSStringC = .{},
     base: MSSStringC = .{},
@@ -121,6 +128,7 @@ pub const StepUnion = extern union {
     exec: ExecStep,
     enablelimit: EnableLimitStep,
     setlfo: SetLfoStep,
+    movevar: MoveVarStep,
 };
 
 pub const EVENT_STEP_INFO = extern struct {
@@ -308,17 +316,60 @@ pub const EventConstruct = struct {
         self.fieldDigit(preset_apply);
         return true;
     }
-    pub fn addSetLfo(self: *EventConstruct, name: ?*const anyopaque, base: ?*const anyopaque, amplitude: ?*const anyopaque, freq: ?*const anyopaque, invert: i32, polarity: i32, waveform: i32, duty_cycle: u8) bool {
+    pub fn addSetLfo(self: *EventConstruct, name: ?*const anyopaque, base: ?*const anyopaque, amplitude: ?*const anyopaque, freq: ?*const anyopaque, invert: i32, polarity: i32, waveform: i32, duty_cycle: i32, is_lfo: i32) bool {
+        if (name == null) return false;
         self.printType(.set_lfo);
         self.raw(";");
         self.fieldCStr(name);
         self.fieldCStr(base);
         self.fieldCStr(amplitude);
         self.fieldCStr(freq);
-        self.fieldDigit(invert);
-        self.fieldDigit(polarity);
-        self.fieldDigit(waveform);
-        self.fieldUChar(duty_cycle);
+        // SDK: "%d;%d;%d;%2x;%d;" with !!invert, !!polarity, waveform & 3,
+        // dutycycle & 255, !!isLFO.
+        self.fieldDigit(@as(i32, if (invert != 0) 1 else 0));
+        self.fieldDigit(@as(i32, if (polarity != 0) 1 else 0));
+        self.fieldDigit(waveform & 3);
+        self.fieldUChar(@truncate(@as(u32, @bitCast(duty_cycle))));
+        self.fieldDigit(@as(i32, if (is_lfo != 0) 1 else 0));
+        return true;
+    }
+    pub fn addMoveVar(self: *EventConstruct, name: ?*const anyopaque, times: ?[*]const f32, interp_types: ?[*]const i32, values: ?[*]const f32) bool {
+        self.printType(.move_var);
+        self.raw(";");
+        self.fieldCStr(name);
+        const t = times orelse return false;
+        const it = interp_types orelse return false;
+        const v = values orelse return false;
+        self.fieldFloat(t[0]);
+        self.fieldFloat(t[1]);
+        self.print("{d};", .{it[0]});
+        self.print("{d};", .{it[1]});
+        self.fieldFloat(v[0]);
+        self.fieldFloat(v[1]);
+        self.fieldFloat(v[2]);
+        return true;
+    }
+    pub fn addSetBlend(self: *EventConstruct, name: ?*const anyopaque, sound_count: i32, in_min: ?[*]const f32, in_max: ?[*]const f32, out_min: ?[*]const f32, out_max: ?[*]const f32, min_p: ?[*]const f32, max_p: ?[*]const f32) bool {
+        const imin = in_min orelse return false;
+        const imax = in_max orelse return false;
+        const omin = out_min orelse return false;
+        const omax = out_max orelse return false;
+        const mnp = min_p orelse return false;
+        const mxp = max_p orelse return false;
+        const count: usize = @intCast(@min(@max(sound_count, 0), 10));
+        // SDK: "%c;%s;%d;" then count*"%f;%f;%f;%f;%f;%f;".
+        self.printType(.set_blend);
+        self.raw(";");
+        self.fieldCStr(name);
+        self.print("{d};", .{count});
+        for (0..count) |i| {
+            self.fieldFloat(imin[i]);
+            self.fieldFloat(imax[i]);
+            self.fieldFloat(omin[i]);
+            self.fieldFloat(omax[i]);
+            self.fieldFloat(mnp[i]);
+            self.fieldFloat(mxp[i]);
+        }
         return true;
     }
     pub fn addStartSound(self: *EventConstruct, args: StartSoundArgs) bool {
@@ -429,6 +480,13 @@ const Decoder = struct {
         x.* = std.fmt.parseFloat(f32, self.p[0..len]) catch 0;
         self.p += len + 1;
     }
+    // A decimal integer field written with "%d" (may be more than one digit).
+    fn copyDecimal(self: *Decoder, x: *i32) void {
+        var len: usize = 0;
+        while (self.p[len] != ';' and self.p[len] != 0) len += 1;
+        x.* = std.fmt.parseInt(i32, self.p[0..len], 10) catch 0;
+        self.p += len + 1;
+    }
 };
 
 /// Decode the next step of `event_string` into `step` (an EVENT_STEP_INFO at the
@@ -439,6 +497,9 @@ pub fn nextStep(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: []
     var d = Decoder{ .p = event_string, .wp = scratch.ptr, .wlimit = scratch.ptr + scratch.len };
     const t: i32 = @as(i32, event_string[0]) - '0';
     step.type = t;
+    // Zero the union so fields the decoder writes partially (e.g. a byte via
+    // copyUChar into a wider field) and fields a step doesn't use read back clean.
+    step.u = std.mem.zeroes(StepUnion);
     const st: StepType = @enumFromInt(t);
     switch (st) {
         .version => {
@@ -545,6 +606,36 @@ pub fn nextStep(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: []
             d.copyDigit(&step.u.setlfo.polarity);
             d.copyDigit(&step.u.setlfo.waveform);
             d.copyUChar(@ptrCast(&step.u.setlfo.dutycycle));
+            d.copyDigit(&step.u.setlfo.islfo);
+        },
+        .set_blend => {
+            d.p += 2;
+            d.setupString(&step.u.blend.name);
+            d.copyString(&step.u.blend.name);
+            var count: i32 = 0;
+            d.copyDecimal(&count);
+            const n: usize = @intCast(@min(@max(count, 0), 10));
+            step.u.blend.count = @intCast(n);
+            for (0..n) |i| {
+                d.copyFloat(&step.u.blend.inmin[i]);
+                d.copyFloat(&step.u.blend.inmax[i]);
+                d.copyFloat(&step.u.blend.outmin[i]);
+                d.copyFloat(&step.u.blend.outmax[i]);
+                d.copyFloat(&step.u.blend.minp[i]);
+                d.copyFloat(&step.u.blend.maxp[i]);
+            }
+        },
+        .move_var => {
+            d.p += 2;
+            d.setupString(&step.u.movevar.name);
+            d.copyString(&step.u.movevar.name);
+            d.copyFloat(&step.u.movevar.times[0]);
+            d.copyFloat(&step.u.movevar.times[1]);
+            d.copyDecimal(&step.u.movevar.interp_types[0]);
+            d.copyDecimal(&step.u.movevar.interp_types[1]);
+            d.copyFloat(&step.u.movevar.values[0]);
+            d.copyFloat(&step.u.movevar.values[1]);
+            d.copyFloat(&step.u.movevar.values[2]);
         },
         .start_sound => {
             d.p += 2;

@@ -2441,3 +2441,47 @@ test "control_sounds and start_sound steps round-trip all fields" {
     cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
     try testing.expect(cur == null);
 }
+
+test "set_lfo, enable_limit and move_var steps round-trip" {
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v9.AIL_add_set_lfo_event_step(ev, cstr("lvol"), cstr("0.5"), cstr("0.3"), cstr("2.0"), 1, 0, 2, 200, 1);
+    _ = api_v9.AIL_add_enable_limit_event_step(ev, cstr("mylimit"));
+    var times = [_]f32{ 1.0, 2.0 };
+    var interps = [_]i32{ 2, 3 };
+    var values = [_]f32{ 0.0, 0.5, 1.0 };
+    _ = api_v9.AIL_add_move_var_event_step(ev, cstr("hp"), &times, &interps, &values);
+    const str = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    defer std.c.free(str);
+
+    var buf: [512]u8 align(8) = undefined;
+    var sp: ?*openmiles.event.EVENT_STEP_INFO = null;
+    var cur: ?*const anyopaque = @ptrCast(str);
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.set_lfo), sp.?.type);
+    const l = sp.?.u.setlfo;
+    try testing.expectEqualStrings("lvol", l.name.str.?[0..@intCast(l.name.len)]);
+    try testing.expectEqualStrings("0.5", l.base.str.?[0..@intCast(l.base.len)]);
+    try testing.expectEqualStrings("2.0", l.freq.str.?[0..@intCast(l.freq.len)]);
+    try testing.expectEqual(@as(i32, 1), l.invert);
+    try testing.expectEqual(@as(i32, 2), l.waveform);
+    try testing.expectEqual(@as(i32, 200), l.dutycycle);
+    try testing.expectEqual(@as(i32, 1), l.islfo);
+
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.enable_limit), sp.?.type);
+    const el = sp.?.u.enablelimit.limitname;
+    try testing.expectEqualStrings("mylimit", el.str.?[0..@intCast(el.len)]);
+
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.move_var), sp.?.type);
+    const mv = sp.?.u.movevar;
+    try testing.expectEqualStrings("hp", mv.name.str.?[0..@intCast(mv.name.len)]);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), mv.times[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 2.0), mv.times[1], 0.0001);
+    try testing.expectEqual(@as(i32, 2), mv.interp_types[0]);
+    try testing.expectEqual(@as(i32, 3), mv.interp_types[1]);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), mv.values[1], 0.0001);
+
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expect(cur == null);
+}

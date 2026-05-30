@@ -765,8 +765,8 @@ test "fuzz: invoke every export with adversarial inputs" {
         _ = api_v9.AIL_add_exec_event_event_step(evh, rstr);
         _ = api_v9.AIL_add_ramp_event_step(evh, scp, scp, rf, scp, ri, ri, ri);
         _ = api_v9.AIL_add_setblend_event_step(evh, scp, ri, scp, scp, scp, scp, scp, scp);
-        _ = api_v9.AIL_add_set_lfo_event_step(evh, scp, scp, ri, rf, rf, rf, ri, ri, ri);
-        _ = api_v9.AIL_add_move_var_event_step(evh, scp, scp, scp, ri);
+        _ = api_v9.AIL_add_set_lfo_event_step(evh, scp, scp, scp, scp, ri, ri, ri, ri, ri);
+        _ = api_v9.AIL_add_move_var_event_step(evh, scp, scp, scp, scp);
         _ = api_v9.AIL_add_enable_limit_event_step(evh, scp);
         _ = api_v8.AIL_add_cache_sounds_event_step(evh, scp, scp);
         _ = api_v8.AIL_add_uncache_sounds_event_step(evh, scp, scp);
