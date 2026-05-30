@@ -47,12 +47,12 @@ pub fn AIL_add_clear_state_event_step(event: ?*anyopaque) callconv(.winapi) i32 
     return if (e.addStep(.clear_state, &.{})) 1 else 0;
 }
 pub fn AIL_add_exec_event_event_step(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
-    return 0;
+    return if (e.addStep(.exec_event, &.{})) 1 else 0;
 }
 pub fn AIL_add_ramp_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: f32, a4: ?*anyopaque, a5: i32, a6: i32, a7: i32) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
     _ = a3;
@@ -60,10 +60,10 @@ pub fn AIL_add_ramp_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque
     _ = a5;
     _ = a6;
     _ = a7;
-    return 0;
+    return if (e.addStep(.ramp, &.{})) 1 else 0;
 }
 pub fn AIL_add_setblend_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: i32, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque, a6: ?*anyopaque, a7: ?*anyopaque, a8: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
     _ = a3;
@@ -72,7 +72,7 @@ pub fn AIL_add_setblend_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: i32, a3
     _ = a6;
     _ = a7;
     _ = a8;
-    return 0;
+    return if (e.addStep(.setblend, &.{})) 1 else 0;
 }
 pub fn AIL_apply_raw_environment_preset(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
@@ -433,20 +433,20 @@ pub fn AIL_set_event_sample_functions(a0: ?*anyopaque, a1: ?*anyopaque) callconv
 
 // --- Event-step builders (event VM bytecode) ---
 pub fn AIL_add_enable_limit_event_step(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
-    return 0;
+    return if (e.addStep(.enable_limit, &.{})) 1 else 0;
 }
 pub fn AIL_add_move_var_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: i32) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
     _ = a3;
     _ = a4;
-    return 0;
+    return if (e.addStep(.move_var, &.{})) 1 else 0;
 }
 pub fn AIL_add_set_lfo_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32, a4: f32, a5: f32, a6: f32, a7: i32, a8: i32, a9: i32) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
     _ = a3;
@@ -456,7 +456,7 @@ pub fn AIL_add_set_lfo_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopa
     _ = a7;
     _ = a8;
     _ = a9;
-    return 0;
+    return if (e.addStep(.set_lfo, &.{})) 1 else 0;
 }
 
 // --- Memory subsystem (v9) ---

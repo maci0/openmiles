@@ -157,16 +157,16 @@ pub fn AIL_WAV_marker_by_name(wav_image: ?*const anyopaque, name: ?[*:0]const u8
     return -1;
 }
 pub fn AIL_add_apply_environment_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: i32) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
-    return 0;
+    return if (e.addStep(.apply_environment, &.{})) 1 else 0;
 }
 pub fn AIL_add_cache_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
-    return 0;
+    return if (e.addStep(.cache_sounds, &.{})) 1 else 0;
 }
 pub fn AIL_add_comment_event_step(event: ?*anyopaque, comment: ?[*:0]const u8) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(event orelse return 0));
@@ -174,7 +174,7 @@ pub fn AIL_add_comment_event_step(event: ?*anyopaque, comment: ?[*:0]const u8) c
     return if (e.addStep(.comment, c)) 1 else 0;
 }
 pub fn AIL_add_control_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque, a6: i32, a7: f32, a8: i32, a9: i32) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
     _ = a3;
@@ -184,24 +184,24 @@ pub fn AIL_add_control_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?
     _ = a7;
     _ = a8;
     _ = a9;
-    return 0;
+    return if (e.addStep(.control_sounds, &.{})) 1 else 0;
 }
 pub fn AIL_add_persist_preset_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: i32) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
     _ = a3;
     _ = a4;
-    return 0;
+    return if (e.addStep(.persist_preset, &.{})) 1 else 0;
 }
 pub fn AIL_add_sound_limit_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
-    return 0;
+    return if (e.addStep(.sound_limit, &.{})) 1 else 0;
 }
 pub fn AIL_add_start_sound_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32, a4: ?*anyopaque, a5: ?*anyopaque, a6: ?*anyopaque, a7: ?*anyopaque, a8: ?*anyopaque, a9: ?*anyopaque, a10: u32, a11: i32, a12: i32, a13: i32, a14: i32, a15: i32, a16: ?*anyopaque, a17: f32, a18: f32, a19: f32, a20: f32, a21: f32, a22: i32, a23: i32) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
     _ = a3;
@@ -225,13 +225,13 @@ pub fn AIL_add_start_sound_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*an
     _ = a21;
     _ = a22;
     _ = a23;
-    return 0;
+    return if (e.addStep(.start_sound, &.{})) 1 else 0;
 }
 pub fn AIL_add_uncache_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
+    const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
     _ = a1;
     _ = a2;
-    return 0;
+    return if (e.addStep(.uncache_sounds, &.{})) 1 else 0;
 }
 pub fn AIL_apply_environment_preset(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;

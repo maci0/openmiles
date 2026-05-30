@@ -2215,3 +2215,21 @@ test "event constructor round-trips steps via close + next_event_step" {
     cur = api_v8b.AIL_next_event_step(cur, &info_ptr, &info_buf, @sizeOf(openmiles.event.EventStepInfo));
     try testing.expect(cur == null);
 }
+
+test "event constructor records all wired step types" {
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v8b.AIL_add_start_sound_event_step(ev, null, null, 0, null, null, null, null, null, null, 0, 0, 0, 0, 0, 0, null, 0, 0, 0, 0, 0, 0, 0);
+    _ = api_v9.AIL_add_ramp_event_step(ev, null, null, 0, null, 0, 0, 0);
+    _ = api_v8b.AIL_add_comment_event_step(ev, "x");
+    const str = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    defer std.c.free(str);
+    var ib: openmiles.event.EventStepInfo = undefined;
+    var ip: ?*openmiles.event.EventStepInfo = null;
+    var cur: ?*const anyopaque = @ptrCast(str);
+    var count: usize = 0;
+    while (true) {
+        cur = api_v8b.AIL_next_event_step(cur, &ip, &ib, @sizeOf(openmiles.event.EventStepInfo)) orelse break;
+        count += 1;
+    }
+    try testing.expectEqual(@as(usize, 3), count); // start_sound, ramp, comment
+}
