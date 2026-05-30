@@ -2052,3 +2052,19 @@ test "v8 sample channel_count and loop_block report real state" {
     var le: i32 = -1;
     try testing.expectEqual(@as(i32, 0), api_v8b.AIL_sample_loop_block(s, &ls, &le));
 }
+
+test "v8 5.1 volume levels round-trip" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    api_v8b.AIL_set_sample_51_volume_levels(s, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6);
+    var fl: f32 = 0;
+    var fr: f32 = 0;
+    var fc: f32 = 0;
+    var lfe: f32 = 0;
+    var bl: f32 = 0;
+    var br: f32 = 0;
+    api_v8b.AIL_sample_51_volume_levels(s, &fl, &fr, &fc, &lfe, &bl, &br);
+    try testing.expect(@abs(fc - 0.3) < 0.001 and @abs(lfe - 0.4) < 0.001 and @abs(br - 0.6) < 0.001);
+}

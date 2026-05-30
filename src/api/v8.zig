@@ -439,15 +439,14 @@ pub fn AIL_register_trace_callback(a0: ?*anyopaque) callconv(.winapi) void {
     _ = a0;
 
 }
-pub fn AIL_sample_51_volume_levels(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque, a6: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    _ = a4;
-    _ = a5;
-    _ = a6;
-
+pub fn AIL_sample_51_volume_levels(s_opt: ?*Sample, fl: ?*f32, fr: ?*f32, fc: ?*f32, lfe: ?*f32, bl: ?*f32, br: ?*f32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    if (fl) |p| p.* = s.v51_levels[0];
+    if (fr) |p| p.* = s.v51_levels[1];
+    if (fc) |p| p.* = s.v51_levels[2];
+    if (lfe) |p| p.* = s.v51_levels[3];
+    if (bl) |p| p.* = s.v51_levels[4];
+    if (br) |p| p.* = s.v51_levels[5];
 }
 pub fn AIL_sample_51_volume_pan(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque) callconv(.winapi) void {
     _ = a0;
@@ -515,11 +514,8 @@ pub fn AIL_sample_stage_property(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque, a3: 
     return 0;
 }
 pub fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, fl: f32, fr: f32, fc: f32, lfe: f32, bl: f32, br: f32) callconv(.winapi) void {
-    _ = fc;
-    _ = lfe;
-    _ = bl;
-    _ = br;
     const s = s_opt orelse return;
+    s.v51_levels = .{ fl, fr, fc, lfe, bl, br }; // remember all six (round-trips via the getter)
     // Engine is stereo; drive volume from the front L/R pair.
     s.setVolume(@intFromFloat(std.math.clamp(@max(fl, fr), 0.0, 1.0) * 127.0));
     const sum = fl + fr;

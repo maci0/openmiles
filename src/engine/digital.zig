@@ -403,6 +403,8 @@ pub const Sample = struct {
     v9_level_mask: u8 = 0xFF,
     v9_spread: f32 = 0.0,
     v9_schedule_time: u64 = 0,
+    // 5.1 per-speaker volume levels: FL, FR, FC, LFE, BL, BR.
+    v51_levels: [6]f32 = [_]f32{1.0} ** 6,
 
     fn eosCallbackBridge(pUserData: ?*anyopaque, pSound: ?*ma.ma_sound) callconv(.c) void {
         _ = pSound;
