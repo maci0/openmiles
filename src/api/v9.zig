@@ -42,9 +42,9 @@ pub fn AIL_set_sample_3D_spread(s_opt: ?*Sample, spread: f32) callconv(.winapi) 
     const s = s_opt orelse return;
     s.v9_spread = spread;
 }
-pub fn AIL_add_clear_state_event_step(a0: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    return 0;
+pub fn AIL_add_clear_state_event_step(event: ?*anyopaque) callconv(.winapi) i32 {
+    const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(event orelse return 0));
+    return if (e.addStep(.clear_state, &.{})) 1 else 0;
 }
 pub fn AIL_add_exec_event_event_step(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;

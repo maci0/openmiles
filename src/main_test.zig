@@ -2191,3 +2191,27 @@ test "v9 register_mix_callback fires per engine mix" {
     const back = api_v9.AIL_register_mix_callback(drv, null);
     try testing.expect(back != null);
 }
+
+test "event constructor round-trips steps via close + next_event_step" {
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    try testing.expectEqual(@as(i32, 1), api_v9.AIL_add_clear_state_event_step(ev));
+    try testing.expectEqual(@as(i32, 1), api_v8b.AIL_add_comment_event_step(ev, "hello"));
+    const str = api_v8b.AIL_close_event(ev) orelse return error.NoString;
+    defer std.c.free(str);
+    // Walk it back.
+    var info_buf: openmiles.event.EventStepInfo = undefined;
+    var info_ptr: ?*openmiles.event.EventStepInfo = null;
+    var cur: ?*const anyopaque = @ptrCast(str);
+    // step 1: clear_state
+    cur = api_v8b.AIL_next_event_step(cur, &info_ptr, &info_buf, @sizeOf(openmiles.event.EventStepInfo));
+    try testing.expect(cur != null);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.clear_state), info_ptr.?.event_type);
+    // step 2: comment "hello"
+    cur = api_v8b.AIL_next_event_step(cur, &info_ptr, &info_buf, @sizeOf(openmiles.event.EventStepInfo));
+    try testing.expect(cur != null);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.comment), info_ptr.?.event_type);
+    try testing.expectEqualStrings("hello", info_ptr.?.payload.?[0..@intCast(info_ptr.?.payload_len)]);
+    // end
+    cur = api_v8b.AIL_next_event_step(cur, &info_ptr, &info_buf, @sizeOf(openmiles.event.EventStepInfo));
+    try testing.expect(cur == null);
+}

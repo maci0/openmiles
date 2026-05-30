@@ -71,6 +71,7 @@ pub const dls_container = @import("engine/dls_container.zig");
 pub const StreamSource = @import("engine/stream_buffer.zig").StreamSource;
 pub const soundbank = @import("engine/soundbank.zig");
 pub const Bank = soundbank.Bank;
+pub const event = @import("engine/event.zig");
 
 pub const get_ASI_INTERFACE = @import("engine/asi.zig").get_ASI_INTERFACE;
 

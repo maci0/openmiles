@@ -168,10 +168,10 @@ pub fn AIL_add_cache_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*a
     _ = a2;
     return 0;
 }
-pub fn AIL_add_comment_event_step(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    return 0;
+pub fn AIL_add_comment_event_step(event: ?*anyopaque, comment: ?[*:0]const u8) callconv(.winapi) i32 {
+    const e: *EventConstruct = @ptrCast(@alignCast(event orelse return 0));
+    const c = if (comment) |p| std.mem.span(p) else "";
+    return if (e.addStep(.comment, c)) 1 else 0;
 }
 pub fn AIL_add_control_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque, a6: i32, a7: f32, a8: i32, a9: i32) callconv(.winapi) i32 {
     _ = a0;
@@ -245,16 +245,17 @@ pub fn AIL_apply_sound_preset(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque)
     _ = a2;
     return 0;
 }
-pub fn AIL_close_event(a0: ?*anyopaque) callconv(.winapi) ?*anyopaque {
-    _ = a0;
-    return null;
+pub fn AIL_close_event(event: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    const e: *EventConstruct = @ptrCast(@alignCast(event orelse return null));
+    return @ptrCast(e.close());
 }
 pub fn AIL_close_soundbank(bank: ?*anyopaque) callconv(.winapi) void {
     const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return));
     b.deinit();
 }
+const EventConstruct = openmiles.event.EventConstruct;
 pub fn AIL_create_event() callconv(.winapi) ?*anyopaque {
-    return null;
+    return @ptrCast(EventConstruct.create(openmiles.global_allocator));
 }
 pub fn AIL_debug(a0: ?*anyopaque) callconv(.winapi) void {
     _ = a0;
@@ -479,12 +480,20 @@ pub fn AIL_mem_write(mem: ?*anyopaque, src: ?*anyopaque, n: i32) callconv(.winap
     if (m.pos > m.len) m.len = m.pos;
     return @intCast(take);
 }
-pub fn AIL_next_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32) callconv(.winapi) ?*anyopaque {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    return null;
+// AIL_next_event_step(eventString, &stepInfo, buffer, bufferSize) — decode the
+// next step of a serialized event string. Writes a pointer to a decoded
+// EventStepInfo (built in the caller's scratch buffer) and returns the pointer
+// just past this step, or null at the end. The event string is NUL-... no, it
+// is length-implicit; we bound reads by the END terminator.
+pub fn AIL_next_event_step(event_string: ?*const anyopaque, step_out: ?*?*openmiles.event.EventStepInfo, buffer: ?*anyopaque, buffer_size: i32) callconv(.winapi) ?*const anyopaque {
+    const p: [*]const u8 = @ptrCast(event_string orelse return null);
+    const buf = buffer orelse return null;
+    if (buffer_size < @sizeOf(openmiles.event.EventStepInfo)) return null;
+    const info: *openmiles.event.EventStepInfo = @ptrCast(@alignCast(buf));
+    // The event string is self-terminated by an END record; allow generous span.
+    const next = openmiles.event.nextStep(p, std.math.maxInt(i32), info) orelse return null;
+    if (step_out) |so| so.* = info;
+    return @ptrCast(next);
 }
 pub fn AIL_open_soundbank(filename: ?*anyopaque, name: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const fn_ptr = filename orelse return null;
