@@ -2513,3 +2513,24 @@ test "set_blend step round-trips name, count and per-sound curves" {
     cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
     try testing.expect(cur == null);
 }
+
+test "cache_sounds step splits the colon-separated sound list into namelist" {
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v8b.AIL_add_cache_sounds_event_step(ev, cstr("bank"), cstr("a:bee:cee"));
+    const str = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    defer std.c.free(str);
+    var buf: [512]u8 align(8) = undefined;
+    var sp: ?*openmiles.event.EVENT_STEP_INFO = null;
+    var cur: ?*const anyopaque = @ptrCast(str);
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.cache_sounds), sp.?.type);
+    const ld = sp.?.u.load;
+    try testing.expectEqualStrings("bank", ld.lib.str.?[0..@intCast(ld.lib.len)]);
+    try testing.expectEqual(@as(i32, 3), ld.namecount);
+    const list = ld.namelist.?;
+    try testing.expectEqualStrings("a", std.mem.span(@as([*:0]const u8, @ptrCast(list[0].?))));
+    try testing.expectEqualStrings("bee", std.mem.span(@as([*:0]const u8, @ptrCast(list[1].?))));
+    try testing.expectEqualStrings("cee", std.mem.span(@as([*:0]const u8, @ptrCast(list[2].?))));
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expect(cur == null);
+}

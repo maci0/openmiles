@@ -487,6 +487,50 @@ const Decoder = struct {
         x.* = std.fmt.parseInt(i32, self.p[0..len], 10) catch 0;
         self.p += len + 1;
     }
+    // Split the colon-separated cache/purge sound list into namelist/namecount,
+    // mirroring the SDK: reserve `count` pointers in the scratch buffer, copy the
+    // list, and null-terminate each name in place.
+    fn parseNameList(self: *Decoder, load: *LoadStep) void {
+        const start = self.p;
+        var pp = self.p;
+        var count: i32 = 0;
+        while (pp[0] != ';' and pp[0] != 0) : (pp += 1) {
+            if (pp[0] == ':') count += 1;
+        }
+        if (@intFromPtr(pp) != @intFromPtr(start)) count += 1;
+        const str_len: usize = @intFromPtr(pp) - @intFromPtr(start);
+        const ncount: usize = @intCast(@max(count, 0));
+        const ptr_size = @sizeOf(usize);
+        const w = (@intFromPtr(self.wp) + ptr_size - 1) & ~@as(usize, ptr_size - 1);
+        const list_bytes = ncount * ptr_size;
+        if (w + list_bytes + str_len + 1 >= @intFromPtr(self.wlimit)) {
+            self.overflow = true;
+            self.p = pp;
+            if (self.p[0] == ';') self.p += 1;
+            return;
+        }
+        const namelist: [*]?[*]const u8 = @ptrFromInt(w);
+        load.namecount = count;
+        load.namelist = @ptrCast(namelist);
+        const str_dst: [*]u8 = @ptrFromInt(w + list_bytes);
+        if (str_len > 0) @memcpy(str_dst[0..str_len], start[0..str_len]);
+        str_dst[str_len] = 0;
+        self.wp = @ptrFromInt(w + list_bytes + str_len + 1);
+        var writer: usize = 0;
+        var trailer: usize = 0;
+        var current: usize = 0;
+        while (writer < str_len) : (writer += 1) {
+            if (str_dst[writer] == ':') {
+                if (current < ncount) namelist[current] = @ptrCast(str_dst + trailer);
+                trailer = writer + 1;
+                current += 1;
+                str_dst[writer] = 0;
+            }
+        }
+        if (writer != trailer and current < ncount) namelist[current] = @ptrCast(str_dst + trailer);
+        self.p = pp;
+        if (self.p[0] == ';') self.p += 1;
+    }
 };
 
 /// Decode the next step of `event_string` into `step` (an EVENT_STEP_INFO at the
@@ -540,10 +584,7 @@ pub fn nextStep(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: []
             d.p += 2;
             d.setupString(&step.u.load.lib);
             d.copyString(&step.u.load.lib);
-            // The SDK splits the second field into namelist/namecount; we keep the
-            // library name and consume the sound list so iteration stays aligned.
-            var sounds: MSSStringC = .{};
-            d.setupString(&sounds);
+            d.parseNameList(&step.u.load);
         },
         .set_limits => {
             d.p += 2;
