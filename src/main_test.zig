@@ -1990,3 +1990,23 @@ test "v9 system-state push/pop tracks depth and restores volume" {
     try testing.expectEqual(@as(u8, 0), api_v9.AIL_system_state_level(drv));
     try testing.expect(@abs(drv.getMasterVolume() - 1.0) < 0.001);
 }
+
+test "v9 set_sample_3D_volume_falloff maps graph range to distance attenuation" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    api_v7.AIL_set_sample_3D_position(s, 0, 0, 0);
+    // Graph: near=2.0, far=50.0 (X = distance).
+    var graph = [_]api_v9.MSSGraphPoint{
+        .{ .x = 2.0, .y = 1.0, .itx = 0, .ity = 0, .otx = 0, .oty = 0, .itype = 0, .otype = 0 },
+        .{ .x = 50.0, .y = 0.0, .itx = 0, .ity = 0, .otx = 0, .oty = 0, .itype = 0, .otype = 0 },
+    };
+    api_v9.AIL_set_sample_3D_volume_falloff(s, &graph, 2);
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_min_distance(&s.sound) - 2.0) < 0.01);
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_max_distance(&s.sound) - 50.0) < 0.01);
+}
