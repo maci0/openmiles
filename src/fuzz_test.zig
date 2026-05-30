@@ -24,6 +24,7 @@ const api_midi = @import("api/midi.zig");
 const api_3d = @import("api/3d.zig");
 const api_timer = @import("api/timer.zig");
 const api_v8 = @import("api/v8.zig");
+const api_v7 = @import("api/v7.zig");
 
 fn freeLock(p: ?*anyopaque) void {
     if (p) |ptr| api_memory.AIL_mem_free_lock(ptr);
@@ -678,5 +679,39 @@ test "fuzz v8 case-insensitive compares with random NUL-terminated buffers" {
         _ = api_v8.AIL_strnicmp(&a, &b, rand.int(u32));
         var fbuf: [40]u8 = undefined;
         _ = api_v8.AIL_ftoa(@bitCast(rand.int(u32)), &fbuf);
+    }
+}
+
+test "fuzz v7/v8 unified sample setters with adversarial floats" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE22);
+    const rand = prng.random();
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const pcm = [_]u8{0} ** 256;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const advf = [_]f32{ std.math.nan(f32), std.math.inf(f32), -std.math.inf(f32), -1.0e30, -1, 0, 1, 1.0e30 };
+
+    var i: usize = 0;
+    while (i < 2000) : (i += 1) {
+        const s = openmiles.Sample.init(driver) catch continue;
+        defer s.deinit();
+        s.loadFromMemory(wav, false) catch continue;
+        const a = advf[rand.intRangeLessThan(usize, 0, advf.len)];
+        const b = advf[rand.intRangeLessThan(usize, 0, advf.len)];
+        const c = advf[rand.intRangeLessThan(usize, 0, advf.len)];
+        switch (rand.intRangeAtMost(u8, 0, 9)) {
+            0 => api_v7.AIL_set_sample_volume_levels(s, a, b),
+            1 => api_v7.AIL_set_sample_reverb_levels(s, a, b),
+            2 => api_v7.AIL_set_sample_low_pass_cut_off(s, 0, a),
+            3 => api_v7.AIL_set_sample_3D_position(s, a, b, c),
+            4 => api_v7.AIL_set_sample_3D_cone(s, a, b, c),
+            5 => api_v7.AIL_set_sample_3D_distances(s, a, b, 0),
+            6 => api_v7.AIL_set_sample_obstruction(s, a),
+            7 => api_v8.AIL_set_sample_51_volume_levels(s, a, b, c, a, b, c),
+            8 => api_v8.AIL_set_sample_51_volume_pan(s, a, b, c, a, b),
+            9 => api_v8.AIL_set_sample_playback_rate_factor(s, a),
+            else => unreachable,
+        }
     }
 }
