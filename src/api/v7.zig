@@ -300,8 +300,9 @@ pub fn AIL_stream_sample_handle(stream: ?*Sample) callconv(.winapi) ?*anyopaque 
     return @ptrCast(stream); // a stream IS a Sample in OpenMiles
 }
 pub fn AIL_DLS_sample_handle(dls: ?*MidiDriver) callconv(.winapi) ?*anyopaque {
-    _ = dls;
-    return null;
+    const d = dls orelse return null;
+    // The DLS "sample" is the loaded SoundFont the driver renders MIDI through.
+    return @ptrCast(d.soundfont);
 }
 
 // --- find_filter (reuse the built-in filter provider) ------------------------
