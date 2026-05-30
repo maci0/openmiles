@@ -6,7 +6,7 @@ const io = root.io;
 
 /// Audio capture device wrapping a miniaudio ma_device in capture mode.
 /// Created via AIL_open_input, controlled via AIL_set_input_state, queried
-/// via AIL_get_input_info.
+/// via AIL_input_info.
 pub const Input = struct {
     device: ma.ma_device,
     allocator: std.mem.Allocator,

@@ -1509,6 +1509,20 @@ pub const Sample3D = struct {
             ma.ma_sound_set_position(&self.sound, x, y, z);
         }
     }
+
+    /// Explicit dead-reckoning step for AIL_3D_update_position: advance the
+    /// position by velocity over `dt_ms` milliseconds, unconditionally (unlike
+    /// the auto-tick updatePosition, which is gated on the auto_update flag).
+    pub fn updatePositionExplicit(self: *Sample3D, dt_ms: f32) void {
+        if (!(dt_ms == dt_ms) or std.math.isInf(dt_ms)) return; // NaN/Inf guard
+        const dt_s = dt_ms / 1000.0;
+        self.pos_x += self.velocity_x * dt_s;
+        self.pos_y += self.velocity_y * dt_s;
+        self.pos_z += self.velocity_z * dt_s;
+        if (self.is_initialized) {
+            ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, self.pos_z);
+        }
+    }
     pub fn setVelocity(self: *Sample3D, x: f32, y: f32, z: f32) void {
         self.velocity_x = x;
         self.velocity_y = y;

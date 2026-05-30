@@ -26,7 +26,7 @@ pub export fn AIL_set_input_state(input_ptr: ?*openmiles.Input, state: i32) call
         input.stop();
     }
 }
-pub export fn AIL_get_input_info(input_ptr: ?*openmiles.Input) callconv(.winapi) u32 {
+pub export fn AIL_input_info(input_ptr: ?*openmiles.Input) callconv(.winapi) u32 {
     const input = input_ptr orelse return 0;
     const info = input.getInfo();
     return info.samples;

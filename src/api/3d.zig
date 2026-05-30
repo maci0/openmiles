@@ -461,6 +461,16 @@ pub export fn AIL_open_3D_provider(provider: *anyopaque, dig_opt: ?*DigitalDrive
     // Return the driver as the 3D provider handle — our miniaudio engine IS the 3D provider
     return @ptrCast(dig);
 }
+pub export fn AIL_3D_update_position(obj: ?*anyopaque, dt_milliseconds: f32) callconv(.winapi) void {
+    const p = obj orelse return;
+    const s: *openmiles.Sample3D = @ptrCast(@alignCast(p));
+    s.updatePositionExplicit(dt_milliseconds);
+}
+pub export fn AIL_3D_auto_update_position(obj: ?*anyopaque, enable: i32) callconv(.winapi) void {
+    const p = obj orelse return;
+    const s: *openmiles.Sample3D = @ptrCast(@alignCast(p));
+    s.auto_update = (enable != 0);
+}
 pub export fn AIL_close_3D_provider(handle: *anyopaque) callconv(.winapi) void {
     _ = handle; // Driver lifetime managed by AIL_close_digital_driver
 }

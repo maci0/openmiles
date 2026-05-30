@@ -221,7 +221,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_v9.AIL_find_sound_preset(null, null);
     _ = api_v8.AIL_ftoa(rf, null);
     _ = api_v8.AIL_get_event_contents(null, null, null);
-    _ = api_input.AIL_get_input_info(null);
+    _ = api_input.AIL_input_info(null);
     api_v8.AIL_get_marker_list(null, null);
     _ = api_digital.AIL_get_preference(ru);
     _ = api_v8.AIL_get_soundbank_filename(null);
@@ -287,7 +287,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_quick.AIL_quick_set_reverb(hs, rf, rf, rf);
     api_v7.AIL_quick_set_reverb_levels(hs, rf, rf);
     api_quick.AIL_quick_set_speed(hs, ri);
-    api_quick.AIL_quick_set_volume(hs, ri);
+    api_quick.AIL_quick_set_volume(hs, ri, ri);
     _ = api_quick.AIL_quick_status(hs);
     api_quick.AIL_quick_stop(hs);
     _ = api_quick.AIL_quick_type(hs);

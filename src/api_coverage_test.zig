@@ -318,7 +318,7 @@ test "coverage: quick.zig exports" {
     qk.AIL_quick_play(n, 1);
     qk.AIL_quick_stop(n);
     _ = qk.AIL_quick_status(n);
-    qk.AIL_quick_set_volume(n, 64);
+    qk.AIL_quick_set_volume(n, 64, 127);
     qk.AIL_quick_set_speed(n, 22050);
     _ = qk.AIL_quick_ms_length(n);
     _ = qk.AIL_quick_ms_position(n);
@@ -388,7 +388,7 @@ test "coverage: file/input.zig exports" {
     if (ip) |p| {
         const ipt: *openmiles.Input = @ptrCast(@alignCast(p));
         inp.AIL_set_input_state(ipt, 0);
-        _ = inp.AIL_get_input_info(ipt);
+        _ = inp.AIL_input_info(ipt);
         inp.AIL_close_input(ipt);
     }
 }

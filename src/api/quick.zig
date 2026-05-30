@@ -107,10 +107,13 @@ pub export fn AIL_quick_status(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     return @intCast(@intFromEnum(s.status()));
 }
-pub export fn AIL_quick_set_volume(s_opt: ?*Sample, volume: i32) callconv(.winapi) void {
+pub export fn AIL_quick_set_volume(s_opt: ?*Sample, volume: i32, extravol: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    log("AIL_quick_set_volume(s={*}, volume={d})\n", .{ s, volume });
-    s.setVolume(volume);
+    log("AIL_quick_set_volume(s={*}, volume={d}, extravol={d})\n", .{ s, volume, extravol });
+    // MSS scales the primary 0..127 volume by the secondary 0..127 extravol.
+    const ev = std.math.clamp(extravol, 0, 127);
+    const scaled: i32 = @intCast(@divTrunc(@as(i64, std.math.clamp(volume, 0, 127)) * ev, 127));
+    s.setVolume(scaled);
 }
 pub export fn AIL_quick_set_speed(s_opt: ?*Sample, rate: i32) callconv(.winapi) void {
     const s = s_opt orelse return;

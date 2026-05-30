@@ -213,7 +213,7 @@ void        MSS_CALLBACK AIL_quick_unload(HSAMPLE S);
 void        MSS_CALLBACK AIL_quick_play(HSAMPLE S, S32 loop_count);
 void        MSS_CALLBACK AIL_quick_stop(HSAMPLE S);
 S32         MSS_CALLBACK AIL_quick_status(HSAMPLE S);
-void        MSS_CALLBACK AIL_quick_set_volume(HSAMPLE S, S32 volume);
+void        MSS_CALLBACK AIL_quick_set_volume(HSAMPLE S, S32 volume, S32 extravol);
 void        MSS_CALLBACK AIL_quick_set_speed(HSAMPLE S, S32 rate);
 S32         MSS_CALLBACK AIL_quick_ms_length(HSAMPLE S);
 S32         MSS_CALLBACK AIL_quick_ms_position(HSAMPLE S);
