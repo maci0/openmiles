@@ -421,6 +421,24 @@ pub export fn AIL_digital_configuration(driver_opt: ?*DigitalDriver, rate: ?*i32
         buf[name.len] = 0;
     }
 }
+// Legacy 3.x exports. The DirectSound-specific ones have no meaning on the
+// miniaudio backend (no DirectSound buffers/DS3D), so they report "unsupported".
+pub export fn AIL_get_DirectSound3D_info(s: ?*anyopaque, ds3d: ?*anyopaque, caps: ?*anyopaque, size: u32) callconv(.winapi) void {
+    _ = s;
+    _ = ds3d;
+    _ = caps;
+    _ = size;
+}
+pub export fn AIL_set_direct_buffer_control(s_opt: ?*Sample, command: u32) callconv(.winapi) i32 {
+    _ = s_opt;
+    _ = command;
+    return 0; // no DirectSound secondary buffer to control
+}
+pub export fn AIL_start_sample_at(s_opt: ?*Sample, offset: u32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    s.setPosition(offset);
+    s.start();
+}
 pub export fn AIL_get_DirectSound_info(driver_opt: ?*DigitalDriver, info: *anyopaque, size: u32) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
     _ = driver;
@@ -812,17 +830,17 @@ comptime {
             .{ .name = "AIL_release_timer_handle", .stack_size = 4 },
             .{ .name = "AIL_start_all_timers", .stack_size = 0 },
             .{ .name = "AIL_stop_all_timers", .stack_size = 0 },
-            .{ .name = "AIL_quick_startup", .stack_size = 20, .ver = 40 },
-            .{ .name = "AIL_quick_shutdown", .stack_size = 0, .ver = 40 },
-            .{ .name = "AIL_quick_load", .stack_size = 4, .ver = 40 },
+            .{ .name = "AIL_quick_startup", .stack_size = 20, .ver = 30 },
+            .{ .name = "AIL_quick_shutdown", .stack_size = 0, .ver = 30 },
+            .{ .name = "AIL_quick_load", .stack_size = 4, .ver = 30 },
             .{ .name = "AIL_quick_load_mem", .stack_size = 8, .ver = 40 },
-            .{ .name = "AIL_quick_copy", .stack_size = 4, .ver = 40 },
-            .{ .name = "AIL_quick_unload", .stack_size = 4, .ver = 40 },
-            .{ .name = "AIL_quick_play", .stack_size = 8, .ver = 40 },
+            .{ .name = "AIL_quick_copy", .stack_size = 4, .ver = 30 },
+            .{ .name = "AIL_quick_unload", .stack_size = 4, .ver = 30 },
+            .{ .name = "AIL_quick_play", .stack_size = 8, .ver = 30 },
             .{ .name = "AIL_quick_stop", .stack_size = 4, .ver = 40 },
-            .{ .name = "AIL_quick_status", .stack_size = 4, .ver = 40 },
-            .{ .name = "AIL_quick_set_volume", .stack_size = 12, .ver = 40 },
-            .{ .name = "AIL_quick_set_speed", .stack_size = 8, .ver = 40 },
+            .{ .name = "AIL_quick_status", .stack_size = 4, .ver = 30 },
+            .{ .name = "AIL_quick_set_volume", .stack_size = 12, .ver = 30 },
+            .{ .name = "AIL_quick_set_speed", .stack_size = 8, .ver = 30 },
             .{ .name = "AIL_quick_ms_length", .stack_size = 4, .ver = 40 },
             .{ .name = "AIL_quick_ms_position", .stack_size = 4, .ver = 40 },
             .{ .name = "AIL_quick_set_ms_position", .stack_size = 8, .ver = 40 },
@@ -839,8 +857,8 @@ comptime {
             .{ .name = "AIL_ASI_provider_attribute", .stack_size = 8, .ver = 40 },
             .{ .name = "AIL_compress_ASI", .stack_size = 20, .ver = 40 },
             .{ .name = "AIL_decompress_ASI", .stack_size = 24, .ver = 40 },
-            .{ .name = "AIL_mem_alloc_lock", .stack_size = 4, .ver = 40 },
-            .{ .name = "AIL_mem_free_lock", .stack_size = 4, .ver = 40 },
+            .{ .name = "AIL_mem_alloc_lock", .stack_size = 4, .ver = 30 },
+            .{ .name = "AIL_mem_free_lock", .stack_size = 4, .ver = 30 },
             // 3D Sample control
             .{ .name = "AIL_start_3D_sample", .stack_size = 4, .ver = 50 },
             .{ .name = "AIL_stop_3D_sample", .stack_size = 4, .ver = 50 },
@@ -904,6 +922,10 @@ comptime {
             .{ .name = "AIL_3D_velocity", .stack_size = 16, .ver = 50 },
             .{ .name = "AIL_3D_update_position", .stack_size = 8, .ver = 50 },
             .{ .name = "AIL_3D_auto_update_position", .stack_size = 8, .ver = 50 },
+            .{ .name = "AIL_get_DirectSound3D_info", .stack_size = 16 },
+            .{ .name = "AIL_set_direct_buffer_control", .stack_size = 8 },
+            .{ .name = "AIL_start_sample_at", .stack_size = 8 },
+            .{ .name = "AIL_open_stream_ex", .stack_size = 16 },
             .{ .name = "AIL_3D_sample_distances", .stack_size = 12, .ver = 50 },
             // Sequence extras
             .{ .name = "AIL_sequence_ms_position", .stack_size = 12 },
@@ -979,11 +1001,11 @@ comptime {
             .{ .name = "AIL_filter_DLS_attribute", .stack_size = 12 },
             .{ .name = "AIL_filter_DLS_with_XMI", .stack_size = 24 },
             // Quick API extras
-            .{ .name = "AIL_quick_halt", .stack_size = 4, .ver = 40 },
+            .{ .name = "AIL_quick_halt", .stack_size = 4, .ver = 30 },
             .{ .name = "AIL_quick_set_reverb", .stack_size = 16, .ver = 40 },
-            .{ .name = "AIL_quick_load_and_play", .stack_size = 12, .ver = 40 },
+            .{ .name = "AIL_quick_load_and_play", .stack_size = 12, .ver = 30 },
             .{ .name = "AIL_quick_type", .stack_size = 4, .ver = 40 },
-            .{ .name = "AIL_quick_handles", .stack_size = 12, .ver = 40 },
+            .{ .name = "AIL_quick_handles", .stack_size = 12, .ver = 30 },
             // DLS extras
             .{ .name = "AIL_DLS_load_memory", .stack_size = 12 },
             .{ .name = "AIL_DLS_unload", .stack_size = 8 },

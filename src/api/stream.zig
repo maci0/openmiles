@@ -4,6 +4,13 @@ const log = openmiles.log;
 const Sample = openmiles.Sample;
 const DigitalDriver = openmiles.DigitalDriver;
 
+// Legacy 3.x AIL_open_stream_ex(dig, filename, stream_mem, flags) @16 — the
+// extended form adds a flags word; we open the stream the same way and ignore
+// the extra flags (they selected DirectSound buffer behavior on the old backend).
+pub export fn AIL_open_stream_ex(driver_opt: ?*DigitalDriver, filename_opt: ?[*:0]const u8, stream_mem: i32, flags: i32) callconv(.winapi) ?*Sample {
+    _ = flags;
+    return AIL_open_stream(driver_opt, filename_opt, stream_mem);
+}
 pub export fn AIL_open_stream(driver_opt: ?*DigitalDriver, filename_opt: ?[*:0]const u8, stream_mem: i32) callconv(.winapi) ?*Sample {
     const driver = driver_opt orelse return null;
     const file_str = if (filename_opt) |ptr| std.mem.span(ptr) else "<null>";

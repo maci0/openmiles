@@ -19,9 +19,9 @@ comptime {
     _ = @import("api/file.zig");
 
     // Version-gated API groups so the export table matches the target release.
-    if (mss_version >= 40) _ = @import("api/memory.zig"); // Memory API (v4+)
+    if (mss_version >= 30) _ = @import("api/memory.zig"); // Memory API (the mem_*_lock pair ships since 3.x)
     if (mss_version >= 40) _ = @import("api/rib.zig"); // RIB/ASI + compression (v4+)
-    if (mss_version >= 40) _ = @import("api/quick.zig"); // Quick API (v4+)
+    if (mss_version >= 30) _ = @import("api/quick.zig"); // Quick API (ships since 3.x)
     if (mss_version >= 40) _ = @import("api/input.zig"); // Input recording (v4+)
     if (mss_version >= 50) _ = @import("api/3d.zig"); // 3D audio (v5+)
     if (mss_version >= 60) _ = @import("api/filter.zig"); // Filter API (v6+)
