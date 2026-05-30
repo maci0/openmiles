@@ -53,14 +53,8 @@ pub fn AIL_add_exec_event_event_step(a0: ?*anyopaque, event_name: ?[*:0]const u8
 }
 pub fn AIL_add_ramp_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: f32, a4: ?*anyopaque, a5: i32, a6: i32, a7: i32) callconv(.winapi) i32 {
     const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    _ = a4;
-    _ = a5;
-    _ = a6;
-    _ = a7;
-    return if (e.addBare(.ramp)) 1 else 0;
+    // SDK: name(a1), labels(a2), time(a3), target(a4), type(a5), applytonew(a6), interp(a7).
+    return if (e.addRamp(a1, a2, a3, a4, a5, a6, a7)) 1 else 0;
 }
 pub fn AIL_add_setblend_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: i32, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque, a6: ?*anyopaque, a7: ?*anyopaque, a8: ?*anyopaque) callconv(.winapi) i32 {
     const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));

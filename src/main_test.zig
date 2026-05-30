@@ -2371,3 +2371,73 @@ test "Miles event system frees all systems and variables (no leaks)" {
     // test allocator flags it at test teardown.
     api_miles_t.MilesShutdownEventSystem();
 }
+
+fn cstr(s: [*:0]const u8) ?*anyopaque {
+    return @constCast(@ptrCast(s));
+}
+
+test "ramp event step encodes byte-faithfully and round-trips" {
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v9.AIL_add_ramp_event_step(ev, cstr("vol"), cstr("music"), 2.5, cstr("0.8"), 3, 1, 2);
+    const str = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    defer std.c.free(str);
+    try testing.expectEqualStrings("9;4;:;vol;music;2.500000;0.8;3;1;2;", std.mem.span(@as([*:0]const u8, @ptrCast(str))));
+
+    var buf: [512]u8 align(8) = undefined;
+    var sp: ?*openmiles.event.EVENT_STEP_INFO = null;
+    var cur: ?*const anyopaque = @ptrCast(str);
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.ramp), sp.?.type);
+    const r = sp.?.u.ramp;
+    try testing.expectEqualStrings("vol", r.name.str.?[0..@intCast(r.name.len)]);
+    try testing.expectEqualStrings("music", r.labels.str.?[0..@intCast(r.labels.len)]);
+    try testing.expectApproxEqAbs(@as(f32, 2.5), r.time, 0.0001);
+    try testing.expectEqualStrings("0.8", r.target.str.?[0..@intCast(r.target.len)]);
+    try testing.expectEqual(@as(u8, 3), r.type);
+    try testing.expectEqual(@as(u8, 1), r.apply_to_new);
+    try testing.expectEqual(@as(u8, 2), r.interpolate_type);
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expect(cur == null);
+}
+
+test "control_sounds and start_sound steps round-trip all fields" {
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    // control: labels, ms, me, pos, preset, presetapply=4, fadeout=1.5, loopcount=7, type=5
+    _ = api_v8b.AIL_add_control_sounds_event_step(ev, cstr("amb"), cstr("a"), cstr("b"), cstr("p"), cstr("pre"), 4, 1.5, 7, 5);
+    // start_sound: full field set
+    _ = api_v8b.AIL_add_start_sound_event_step(ev, cstr("snd"), cstr("pst"), 1, cstr("evt"), cstr("ms"), cstr("me"), cstr("sv"), cstr("vi"), cstr("lbl"), 1, 0, 100, 200, 5, 3, cstr("off"), 0.1, 0.9, 0.5, 1.5, 0.25, 2, 1);
+    const str = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    defer std.c.free(str);
+
+    var buf: [1024]u8 align(8) = undefined;
+    var sp: ?*openmiles.event.EVENT_STEP_INFO = null;
+    var cur: ?*const anyopaque = @ptrCast(str);
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.control_sounds), sp.?.type);
+    const c = sp.?.u.control;
+    try testing.expectEqualStrings("amb", c.labels.str.?[0..@intCast(c.labels.len)]);
+    try testing.expectEqualStrings("pre", c.presetname.str.?[0..@intCast(c.presetname.len)]);
+    try testing.expectEqual(@as(u8, 7), c.loopcount);
+    try testing.expectEqual(@as(u8, 5), c.type);
+    try testing.expectApproxEqAbs(@as(f32, 1.5), c.fadeouttime, 0.0001);
+    try testing.expectEqual(@as(u8, 4), c.presetapplytype);
+
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.start_sound), sp.?.type);
+    const s = sp.?.u.start;
+    try testing.expectEqualStrings("snd", s.soundname.str.?[0..@intCast(s.soundname.len)]);
+    try testing.expectEqualStrings("lbl", s.labels.str.?[0..@intCast(s.labels.len)]);
+    try testing.expectEqualStrings("off", s.startoffset.str.?[0..@intCast(s.startoffset.len)]);
+    try testing.expectEqual(@as(u16, 100), s.delaymin);
+    try testing.expectEqual(@as(u16, 200), s.delaymax);
+    try testing.expectEqual(@as(u8, 5), s.priority);
+    try testing.expectEqual(@as(u8, 3), s.loopcount);
+    try testing.expectEqual(@as(u8, 1), s.presetisdynamic);
+    try testing.expectApproxEqAbs(@as(f32, 0.1), s.volmin, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 1.5), s.pitchmax, 0.0001);
+    try testing.expectEqual(@as(u8, 2), s.evictiontype);
+    try testing.expectEqual(@as(u8, 1), s.selecttype);
+
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expect(cur == null);
+}

@@ -133,6 +133,33 @@ pub const EventStepInfo = EVENT_STEP_INFO;
 // ---------------------------------------------------------------------------
 // Constructor (byte-faithful write side)
 // ---------------------------------------------------------------------------
+// Arguments to addStartSound, in the order the start-sound step encodes them.
+pub const StartSoundArgs = struct {
+    soundname: ?*const anyopaque,
+    presetname: ?*const anyopaque,
+    presetisdynamic: i32,
+    eventname: ?*const anyopaque,
+    markerstart: ?*const anyopaque,
+    markerend: ?*const anyopaque,
+    statevar: ?*const anyopaque,
+    varinit: ?*const anyopaque,
+    labels: ?*const anyopaque,
+    stream: i32,
+    canload: i32,
+    delaymin: u16,
+    delaymax: u16,
+    priority: u8,
+    loopcount: u8,
+    startoffset: ?*const anyopaque,
+    volmin: f32,
+    volmax: f32,
+    pitchmin: f32,
+    pitchmax: f32,
+    fadeintime: f32,
+    evictiontype: i32,
+    selecttype: i32,
+};
+
 pub const EventConstruct = struct {
     bytes: std.ArrayListUnmanaged(u8) = .empty,
     allocator: std.mem.Allocator,
@@ -177,6 +204,150 @@ pub const EventConstruct = struct {
     pub fn addBare(self: *EventConstruct, t: StepType) bool {
         self.printType(t);
         self.raw(";");
+        return true;
+    }
+    // --- field encoders (mirror the SDK AIL_mem_print* calls and the decoder) ---
+    // A string field: content followed by the ';' separator (AIL_mem_prints + ';').
+    fn fieldStr(self: *EventConstruct, s: []const u8) void {
+        self.raw(s);
+        self.raw(";");
+    }
+    // A C-string argument passed through the C ABI as an opaque pointer.
+    fn fieldCStr(self: *EventConstruct, p: ?*const anyopaque) void {
+        if (p) |ptr| {
+            self.fieldStr(std.mem.span(@as([*:0]const u8, @ptrCast(ptr))));
+        } else {
+            self.fieldStr("");
+        }
+    }
+    fn hexChar(v: u8) u8 {
+        return if (v < 10) '0' + v else 'a' + (v - 10);
+    }
+    // A single nibble field (decoder copyDigit: one hex char + ';').
+    fn fieldDigit(self: *EventConstruct, v: anytype) void {
+        self.bytes.append(self.allocator, hexChar(@as(u8, @intCast(@as(i64, v) & 0xf)))) catch {};
+        self.raw(";");
+    }
+    // A byte field as two hex chars + ';' (decoder copyUChar; SDK "%02x"-style).
+    fn fieldUChar(self: *EventConstruct, v: u8) void {
+        self.bytes.append(self.allocator, hexChar(v >> 4)) catch {};
+        self.bytes.append(self.allocator, hexChar(v & 0xf)) catch {};
+        self.raw(";");
+    }
+    // A u16 field as four hex chars + ';' (decoder copyUShort; SDK "%04x").
+    fn fieldUShort(self: *EventConstruct, v: u16) void {
+        self.bytes.append(self.allocator, hexChar(@intCast((v >> 12) & 0xf))) catch {};
+        self.bytes.append(self.allocator, hexChar(@intCast((v >> 8) & 0xf))) catch {};
+        self.bytes.append(self.allocator, hexChar(@intCast((v >> 4) & 0xf))) catch {};
+        self.bytes.append(self.allocator, hexChar(@intCast(v & 0xf))) catch {};
+        self.raw(";");
+    }
+    // A float field, C "%f" (six decimals) + ';' (decoder copyFloat: parse to ';').
+    fn fieldFloat(self: *EventConstruct, v: f32) void {
+        self.print("{d:.6};", .{v});
+    }
+    // --- faithful multi-field step builders (mirror mssevent.cpp) --------------
+    pub fn addCacheSounds(self: *EventConstruct, t: StepType, lib: ?*const anyopaque, sounds: ?*const anyopaque) bool {
+        if (lib == null or sounds == null) return false;
+        self.printType(t);
+        self.raw(";");
+        self.fieldCStr(lib);
+        self.fieldCStr(sounds);
+        return true;
+    }
+    pub fn addApplyEnv(self: *EventConstruct, name: ?*const anyopaque, is_dynamic: i32) bool {
+        if (name == null) return false;
+        self.printType(.apply_env);
+        self.raw(";");
+        self.fieldCStr(name);
+        self.fieldDigit(@as(i32, if (is_dynamic != 0) 1 else 0));
+        return true;
+    }
+    pub fn addSoundLimit(self: *EventConstruct, name: ?*const anyopaque, limits: ?*const anyopaque) bool {
+        if (name == null) return false;
+        self.printType(.set_limits);
+        self.raw(";");
+        self.fieldCStr(name);
+        self.fieldCStr(limits);
+        return true;
+    }
+    pub fn addPersist(self: *EventConstruct, preset: ?*const anyopaque, name: ?*const anyopaque, labels: ?*const anyopaque, is_dynamic: i32) bool {
+        if (preset == null) return false;
+        self.printType(.persist);
+        self.raw(";");
+        self.fieldCStr(preset);
+        self.fieldCStr(name);
+        self.fieldCStr(labels);
+        self.fieldDigit(is_dynamic);
+        return true;
+    }
+    pub fn addRamp(self: *EventConstruct, name: ?*const anyopaque, labels: ?*const anyopaque, time: f32, target: ?*const anyopaque, type_: i32, apply_to_new: i32, interp: i32) bool {
+        if (name == null) return false;
+        self.printType(.ramp);
+        self.raw(";");
+        self.fieldCStr(name);
+        self.fieldCStr(labels);
+        self.fieldFloat(time);
+        self.fieldCStr(target);
+        self.fieldDigit(type_);
+        self.fieldDigit(apply_to_new);
+        self.fieldDigit(interp);
+        return true;
+    }
+    pub fn addControlSounds(self: *EventConstruct, labels: ?*const anyopaque, marker_start: ?*const anyopaque, marker_end: ?*const anyopaque, position: ?*const anyopaque, preset: ?*const anyopaque, loop_count: u8, type_: i32, fade_out: f32, preset_apply: i32) bool {
+        self.printType(.control_sounds);
+        self.raw(";");
+        self.fieldCStr(labels);
+        self.fieldCStr(marker_start);
+        self.fieldCStr(marker_end);
+        self.fieldCStr(position);
+        self.fieldCStr(preset);
+        self.fieldUChar(loop_count);
+        self.fieldDigit(type_);
+        self.fieldFloat(fade_out);
+        self.fieldDigit(preset_apply);
+        return true;
+    }
+    pub fn addSetLfo(self: *EventConstruct, name: ?*const anyopaque, base: ?*const anyopaque, amplitude: ?*const anyopaque, freq: ?*const anyopaque, invert: i32, polarity: i32, waveform: i32, duty_cycle: u8) bool {
+        self.printType(.set_lfo);
+        self.raw(";");
+        self.fieldCStr(name);
+        self.fieldCStr(base);
+        self.fieldCStr(amplitude);
+        self.fieldCStr(freq);
+        self.fieldDigit(invert);
+        self.fieldDigit(polarity);
+        self.fieldDigit(waveform);
+        self.fieldUChar(duty_cycle);
+        return true;
+    }
+    pub fn addStartSound(self: *EventConstruct, args: StartSoundArgs) bool {
+        if (args.soundname == null) return false;
+        self.printType(.start_sound);
+        self.raw(";");
+        self.fieldCStr(args.soundname);
+        self.fieldCStr(args.presetname);
+        self.fieldCStr(args.eventname);
+        self.fieldCStr(args.markerstart);
+        self.fieldCStr(args.markerend);
+        self.fieldCStr(args.labels);
+        self.fieldCStr(args.statevar);
+        self.fieldCStr(args.varinit);
+        self.fieldDigit(args.stream);
+        self.fieldDigit(args.canload);
+        self.fieldDigit(args.presetisdynamic);
+        self.fieldUShort(args.delaymin);
+        self.fieldUShort(args.delaymax);
+        self.fieldUChar(args.priority);
+        self.fieldUChar(args.loopcount);
+        self.fieldCStr(args.startoffset);
+        self.fieldFloat(args.volmin);
+        self.fieldFloat(args.volmax);
+        self.fieldFloat(args.pitchmin);
+        self.fieldFloat(args.pitchmax);
+        self.fieldFloat(args.fadeintime);
+        self.fieldDigit(args.evictiontype);
+        self.fieldDigit(args.selecttype);
         return true;
     }
     pub fn close(self: *EventConstruct) ?[*]u8 {
@@ -308,7 +479,10 @@ pub fn nextStep(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: []
             d.p += 2;
             d.setupString(&step.u.load.lib);
             d.copyString(&step.u.load.lib);
-            // (sound name list is parsed by the SDK into namelist; we keep lib.)
+            // The SDK splits the second field into namelist/namecount; we keep the
+            // library name and consume the sound list so iteration stays aligned.
+            var sounds: MSSStringC = .{};
+            d.setupString(&sounds);
         },
         .set_limits => {
             d.p += 2;
@@ -352,6 +526,7 @@ pub fn nextStep(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: []
             d.copyString(&step.u.control.position);
             d.setupString(&step.u.control.presetname);
             d.copyString(&step.u.control.presetname);
+            d.copyUChar(&step.u.control.loopcount);
             d.copyDigit(&step.u.control.type);
             d.copyFloat(&step.u.control.fadeouttime);
             d.copyDigit(&step.u.control.presetapplytype);

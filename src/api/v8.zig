@@ -158,15 +158,11 @@ pub fn AIL_WAV_marker_by_name(wav_image: ?*const anyopaque, name: ?[*:0]const u8
 }
 pub fn AIL_add_apply_environment_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: i32) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
-    _ = a1;
-    _ = a2;
-    return if (e.addBare(.apply_env)) 1 else 0;
+    return if (e.addApplyEnv(a1, a2)) 1 else 0;
 }
 pub fn AIL_add_cache_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
-    _ = a1;
-    _ = a2;
-    return if (e.addBare(.cache_sounds)) 1 else 0;
+    return if (e.addCacheSounds(.cache_sounds, a1, a2)) 1 else 0;
 }
 pub fn AIL_add_comment_event_step(event: ?*anyopaque, comment: ?[*:0]const u8) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(event orelse return 0));
@@ -175,63 +171,54 @@ pub fn AIL_add_comment_event_step(event: ?*anyopaque, comment: ?[*:0]const u8) c
 }
 pub fn AIL_add_control_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque, a6: i32, a7: f32, a8: i32, a9: i32) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    _ = a4;
-    _ = a5;
-    _ = a6;
-    _ = a7;
-    _ = a8;
-    _ = a9;
-    return if (e.addBare(.control_sounds)) 1 else 0;
+    // SDK order: labels, markerstart, markerend, position, presetname,
+    // presetapply(a6), fadeout(a7), loopcount(a8), type(a9).
+    const loop: u8 = @truncate(@as(u32, @bitCast(a8)));
+    return if (e.addControlSounds(a1, a2, a3, a4, a5, loop, a9, a7, a6)) 1 else 0;
 }
 pub fn AIL_add_persist_preset_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: i32) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    _ = a4;
-    return if (e.addBare(.persist)) 1 else 0;
+    return if (e.addPersist(a1, a2, a3, a4)) 1 else 0;
 }
 pub fn AIL_add_sound_limit_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
-    _ = a1;
-    _ = a2;
-    return if (e.addBare(.set_limits)) 1 else 0;
+    return if (e.addSoundLimit(a1, a2)) 1 else 0;
 }
 pub fn AIL_add_start_sound_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32, a4: ?*anyopaque, a5: ?*anyopaque, a6: ?*anyopaque, a7: ?*anyopaque, a8: ?*anyopaque, a9: ?*anyopaque, a10: u32, a11: i32, a12: i32, a13: i32, a14: i32, a15: i32, a16: ?*anyopaque, a17: f32, a18: f32, a19: f32, a20: f32, a21: f32, a22: i32, a23: i32) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    _ = a4;
-    _ = a5;
-    _ = a6;
-    _ = a7;
-    _ = a8;
-    _ = a9;
-    _ = a10;
-    _ = a11;
-    _ = a12;
-    _ = a13;
-    _ = a14;
-    _ = a15;
-    _ = a16;
-    _ = a17;
-    _ = a18;
-    _ = a19;
-    _ = a20;
-    _ = a21;
-    _ = a22;
-    _ = a23;
-    return if (e.addBare(.start_sound)) 1 else 0;
+    // SDK arg order: soundnames, presetname, presetisdynamic, eventname,
+    // startmarker, endmarker, statevar, varinit, labels, streaming, canload,
+    // delay, delaymax, priority, loopcount, startoffset, vol/pitch/fade, types.
+    const args = openmiles.event.StartSoundArgs{
+        .soundname = a1,
+        .presetname = a2,
+        .presetisdynamic = a3,
+        .eventname = a4,
+        .markerstart = a5,
+        .markerend = a6,
+        .statevar = a7,
+        .varinit = a8,
+        .labels = a9,
+        .stream = @bitCast(a10),
+        .canload = a11,
+        .delaymin = @truncate(@as(u32, @bitCast(a12))),
+        .delaymax = @truncate(@as(u32, @bitCast(a13))),
+        .priority = @truncate(@as(u32, @bitCast(a14))),
+        .loopcount = @truncate(@as(u32, @bitCast(a15))),
+        .startoffset = a16,
+        .volmin = a17,
+        .volmax = a18,
+        .pitchmin = a19,
+        .pitchmax = a20,
+        .fadeintime = a21,
+        .evictiontype = a22,
+        .selecttype = a23,
+    };
+    return if (e.addStartSound(args)) 1 else 0;
 }
 pub fn AIL_add_uncache_sounds_event_step(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
     const e: *EventConstruct = @ptrCast(@alignCast(a0 orelse return 0));
-    _ = a1;
-    _ = a2;
-    return if (e.addBare(.purge_sounds)) 1 else 0;
+    return if (e.addCacheSounds(.purge_sounds, a1, a2)) 1 else 0;
 }
 pub fn AIL_apply_environment_preset(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
