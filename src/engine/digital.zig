@@ -666,7 +666,7 @@ pub const Sample = struct {
     pub fn setAddress(self: *Sample, data: *anyopaque, size: u32) !void {
         const raw: []const u8 = @as([*]const u8, @ptrCast(data))[0..@intCast(size)];
         if (self.pcm_format) |fmt| {
-            const rate: u32 = if (self.target_rate) |r| @intFromFloat(r) else 22050;
+            const rate: u32 = if (self.target_rate) |r| root.satU32(r) else 22050;
             const wav = try buildWavFromPcm(self.driver.allocator, raw, fmt.channels, rate, fmt.bits);
             errdefer self.driver.allocator.free(wav);
             try self.loadFromOwnedMemory(wav);
@@ -703,7 +703,7 @@ pub const Sample = struct {
             // Tear down any prior decoder-based playback before switching modes.
             self.cleanupPlaybackState();
             const fmt = self.pcm_format orelse SamplePcmFormat{ .channels = 2, .bits = 16 };
-            const rate: u32 = if (self.target_rate) |r| @intFromFloat(r) else 22050;
+            const rate: u32 = if (self.target_rate) |r| root.satU32(r) else 22050;
             try self.stream_src.init(fmt.bits, fmt.channels, rate, streamEobBridge, self);
             errdefer self.stream_src.deinit();
 

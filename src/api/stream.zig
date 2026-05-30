@@ -119,7 +119,7 @@ pub export fn AIL_stream_status(s_opt: ?*Sample) callconv(.winapi) u32 {
 }
 pub export fn AIL_stream_playback_rate(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    return @intFromFloat(s.target_rate orelse 44100.0);
+    return openmiles.satI32(s.target_rate orelse 44100.0);
 }
 pub export fn AIL_stream_volume(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;

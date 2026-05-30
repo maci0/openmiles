@@ -471,9 +471,27 @@ const volume_to_gain_table: [128]f32 = blk: {
     break :blk table;
 };
 
+/// Saturating f32 -> i32 (NaN -> 0, out-of-range -> clamped). Guards the
+/// `@intFromFloat` panic when callers feed adversarial floats — including the
+/// i32 -> f32 -> i32 round trip where INT_MAX rounds up to 2^31 (out of range).
+pub fn satI32(v: f32) i32 {
+    if (std.math.isNan(v)) return 0;
+    if (v >= 2147483647.0) return std.math.maxInt(i32);
+    if (v <= -2147483648.0) return std.math.minInt(i32);
+    return @intFromFloat(v);
+}
+
+/// Saturating f32 -> u32 (NaN/negative -> 0, overflow -> clamped).
+pub fn satU32(v: f32) u32 {
+    if (!(v >= 0)) return 0; // false for NaN and negatives
+    if (v >= 4294967295.0) return std.math.maxInt(u32);
+    return @intFromFloat(v);
+}
+
 /// Convert a linear pan (-1.0 left .. +1.0 right) to MSS 0-127 range.
+/// Clamps the float first so NaN/huge inputs cannot panic `@intFromFloat`.
 pub fn panToMss(pan: f32) i32 {
-    return @min(127, @max(0, @as(i32, @intFromFloat((pan * 64.0) + 64.0))));
+    return satI32(@min(127.0, @max(0.0, (pan * 64.0) + 64.0)));
 }
 
 // --- Startup time ---

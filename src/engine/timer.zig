@@ -70,16 +70,26 @@ pub const Timer = struct {
         @atomicStore(u32, &self.user_data, data, .release);
     }
 
+    // Longest single sleep slice. The timer period can be set as high as
+    // ~71 minutes (maxInt(u32) us); sleeping that whole span in one call would
+    // make stop() block on join until it elapsed. Wake at least this often to
+    // re-check is_running so stop() stays responsive.
+    const max_slice_ns: i128 = 50 * std.time.ns_per_ms;
+
     fn run(self: *Timer) void {
         var next_ns: i128 = std.Io.Timestamp.now(io, .awake).nanoseconds;
         while (@atomicLoad(bool, &self.is_running, .acquire)) {
             self.callback(self.getUserData());
             const period_ns: i128 = @as(i128, self.getPeriodUs()) * std.time.ns_per_us;
             next_ns += period_ns;
-            const now = std.Io.Timestamp.now(io, .awake).nanoseconds;
-            const remaining = next_ns - now;
-            if (remaining > 0) {
-                const dur = std.Io.Duration.fromNanoseconds(@intCast(remaining));
+            // Sleep toward next_ns in bounded slices, bailing out promptly once
+            // stop() clears is_running.
+            while (@atomicLoad(bool, &self.is_running, .acquire)) {
+                const now = std.Io.Timestamp.now(io, .awake).nanoseconds;
+                const remaining = next_ns - now;
+                if (remaining <= 0) break;
+                const slice = @min(remaining, max_slice_ns);
+                const dur = std.Io.Duration.fromNanoseconds(@intCast(slice));
                 io.sleep(dur, .awake) catch {};
             }
         }

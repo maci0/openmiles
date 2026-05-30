@@ -145,7 +145,7 @@ pub export fn AIL_set_3D_sample_loop_count(s: ?*anyopaque, count: i32) callconv(
 pub export fn AIL_3D_sample_playback_rate(s: ?*anyopaque) callconv(.winapi) i32 {
     const p = s orelse return 0;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
-    return @intFromFloat(sample.target_rate orelse 44100.0);
+    return openmiles.satI32(sample.target_rate orelse 44100.0);
 }
 pub export fn AIL_set_3D_sample_playback_rate(s: ?*anyopaque, rate: i32) callconv(.winapi) void {
     const p = s orelse return;
@@ -241,7 +241,7 @@ pub export fn AIL_3D_sample_cone(s: ?*anyopaque, inner_angle: ?*f32, outer_angle
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     if (inner_angle) |a| a.* = sample.cone_inner_rad / openmiles.deg2rad;
     if (outer_angle) |a| a.* = sample.cone_outer_rad / openmiles.deg2rad;
-    if (outer_volume) |a| a.* = @intFromFloat(sample.cone_outer_volume * 127.0 + 0.5);
+    if (outer_volume) |a| a.* = openmiles.satI32(sample.cone_outer_volume * 127.0 + 0.5);
 }
 pub export fn AIL_set_3D_sample_effects_level(s: ?*anyopaque, effects_level: f32) callconv(.winapi) void {
     const p = s orelse return;
@@ -382,7 +382,7 @@ pub export fn AIL_3D_sample_attribute(s: ?*anyopaque, name: [*:0]const u8, val: 
         v.* = sample.cone_outer_volume;
     } else if (std.mem.eql(u8, n, "Frequency") or std.mem.eql(u8, n, "Playback rate")) {
         const v: *i32 = @ptrCast(@alignCast(val));
-        v.* = @intFromFloat(sample.target_rate orelse 44100.0);
+        v.* = openmiles.satI32(sample.target_rate orelse 44100.0);
     } else if (std.mem.eql(u8, n, "Volume")) {
         const v: *i32 = @ptrCast(@alignCast(val));
         v.* = sample.original_volume;

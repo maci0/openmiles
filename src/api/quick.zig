@@ -132,8 +132,12 @@ pub export fn AIL_quick_set_ms_position(s_opt: ?*Sample, ms: i32) callconv(.wina
 }
 pub export fn AIL_quick_halt(s_opt: ?*Sample) callconv(.winapi) void {
     const s = s_opt orelse return;
-    s.stop();
-    s.deinit();
+    log("AIL_quick_halt(s={*})\n", .{s});
+    // Real MSS AIL_quick_halt calls AIL_end_sample (stop + mark done) and then
+    // clears the HAUDIO's handle reference — it does NOT free the sample. The
+    // backing handle stays valid so the title can reload/replay it. Freeing
+    // here would dangle every later AIL_quick_* call on the same handle.
+    s.end();
 }
 pub export fn AIL_quick_set_reverb(s_opt: ?*Sample, room_type: f32, level: f32, reflect_time: f32) callconv(.winapi) void {
     const s = s_opt orelse return;

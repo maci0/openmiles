@@ -234,11 +234,11 @@ pub export fn AIL_controller_value(seq_opt: ?*Sequence, channel: i32, controller
         0 => return tsf_mod.tsf_channel_get_preset_bank(sf, channel),
         7, 11 => {
             const v = tsf_mod.tsf_channel_get_volume(sf, channel);
-            return @intFromFloat(v * 127.0);
+            return openmiles.satI32(v * 127.0);
         },
         10 => {
             const p = tsf_mod.tsf_channel_get_pan(sf, channel);
-            return @min(127, @max(0, @as(i32, @intFromFloat((p + 1.0) * 64.0))));
+            return openmiles.satI32(@min(127.0, @max(0.0, (p + 1.0) * 64.0)));
         },
         else => return 0,
     }
