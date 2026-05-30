@@ -1977,3 +1977,16 @@ test "v9 update_sample_3D_position dead-reckons by velocity" {
     const p2 = openmiles.ma.ma_sound_get_position(&s.sound);
     try testing.expect(p2.x > 9.0 and p2.x < 11.0);
 }
+
+test "v9 system-state push/pop tracks depth and restores volume" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    drv.setMasterVolume(1.0);
+    try testing.expectEqual(@as(u8, 0), api_v9.AIL_system_state_level(drv));
+    api_v9.AIL_push_system_state(drv, 0, 0);
+    try testing.expectEqual(@as(u8, 1), api_v9.AIL_system_state_level(drv));
+    drv.setMasterVolume(0.25); // change while pushed
+    api_v9.AIL_pop_system_state(drv, 0); // restores 1.0
+    try testing.expectEqual(@as(u8, 0), api_v9.AIL_system_state_level(drv));
+    try testing.expect(@abs(drv.getMasterVolume() - 1.0) < 0.001);
+}

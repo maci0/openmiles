@@ -272,17 +272,21 @@ pub fn AIL_set_sample_loop_samples(s_opt: ?*Sample, loop_start_samples: i32, loo
 
 // --- System-state stack ---
 pub fn AIL_push_system_state(dig: ?*DigitalDriver, flags: u32, crossfade_ms: i32) callconv(.winapi) void {
-    _ = dig;
+    const d = dig orelse return;
     _ = flags;
     _ = crossfade_ms;
+    // Save the current driver state so it can be restored by pop. (We snapshot
+    // the master volume; the level counter mirrors the real push/pop depth.)
+    d.system_state_stack.append(d.allocator, d.getMasterVolume()) catch {};
 }
 pub fn AIL_pop_system_state(dig: ?*DigitalDriver, crossfade_ms: i32) callconv(.winapi) void {
-    _ = dig;
+    const d = dig orelse return;
     _ = crossfade_ms;
+    if (d.system_state_stack.pop()) |vol| d.setMasterVolume(vol);
 }
 pub fn AIL_system_state_level(dig: ?*DigitalDriver) callconv(.winapi) u8 {
-    _ = dig;
-    return 0;
+    const d = dig orelse return 0;
+    return @intCast(@min(d.system_state_stack.items.len, 255));
 }
 pub fn AIL_set_async_callbacks(read: ?*anyopaque, cancel: ?*anyopaque, status: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque, a6: ?*anyopaque) callconv(.winapi) void {
     _ = read;

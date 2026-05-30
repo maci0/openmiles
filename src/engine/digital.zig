@@ -39,6 +39,8 @@ pub const DigitalDriver = struct {
     providers: std.ArrayListUnmanaged(*root.Provider),
     timers: std.ArrayListUnmanaged(*root.Timer),
     samples: std.ArrayListUnmanaged(*Sample),
+    // v9 system-state stack: saved master-volume per push level.
+    system_state_stack: std.ArrayListUnmanaged(f32) = .empty,
     samples_3d: std.ArrayListUnmanaged(*Sample3D) = .empty,
     rolloff_factor: f32 = 1.0,
     doppler_factor: f32 = 1.0,
@@ -107,6 +109,7 @@ pub const DigitalDriver = struct {
     pub fn deinit(self: *DigitalDriver) void {
         if (root.last_digital_driver == self) root.last_digital_driver = null;
         root.unregisterDriver(self);
+        self.system_state_stack.deinit(self.allocator);
         for (self.providers.items) |p| {
             p.deinit();
         }
