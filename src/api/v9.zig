@@ -291,24 +291,35 @@ pub fn AIL_set_async_callbacks(read: ?*anyopaque, cancel: ?*anyopaque, status: ?
 }
 
 // --- Synchronized sample groups ---
+// Sample groups act on every HSAMPLE whose id matches; the matched samples are
+// then re-tagged with `set_to_id` so they can be controlled as a new group.
+const GroupOp = enum { start, stop, unpause };
+fn sampleGroup(dig: ?*DigitalDriver, match_id: i32, set_to_id: i32, op: GroupOp) void {
+    const d = dig orelse return;
+    for (d.samples.items) |s| {
+        if (s.v9_id != match_id) continue;
+        switch (op) {
+            .start => s.start(),
+            .stop => s.stop(),
+            .unpause => s.resumePlayback(),
+        }
+        s.v9_id = set_to_id;
+    }
+}
 pub fn AIL_start_sample_group(dig: ?*DigitalDriver, start_id: i32, set_to_id: i32) callconv(.winapi) void {
-    _ = dig;
-    _ = start_id;
-    _ = set_to_id;
+    sampleGroup(dig, start_id, set_to_id, .start);
 }
 pub fn AIL_stop_sample_group(dig: ?*DigitalDriver, stop_id: i32, set_to_id: i32) callconv(.winapi) void {
-    _ = dig;
-    _ = stop_id;
-    _ = set_to_id;
+    sampleGroup(dig, stop_id, set_to_id, .stop);
 }
 pub fn AIL_resume_sample_group(dig: ?*DigitalDriver, resume_id: i32, set_to_id: i32) callconv(.winapi) void {
-    _ = dig;
-    _ = resume_id;
-    _ = set_to_id;
+    sampleGroup(dig, resume_id, set_to_id, .unpause);
 }
 pub fn AIL_end_sample_group(dig: ?*DigitalDriver, end_id: i32) callconv(.winapi) void {
-    _ = dig;
-    _ = end_id;
+    const d = dig orelse return;
+    for (d.samples.items) |s| {
+        if (s.v9_id == end_id) s.end();
+    }
 }
 
 // --- 3D falloff graphs / position segments ---

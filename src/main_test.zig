@@ -1934,3 +1934,25 @@ test "v8 SoundBank rejects non-bank and truncated data" {
     std.mem.writeInt(u32, img[52..56], 1000, .little);
     try testing.expectError(error.BadAssetTable, openmiles.soundbank.loadFromMemory(testing.allocator, "x", img[0..sz]));
 }
+
+test "v9 sample groups operate on samples by id" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const a = try openmiles.Sample.init(drv);
+    defer a.deinit();
+    const b = try openmiles.Sample.init(drv);
+    defer b.deinit();
+    const c = try openmiles.Sample.init(drv);
+    defer c.deinit();
+    api_v9.AIL_set_sample_id(a, 5);
+    api_v9.AIL_set_sample_id(b, 5);
+    api_v9.AIL_set_sample_id(c, 7);
+    // Start group 5, re-tagging matched samples to 9.
+    api_v9.AIL_start_sample_group(drv, 5, 9);
+    try testing.expectEqual(@as(i32, 9), api_v9.AIL_sample_id(a));
+    try testing.expectEqual(@as(i32, 9), api_v9.AIL_sample_id(b));
+    try testing.expectEqual(@as(i32, 7), api_v9.AIL_sample_id(c)); // untouched
+    // A non-matching group id is a no-op.
+    api_v9.AIL_stop_sample_group(drv, 1234, 0);
+    try testing.expectEqual(@as(i32, 9), api_v9.AIL_sample_id(a));
+}
