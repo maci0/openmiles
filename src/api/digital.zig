@@ -180,6 +180,12 @@ pub fn AIL_init_sample(s_opt: ?*Sample) callconv(.winapi) void {
     log("AIL_init_sample(s={*})\n", .{s});
     s.reset();
 }
+// v7 carried two extra (now-unused) slots: void AIL_init_sample(HSAMPLE, S32, S32) @12.
+pub fn AIL_init_sample_v7(s_opt: ?*Sample, a1: i32, a2: i32) callconv(.winapi) void {
+    _ = a1;
+    _ = a2;
+    AIL_init_sample(s_opt);
+}
 // v8+ gained a `format` argument: S32 AIL_init_sample(HSAMPLE S, S32 format) @8.
 // Exported as _AIL_init_sample@8 for v8/v9 via a symbol override.
 pub fn AIL_init_sample_v8(s_opt: ?*Sample, format: i32) callconv(.winapi) i32 {
@@ -796,7 +802,10 @@ comptime {
             .{ .name = "AIL_digital_master_volume", .stack_size = 4 },
             .{ .name = "AIL_allocate_sample_handle", .stack_size = 4 },
             .{ .name = "AIL_release_sample_handle", .stack_size = 4 },
-            .{ .name = "AIL_init_sample", .stack_size = 4, .ver_max = 70 },
+            // init_sample arity by era: v3-v6 @4 (S), v7 @12 (S + 2 extra slots),
+            // v8+ @8 (S, format).
+            .{ .name = "AIL_init_sample", .stack_size = 4, .ver_max = 66 },
+            .{ .name = "AIL_init_sample", .stack_size = 12, .ver = 70, .ver_max = 70, .symbol = "AIL_init_sample_v7" },
             .{ .name = "AIL_init_sample", .stack_size = 8, .ver = 80, .symbol = "AIL_init_sample_v8" },
             .{ .name = "AIL_set_named_sample_file", .stack_size = 20 },
             .{ .name = "AIL_set_sample_file", .stack_size = 12 },
@@ -1089,6 +1098,7 @@ comptime {
             // v9-only: v7/v8 export MIX_RIB_MAIN@8 (a different ASI entry arity);
             // v4-v6 and v7/v8 do not export MSS_alloc_info/MSS_free_info at all.
             .{ .name = "MIX_RIB_MAIN", .stack_size = 20, .ver = 90 },
+            .{ .name = "MIX_RIB_MAIN", .stack_size = 8, .ver = 70, .ver_max = 80, .symbol = "MIX_RIB_MAIN_v7" },
             .{ .name = "MSS_alloc_info", .stack_size = 16, .ver = 90 },
             .{ .name = "MSS_free_info", .stack_size = 16, .ver = 90 },
             .{ .name = "RIB_provider_system_data", .stack_size = 8, .ver = 40 },
@@ -1150,7 +1160,9 @@ comptime {
             .{ .name = "AIL_create_wave_synthesizer", .stack_size = 16 },
             .{ .name = "AIL_destroy_wave_synthesizer", .stack_size = 4 },
             .{ .name = "AIL_waveOutClose", .stack_size = 4 },
-            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 12, .ver = 40 },
+            // EOB ASI reset: v7 @8 (HSAMPLE, buff_num); v8+ added new_stream_position.
+            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 12, .ver = 80 },
+            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 8, .ver = 70, .ver_max = 70, .symbol = "AIL_request_EOB_ASI_reset_v7" },
             // DLS utilities
             .{ .name = "AIL_compress_DLS", .stack_size = 20 },
             .{ .name = "AIL_extract_DLS", .stack_size = 28 },
@@ -1231,17 +1243,23 @@ comptime {
             .{ .name = "AIL_background_CPU_percent", .stack_size = 0, .ver = 70 },
             .{ .name = "AIL_sample_processor", .stack_size = 8, .ver = 70 },
             .{ .name = "AIL_digital_driver_processor", .stack_size = 8, .ver = 70 },
-            .{ .name = "AIL_sample_stage_attribute", .stack_size = 12, .ver = 70 },
-            .{ .name = "AIL_set_sample_stage_preference", .stack_size = 12, .ver = 70 },
-            .{ .name = "AIL_enumerate_sample_stage_attributes", .stack_size = 12, .ver = 70 },
-            .{ .name = "AIL_sample_channel_levels", .stack_size = 20, .ver = 70 },
-            .{ .name = "AIL_set_sample_channel_levels", .stack_size = 20, .ver = 70 },
+            // DSP stage attributes were a v7-only API (@16, with a stage index).
+            .{ .name = "AIL_sample_stage_attribute", .stack_size = 16, .ver = 70, .ver_max = 70, .symbol = "AIL_sample_stage_attribute_v7" },
+            .{ .name = "AIL_set_sample_stage_preference", .stack_size = 16, .ver = 70, .ver_max = 70, .symbol = "AIL_set_sample_stage_preference_v7" },
+            .{ .name = "AIL_enumerate_sample_stage_attributes", .stack_size = 16, .ver = 70, .ver_max = 70, .symbol = "AIL_enumerate_sample_stage_attributes_v7" },
+            // channel levels: v7 @8/@12 lacked the src/dst matrices v8 added (@20).
+            .{ .name = "AIL_sample_channel_levels", .stack_size = 20, .ver = 80 },
+            .{ .name = "AIL_sample_channel_levels", .stack_size = 8, .ver = 70, .ver_max = 70, .symbol = "AIL_sample_channel_levels_v7" },
+            .{ .name = "AIL_set_sample_channel_levels", .stack_size = 20, .ver = 80 },
+            .{ .name = "AIL_set_sample_channel_levels", .stack_size = 12, .ver = 70, .ver_max = 70, .symbol = "AIL_set_sample_channel_levels_v7" },
             .{ .name = "AIL_listener_relative_receiver_array", .stack_size = 8, .ver = 70 },
             .{ .name = "AIL_set_listener_relative_receiver_array", .stack_size = 12, .ver = 70 },
             .{ .name = "AIL_speaker_configuration", .stack_size = 20, .ver = 70 },
             .{ .name = "AIL_set_speaker_configuration", .stack_size = 16, .ver = 70 },
             .{ .name = "AIL_speaker_reverb_levels", .stack_size = 16, .ver = 70 },
-            .{ .name = "AIL_set_speaker_reverb_levels", .stack_size = 20, .ver = 70 },
+            // speaker reverb levels: v7 @16 lacked the per-speaker index array (v8 @20).
+            .{ .name = "AIL_set_speaker_reverb_levels", .stack_size = 20, .ver = 80 },
+            .{ .name = "AIL_set_speaker_reverb_levels", .stack_size = 16, .ver = 70, .ver_max = 70, .symbol = "AIL_set_speaker_reverb_levels_v7" },
             .{ .name = "AIL_calculate_3D_channel_levels", .stack_size = 56, .ver = 70, .ver_max = 70, .symbol = "AIL_calculate_3D_channel_levels_v7" },
             .{ .name = "AIL_calculate_3D_channel_levels", .stack_size = 68, .ver = 80 },
             .{ .name = "AIL_digital_output_filter", .stack_size = 4, .ver = 70 },

@@ -189,6 +189,18 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_v7.AIL_sample_low_pass_cut_off_v7(hs);
     api_v7.AIL_set_sample_low_pass_cut_off_v7(hs, rf);
     api_v7.AIL_quick_set_low_pass_cut_off_v7(hs, rf);
+    api_digital.AIL_init_sample_v7(hs, ri, ri);
+    api_v7.AIL_sample_stage_attribute_v7(hs, ri, rstr, scp);
+    api_v7.AIL_set_sample_stage_preference_v7(hs, ri, rstr, scp);
+    {
+        var sp: ?*anyopaque = null;
+        _ = api_v7.AIL_enumerate_sample_stage_attributes_v7(hs, ri, &sp, scp);
+    }
+    api_v7.AIL_sample_channel_levels_v7(hs, &fo);
+    api_v7.AIL_set_sample_channel_levels_v7(hs, &fo, ri);
+    api_v7.AIL_set_speaker_reverb_levels_v7(hd, &fo, &fo, ri);
+    api_rib.AIL_request_EOB_ASI_reset_v7(hs, ru);
+    _ = api_rib.MIX_RIB_MAIN_v7(prov, ru);
     _ = api_digital.AIL_digital_master_volume(hd);
     _ = api_v7.AIL_digital_master_volume_level(hd);
     _ = api_v7.AIL_digital_output_filter(hd);

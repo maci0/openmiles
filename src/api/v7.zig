@@ -560,3 +560,34 @@ pub fn AIL_set_sample_low_pass_cut_off_v7(s_opt: ?*Sample, cut_off: f32) callcon
 pub fn AIL_quick_set_low_pass_cut_off_v7(audio: ?*Sample, cut_off: f32) callconv(.winapi) void {
     AIL_quick_set_low_pass_cut_off(audio, 0, cut_off);
 }
+
+// --- v7-only ABI variants (arities that differ from v8/v9) -------------------
+// These match the exact stdcall decoration the 7.0b mss32.dll exports. Where v7
+// carried extra parameters later dropped (the DSP stage index, the per-call
+// channel-level source/dest matrices), the variant accepts them for ABI fidelity
+// and forwards the meaningful arguments to the v8/v9 implementation.
+
+// stage DSP attributes were v7-only and carried a stage index as the second arg.
+pub fn AIL_sample_stage_attribute_v7(s_opt: ?*Sample, stage_index: i32, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
+    _ = stage_index;
+    AIL_sample_stage_attribute(s_opt, name, val);
+}
+pub fn AIL_set_sample_stage_preference_v7(s_opt: ?*Sample, stage_index: i32, name: [*:0]const u8, val: *const anyopaque) callconv(.winapi) void {
+    _ = stage_index;
+    AIL_set_sample_stage_preference(s_opt, name, val);
+}
+pub fn AIL_enumerate_sample_stage_attributes_v7(s_opt: ?*Sample, stage_index: i32, next: *?*anyopaque, dest: *anyopaque) callconv(.winapi) i32 {
+    _ = stage_index;
+    return AIL_enumerate_sample_stage_attributes(s_opt, next, dest);
+}
+// channel levels: v7 @8/@12 lacked the src/dst speaker-matrix pointers v8 added.
+pub fn AIL_sample_channel_levels_v7(s_opt: ?*Sample, levels: ?*f32) callconv(.winapi) void {
+    AIL_sample_channel_levels(s_opt, null, null, levels, 0);
+}
+pub fn AIL_set_sample_channel_levels_v7(s_opt: ?*Sample, levels: ?*const f32, n_levels: i32) callconv(.winapi) void {
+    AIL_set_sample_channel_levels(s_opt, null, null, levels, n_levels);
+}
+// speaker reverb levels: v7 @16 lacked the per-speaker index array v8 added.
+pub fn AIL_set_speaker_reverb_levels_v7(dig_opt: ?*DigitalDriver, wet_array: ?*f32, dry_array: ?*f32, n_levels: i32) callconv(.winapi) void {
+    AIL_set_speaker_reverb_levels(dig_opt, wet_array, dry_array, null, n_levels);
+}
