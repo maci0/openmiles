@@ -233,8 +233,9 @@ pub fn AIL_install_bus_compressor(dig: ?*DigitalDriver, bus_index: i32, filter_s
 
 // --- Mixer status / scheduling / per-sample misc ---
 pub fn AIL_digital_mixed_samples(dig: ?*DigitalDriver) callconv(.winapi) u64 {
-    _ = dig;
-    return 0;
+    const d = dig orelse return 0;
+    // Total sample frames the engine has mixed since startup (its PCM clock).
+    return openmiles.ma.ma_engine_get_time_in_pcm_frames(&d.engine);
 }
 pub fn AIL_register_mix_callback(dig: ?*DigitalDriver, mixcb: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     _ = dig;
@@ -251,12 +252,15 @@ pub fn AIL_sample_mixed_ms(s_opt: ?*Sample) callconv(.winapi) u32 {
     return if (cur > 0) @intCast(cur) else 0;
 }
 pub fn AIL_sample_schedule_time(s_opt: ?*Sample) callconv(.winapi) u64 {
-    _ = s_opt;
-    return 0;
+    const s = s_opt orelse return 0;
+    return s.v9_schedule_time;
 }
 pub fn AIL_schedule_start_sample(s_opt: ?*Sample, mix_time_to_start: u64) callconv(.winapi) void {
     const s = s_opt orelse return;
-    _ = mix_time_to_start;
+    // Begin playback at an absolute mixer time (engine PCM clock), so groups of
+    // samples can be started sample-accurately.
+    s.v9_schedule_time = mix_time_to_start;
+    if (s.is_initialized) openmiles.ma.ma_sound_set_start_time_in_pcm_frames(&s.sound, mix_time_to_start);
     s.start();
 }
 pub fn AIL_set_sample_loop_samples(s_opt: ?*Sample, loop_start_samples: i32, loop_end_samples: i32) callconv(.winapi) i32 {

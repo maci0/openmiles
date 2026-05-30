@@ -342,6 +342,7 @@ pub const Sample = struct {
     v9_bus: i32 = 0,
     v9_level_mask: u8 = 0xFF,
     v9_spread: f32 = 0.0,
+    v9_schedule_time: u64 = 0,
 
     fn eosCallbackBridge(pUserData: ?*anyopaque, pSound: ?*ma.ma_sound) callconv(.c) void {
         _ = pSound;
