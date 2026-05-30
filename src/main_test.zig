@@ -2244,3 +2244,31 @@ test "v8 playback delay + MMX available" {
     try testing.expectEqual(@as(i32, 250), api_v8b.AIL_sample_playback_delay(s));
     try testing.expectEqual(@as(i32, 1), dg.AIL_MMX_available());
 }
+
+const api_v7b = @import("api/v7.zig");
+test "MP3 inspector parses real Layer III frames" {
+    // Two MPEG-1 Layer III frames, 128 kbps, 44100 Hz, stereo (header FF FB 90 00).
+    // frame size = 144*128000/44100 = 417 bytes each.
+    const frame_size = 417;
+    var img: [frame_size * 2]u8 = [_]u8{0} ** (frame_size * 2);
+    inline for (.{ 0, frame_size }) |base| {
+        img[base + 0] = 0xFF;
+        img[base + 1] = 0xFB;
+        img[base + 2] = 0x90;
+        img[base + 3] = 0x00;
+    }
+    var es: openmiles.mp3.MP3_INFO = undefined;
+    try testing.expectEqual(@as(i32, 1), api_v7b.AIL_inspect_MP3(&es, &img, img.len));
+    // First frame.
+    try testing.expectEqual(@as(i32, 1), api_v7b.AIL_enumerate_MP3_frames(&es));
+    try testing.expectEqual(@as(i32, 44100), es.sample_rate);
+    try testing.expectEqual(@as(i32, 128000), es.bit_rate);
+    try testing.expectEqual(@as(i32, 2), es.channels_per_sample);
+    try testing.expectEqual(@as(i32, 1152), es.samples_per_frame);
+    try testing.expectEqual(@as(i32, 0), es.byte_offset);
+    // Second frame at offset 417.
+    try testing.expectEqual(@as(i32, 1), api_v7b.AIL_enumerate_MP3_frames(&es));
+    try testing.expectEqual(@as(i32, frame_size), es.byte_offset);
+    // End.
+    try testing.expectEqual(@as(i32, 0), api_v7b.AIL_enumerate_MP3_frames(&es));
+}

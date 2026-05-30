@@ -501,14 +501,21 @@ pub fn AIL_enumerate_output_filter_sample_attributes(lib: ?*anyopaque, next: *?*
     return 0;
 }
 pub fn AIL_inspect_MP3(inspection_state: ?*anyopaque, mp3_image: ?*anyopaque, image_size: i32) callconv(.winapi) i32 {
-    _ = inspection_state;
-    _ = mp3_image;
-    _ = image_size;
-    return 0;
+    const es: *openmiles.mp3.MP3_INFO = @ptrCast(@alignCast(inspection_state orelse return 0));
+    const img: [*]u8 = @ptrCast(mp3_image orelse {
+        es.* = .{};
+        return 0;
+    });
+    if (image_size <= 0) {
+        es.* = .{};
+        return 0;
+    }
+    openmiles.mp3.inspect(es, img, image_size);
+    return 1;
 }
 pub fn AIL_enumerate_MP3_frames(inspection_state: ?*anyopaque) callconv(.winapi) i32 {
-    _ = inspection_state;
-    return 0;
+    const es: *openmiles.mp3.MP3_INFO = @ptrCast(@alignCast(inspection_state orelse return 0));
+    return openmiles.mp3.enumerateFrames(es);
 }
 pub fn RIB_load_static_provider_library(main_fn: ?*anyopaque, description: [*:0]const u8) callconv(.winapi) ?*anyopaque {
     _ = main_fn;
