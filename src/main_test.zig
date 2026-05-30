@@ -2171,3 +2171,23 @@ test "v9 bus compressor installs and reduces peaks" {
     try testing.expect(node.env < 1.0); // gain reduced
     try testing.expect(out_buf[0] < 0.9); // output attenuated
 }
+
+var mix_cb_hits: u32 = 0;
+fn testMixCb(_: ?*openmiles.DigitalDriver) callconv(.winapi) void {
+    mix_cb_hits += 1;
+}
+test "v9 register_mix_callback fires per engine mix" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    mix_cb_hits = 0;
+    const prev = api_v9.AIL_register_mix_callback(drv, @ptrCast(@constCast(&testMixCb)));
+    try testing.expect(prev == null); // no previous callback
+    // The engine fires mixDispatch per mixed block on a real device; invoke it
+    // directly here (noDevice test mode) to confirm it routes to the callback.
+    openmiles.DigitalDriver.mixDispatch(@ptrCast(drv), null, 0);
+    openmiles.DigitalDriver.mixDispatch(@ptrCast(drv), null, 0);
+    try testing.expectEqual(@as(u32, 2), mix_cb_hits);
+    // Unregister; returns our callback as the previous one.
+    const back = api_v9.AIL_register_mix_callback(drv, null);
+    try testing.expect(back != null);
+}

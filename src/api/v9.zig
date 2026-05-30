@@ -240,10 +240,12 @@ pub fn AIL_digital_mixed_samples(dig: ?*DigitalDriver) callconv(.winapi) u64 {
     // Total sample frames the engine has mixed since startup (its PCM clock).
     return openmiles.ma.ma_engine_get_time_in_pcm_frames(&d.engine);
 }
+const AilMixerCb = *const fn (?*DigitalDriver) callconv(.winapi) void;
 pub fn AIL_register_mix_callback(dig: ?*DigitalDriver, mixcb: ?*anyopaque) callconv(.winapi) ?*anyopaque {
-    _ = dig;
-    _ = mixcb;
-    return null;
+    const d = dig orelse return null;
+    const prev = d.mix_callback;
+    d.mix_callback = if (mixcb) |p| @as(AilMixerCb, @ptrCast(@alignCast(p))) else null;
+    return if (prev) |p| @constCast(@ptrCast(p)) else null;
 }
 pub fn AIL_end_fade_sample(s_opt: ?*Sample) callconv(.winapi) void {
     const s = s_opt orelse return;

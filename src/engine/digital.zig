@@ -204,6 +204,8 @@ pub const DigitalDriver = struct {
     system_state_stack: std.ArrayListUnmanaged(f32) = .empty,
     // v9 bus mixer: submix groups samples can be routed to.
     buses: std.ArrayListUnmanaged(*MixBus) = .empty,
+    // Per-mix callback (AILMIXERCB) invoked from the engine's process hook.
+    mix_callback: ?*const fn (?*DigitalDriver) callconv(.winapi) void = null,
     samples_3d: std.ArrayListUnmanaged(*Sample3D) = .empty,
     rolloff_factor: f32 = 1.0,
     doppler_factor: f32 = 1.0,
@@ -247,6 +249,8 @@ pub const DigitalDriver = struct {
         config.channels = channels;
         if (frequency == 0) config.sampleRate = 44100;
         if (channels == 0) config.channels = 2;
+        config.onProcess = &mixDispatch; // drives AIL_register_mix_callback
+        config.pProcessUserData = self;
         const result = ma.ma_engine_init(&config, &self.engine);
         if (result != ma.MA_SUCCESS) {
             log("ma_engine_init failed: {d}\n", .{result});
@@ -267,6 +271,14 @@ pub const DigitalDriver = struct {
         root.last_digital_driver = self;
         root.registerDriver(self);
         return self;
+    }
+
+    /// Engine onProcess hook: fires once per mixed block on the audio thread.
+    pub fn mixDispatch(user: ?*anyopaque, frames: [*c]f32, frame_count: u64) callconv(.c) void {
+        _ = frames;
+        _ = frame_count;
+        const self: *DigitalDriver = @ptrCast(@alignCast(user orelse return));
+        if (self.mix_callback) |cb| cb(self);
     }
 
     /// Allocate a new mixer bus (a miniaudio sound group) samples can route to.
