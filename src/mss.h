@@ -235,8 +235,8 @@ void        MSS_CALLBACK AIL_close_ASI_provider(HPROVIDER provider);
 void*       MSS_CALLBACK AIL_ASI_provider_attribute(HPROVIDER provider, char const* name);
 
 // Compression API
-S32         MSS_CALLBACK AIL_compress_ASI(HPROVIDER provider, char const* filename, char const* out_filename, U32 flags);
-S32         MSS_CALLBACK AIL_decompress_ASI(HPROVIDER provider, char const* filename, char const* out_filename, U32 flags);
+S32         MSS_CALLBACK AIL_compress_ASI(AILSOUNDINFO const* info, char const* filename_ext, void** outdata, U32* outsize, AILLENGTHYCB callback);
+S32         MSS_CALLBACK AIL_decompress_ASI(void const* indata, U32 insize, char const* filename_ext, void** wav, U32* wavsize, AILLENGTHYCB callback);
 
 // Memory
 void*      MSS_CALLBACK AIL_mem_alloc_lock(U32 size);

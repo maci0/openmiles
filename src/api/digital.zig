@@ -836,8 +836,8 @@ comptime {
             .{ .name = "AIL_open_ASI_provider", .stack_size = 8, .ver = 40 },
             .{ .name = "AIL_close_ASI_provider", .stack_size = 4, .ver = 40 },
             .{ .name = "AIL_ASI_provider_attribute", .stack_size = 8, .ver = 40 },
-            .{ .name = "AIL_compress_ASI", .stack_size = 16, .ver = 40 },
-            .{ .name = "AIL_decompress_ASI", .stack_size = 16, .ver = 40 },
+            .{ .name = "AIL_compress_ASI", .stack_size = 20, .ver = 40 },
+            .{ .name = "AIL_decompress_ASI", .stack_size = 24, .ver = 40 },
             .{ .name = "AIL_mem_alloc_lock", .stack_size = 4, .ver = 40 },
             .{ .name = "AIL_mem_free_lock", .stack_size = 4, .ver = 40 },
             // 3D Sample control

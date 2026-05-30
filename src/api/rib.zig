@@ -288,71 +288,40 @@ pub export fn AIL_request_EOB_ASI_reset(s_opt: ?*Sample, flags: u32) callconv(.w
         s.is_done = false;
     }
 }
-/// AIL_compress_ASI(provider, filename, out_filename, flags)
-/// Compress an input audio file to an IMA-ADPCM WAV (~4:1). OpenMiles bundles
-/// only decoders for perceptual codecs (MP3/Vorbis) via miniaudio, so ADPCM —
-/// the encoder we do have (see AIL_compress_ADPCM) — is the faithful compressed
-/// output here. Symmetric with AIL_decompress_ASI. Returns 1 on success.
-pub export fn AIL_compress_ASI(provider_opt: ?*Provider, filename: [*:0]const u8, out_filename: [*:0]const u8, flags: u32) callconv(.winapi) i32 {
-    const provider = provider_opt orelse return 0;
-    log("AIL_compress_ASI(provider={*}, filename={s}, out_filename={s}, flags={d})\n", .{ provider, filename, out_filename, flags });
-
-    var decoder: openmiles.ma.ma_decoder = undefined;
-    var config = openmiles.ma.ma_decoder_config_init(openmiles.ma.ma_format_s16, 2, 44100);
-    if (openmiles.ma.ma_decoder_init_file(filename, &config, &decoder) != openmiles.ma.MA_SUCCESS) {
-        openmiles.setLastError("AIL_compress_ASI: failed to open input");
-        return 0;
-    }
-    defer _ = openmiles.ma.ma_decoder_uninit(&decoder);
-
-    var all_pcm: std.ArrayListUnmanaged(u8) = .empty;
-    defer all_pcm.deinit(openmiles.global_allocator);
-    {
-        var total_frames: u64 = 0;
-        _ = openmiles.ma.ma_decoder_get_length_in_pcm_frames(&decoder, &total_frames);
-        if (total_frames > 0) {
-            all_pcm.ensureTotalCapacity(openmiles.global_allocator, @intCast(total_frames * 4)) catch {};
-        }
-    }
-    var chunk_buf: [4096 * 4]u8 = undefined; // 4096 frames × 4 bytes (s16 stereo)
-    while (true) {
-        var fr: u64 = 0;
-        _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, &chunk_buf, 4096, &fr);
-        if (fr == 0) break;
-        all_pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..@intCast(fr * 4)]) catch break;
-    }
-    if (all_pcm.items.len < 4) return 0;
-
-    // Copy bytes into a properly i16-aligned buffer before ADPCM encoding.
-    const frame_count = all_pcm.items.len / 4; // s16 stereo → 4 bytes/frame
-    const samples = openmiles.global_allocator.alloc(i16, frame_count * 2) catch return 0;
-    defer openmiles.global_allocator.free(samples);
-    @memcpy(std.mem.sliceAsBytes(samples), all_pcm.items[0 .. frame_count * 4]);
-
-    const wav = openmiles.buildAdpcmWav(openmiles.global_allocator, samples.ptr, frame_count, 2, 44100) catch |err| {
-        log("Error: {any}\n", .{err});
-        return 0;
-    };
+/// AIL_compress_ASI(info, ext, outdata, outsize, callback)
+/// Real MSS compresses the PCM described by `info` to the ASI codec implied by
+/// the `ext` extension, returning a freshly malloc'd buffer in outdata/outsize.
+/// OpenMiles ships only decoders for the perceptual codecs (MP3/Vorbis) via
+/// miniaudio, so IMA-ADPCM — the one encoder we have — is the compressed output
+/// here, mirroring AIL_compress_ADPCM. Returns 1 on success, 0 on failure.
+pub export fn AIL_compress_ASI(info_opt: ?*const openmiles.AILSOUNDINFO, ext: ?[*:0]const u8, outdata: ?*?*anyopaque, outsize: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
+    _ = ext;
+    _ = callback;
+    const info = info_opt orelse return 0;
+    if (info.data_ptr == null or info.data_len == 0 or info.bits != 16) return 0;
+    const channels: u16 = @intCast(@max(1, @min(2, info.channels)));
+    const pcm: [*]const i16 = @ptrCast(@alignCast(info.data_ptr.?));
+    const total_per_ch: usize = @as(usize, info.data_len) / (@as(usize, channels) * 2);
+    const wav = openmiles.buildAdpcmWav(openmiles.global_allocator, pcm, total_per_ch, channels, info.rate) catch return 0;
     defer openmiles.global_allocator.free(wav);
-
-    const out_path = std.mem.span(out_filename);
-    const out_file = openmiles.fs_compat.createFile(io, out_path, .{}) catch |err| {
-        log("Error: {any}\n", .{err});
-        return 0;
-    };
-    defer out_file.close(io);
-    out_file.writeStreamingAll(io, wav) catch |err| {
-        log("Error: {any}\n", .{err});
-        return 0;
-    };
+    const buf: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse return 0);
+    @memcpy(buf[0..wav.len], wav);
+    if (outdata) |o| o.* = buf;
+    if (outsize) |o| o.* = @intCast(wav.len);
     return 1;
 }
-pub export fn AIL_decompress_ASI(provider_opt: ?*Provider, filename: [*:0]const u8, out_filename: [*:0]const u8, flags: u32) callconv(.winapi) i32 {
-    const provider = provider_opt orelse return 0;
-    log("AIL_decompress_ASI: {s} -> {s} (provider={*}, flags={d})\n", .{ filename, out_filename, provider, flags });
+/// AIL_decompress_ASI(indata, insize, ext, wav, wavsize, callback)
+/// Decode a compressed in-memory audio image (any format miniaudio recognizes)
+/// to a PCM WAV image returned in wav/wavsize (freshly malloc'd). Returns 1 on
+/// success, 0 on failure.
+pub export fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]const u8, wav_out: ?*?*anyopaque, wavsize: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
+    _ = ext;
+    _ = callback;
+    const data = indata orelse return 0;
+    if (insize == 0) return 0;
     var decoder: openmiles.ma.ma_decoder = undefined;
     var config = openmiles.ma.ma_decoder_config_init(openmiles.ma.ma_format_s16, 2, 44100);
-    if (openmiles.ma.ma_decoder_init_file(filename, &config, &decoder) != openmiles.ma.MA_SUCCESS) {
+    if (openmiles.ma.ma_decoder_init_memory(data, insize, &config, &decoder) != openmiles.ma.MA_SUCCESS) {
         openmiles.setLastError("AIL_decompress_ASI: failed to open input");
         return 0;
     }
@@ -360,14 +329,7 @@ pub export fn AIL_decompress_ASI(provider_opt: ?*Provider, filename: [*:0]const 
 
     var all_pcm: std.ArrayListUnmanaged(u8) = .empty;
     defer all_pcm.deinit(openmiles.global_allocator);
-    {
-        var total_frames: u64 = 0;
-        _ = openmiles.ma.ma_decoder_get_length_in_pcm_frames(&decoder, &total_frames);
-        if (total_frames > 0) {
-            all_pcm.ensureTotalCapacity(openmiles.global_allocator, @intCast(total_frames * 4)) catch {};
-        }
-    }
-    var chunk_buf: [4096 * 4]u8 = undefined; // 4096 frames × 4 bytes (s16 stereo)
+    var chunk_buf: [4096 * 4]u8 = undefined; // 4096 frames x 4 bytes (s16 stereo)
     while (true) {
         var fr: u64 = 0;
         _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, &chunk_buf, 4096, &fr);
@@ -376,21 +338,11 @@ pub export fn AIL_decompress_ASI(provider_opt: ?*Provider, filename: [*:0]const 
     }
     if (all_pcm.items.len == 0) return 0;
 
-    const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, all_pcm.items, 2, 44100, 16) catch |err| {
-        log("Error: {any}\n", .{err});
-        return 0;
-    };
+    const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, all_pcm.items, 2, 44100, 16) catch return 0;
     defer openmiles.global_allocator.free(wav);
-
-    const out_path = std.mem.span(out_filename);
-    const out_file = openmiles.fs_compat.createFile(io, out_path, .{}) catch |err| {
-        log("Error: {any}\n", .{err});
-        return 0;
-    };
-    defer out_file.close(io);
-    out_file.writeStreamingAll(io, wav) catch |err| {
-        log("Error: {any}\n", .{err});
-        return 0;
-    };
+    const buf: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse return 0);
+    @memcpy(buf[0..wav.len], wav);
+    if (wav_out) |o| o.* = buf;
+    if (wavsize) |o| o.* = @intCast(wav.len);
     return 1;
 }

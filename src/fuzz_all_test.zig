@@ -161,7 +161,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_v7.AIL_calculate_3D_channel_levels(hd, hs, rszi, &fo, null);
     _ = api_midi.AIL_channel_notes(hq, ri);
     _ = api_digital.AIL_compress_ADPCM(&info, &ppnn, &uo);
-    _ = api_rib.AIL_compress_ASI(prov, rstr, rstr, ru);
+    _ = api_rib.AIL_compress_ASI(&info, rstr, &pp, &uo, null);
     _ = api_dls.AIL_compress_DLS(null, rstr, &pp, &uo, null);
     api_v9.AIL_configure_logging(null, ri, ri);
     _ = api_midi.AIL_controller_value(hq, ri, ri);
@@ -169,7 +169,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_v8.AIL_debug(null);
     api_v8.AIL_debug_log(null);
     _ = api_digital.AIL_decompress_ADPCM(&info, &ppnn, &uo);
-    _ = api_rib.AIL_decompress_ASI(prov, rstr, rstr, ru);
+    _ = api_rib.AIL_decompress_ASI(scp, rsz, rstr, &pp, &uo, null);
     api_digital.AIL_delay(rand.intRangeAtMost(u32, 0, 1)); // bounded: real sleep, don't block the fuzzer
     _ = api_digital.AIL_digital_CPU_percent(hd);
     api_digital.AIL_digital_configuration(hd, &io, &io, @as([*]u8, @ptrCast(&g_scratch)));

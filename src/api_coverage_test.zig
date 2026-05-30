@@ -539,8 +539,11 @@ test "coverage: rib.zig exports" {
     rib.AIL_close_ASI_provider(np);
     _ = rib.AIL_ASI_provider_attribute(np, "x");
     dg_request_eob();
-    _ = rib.AIL_compress_ASI(np, "/nonexistent", "/tmp/om_x", 0);
-    _ = rib.AIL_decompress_ASI(np, "/nonexistent", "/tmp/om_x", 0);
+    var asi_info: openmiles.AILSOUNDINFO = std.mem.zeroes(openmiles.AILSOUNDINFO);
+    var asi_out: ?*anyopaque = null;
+    var asi_sz: u32 = 0;
+    _ = rib.AIL_compress_ASI(&asi_info, "wav", &asi_out, &asi_sz, null);
+    _ = rib.AIL_decompress_ASI(null, 0, "wav", &asi_out, &asi_sz, null);
 }
 
 fn dg_request_eob() void {
