@@ -275,18 +275,25 @@ pub fn MilesSetSoundLabelLimits(system: ?*anyopaque, sound_limits: ?[*:0]const u
 // --- sound banks / events (loader not yet ported) ----------------------------
 
 pub fn MilesAddSoundBank(filename: ?[*:0]const u8, name: ?[*:0]const u8) callconv(.winapi) ?*anyopaque {
-    _ = filename;
     _ = name;
-    return null;
+    const fname = std.mem.span(filename orelse return null);
+    const image = openmiles.readWholeFile(fname) catch return null;
+    defer openmiles.global_allocator.free(image);
+    const bank = openmiles.soundbank.loadFromMemory(openmiles.global_allocator, fname, image) catch {
+        openmiles.setLastError("Failed to add sound bank");
+        return null;
+    };
+    return @ptrCast(bank);
 }
 pub fn MilesReleaseSoundBank(bank: ?*anyopaque) callconv(.winapi) i32 {
-    _ = bank;
-    return 0;
+    const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return 0));
+    b.deinit();
+    return 1;
 }
 pub fn MilesFindEvent(bank: ?*anyopaque, event_name: ?[*:0]const u8) callconv(.winapi) ?[*]const u8 {
-    _ = bank;
-    _ = event_name;
-    return null;
+    const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return null));
+    const name = std.mem.span(event_name orelse return null);
+    return b.findEventContents(name);
 }
 pub fn MilesGetEventLength(event_name: ?[*:0]const u8) callconv(.winapi) i32 {
     _ = event_name;

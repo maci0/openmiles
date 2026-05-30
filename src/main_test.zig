@@ -2560,3 +2560,51 @@ test "EVENT_STEP_INFO union member layouts match the SDK field order" {
     try testing.expect(@sizeOf(ev.StepUnion) >= @sizeOf(ev.BlendStep));
     try testing.expect(@sizeOf(ev.MSSStringC) == 2 * @sizeOf(usize) or @sizeOf(ev.MSSStringC) == @sizeOf(usize) + @sizeOf(i32));
 }
+
+fn buildEventBank(buf: []u8) usize {
+    const sb = openmiles.soundbank;
+    @memset(buf, 0);
+    std.mem.writeInt(u32, buf[0..4], sb.BANK_TAG, .little);
+    std.mem.writeInt(i32, buf[4..8], 8, .little); // version
+    std.mem.writeInt(u32, buf[20..24], 60, .little); // events table offset
+    std.mem.writeInt(u32, buf[40..44], 1, .little); // event count
+    @memcpy(buf[56..60], "tb\x00\x00"); // SoundBankName[4]
+    // events table: entry 0 = { NameOffset=68, DataOffset=73 }
+    std.mem.writeInt(u32, buf[60..64], 68, .little);
+    std.mem.writeInt(u32, buf[64..68], 73, .little);
+    @memcpy(buf[68..73], "boom\x00");
+    const data = "9;4;<;";
+    @memcpy(buf[73 .. 73 + data.len], data);
+    buf[73 + data.len] = 0;
+    const total = 73 + data.len + 1;
+    std.mem.writeInt(i32, buf[8..12], @intCast(total), .little); // meta_size
+    return total;
+}
+
+test "soundbank loader resolves event assets and bytecode" {
+    var img: [128]u8 = undefined;
+    const n = buildEventBank(&img);
+    const bank = try openmiles.soundbank.loadFromMemory(testing.allocator, "syn.mbnk", img[0..n]);
+    defer bank.deinit();
+    try testing.expectEqual(@as(u32, 1), bank.assetCount(.events));
+    try testing.expectEqual(@as(u32, 0), bank.assetCount(.sounds));
+    try testing.expectEqualStrings("boom", std.mem.span(bank.assetName(.events, 0).?));
+    const ev = bank.findEventContents("boom") orelse return error.NoEvent;
+    try testing.expectEqualStrings("9;4;<;", std.mem.span(@as([*:0]const u8, @ptrCast(ev))));
+    try testing.expect(bank.findEventContents("BOOM") != null); // case-insensitive
+    try testing.expect(bank.findEventContents("missing") == null);
+    try testing.expect(bank.assetName(.events, 1) == null); // out of range
+}
+
+test "MilesFindEvent and MilesReleaseSoundBank operate on a loaded bank" {
+    var img: [128]u8 = undefined;
+    const n = buildEventBank(&img);
+    // The file-read path (readWholeFile) is shared with AIL_open_soundbank and is
+    // fuzzed; here we exercise the C-ABI query/release on a directly-loaded bank.
+    const bank = try openmiles.soundbank.loadFromMemory(openmiles.global_allocator, "syn.mbnk", img[0..n]);
+    const bptr: ?*anyopaque = @ptrCast(bank);
+    const ev = api_miles_t.MilesFindEvent(bptr, "boom") orelse return error.NoEvent;
+    try testing.expectEqualStrings("9;4;<;", std.mem.span(@as([*:0]const u8, @ptrCast(ev))));
+    try testing.expect(api_miles_t.MilesFindEvent(bptr, "nope") == null);
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesReleaseSoundBank(bptr));
+}

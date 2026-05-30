@@ -830,8 +830,11 @@ test "fuzz: invoke every export with adversarial inputs" {
         api_miles.MilesSetSoundStartOffset(rz, ri, ri);
         _ = api_miles.MilesSetSoundLabelLimits(msys, rstr);
         _ = api_miles.MilesAddSoundBank(rstr, rstr);
-        _ = api_miles.MilesReleaseSoundBank(scp);
-        _ = api_miles.MilesFindEvent(scp, rstr);
+        // ReleaseSoundBank/FindEvent dereference and free the bank handle (the
+        // real DLL would too), so they take null here, not a garbage pointer;
+        // the live-handle path is covered by main_test soundbank tests.
+        _ = api_miles.MilesReleaseSoundBank(null);
+        _ = api_miles.MilesFindEvent(null, rstr);
         _ = api_miles.MilesGetEventLength(rstr);
         _ = api_miles.MilesTextDumpEventSystem();
         api_miles.MilesRegisterRand(scp);

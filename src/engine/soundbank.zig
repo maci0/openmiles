@@ -86,6 +86,31 @@ pub const Bank = struct {
         return self.countFor(which);
     }
 
+    /// Find an asset by (case-insensitive) name and return a pointer to its data
+    /// at DataOffset, or null if not found / the data offset escapes the metadata.
+    /// Mirrors the SDK FindAsset + AIL_ptr_add(bank, pAsset->DataOffset).
+    pub fn assetData(self: *const Bank, which: AssetKind, target: []const u8) ?[*]const u8 {
+        const count = self.countFor(which);
+        var i: u32 = 0;
+        while (i < count) : (i += 1) {
+            const entry = @as(usize, self.tableOff(which)) + @as(usize, i) * asset_entry_size;
+            const name_off = self.rdU32(entry);
+            if (name_off == 0 or name_off >= self.meta.len) continue;
+            const nm = std.mem.sliceTo(self.meta[name_off..], 0);
+            if (std.ascii.eqlIgnoreCase(nm, target)) {
+                const data_off = self.rdU32(entry + 4);
+                if (data_off == 0 or data_off >= self.meta.len) return null;
+                return @ptrCast(self.meta.ptr + data_off);
+            }
+        }
+        return null;
+    }
+
+    /// The event-step bytecode for a named event (MilesFindEvent / AIL_find_event).
+    pub fn findEventContents(self: *const Bank, event_name: []const u8) ?[*]const u8 {
+        return self.assetData(.events, event_name);
+    }
+
     pub fn deinit(self: *Bank) void {
         self.allocator.free(self.meta);
         self.allocator.free(self.filename);
