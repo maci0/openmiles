@@ -352,7 +352,29 @@ pub export fn AIL_sample_buffer_ready(s_opt: ?*Sample) callconv(.winapi) i32 {
     if (openmiles.ma.ma_sound_at_end(&s.sound) != 0) return 0;
     return -1;
 }
-// Real MSS: S32 AIL_sample_buffer_info(HSAMPLE S, S32 buff_num, U32 *pos,
+// v3-v7 form: 5 args @20 — both double-buffer slots (pos/len each). Exported as
+// _AIL_sample_buffer_info@20 for v3-v7.
+pub export fn AIL_sample_buffer_info_old(s_opt: ?*Sample, pos0: ?*u32, len0: ?*u32, pos1: ?*u32, len1: ?*u32) callconv(.winapi) void {
+    if (pos0) |p| p.* = 0;
+    if (len0) |p| p.* = 0;
+    if (pos1) |p| p.* = 0;
+    if (len1) |p| p.* = 0;
+    const s = s_opt orelse return;
+    if (s.stream_active) {
+        var p0: u32 = 0;
+        var l0: u32 = 0;
+        var p1: u32 = 0;
+        var l1: u32 = 0;
+        s.stream_src.bufferInfo(&p0, &l0, &p1, &l1);
+        if (pos0) |p| p.* = p0;
+        if (len0) |p| p.* = l0;
+        if (pos1) |p| p.* = p1;
+        if (len1) |p| p.* = l1;
+    } else if (s.owned_buffer) |buf| {
+        if (len0) |p| p.* = @intCast(buf.len);
+    }
+}
+// v8+ form: S32 AIL_sample_buffer_info(HSAMPLE S, S32 buff_num, U32 *pos,
 // U32 *len, U32 *used, U32 *free) @24 — report play position/length and the
 // used/free buffer counts for the requested double-buffer slot.
 pub export fn AIL_sample_buffer_info(s_opt: ?*Sample, buff_num: i32, pos: ?*u32, len: ?*u32, used: ?*u32, free_count: ?*u32) callconv(.winapi) i32 {
@@ -995,7 +1017,8 @@ comptime {
             .{ .name = "AIL_allocate_file_sample", .stack_size = 12 },
             .{ .name = "AIL_load_sample_buffer", .stack_size = 16 },
             .{ .name = "AIL_sample_buffer_ready", .stack_size = 4 },
-            .{ .name = "AIL_sample_buffer_info", .stack_size = 24 },
+            .{ .name = "AIL_sample_buffer_info", .stack_size = 20, .ver_max = 70, .symbol = "AIL_sample_buffer_info_old" },
+            .{ .name = "AIL_sample_buffer_info", .stack_size = 24, .ver = 80 },
             .{ .name = "AIL_register_EOB_callback", .stack_size = 8 },
             .{ .name = "AIL_register_SOB_callback", .stack_size = 8 },
             .{ .name = "AIL_set_sample_processor", .stack_size = 12 },
@@ -1027,7 +1050,8 @@ comptime {
             .{ .name = "AIL_quick_set_reverb", .stack_size = 16, .ver = 40 },
             .{ .name = "AIL_quick_load_and_play", .stack_size = 12, .ver = 30 },
             .{ .name = "AIL_quick_type", .stack_size = 4, .ver = 40 },
-            .{ .name = "AIL_quick_handles", .stack_size = 12, .ver = 30 },
+            .{ .name = "AIL_quick_handles", .stack_size = 8, .ver = 30, .ver_max = 39, .symbol = "AIL_quick_handles_v3" },
+            .{ .name = "AIL_quick_handles", .stack_size = 12, .ver = 40 },
             // DLS extras
             .{ .name = "AIL_DLS_load_memory", .stack_size = 12 },
             .{ .name = "AIL_DLS_unload", .stack_size = 8 },

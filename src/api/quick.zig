@@ -188,3 +188,9 @@ pub export fn AIL_quick_handles(quick_ptr: ?*?*Sample, dig_ptr: ?*?*DigitalDrive
     if (dig_ptr) |p| p.* = openmiles.last_digital_driver;
     if (midi_ptr) |p| p.* = openmiles.last_midi_driver;
 }
+// MSS 3.x form: 2 args @8 (digital + MIDI driver handles, no DLS slot).
+// Exported as _AIL_quick_handles@8 for v3 only.
+pub export fn AIL_quick_handles_v3(dig_ptr: ?*?*DigitalDriver, midi_ptr: ?*?*openmiles.MidiDriver) callconv(.winapi) void {
+    if (dig_ptr) |p| p.* = openmiles.last_digital_driver;
+    if (midi_ptr) |p| p.* = openmiles.last_midi_driver;
+}
