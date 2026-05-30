@@ -627,9 +627,9 @@ test "fuzz v8 AIL_mem in-memory stream ops" {
     var io_buf: [2048]u8 = undefined;
     var trial: usize = 0;
     while (trial < 300) : (trial += 1) {
-        const cap = rand.intRangeAtMost(i32, 0, 1024);
-        const m = api_v8.AIL_mem_create(cap) orelse continue;
-        defer api_v8.AIL_mem_close(m);
+        _ = rand.intRangeAtMost(i32, 0, 1024);
+        const m = api_v8.AIL_mem_create() orelse continue;
+        defer api_v8.AIL_mem_close(m, null, null);
         var step: usize = 0;
         while (step < 40) : (step += 1) {
             switch (rand.intRangeAtMost(u8, 0, 5)) {
@@ -655,7 +655,7 @@ test "fuzz v8 AIL_mem in-memory stream ops" {
     while (v < 200) : (v += 1) {
         const sz = rand.intRangeAtMost(i32, 0, @intCast(payload.len));
         const m = api_v8.AIL_mem_open(&payload, sz) orelse continue;
-        defer api_v8.AIL_mem_close(m);
+        defer api_v8.AIL_mem_close(m, null, null);
         _ = api_v8.AIL_mem_read(m, &io_buf, rand.intRangeAtMost(i32, 0, @intCast(io_buf.len)));
         _ = api_v8.AIL_mem_write(m, &io_buf, 4); // read-only: must reject, not crash
     }

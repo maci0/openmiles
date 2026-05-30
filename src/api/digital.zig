@@ -180,6 +180,14 @@ pub export fn AIL_init_sample(s_opt: ?*Sample) callconv(.winapi) void {
     log("AIL_init_sample(s={*})\n", .{s});
     s.reset();
 }
+// v8+ gained a `format` argument: S32 AIL_init_sample(HSAMPLE S, S32 format) @8.
+// Exported as _AIL_init_sample@8 for v8/v9 via a symbol override.
+pub export fn AIL_init_sample_v8(s_opt: ?*Sample, format: i32) callconv(.winapi) i32 {
+    const s = s_opt orelse return 0;
+    _ = format; // output format selection: the miniaudio mixer is format-agnostic
+    s.reset();
+    return 1;
+}
 pub export fn AIL_set_sample_file(s_opt: ?*Sample, data: *anyopaque, block: i32) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     log("AIL_set_sample_file(s={*}, data={*}, block={d})\n", .{ s, data, block });
@@ -765,7 +773,8 @@ comptime {
             .{ .name = "AIL_digital_master_volume", .stack_size = 4 },
             .{ .name = "AIL_allocate_sample_handle", .stack_size = 4 },
             .{ .name = "AIL_release_sample_handle", .stack_size = 4 },
-            .{ .name = "AIL_init_sample", .stack_size = 4 },
+            .{ .name = "AIL_init_sample", .stack_size = 4, .ver_max = 70 },
+            .{ .name = "AIL_init_sample", .stack_size = 8, .ver = 80, .symbol = "AIL_init_sample_v8" },
             .{ .name = "AIL_set_named_sample_file", .stack_size = 20 },
             .{ .name = "AIL_set_sample_file", .stack_size = 12 },
             .{ .name = "AIL_set_sample_address", .stack_size = 12 },
@@ -1228,8 +1237,8 @@ comptime {
             .{ .name = "AIL_get_soundbank_filename", .stack_size = 4, .ver = 80 },
             .{ .name = "AIL_get_soundbank_mem_usage", .stack_size = 4, .ver = 80 },
             .{ .name = "AIL_indent", .stack_size = 4, .ver = 80 },
-            .{ .name = "AIL_mem_close", .stack_size = 4, .ver = 80 },
-            .{ .name = "AIL_mem_create", .stack_size = 4, .ver = 80 },
+            .{ .name = "AIL_mem_close", .stack_size = 12, .ver = 80 },
+            .{ .name = "AIL_mem_create", .stack_size = 0, .ver = 80 },
             .{ .name = "AIL_mem_create_from_existing", .stack_size = 8, .ver = 80 },
             .{ .name = "AIL_mem_error", .stack_size = 4, .ver = 80 },
             .{ .name = "AIL_mem_open", .stack_size = 8, .ver = 80 },

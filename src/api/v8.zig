@@ -268,14 +268,38 @@ pub export fn AIL_indent(a0: i32) callconv(.winapi) void {
     _ = a0;
 
 }
-pub export fn AIL_mem_close(mem: ?*anyopaque) callconv(.winapi) void {
-    const m: *MemStream = @ptrCast(@alignCast(mem orelse return));
+// Real MSS: AIL_mem_close(mem, void** data, U32* size) @12 — close a write
+// stream, optionally handing the accumulated buffer (C-malloc'd, caller frees
+// via AIL_mem_free_lock) back through data/size.
+pub export fn AIL_mem_close(mem: ?*anyopaque, data_out: ?*?*anyopaque, size_out: ?*u32) callconv(.winapi) void {
+    const m: *MemStream = @ptrCast(@alignCast(mem orelse {
+        if (data_out) |d| d.* = null;
+        if (size_out) |s| s.* = 0;
+        return;
+    }));
+    if (data_out) |d| {
+        if (m.len > 0) {
+            if (std.c.malloc(m.len)) |raw| {
+                const out: [*]u8 = @ptrCast(raw);
+                @memcpy(out[0..m.len], m.buf[0..m.len]);
+                d.* = raw;
+                if (size_out) |s| s.* = @intCast(m.len);
+            } else {
+                d.* = null;
+                if (size_out) |s| s.* = 0;
+            }
+        } else {
+            d.* = null;
+            if (size_out) |s| s.* = 0;
+        }
+    }
     if (m.owns) openmiles.global_allocator.free(m.buf);
     openmiles.global_allocator.destroy(m);
 }
-pub export fn AIL_mem_create(size: i32) callconv(.winapi) ?*anyopaque {
-    if (size <= 0) return null;
-    const buf = openmiles.global_allocator.alloc(u8, @intCast(size)) catch return null;
+// Real MSS: AIL_mem_create() @0 — create an empty, growable in-memory write
+// stream (writes append and grow the backing buffer; see AIL_mem_close).
+pub export fn AIL_mem_create() callconv(.winapi) ?*anyopaque {
+    const buf = openmiles.global_allocator.alloc(u8, 0) catch return null;
     const m = MemStream.create(buf, 0, true, true) orelse {
         openmiles.global_allocator.free(buf);
         return null;
@@ -345,6 +369,13 @@ pub export fn AIL_mem_write(mem: ?*anyopaque, src: ?*anyopaque, n: i32) callconv
     const sp = src orelse return 0;
     if (n <= 0 or !m.writable) return 0;
     const want: usize = @intCast(n);
+    // Owned write streams grow to fit (AIL_mem_create semantics); views over
+    // caller memory stay fixed and truncate at the end of the buffer.
+    if (m.owns and m.pos + want > m.buf.len) {
+        if (openmiles.global_allocator.realloc(m.buf, m.pos + want)) |nb| {
+            m.buf = nb;
+        } else |_| {}
+    }
     const room = if (m.pos < m.buf.len) m.buf.len - m.pos else 0;
     const take = @min(want, room);
     if (take < want) m.err = true; // truncated write

@@ -1833,8 +1833,8 @@ const api_v8 = @import("api/v8.zig");
 const api_v9 = @import("api/v9.zig");
 
 test "v8 AIL_mem in-memory stream round-trips" {
-    const m = api_v8.AIL_mem_create(64) orelse return error.NoMem;
-    defer api_v8.AIL_mem_close(m);
+    const m = api_v8.AIL_mem_create() orelse return error.NoMem;
+    defer api_v8.AIL_mem_close(m, null, null);
     var src = "hello world".*;
     try testing.expectEqual(@as(i32, 11), api_v8.AIL_mem_write(m, &src, 11));
     try testing.expectEqual(@as(i32, 11), api_v8.AIL_mem_pos(m));
@@ -1850,7 +1850,7 @@ test "v8 AIL_mem in-memory stream round-trips" {
 test "v8 AIL_mem_open read-only view" {
     var data = "abcdef".*;
     const m = api_v8.AIL_mem_open(&data, 6) orelse return error.NoMem;
-    defer api_v8.AIL_mem_close(m);
+    defer api_v8.AIL_mem_close(m, null, null);
     var dst: [8]u8 = undefined;
     try testing.expectEqual(@as(i32, 3), api_v8.AIL_mem_read(m, &dst, 3));
     try testing.expectEqualSlices(u8, "abc", dst[0..3]);

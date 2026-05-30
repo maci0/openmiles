@@ -244,7 +244,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_midi.AIL_map_sequence_channel(hq, ri, ri);
     _ = api_memory.AIL_mem_alloc_lock(rsz);
     _ = api_v9.AIL_mem_alloc_lock_info(ru, null, ru);
-    _ = api_v8.AIL_mem_create(rszi);
+    _ = api_v8.AIL_mem_create();
     _ = api_v8.AIL_mem_create_from_existing(null, rszi);
     _ = api_v8.AIL_mem_error(null);
     _ = api_v8.AIL_mem_open(null, rszi);
