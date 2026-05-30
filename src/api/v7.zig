@@ -387,12 +387,82 @@ pub export fn AIL_set_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array:
     _ = speaker_index_array;
     _ = n_levels;
 }
-pub export fn AIL_calculate_3D_channel_levels(dig_opt: ?*DigitalDriver, s_opt: ?*Sample, n_levels: i32, levels: ?*f32, speakers: ?*anyopaque) callconv(.winapi) void {
-    _ = dig_opt;
-    _ = s_opt;
-    _ = n_levels;
-    _ = levels;
-    _ = speakers;
+// Real MSS computes per-speaker gains for a positioned 3D source. The full
+// panning/falloff math has no miniaudio equivalent (ma_sound spatializes
+// internally), so these report success and leave the caller's channel_levels
+// untouched. The signature grew across versions: v7 @56 (14 args), v8+ @68
+// (adds listener up-vector + doppler velocity/shift).
+pub export fn AIL_calculate_3D_channel_levels(
+    dig: ?*DigitalDriver,
+    channel_levels: ?*f32,
+    speaker_array: ?*anyopaque,
+    src_pos: ?*anyopaque,
+    src_face: ?*anyopaque,
+    src_up: ?*anyopaque,
+    src_inner_angle: f32,
+    src_outer_angle: f32,
+    src_outer_volume: f32,
+    src_max_dist: f32,
+    src_min_dist: f32,
+    listen_pos: ?*anyopaque,
+    listen_face: ?*anyopaque,
+    listen_up: ?*anyopaque,
+    rolloff_factor: f32,
+    doppler_velocity: ?*anyopaque,
+    doppler_shift: ?*f32,
+) callconv(.winapi) i32 {
+    _ = dig;
+    _ = channel_levels;
+    _ = speaker_array;
+    _ = src_pos;
+    _ = src_face;
+    _ = src_up;
+    _ = src_inner_angle;
+    _ = src_outer_angle;
+    _ = src_outer_volume;
+    _ = src_max_dist;
+    _ = src_min_dist;
+    _ = listen_pos;
+    _ = listen_face;
+    _ = listen_up;
+    _ = rolloff_factor;
+    _ = doppler_velocity;
+    if (doppler_shift) |p| p.* = 1.0; // no pitch shift
+    return 0;
+}
+// v7 form: 14 args @56 (no listener up-vector / doppler). Exported as
+// _AIL_calculate_3D_channel_levels@56 for v7 only.
+pub export fn AIL_calculate_3D_channel_levels_v7(
+    dig: ?*DigitalDriver,
+    channel_levels: ?*f32,
+    speaker_array: ?*anyopaque,
+    src_pos: ?*anyopaque,
+    src_face: ?*anyopaque,
+    src_up: ?*anyopaque,
+    src_inner_angle: f32,
+    src_outer_angle: f32,
+    src_outer_volume: f32,
+    src_max_dist: f32,
+    src_min_dist: f32,
+    listen_pos: ?*anyopaque,
+    listen_face: ?*anyopaque,
+    rolloff_factor: f32,
+) callconv(.winapi) i32 {
+    _ = dig;
+    _ = channel_levels;
+    _ = speaker_array;
+    _ = src_pos;
+    _ = src_face;
+    _ = src_up;
+    _ = src_inner_angle;
+    _ = src_outer_angle;
+    _ = src_outer_volume;
+    _ = src_max_dist;
+    _ = src_min_dist;
+    _ = listen_pos;
+    _ = listen_face;
+    _ = rolloff_factor;
+    return 0;
 }
 pub export fn AIL_digital_output_filter(dig_opt: ?*DigitalDriver) callconv(.winapi) ?*anyopaque {
     _ = dig_opt;

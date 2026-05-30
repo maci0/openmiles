@@ -158,7 +158,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_digital.AIL_background();
     _ = api_v7.AIL_background_CPU_percent();
     api_midi.AIL_branch_index(hq, ru);
-    api_v7.AIL_calculate_3D_channel_levels(hd, hs, rszi, &fo, null);
+    _ = api_v7.AIL_calculate_3D_channel_levels(hd, &fo, scp, scp, scp, scp, rf, rf, rf, rf, rf, scp, scp, scp, rf, scp, &fo);
     _ = api_midi.AIL_channel_notes(hq, ri);
     _ = api_digital.AIL_compress_ADPCM(&info, &ppnn, &uo);
     _ = api_rib.AIL_compress_ASI(&info, rstr, &pp, &uo, null);

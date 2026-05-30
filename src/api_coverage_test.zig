@@ -675,7 +675,7 @@ test "coverage: v7.zig unified exports" {
     v7.AIL_set_speaker_configuration(drv, null, 2, 1);
     v7.AIL_speaker_reverb_levels(drv, null, null, null);
     v7.AIL_set_speaker_reverb_levels(drv, &f32o, &f32o, null, 0);
-    v7.AIL_calculate_3D_channel_levels(drv, s, 0, &f32o, sc());
+    _ = v7.AIL_calculate_3D_channel_levels(drv, &f32o, sc(), sc(), sc(), sc(), 0, 0, 0, 0, 0, sc(), sc(), sc(), 1, sc(), &f32o);
     _ = v7.AIL_digital_output_filter(drv);
     v7.AIL_output_filter_driver_attribute(null, "x", sc());
     v7.AIL_set_output_filter_driver_preference(null, "x", sc());
