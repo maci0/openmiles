@@ -2346,3 +2346,28 @@ test "Miles empty-state queries return documented empty values" {
     try testing.expect(api_miles_t.MilesFindEvent(null, "x") == null);
     try testing.expectEqual(@as(i32, 0), api_miles_t.MilesGetEventLength("x"));
 }
+
+test "Miles event system frees all systems and variables (no leaks)" {
+    // Route the module's allocations through the leak-checked test allocator.
+    const saved = openmiles.global_allocator;
+    openmiles.global_allocator = testing.allocator;
+    defer openmiles.global_allocator = saved;
+
+    _ = api_miles_t.MilesStartupEventSystem(null, 0, null, 0);
+    // many vars on the default system, plus several extra systems each with vars
+    var n: i32 = 0;
+    while (n < 32) : (n += 1) {
+        var buf: [16]u8 = undefined;
+        const name = std.fmt.bufPrintZ(&buf, "var{d}", .{n}) catch unreachable;
+        api_miles_t.MilesSetVarI(0, name, n);
+        api_miles_t.MilesSetVarF(0, name, @floatFromInt(n)); // overwrite path
+    }
+    var k: i32 = 0;
+    while (k < 8) : (k += 1) {
+        const sys = api_miles_t.MilesAddEventSystem(null) orelse continue;
+        api_miles_t.MilesSetVarI(@intFromPtr(sys), "hp", k);
+    }
+    // Shutdown must free every system and its variable list; if it leaks, the
+    // test allocator flags it at test teardown.
+    api_miles_t.MilesShutdownEventSystem();
+}
