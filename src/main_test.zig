@@ -2534,3 +2534,29 @@ test "cache_sounds step splits the colon-separated sound list into namelist" {
     cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
     try testing.expect(cur == null);
 }
+
+test "EVENT_STEP_INFO union member layouts match the SDK field order" {
+    const ev = openmiles.event;
+    const ssc = @sizeOf(ev.MSSStringC); // {const char* str; S32 len}
+    // start: 9 counted strings, then stream (U32) at offset 9*ssc.
+    try testing.expectEqual(@as(usize, 0), @offsetOf(ev.StartStep, "soundname"));
+    try testing.expectEqual(ssc, @offsetOf(ev.StartStep, "presetname"));
+    try testing.expectEqual(9 * ssc, @offsetOf(ev.StartStep, "stream"));
+    // control: 5 strings then fadeouttime (F32).
+    try testing.expectEqual(5 * ssc, @offsetOf(ev.ControlStep, "fadeouttime"));
+    // load: lib, then namelist pointer, then namecount.
+    try testing.expectEqual(@as(usize, 0), @offsetOf(ev.LoadStep, "lib"));
+    try testing.expectEqual(ssc, @offsetOf(ev.LoadStep, "namelist"));
+    // ramp: name, labels, target (3 strings) then time (F32).
+    try testing.expectEqual(3 * ssc, @offsetOf(ev.RampStep, "time"));
+    // setlfo: 4 strings then invert..islfo (5 x S32).
+    try testing.expectEqual(4 * ssc, @offsetOf(ev.SetLfoStep, "invert"));
+    try testing.expectEqual(4 * ssc + 4 * @sizeOf(i32), @offsetOf(ev.SetLfoStep, "islfo"));
+    // movevar: name then time[2], interp_types[2], values[3].
+    try testing.expectEqual(ssc, @offsetOf(ev.MoveVarStep, "times"));
+    // EVENT_STEP_INFO: type tag at offset 0.
+    try testing.expectEqual(@as(usize, 0), @offsetOf(ev.EVENT_STEP_INFO, "type"));
+    // blend is the largest union member (6 x [10]F32 plus name and count).
+    try testing.expect(@sizeOf(ev.StepUnion) >= @sizeOf(ev.BlendStep));
+    try testing.expect(@sizeOf(ev.MSSStringC) == 2 * @sizeOf(usize) or @sizeOf(ev.MSSStringC) == @sizeOf(usize) + @sizeOf(i32));
+}
