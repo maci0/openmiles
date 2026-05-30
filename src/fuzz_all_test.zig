@@ -41,8 +41,14 @@ test "fuzz: invoke every export with adversarial inputs" {
     const ht_h = api_timer.AIL_register_timer(dummyTimerCb);
     const ht: ?*openmiles.Timer = if (ht_h) |t| @ptrCast(@alignCast(t)) else null;
     defer if (ht) |t| api_timer.AIL_release_timer_handle(t);
-    var iter: usize = 0;
-    while (iter < 300) : (iter += 1) {
+    // Sweep several PRNG seeds so the adversarial input space is explored more
+    // broadly than a single fixed sequence would. Driver/timer handles above
+    // are set up once and reused across all rounds.
+    const seeds = [_]u64{ 0xF0F0F0F0, 0x12345678, 0xDEADBEEF, 0xCAFEBABE, 0x00000000, 0xFFFFFFFFFFFFFFFF, 0x9E3779B9, 0x1, 0x5555AAAA, 0xC0FFEE };
+    for (seeds) |sd| {
+        prng = std.Random.DefaultPrng.init(sd);
+        var iter: usize = 0;
+        while (iter < 200) : (iter += 1) {
         const rf = advf[rand.intRangeLessThan(usize, 0, advf.len)];
         const rf64: f64 = rf;
         const ri = advi[rand.intRangeLessThan(usize, 0, advi.len)];
@@ -545,5 +551,6 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_rib.RIB_set_provider_user_data(prov, ru, rz);
     _ = api_rib.RIB_type_string(ru);
     api_rib.RIB_unregister_interface(prov, rstr, rszi, scp);
+        }
     }
 }
