@@ -1412,8 +1412,8 @@ comptime {
                 }
             }
         }
-        // Export the CRT-provided DllMainCRTStartup (defined in dllcrt2.obj, not our code)
-        asm (".section .drectve\n .ascii \" /EXPORT:DllMainCRTStartup=_DllMainCRTStartup@12 /EXPORT:_DllMainCRTStartup@12\"\n .text\n");
+        // (The CRT entry DllMainCRTStartup is the PE entry point via the header,
+        // not an export — real mss32.dll does not export it, so neither do we.)
         // Variadic functions use callconv(.c), generating `_FuncName` in COFF (not `_FuncName@N`).
         // They are NOT in the stdcall targets loop, so they need explicit /EXPORT renames so the
         // DLL export table contains the bare name (AIL_debug_printf) rather than _AIL_debug_printf.
