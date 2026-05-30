@@ -786,6 +786,17 @@ test "fuzz: invoke every export with adversarial inputs" {
             std.c.free(estr);
         }
     }
+    // Decode adversarial (random, non-constructed) event strings: the step parser
+    // and the cache/purge namelist split must stay in-bounds on garbage input.
+    {
+        var ebuf: [600]u8 align(8) = undefined;
+        var eout: ?*openmiles.event.EVENT_STEP_INFO = null;
+        var ec: ?*const anyopaque = @ptrCast(&g_scratch[256]); // random bytes, NUL-terminated by g_scratch end
+        var eg: u32 = 0;
+        while (ec != null and eg < 48) : (eg += 1) {
+            ec = api_v8.AIL_next_event_step(ec, &eout, &ebuf, ebuf.len);
+        }
+    }
     // Miles 9.x event system: lifecycle + vars + queue/instance/bank/async surface
     {
         const msys = api_miles.MilesStartupEventSystem(hd, ri, null, ri);
