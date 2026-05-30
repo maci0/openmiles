@@ -27,6 +27,10 @@ const rib = @import("api/rib.zig");
 
 fn dummyTimerCb(_: u32) callconv(.winapi) void {}
 
+// Variadic C exports (defined in src/bindings/c_impl.c).
+extern fn AIL_debug_printf(fmt: [*:0]const u8, ...) callconv(.c) void;
+extern fn AIL_sprintf(buf: [*:0]u8, fmt: [*:0]const u8, ...) callconv(.c) [*:0]u8;
+
 // Crash-verification smoke test: use a plain allocator (no leak abort). Leak
 // checking of the parsing paths is done in fuzz_test.zig with testing.allocator.
 const alloc = std.heap.page_allocator;
@@ -572,6 +576,11 @@ test "coverage: lifecycle / driver open-close exports" {
     // DllMain (DLL_PROCESS_ATTACH = 1).
     var hinst: u8 = 0;
     _ = dg.DllMain(@ptrCast(&hinst), 1, null);
+
+    // Variadic C exports.
+    AIL_debug_printf("coverage %d", @as(c_int, 1));
+    var sbuf: [64]u8 = undefined;
+    _ = AIL_sprintf(@ptrCast(&sbuf), "v=%d", @as(c_int, 7));
 
     // Global teardown last.
     dg.AIL_shutdown();
