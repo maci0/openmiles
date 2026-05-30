@@ -466,20 +466,21 @@ pub export fn AIL_process_digital_audio(driver_opt: ?*DigitalDriver, dest: ?*any
     }
     return 1;
 }
-pub export fn AIL_size_processed_digital_audio(driver_opt: ?*DigitalDriver, rate: i32, format: i32, data: *anyopaque, len: u32) callconv(.winapi) u32 {
-    const driver = driver_opt orelse return 0;
-    _ = driver;
-    _ = data;
-    if (rate <= 0) return 0; // guards both the negative-cast and div-by-zero
-    const fmt: u32 = if (format < 0) 0 else @intCast(format);
-    const bytes_per_sample: u32 = switch (fmt) {
-        0, 2 => 1, // 8-bit
-        else => 2, // 16-bit
-    };
-    const channels: u32 = if (fmt >= 2) 2 else 1;
-    const divisor = @as(u64, @intCast(rate)) * bytes_per_sample * channels; // > 0
-    const result = @as(u64, len) * 1000 / divisor;
-    return @intCast(@min(result, std.math.maxInt(u32)));
+// Real MSS: S32 AIL_size_processed_digital_audio(U32 dest_rate, U32 dest_format,
+// S32 num_srcs, AILMIXINFO const* src) @16 — return the byte size that
+// AIL_process_digital_audio would emit for the given source(s) resampled to the
+// destination rate/format. AILMIXINFO begins with an AILSOUNDINFO, so the first
+// source's length/rate drive the estimate.
+pub export fn AIL_size_processed_digital_audio(dest_rate: u32, dest_format: u32, num_srcs: i32, src: ?*const anyopaque) callconv(.winapi) i32 {
+    if (num_srcs <= 0 or dest_rate == 0) return 0;
+    const sp = src orelse return 0;
+    const info: *const openmiles.AILSOUNDINFO = @ptrCast(@alignCast(sp));
+    const src_rate: u64 = if (info.rate == 0) dest_rate else info.rate;
+    const out_samples: u64 = @as(u64, info.samples) * dest_rate / src_rate;
+    const dest_bps: u64 = if ((dest_format & 1) != 0) 2 else 1; // bit0 set => 16-bit
+    const dest_ch: u64 = if (dest_format >= 2) 2 else 1; // >=2 => stereo
+    const bytes = out_samples * dest_bps * dest_ch;
+    return @intCast(@min(bytes, std.math.maxInt(i32)));
 }
 pub export fn AIL_ms_count() callconv(.winapi) u32 {
     return openmiles.getMsCount();
@@ -888,7 +889,7 @@ comptime {
             .{ .name = "AIL_set_3D_speaker_type", .stack_size = 8, .ver = 50 },
             .{ .name = "AIL_3D_speaker_type", .stack_size = 4, .ver = 50 },
             // 3D Provider/Listener/Object
-            .{ .name = "AIL_open_3D_provider", .stack_size = 8, .ver = 50 },
+            .{ .name = "AIL_open_3D_provider", .stack_size = 4, .ver = 50 },
             .{ .name = "AIL_close_3D_provider", .stack_size = 4, .ver = 50 },
             .{ .name = "AIL_open_3D_listener", .stack_size = 4, .ver = 50 },
             .{ .name = "AIL_close_3D_listener", .stack_size = 4, .ver = 50 },
@@ -1025,7 +1026,7 @@ comptime {
             .{ .name = "AIL_set_DirectSound_HWND", .stack_size = 8 },
             .{ .name = "AIL_set_digital_driver_processor", .stack_size = 12 },
             .{ .name = "AIL_process_digital_audio", .stack_size = 24 },
-            .{ .name = "AIL_size_processed_digital_audio", .stack_size = 20 },
+            .{ .name = "AIL_size_processed_digital_audio", .stack_size = 16 },
             // Utility
             .{ .name = "AIL_ms_count", .stack_size = 0 },
             .{ .name = "AIL_us_count", .stack_size = 0 },

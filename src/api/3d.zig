@@ -455,11 +455,13 @@ pub export fn AIL_3D_speaker_type(dig_opt: ?*DigitalDriver) callconv(.winapi) i3
     const dig = dig_opt orelse return 0;
     return dig.speaker_type;
 }
-pub export fn AIL_open_3D_provider(provider: *anyopaque, dig_opt: ?*DigitalDriver) callconv(.winapi) ?*anyopaque {
-    const dig = dig_opt orelse return null;
-    _ = provider;
-    // Return the driver as the 3D provider handle — our miniaudio engine IS the 3D provider
-    return @ptrCast(dig);
+// Real MSS: M3DRESULT AIL_open_3D_provider(HPROVIDER lib) @4 — initialize the
+// 3D provider, returning M3D_NOERR (0) on success. Our miniaudio engine is
+// always the 3D provider and 3D objects are created against the active digital
+// driver (see AIL_open_3D_object), so this just validates and reports success.
+pub export fn AIL_open_3D_provider(lib: ?*anyopaque) callconv(.winapi) i32 {
+    _ = lib;
+    return 0; // M3D_NOERR
 }
 pub export fn AIL_3D_update_position(obj: ?*anyopaque, dt_milliseconds: f32) callconv(.winapi) void {
     const p = obj orelse return;
@@ -481,7 +483,9 @@ pub export fn AIL_close_3D_listener(listener: *anyopaque) callconv(.winapi) void
     _ = listener;
 }
 pub export fn AIL_open_3D_object(provider: *anyopaque) callconv(.winapi) ?*anyopaque {
-    const dig: *DigitalDriver = @ptrCast(@alignCast(provider));
+    // Prefer the active digital driver (the real engine); fall back to treating
+    // the provider handle as a driver for legacy callers.
+    const dig: *DigitalDriver = openmiles.last_digital_driver orelse @ptrCast(@alignCast(provider));
     const s = openmiles.Sample3D.init(dig) catch |err| {
         log("Error: {any}\n", .{err});
         return null;

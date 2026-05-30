@@ -103,7 +103,7 @@ test "coverage: digital.zig exports" {
     dg.AIL_set_DirectSound_HWND(drv, sc());
     _ = dg.AIL_set_digital_driver_processor(drv, 0, null);
     _ = dg.AIL_process_digital_audio(drv, sc(), 0, null, 0, 0);
-    _ = dg.AIL_size_processed_digital_audio(drv, 44100, 0, sc(), 0);
+    _ = dg.AIL_size_processed_digital_audio(44100, 1, 1, sc());
     _ = dg.AIL_digital_handle_release(drv);
     _ = dg.AIL_digital_handle_reacquire(drv);
 
@@ -197,7 +197,7 @@ test "coverage: 3d.zig exports" {
 
     next = null;
     _ = td.AIL_enumerate_3D_providers(&next, &prov, &namep);
-    _ = td.AIL_open_3D_provider(dp, drv);
+    _ = td.AIL_open_3D_provider(dp);
     td.AIL_close_3D_provider(dp);
     const lis = td.AIL_open_3D_listener(dp);
     if (lis) |l| td.AIL_close_3D_listener(l);

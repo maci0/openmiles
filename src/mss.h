@@ -63,6 +63,7 @@ typedef struct _AILREDBOOKTEXT {
 
 typedef void (MSS_CALLBACK *AILTIMERCB)(U32 user);
 typedef void (MSS_CALLBACK *AILSTREAMCB)(HSTREAM stream);
+typedef S32  (MSS_CALLBACK *AILLENGTHYCB)(U32 done, U32 total);
 
 typedef void* HSEQUENCE;
 typedef void* HDLSDRIVER;
