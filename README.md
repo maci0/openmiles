@@ -50,30 +50,30 @@ zig build -Dtarget=x86-windows -Doptimize=ReleaseSmall -Dmss-version=5
 
 ### Targeting an MSS version
 
-`-Dmss-version=<3|4|5|6|6.0|6.1|6.5|6.6>` (default `6.6`) gates which API groups
-are compiled and exported, so the DLL is ABI-shaped like that Miles release:
+`-Dmss-version=<3|4|5|6|6.0|6.1|6.5|6.6|7|8|9>` (default `9`) gates which API
+groups are compiled and exported. The default is a superset DLL spanning every
+era (v3–v9); a lower value ABI-shapes the export table to that Miles release.
 
-| Version | Adds |
-|---------|------|
-| 3 | Core, Digital, Sample, Streaming, MIDI, Redbook, Timer |
-| 4 | RIB/ASI plugin system + ASI compression, Quick API, Input recording |
-| 5 | 3D audio |
-| 6 | Filter API |
+| Version | Adds | Exports |
+|---------|------|---------|
+| 3 | Core, Digital, Sample, Streaming, MIDI, Redbook, Timer | 231 |
+| 4 | RIB/ASI plugin system + ASI compression, Quick, Input, Memory | 287 |
+| 5 | 3D audio | 357 |
+| 6 | Filter API | 368 |
+| 7 | Unified 2D/3D sample API, master reverb (implemented via the engine) | 438 |
+| 8 | Soundbank/event/preset system, 5.1 surround, in-memory I/O (stubbed) | 517 |
+| 9 | Environment presets, 64-bit counters, logging (stubbed) | 547 |
 
-A lower-versioned DLL omits the newer groups' exports entirely, byte-for-byte
-matching what games of that era expect. Example export-table sizes:
+A lower-versioned DLL omits the newer groups byte-for-byte. The v7 unified API
+is implemented by reusing the engine (3D on the normal `HSAMPLE`, master/sample
+reverb, low-pass); the v8/v9 high-level subsystems (soundbanks, events) link and
+return safe defaults so those titles still run on the implemented v7 audio path.
 
-| `-Dmss-version` | Exports |
-|-----------------|---------|
-| 3 | 231 |
-| 4 | 287 |
-| 5 | 357 |
-| 6.x | 368 |
+The default DLL exports every name the real v7.0/v8.0/v9.0 `mss32.dll` do.
 
-(The RIB/ASI plugin loader is absent from a v3 build; 3D from <v5; Filter from
-<v6.) The plugin ABI itself — `RIB_INTERFACE_ENTRY` layout and the ASI/RIB
-callback signatures — is stable across MSS v4–v6, so a `.asi` plugin built for
-any v4+ release loads into any v4+ build.
+The `.asi` plugin ABI (`RIB_INTERFACE_ENTRY` layout + ASI/RIB callback
+signatures) is stable across MSS v4–v9, so a plugin built for any v4+ release
+loads into any v4+ build; the loader is absent only from a v3 build.
 
 > **Note:** Native builds on macOS aarch64 (Apple Silicon) are not supported because Zig's stage2 backend does not implement the `aarch64_aapcs_win` calling convention used by the stdcall exports. Use Linux or Windows for native builds, or cross-compile to `x86-windows`.
 
