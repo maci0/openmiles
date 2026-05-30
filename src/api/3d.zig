@@ -597,6 +597,12 @@ pub fn AIL_3D_velocity(obj: *anyopaque, x: ?*f32, y: ?*f32, z: ?*f32) callconv(.
         if (z) |p| p.* = s.velocity_z;
     }
 }
+// NOTE: this is the v6+ 3-arg ABI (`_AIL_3D_sample_distances@12`, matching the
+// 6.1 and combined SDK headers). The 4.0/5.0 mss32.dll exports a wider
+// `@20` (5-arg) variant — and 5.0 adds `AIL_3D_sample_float_distances@20` — whose
+// two extra parameters are not documented by any available SDK header. Faithfully
+// reproducing the v4/v5 decoration needs the era SDK or a 4.0h/5.0r disassembly;
+// until then those four symbols are the only gap in the v4/v5 export tables.
 pub fn AIL_3D_sample_distances(s_opt: ?*openmiles.Sample3D, max_dist: ?*f32, min_dist: ?*f32) callconv(.winapi) void {
     const sample = s_opt orelse return;
     if (sample.is_initialized) {
