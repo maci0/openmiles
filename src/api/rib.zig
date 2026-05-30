@@ -196,7 +196,8 @@ pub fn RIB_free_provider_library(provider_opt: ?*Provider) callconv(.winapi) voi
     const provider = provider_opt orelse return;
     provider.deinit();
 }
-pub fn RIB_request_interface_entry(provider_opt: ?*Provider, name: [*:0]const u8, entry_name: [*:0]const u8, token: ?*usize) callconv(.winapi) i32 {
+pub fn RIB_request_interface_entry(provider_opt: ?*Provider, name: [*:0]const u8, entry_type: u32, entry_name: [*:0]const u8, token: ?*usize) callconv(.winapi) i32 {
+    _ = entry_type; // RIB_FUNCTION/RIB_PROPERTY filter; we match by name alone
     const provider = provider_opt orelse return 0;
     for (provider.interfaces.items) |iface| {
         if (std.mem.eql(u8, iface.name, std.mem.span(name))) {
@@ -238,17 +239,37 @@ pub fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const u8, en
     next.* = null;
     return 0;
 }
-pub fn RIB_type_string(data_type: u32) callconv(.winapi) [*:0]const u8 {
-    return switch (data_type) {
-        0 => "none",
-        1 => "decimal",
-        2 => "hexadecimal",
-        3 => "float",
-        4 => "percent",
-        5 => "boolean",
-        6 => "string",
-        else => "unknown",
+// RIB_type_string(void const* data, RIB_DATA_SUBTYPE subtype) — formats the value
+// pointed to by `data` per its subtype into a static buffer (rib.cpp). Subtypes:
+// RIB_DEC=1, RIB_HEX=2, RIB_FLOAT=3, RIB_PERCENT=4, RIB_BOOL=5, RIB_STRING=6;
+// RIB_READONLY=0x80000000 is a flag stripped before the switch.
+var type_string_buf: [256]u8 = undefined;
+pub fn RIB_type_string(data: ?*const anyopaque, subtype: u32) callconv(.winapi) [*:0]const u8 {
+    const d = data orelse return "";
+    const st = subtype & ~@as(u32, 0x80000000);
+    const slice: []const u8 = switch (st) {
+        2 => std.fmt.bufPrint(&type_string_buf, "0x{X}", .{@as(*align(1) const i32, @ptrCast(d)).*}) catch return "",
+        3 => std.fmt.bufPrint(&type_string_buf, "{d:.1}", .{@as(*align(1) const f32, @ptrCast(d)).*}) catch return "",
+        4 => std.fmt.bufPrint(&type_string_buf, "{d:.1}%", .{@as(*align(1) const f32, @ptrCast(d)).*}) catch return "",
+        5 => if (@as(*align(1) const i32, @ptrCast(d)).* != 0) "True" else "False",
+        6 => return @as(*align(1) const [*:0]const u8, @ptrCast(d)).*,
+        else => std.fmt.bufPrint(&type_string_buf, "{d}", .{@as(*align(1) const i32, @ptrCast(d)).*}) catch return "",
     };
+    const n = @min(slice.len, type_string_buf.len - 1);
+    if (slice.ptr != @as([*]const u8, &type_string_buf)) std.mem.copyForwards(u8, type_string_buf[0..n], slice[0..n]);
+    type_string_buf[n] = 0;
+    return @ptrCast(&type_string_buf);
+}
+// MIX_RIB_MAIN(HPROVIDER, U32 up_down, RIB_ALLOC*, RIB_REGISTER*, RIB_UNREGISTER*)
+// is the DLL's own ASI mixer provider entry point. The miniaudio mixer is wired
+// directly rather than through the RIB ASI path, so this reports success.
+pub fn MIX_RIB_MAIN(provider: ?*Provider, up_down: u32, rib_alloc: ?*anyopaque, rib_reg: ?*anyopaque, rib_unreg: ?*anyopaque) callconv(.winapi) i32 {
+    _ = provider;
+    _ = up_down;
+    _ = rib_alloc;
+    _ = rib_reg;
+    _ = rib_unreg;
+    return 0;
 }
 pub fn RIB_provider_system_data(provider_opt: ?*Provider, index: u32) callconv(.winapi) usize {
     const provider = provider_opt orelse return 0;

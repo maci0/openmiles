@@ -2296,3 +2296,53 @@ test "release_all_timers frees registered timers and registration still works" {
     try testing.expect(h2 != null);
     api_timer_t.AIL_release_all_timers();
 }
+
+const api_miles_t = @import("api/miles.zig");
+
+test "Miles event-system variables roundtrip on default and named systems" {
+    const sys = api_miles_t.MilesStartupEventSystem(null, 0, null, 0);
+    defer api_miles_t.MilesShutdownEventSystem();
+    try testing.expect(sys != null);
+
+    api_miles_t.MilesSetVarI(0, "hp", 42); // default system == context 0
+    api_miles_t.MilesSetVarF(0, "vol", 0.5);
+    var iv: i32 = 0;
+    var fv: f32 = 0;
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesGetVarI(0, "hp", &iv));
+    try testing.expectEqual(@as(i32, 42), iv);
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesGetVarF(0, "vol", &fv));
+    try testing.expectEqual(@as(f32, 0.5), fv);
+
+    // type mismatch and unknown name both report "not found"
+    try testing.expectEqual(@as(i32, 0), api_miles_t.MilesGetVarF(0, "hp", &fv));
+    try testing.expectEqual(@as(i32, 0), api_miles_t.MilesGetVarI(0, "missing", &iv));
+
+    // case-insensitive update of an existing var (AIL_stricmp semantics)
+    api_miles_t.MilesSetVarI(0, "HP", 7);
+    _ = api_miles_t.MilesGetVarI(0, "hp", &iv);
+    try testing.expectEqual(@as(i32, 7), iv);
+
+    // a second system has an independent variable namespace
+    const sys2 = api_miles_t.MilesAddEventSystem(null);
+    try testing.expect(sys2 != null);
+    try testing.expectEqual(@as(i32, 0), api_miles_t.MilesGetVarI(@intFromPtr(sys2.?), "hp", &iv));
+    api_miles_t.MilesSetVarI(@intFromPtr(sys2.?), "hp", 99);
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesGetVarI(@intFromPtr(sys2.?), "hp", &iv));
+    try testing.expectEqual(@as(i32, 99), iv);
+    // default system unchanged by the named-system write
+    _ = api_miles_t.MilesGetVarI(0, "hp", &iv);
+    try testing.expectEqual(@as(i32, 7), iv);
+}
+
+test "Miles empty-state queries return documented empty values" {
+    _ = api_miles_t.MilesStartupEventSystem(null, 256, null, 0);
+    defer api_miles_t.MilesShutdownEventSystem();
+    var state: api_miles_t.MILESEVENTSTATE = undefined;
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(@as(i32, 256), state.CommandBufferSize);
+    try testing.expectEqual(@as(i32, 0), state.PlayingSoundCount);
+    try testing.expectEqual(@as(i32, 0), state.LoadedBankCount);
+    try testing.expectEqual(@as(u64, 0), api_miles_t.MilesEnqueueEvent(null, null, 0, 0, 0));
+    try testing.expect(api_miles_t.MilesFindEvent(null, "x") == null);
+    try testing.expectEqual(@as(i32, 0), api_miles_t.MilesGetEventLength("x"));
+}

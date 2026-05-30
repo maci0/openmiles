@@ -29,6 +29,7 @@ const api_memory = @import("api/memory.zig");
 const api_v7 = @import("api/v7.zig");
 const api_v8 = @import("api/v8.zig");
 const api_v9 = @import("api/v9.zig");
+const api_miles = @import("api/miles.zig");
 fn dummyTimerCb(_: u32) callconv(.winapi) void {}
 const alloc = std.heap.page_allocator;
 var g_scratch: [65536]u8 align(8) = [_]u8{0} ** 65536;
@@ -554,10 +555,10 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_rib.RIB_provider_user_data(prov, ru);
     api_rib.RIB_register_interface(prov, rstr, rszi, scp);
     _ = api_rib.RIB_request_interface(prov, rstr, rszi, scp);
-    _ = api_rib.RIB_request_interface_entry(prov, rstr, rstr, &zo);
+    _ = api_rib.RIB_request_interface_entry(prov, rstr, ru, rstr, &zo);
     api_rib.RIB_set_provider_system_data(prov, ru, rz);
     api_rib.RIB_set_provider_user_data(prov, ru, rz);
-    _ = api_rib.RIB_type_string(ru);
+    { var tsv: i32 = ri; _ = api_rib.RIB_type_string(&tsv, ru); }
     api_rib.RIB_unregister_interface(prov, rstr, rszi, scp);
     // Input validators that load/parse caller-supplied buffers. Buffer lengths
     // are bounded to the real scratch (rsz <= 256, well inside g_scratch's
@@ -751,6 +752,61 @@ test "fuzz: invoke every export with adversarial inputs" {
             std.c.free(estr);
         }
     }
+    // Miles 9.x event system: lifecycle + vars + queue/instance/bank/async surface
+    {
+        const msys = api_miles.MilesStartupEventSystem(hd, ri, null, ri);
+        const msysi: usize = @intFromPtr(msys);
+        api_miles.MilesSetVarI(msysi, rstr, ri);
+        api_miles.MilesSetVarF(msysi, rstr, rf);
+        api_miles.MilesSetVarI(0, rstr, ri);
+        api_miles.MilesSetVarF(0, rstr, rf);
+        var mvi: i32 = 0;
+        var mvf: f32 = 0;
+        _ = api_miles.MilesGetVarI(msysi, rstr, &mvi);
+        _ = api_miles.MilesGetVarF(0, rstr, &mvf);
+        _ = api_miles.MilesAddEventSystem(hd);
+        var mstate: api_miles.MILESEVENTSTATE = undefined;
+        api_miles.MilesGetEventSystemState(msys, &mstate);
+        _ = api_miles.MilesEnqueueEvent(null, scp, ri, ri, ru64);
+        _ = api_miles.MilesEnqueueEventContext(msys, null, scp, ri, ri, ru64);
+        _ = api_miles.MilesEnqueueEventByName(rstr);
+        _ = api_miles.MilesBeginEventQueueProcessing();
+        _ = api_miles.MilesCompleteEventQueueProcessing();
+        api_miles.MilesClearEventQueue();
+        _ = api_miles.MilesStartSoundInstance(scp, rstr, ru, ri, rstr, scp, ri, ri);
+        _ = api_miles.MilesStopSoundInstances(rstr, ru64);
+        _ = api_miles.MilesPauseSoundInstances(rstr, ru64);
+        _ = api_miles.MilesResumeSoundInstances(rstr, ru64);
+        var mnext: ?*anyopaque = null;
+        _ = api_miles.MilesEnumerateSoundInstances(msys, &mnext, ri, rstr, ru64, scp);
+        mnext = null;
+        var mname: ?[*:0]const u8 = null;
+        _ = api_miles.MilesEnumeratePresetPersists(msys, &mnext, &mname);
+        api_miles.MilesSetSoundStartOffset(rz, ri, ri);
+        _ = api_miles.MilesSetSoundLabelLimits(msys, rstr);
+        _ = api_miles.MilesAddSoundBank(rstr, rstr);
+        _ = api_miles.MilesReleaseSoundBank(scp);
+        _ = api_miles.MilesFindEvent(scp, rstr);
+        _ = api_miles.MilesGetEventLength(rstr);
+        _ = api_miles.MilesTextDumpEventSystem();
+        api_miles.MilesRegisterRand(scp);
+        api_miles.MilesSetEventErrorCallback(scp);
+        api_miles.MilesEventSetAuditionFunctions(scp);
+        _ = api_miles.MilesGetBankFunctions();
+        api_miles.MilesSetBankFunctions(scp);
+        api_miles.MilesUseTelemetry(scp);
+        api_miles.MilesUseTmLite(scp);
+        _ = api_miles.MilesAsyncStartup();
+        _ = api_miles.MilesAsyncFileRead(scp);
+        _ = api_miles.MilesAsyncFileCancel(scp);
+        _ = api_miles.MilesAsyncFileStatus(scp, ru);
+        api_miles.MilesAsyncSetPaused(ri);
+        api_miles.MilesRequeueAsyncs();
+        _ = api_miles.MilesAsyncShutdown();
+        api_miles.MilesShutdownEventSystem();
+    }
+    _ = api_rib.MIX_RIB_MAIN(prov, ru, scp, scp, scp);
+    if (api_memory.MSS_alloc_info(rsz, rz, rstr, ru)) |mp| api_memory.MSS_free_info(mp, rz, rstr, ru);
         }
     }
 }

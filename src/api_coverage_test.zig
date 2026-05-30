@@ -522,11 +522,11 @@ test "coverage: rib.zig exports" {
     _ = rib.RIB_load_provider_library("/nonexistent");
     rib.RIB_free_provider_library(np);
     rib.RIB_free_provider_handle(np);
-    _ = rib.RIB_request_interface_entry(np, "x", "y", null);
+    _ = rib.RIB_request_interface_entry(np, "x", 0, "y", null);
     var entry: openmiles.RIB_INTERFACE_ENTRY = undefined;
     rnext = null;
     _ = rib.RIB_enumerate_interface(np, "x", 0, &rnext, &entry);
-    _ = rib.RIB_type_string(1);
+    { var tsv: i32 = 42; _ = rib.RIB_type_string(&tsv, 1); }
     _ = rib.RIB_provider_system_data(np, 0);
     _ = rib.RIB_provider_user_data(np, 0);
     rib.RIB_set_provider_system_data(np, 0, 0);
