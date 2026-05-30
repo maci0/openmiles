@@ -717,6 +717,10 @@ comptime {
             name: []const u8,
             stack_size: u8,
             ver: u16 = 30, // MSS version (major*10+minor) the export first appeared in
+            ver_max: u16 = 999, // last version that still exports it (for renamed/dropped APIs)
+            // Optional COFF symbol to alias when it differs from `name` (e.g. a
+            // renamed export sharing another function's implementation).
+            symbol: ?[]const u8 = null,
         };
         const targets = [_]Target{
             .{ .name = "AIL_startup", .stack_size = 0 },
@@ -1080,7 +1084,8 @@ comptime {
             .{ .name = "AIL_open_input", .stack_size = 4, .ver = 40 },
             .{ .name = "AIL_close_input", .stack_size = 4, .ver = 40 },
             .{ .name = "AIL_set_input_state", .stack_size = 8, .ver = 40 },
-            .{ .name = "AIL_input_info", .stack_size = 4, .ver = 40 },
+            .{ .name = "AIL_input_info", .stack_size = 4, .ver = 40, .ver_max = 66 }, // renamed to get_input_info in v7
+            .{ .name = "AIL_get_input_info", .stack_size = 4, .ver = 70, .symbol = "AIL_input_info" },
             .{ .name = "AIL_set_file_callbacks", .stack_size = 16 },
             .{ .name = "AIL_set_file_async_callbacks", .stack_size = 20 },
             .{ .name = "AIL_set_DLS_processor", .stack_size = 12 },
@@ -1289,15 +1294,19 @@ comptime {
             .{ .name = "AIL_us_count64", .stack_size = 0, .ver = 90 },
         };
         for (targets) |t| {
-            // Skip exports newer than the targeted MSS version so the export
-            // table is ABI-shaped like that release (matches the gated imports
-            // in main.zig — the symbols don't exist in older-version builds).
-            if (openmiles.mss_version < t.ver) continue;
+            // Skip exports outside the targeted MSS version's window so the
+            // export table is ABI-shaped like that release (matches the gated
+            // imports in main.zig). `ver` is the first version to export the
+            // symbol; `ver_max` the last (for renamed/removed APIs).
+            if (openmiles.mss_version < t.ver or openmiles.mss_version > t.ver_max) continue;
             // Real mss32.dll exports only the MSVC-decorated stdcall name
             // `_NAME@stack`; emit just that so our export set (and thus the
-            // alphabetical ordinal numbering) matches the reference DLL.
+            // alphabetical ordinal numbering) matches the reference DLL. When a
+            // `symbol` override is given the export name differs from the COFF
+            // symbol it resolves to (used for renamed APIs sharing one impl).
             const canonical = std.fmt.comptimePrint("{s}@{d}", .{ t.name, t.stack_size });
-            asm (std.fmt.comptimePrint(".section .drectve\n .ascii \" /EXPORT:_{s}={s}\"\n .text\n", .{ canonical, canonical }));
+            const sym = std.fmt.comptimePrint("{s}@{d}", .{ t.symbol orelse t.name, t.stack_size });
+            asm (std.fmt.comptimePrint(".section .drectve\n .ascii \" /EXPORT:_{s}={s}\"\n .text\n", .{ canonical, sym }));
         }
         // Manual exports for problematic symbols (RIB is v4+).
         if (openmiles.mss_version >= 40)
