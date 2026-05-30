@@ -16,9 +16,60 @@ fn parseMssVersion(s: []const u8) ?u16 {
     return null;
 }
 
+const OpenmilesModule = struct {
+    mod: *std.Build.Module,
+    c_impl: *std.Build.Step.Compile,
+};
+
+/// Build an (anonymous) openmiles module plus its c_impl object for a given
+/// resolved target. Used to produce a musl-targeted copy for the native test
+/// executables on a glibc host (see `test_target`).
+fn addOpenmilesModule(
+    b: *std.Build,
+    rtarget: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    build_opts_mod: *std.Build.Module,
+) OpenmilesModule {
+    const tma = b.addTranslateC(.{ .root_source_file = b.path("deps/miniaudio.h"), .target = rtarget, .optimize = optimize });
+    tma.addIncludePath(b.path("deps"));
+    const ma = tma.createModule();
+
+    const ttsf = b.addTranslateC(.{ .root_source_file = b.path("deps/tsf_tml.h"), .target = rtarget, .optimize = optimize });
+    ttsf.addIncludePath(b.path("deps"));
+    const tsf = ttsf.createModule();
+
+    const m = b.createModule(.{ .root_source_file = b.path("src/root.zig"), .target = rtarget, .optimize = optimize });
+    m.addIncludePath(b.path("deps"));
+    m.addImport("ma_c", ma);
+    m.addImport("tsf_c", tsf);
+    m.addImport("build_options", build_opts_mod);
+
+    const ci = b.addObject(.{
+        .name = "c_impl_test",
+        .root_module = b.createModule(.{ .target = rtarget, .optimize = optimize, .link_libc = true }),
+    });
+    ci.root_module.addIncludePath(b.path("deps"));
+    ci.root_module.addCSourceFile(.{ .file = b.path("src/bindings/c_impl.c"), .flags = &.{"-std=c99"} });
+
+    return .{ .mod = m, .c_impl = ci };
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    // The native test executables (the C harnesses + native_rib_test) are real
+    // executables that pull the host's C-runtime startup object. On a modern
+    // glibc host, crt1.o now carries a .sframe section whose R_X86_64_PC64
+    // relocations neither Zig's self-hosted ELF linker nor its bundled LLD can
+    // process. Build those test exes against musl instead (Zig ships its own
+    // self-contained musl crt), which sidesteps the host crt1.o entirely. Cross
+    // targets and the shipped library keep the user-selected target unchanged.
+    const host_is_glibc_linux = target.result.os.tag == .linux and target.result.abi == .gnu;
+    const test_target = if (host_is_glibc_linux)
+        b.resolveTargetQuery(.{ .cpu_arch = target.result.cpu.arch, .os_tag = .linux, .abi = .musl })
+    else
+        target;
 
     // Target MSS version: gates which API groups are compiled/exported so the
     // DLL is ABI-shaped like a specific Miles release. Encoded major*10+minor:
@@ -133,7 +184,7 @@ pub fn build(b: *std.Build) void {
         const obj = b.addObject(.{
             .name = b.fmt("{s}_obj", .{t.name}),
             .root_module = b.createModule(.{
-                .target = target,
+                .target = test_target,
                 .optimize = optimize,
                 .link_libc = true,
             }),
@@ -148,7 +199,7 @@ pub fn build(b: *std.Build) void {
             .name = b.fmt("{s}", .{t.name}),
             .root_module = b.createModule(.{
                 .root_source_file = b.path("tests/empty.zig"),
-                .target = target,
+                .target = test_target,
                 .optimize = optimize,
                 .link_libc = true,
             }),
@@ -179,21 +230,27 @@ pub fn build(b: *std.Build) void {
     });
     b.getInstallStep().dependOn(&install_mock.step);
 
-    // Native RIB test
+    // Native RIB test. On a glibc host this builds against musl (test_target)
+    // to avoid the crt1.o .sframe relocation the linker can't handle, so it
+    // needs an openmiles module + c_impl resolved for that same target.
+    const nrt = if (host_is_glibc_linux)
+        addOpenmilesModule(b, test_target, optimize, build_opts_mod)
+    else
+        OpenmilesModule{ .mod = mod, .c_impl = c_impl };
     const native_rib_test = b.addExecutable(.{
         .name = "native_rib_test",
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/native_rib_test.zig"),
-            .target = target,
+            .target = test_target,
             .optimize = optimize,
             .link_libc = true,
             .imports = &.{
-                .{ .name = "openmiles", .module = mod },
+                .{ .name = "openmiles", .module = nrt.mod },
             },
         }),
     });
     native_rib_test.root_module.addIncludePath(b.path("deps"));
     native_rib_test.root_module.addIncludePath(b.path("src"));
-    native_rib_test.root_module.addObject(c_impl);
+    native_rib_test.root_module.addObject(nrt.c_impl);
     b.installArtifact(native_rib_test);
 }
