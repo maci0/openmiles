@@ -179,6 +179,16 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_digital.AIL_digital_latency(hd);
     api_v7.AIL_digital_master_reverb(hd, ri, &fo, &fo, &fo);
     api_v7.AIL_digital_master_reverb_levels(hd, ri, &fo, &fo);
+    // v7/v8 narrow-ABI variants (no bus_index/channel)
+    _ = api_v7.AIL_room_type_v7(hd);
+    api_v7.AIL_set_room_type_v7(hd, ri);
+    api_v7.AIL_digital_master_reverb_v7(hd, &fo, &fo, &fo);
+    api_v7.AIL_set_digital_master_reverb_v7(hd, rf, rf, rf);
+    api_v7.AIL_digital_master_reverb_levels_v7(hd, &fo, &fo);
+    api_v7.AIL_set_digital_master_reverb_levels_v7(hd, rf, rf);
+    _ = api_v7.AIL_sample_low_pass_cut_off_v7(hs);
+    api_v7.AIL_set_sample_low_pass_cut_off_v7(hs, rf);
+    api_v7.AIL_quick_set_low_pass_cut_off_v7(hs, rf);
     _ = api_digital.AIL_digital_master_volume(hd);
     _ = api_v7.AIL_digital_master_volume_level(hd);
     _ = api_v7.AIL_digital_output_filter(hd);

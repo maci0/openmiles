@@ -527,3 +527,36 @@ pub fn RIB_MAIN(self: ?*anyopaque, dll_name: [*:0]const u8) callconv(.winapi) i3
     _ = dll_name;
     return 0;
 }
+
+// v7/v8 ABI: the master-reverb, room-type and low-pass-cutoff calls predate the
+// v9 bus mixer, so they lack the bus_index/channel parameter that v9 inserted as
+// the second argument. These narrower variants (ver 70..80) forward to the v9
+// implementations targeting the default bus/channel 0; the v9 build exports the
+// wider forms above.
+pub fn AIL_room_type_v7(dig_opt: ?*DigitalDriver) callconv(.winapi) i32 {
+    return AIL_room_type(dig_opt, 0);
+}
+pub fn AIL_set_room_type_v7(dig_opt: ?*DigitalDriver, room_type: i32) callconv(.winapi) void {
+    AIL_set_room_type(dig_opt, 0, room_type);
+}
+pub fn AIL_digital_master_reverb_v7(dig_opt: ?*DigitalDriver, reverb_time: ?*f32, reverb_predelay: ?*f32, reverb_damping: ?*f32) callconv(.winapi) void {
+    AIL_digital_master_reverb(dig_opt, 0, reverb_time, reverb_predelay, reverb_damping);
+}
+pub fn AIL_set_digital_master_reverb_v7(dig_opt: ?*DigitalDriver, reverb_decay_time: f32, reverb_predelay: f32, reverb_damping: f32) callconv(.winapi) void {
+    AIL_set_digital_master_reverb(dig_opt, 0, reverb_decay_time, reverb_predelay, reverb_damping);
+}
+pub fn AIL_digital_master_reverb_levels_v7(dig_opt: ?*DigitalDriver, dry_level: ?*f32, wet_level: ?*f32) callconv(.winapi) void {
+    AIL_digital_master_reverb_levels(dig_opt, 0, dry_level, wet_level);
+}
+pub fn AIL_set_digital_master_reverb_levels_v7(dig_opt: ?*DigitalDriver, dry_level: f32, wet_level: f32) callconv(.winapi) void {
+    AIL_set_digital_master_reverb_levels(dig_opt, 0, dry_level, wet_level);
+}
+pub fn AIL_sample_low_pass_cut_off_v7(s_opt: ?*Sample) callconv(.winapi) f32 {
+    return AIL_sample_low_pass_cut_off(s_opt, 0);
+}
+pub fn AIL_set_sample_low_pass_cut_off_v7(s_opt: ?*Sample, cut_off: f32) callconv(.winapi) void {
+    AIL_set_sample_low_pass_cut_off(s_opt, 0, cut_off);
+}
+pub fn AIL_quick_set_low_pass_cut_off_v7(audio: ?*Sample, cut_off: f32) callconv(.winapi) void {
+    AIL_quick_set_low_pass_cut_off(audio, 0, cut_off);
+}
