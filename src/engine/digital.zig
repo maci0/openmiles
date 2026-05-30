@@ -532,10 +532,12 @@ pub const Sample = struct {
             log("Sample.loadFromUnownedMemoryUnknownSize detected size: {d}\n", .{detected});
             try self.loadFromMemory(data_ptr[0..detected], false);
         } else {
-            // Format unrecognized (detected == 0) — use bounded decoder as a safe
-            // fallback to avoid creating a Zig slice past the real allocation.
-            log("Sample.loadFromUnownedMemoryUnknownSize using bounded decoder (unknown format)\n", .{});
-            try self.loadFromBoundedPointer(data_ptr, root.streaming_sentinel_size);
+            // Format unrecognized. With only a bare pointer there is no size to
+            // bound reads by, and miniaudio's format probing would over-read any
+            // buffer smaller than its detection window. Refuse — matching MSS,
+            // which fails set_sample_file on data it can't identify.
+            log("Sample.loadFromUnownedMemoryUnknownSize: unrecognized format, refusing\n", .{});
+            return error.UnsupportedAudioFormat;
         }
     }
 
@@ -1310,7 +1312,12 @@ pub const Sample3D = struct {
 
     pub fn loadFromUnownedPointer(self: *Sample3D, data_ptr: [*]const u8) !void {
         const detected = root.detectAudioSize(data_ptr);
-        if (detected > 0 and detected != root.streaming_sentinel_size) {
+        if (detected == 0) {
+            // Unrecognized format: cannot bound reads from a bare pointer
+            // (see Sample.loadFromUnownedMemoryUnknownSize). Refuse.
+            return error.UnsupportedAudioFormat;
+        }
+        if (detected != root.streaming_sentinel_size) {
             try self.loadFromMemory(data_ptr[0..detected], true);
         } else {
             try self.loadFromBoundedPointer(data_ptr, root.streaming_sentinel_size);

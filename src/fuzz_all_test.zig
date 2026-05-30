@@ -551,6 +551,29 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_rib.RIB_set_provider_user_data(prov, ru, rz);
     _ = api_rib.RIB_type_string(ru);
     api_rib.RIB_unregister_interface(prov, rstr, rszi, scp);
+    // Input validators that load/parse caller-supplied buffers. Buffer lengths
+    // are bounded to the real scratch (rsz <= 256, well inside g_scratch's
+    // 64 KiB) so any out-of-bounds read/write is a genuine library bug, not a
+    // harness contract violation. Filenames resolve to "" (scratch starts
+    // zeroed), so the file writers just fail to open rather than touching disk.
+    var pfo: ?*f32 = null;
+    var pco: ?*const anyopaque = null;
+    _ = api_digital.AIL_set_sample_file(hs, scp, ri);
+    api_digital.AIL_set_sample_address(hs, scp, rsz);
+    api_v7.AIL_set_sample_info(hs, &info);
+    _ = api_digital.AIL_set_named_sample_file(hs, rstr, scp, rszi, ru);
+    _ = api_3d.AIL_set_3D_sample_file(@as(?*anyopaque, @ptrCast(h3)), scp);
+    _ = api_3d.AIL_set_3D_sample_info(@as(?*anyopaque, @ptrCast(h3)), @as(?*anyopaque, &info));
+    api_digital.AIL_load_sample_buffer(hs, ru, scp, rsz);
+    _ = api_digital.AIL_size_processed_digital_audio(hd, ri, ri, scp, rsz);
+    _ = api_digital.AIL_process_digital_audio(hd, scp, rsz, scp, rsz, ru);
+    _ = api_dls.AIL_DLS_get_info(hm, scp, scp);
+    _ = api_digital.AIL_get_DirectSound_info(hd, scp, rsz);
+    api_v7.AIL_speaker_reverb_levels(hd, &pfo, &pfo, &pco);
+    _ = api_file.AIL_file_read(rstr, scp);
+    _ = api_file.AIL_file_write(rstr, scp, rsz);
+    _ = api_digital.AIL_WAV_file_write(rstr, scp, rsz, ri, ri);
+    _ = api_midi.AIL_MIDI_to_XMI(scp, rsz, null, &uo, ru);
         }
     }
 }

@@ -315,7 +315,7 @@ pub export fn AIL_allocate_file_sample(driver_opt: ?*DigitalDriver, data: *anyop
 // AIL_load_sample_buffer(HSAMPLE S, U32 buff_num, void const *buffer, U32 len)
 pub export fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: u32, data: *anyopaque, len: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    const buffer_id: i32 = @intCast(buff_num);
+    const buffer_id: i32 = @bitCast(buff_num); // just a stored id; don't panic on high bit
     s.last_loaded_buffer = buffer_id;
     if (s.pcm_format != null) {
         // Raw PCM + a known format = MSS double-buffer streaming. Feed the buffer
@@ -464,12 +464,16 @@ pub export fn AIL_size_processed_digital_audio(driver_opt: ?*DigitalDriver, rate
     const driver = driver_opt orelse return 0;
     _ = driver;
     _ = data;
-    const bytes_per_sample: u32 = switch (@as(u32, @intCast(format))) {
+    if (rate <= 0) return 0; // guards both the negative-cast and div-by-zero
+    const fmt: u32 = if (format < 0) 0 else @intCast(format);
+    const bytes_per_sample: u32 = switch (fmt) {
         0, 2 => 1, // 8-bit
         else => 2, // 16-bit
     };
-    const channels: u32 = if (format >= 2) 2 else 1;
-    return @intCast(@as(u64, len) * 1000 / (@as(u64, @intCast(rate)) * bytes_per_sample * channels));
+    const channels: u32 = if (fmt >= 2) 2 else 1;
+    const divisor = @as(u64, @intCast(rate)) * bytes_per_sample * channels; // > 0
+    const result = @as(u64, len) * 1000 / divisor;
+    return @intCast(@min(result, std.math.maxInt(u32)));
 }
 pub export fn AIL_ms_count() callconv(.winapi) u32 {
     return openmiles.getMsCount();
@@ -560,6 +564,9 @@ pub export fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi)
     return 1;
 }
 pub export fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, rate: i32, bits: i32) callconv(.winapi) i32 {
+    // Reject nonsensical sample rate / bit depth rather than panicking on the
+    // narrowing cast when a caller passes adversarial values.
+    if (rate <= 0 or bits <= 0 or bits > 32) return 0;
     const pcm_data: []const u8 = @as([*]const u8, @ptrCast(@alignCast(data)))[0..len];
     const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, pcm_data, 1, @intCast(rate), @intCast(bits)) catch |err| {
         log("Error: {any}\n", .{err});
