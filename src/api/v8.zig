@@ -712,3 +712,40 @@ pub fn AIL_unapply_sound_preset(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaqu
     _ = a2;
     return 0;
 }
+
+// --- v8-only ABI variants (narrower than the v9 forms) -----------------------
+// v8 predates several v9 parameters: an extra event-queue/limit argument on the
+// event-step builders, the soundbank "name" argument, the per-marker list arg,
+// and the ftoa output buffer. These variants match the exact v8 decorations and
+// forward to the v9 implementations, defaulting the parameters v9 later added.
+pub fn AIL_add_control_sounds_event_step_v8(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque, a6: i32, a7: f32, a8: i32) callconv(.winapi) i32 {
+    return AIL_add_control_sounds_event_step(a0, a1, a2, a3, a4, a5, a6, a7, a8, 0);
+}
+pub fn AIL_add_sound_limit_event_step_v8(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) i32 {
+    return AIL_add_sound_limit_event_step(a0, a1, null);
+}
+pub fn AIL_add_start_sound_event_step_v8(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32, a4: ?*anyopaque, a5: ?*anyopaque, a6: ?*anyopaque, a7: ?*anyopaque, a8: ?*anyopaque, a9: ?*anyopaque, a10: u32, a11: i32, a12: i32, a13: i32, a14: i32, a15: i32, a16: ?*anyopaque, a17: f32, a18: f32, a19: f32, a20: f32) callconv(.winapi) i32 {
+    return AIL_add_start_sound_event_step(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, 1.0, 0, 0);
+}
+pub fn AIL_find_marker_in_list_v8(a0: i32, a1: ?*anyopaque) callconv(.winapi) i32 {
+    return AIL_find_marker_in_list(a0, a1, null);
+}
+var ftoa_buf: [32]u8 = undefined;
+pub fn AIL_ftoa_v8(v: f32) callconv(.winapi) ?*anyopaque {
+    return AIL_ftoa(v, &ftoa_buf);
+}
+pub fn AIL_open_soundbank_v8(filename: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    return AIL_open_soundbank(filename, null);
+}
+pub fn AIL_register_trace_callback_v8(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) void {
+    _ = a1;
+    AIL_register_trace_callback(a0);
+}
+pub fn AIL_sound_asset_filename_v8(a0: ?*anyopaque, a1: i32, a2: i32) callconv(.winapi) void {
+    _ = a2;
+    AIL_sound_asset_filename(a0, a1);
+}
+// MSSDisableThreadLibraryCalls(HMODULE)@4 — a v8 DllMain helper; no-op here.
+pub fn MSSDisableThreadLibraryCalls(hmodule: ?*anyopaque) callconv(.winapi) void {
+    _ = hmodule;
+}

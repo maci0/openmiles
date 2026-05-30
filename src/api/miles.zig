@@ -347,3 +347,29 @@ pub fn MilesAsyncSetPaused(is_paused: i32) callconv(.winapi) void {
     _ = is_paused;
 }
 pub fn MilesRequeueAsyncs() callconv(.winapi) void {}
+
+// --- v8 ABI variants ---------------------------------------------------------
+// v8 exported a smaller, single-global-system Miles API: several calls lacked the
+// HEVENTSYSTEM context that v9 added, AddSoundBank lacked the name argument, the
+// sound-instance ID was U32 (widened to U64 in v9), and StartupEventSystem
+// carried an extra trailing slot. These variants match the v8 decorations and
+// forward to the v9 implementations.
+pub fn MilesStartupEventSystem_v8(driver: ?*anyopaque, command_buf_len: i32, memory_buf: ?[*]u8, memory_len: i32, extra: i32) callconv(.winapi) ?*anyopaque {
+    _ = extra;
+    return MilesStartupEventSystem(driver, command_buf_len, memory_buf, memory_len);
+}
+pub fn MilesAddSoundBank_v8(filename: ?[*:0]const u8) callconv(.winapi) ?*anyopaque {
+    return MilesAddSoundBank(filename, null);
+}
+pub fn MilesGetEventSystemState_v8(state: ?*MILESEVENTSTATE) callconv(.winapi) void {
+    MilesGetEventSystemState(null, state);
+}
+pub fn MilesSetSoundLabelLimits_v8(sound_limits: ?[*:0]const u8) callconv(.winapi) i32 {
+    return MilesSetSoundLabelLimits(null, sound_limits);
+}
+pub fn MilesEnumeratePresetPersists_v8(io_next: ?*?*anyopaque, out_name: ?*?[*:0]const u8) callconv(.winapi) i32 {
+    return MilesEnumeratePresetPersists(null, io_next, out_name);
+}
+pub fn MilesEnumerateSoundInstances_v8(system: ?*anyopaque, io_next: ?*?*anyopaque, status: i32, labels: ?[*:0]const u8, search_for_id: u32, out_info: ?*anyopaque) callconv(.winapi) i32 {
+    return MilesEnumerateSoundInstances(system, io_next, status, labels, search_for_id, out_info);
+}

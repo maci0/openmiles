@@ -837,7 +837,29 @@ test "fuzz: invoke every export with adversarial inputs" {
         api_miles.MilesAsyncSetPaused(ri);
         api_miles.MilesRequeueAsyncs();
         _ = api_miles.MilesAsyncShutdown();
+        // v8-arity Miles variants
+        _ = api_miles.MilesStartupEventSystem_v8(hd, ri, null, ri, ri);
+        _ = api_miles.MilesAddSoundBank_v8(rstr);
+        api_miles.MilesGetEventSystemState_v8(&mstate);
+        _ = api_miles.MilesSetSoundLabelLimits_v8(rstr);
+        mnext = null;
+        _ = api_miles.MilesEnumeratePresetPersists_v8(&mnext, &mname);
+        mnext = null;
+        _ = api_miles.MilesEnumerateSoundInstances_v8(msys, &mnext, ri, rstr, ru, scp);
         api_miles.MilesShutdownEventSystem();
+    }
+    // v8-arity AIL/event/misc variants
+    api_v8.MSSDisableThreadLibraryCalls(scp);
+    _ = api_v8.AIL_find_marker_in_list_v8(ri, scp);
+    _ = api_v8.AIL_ftoa_v8(rf);
+    _ = api_v8.AIL_open_soundbank_v8(scp);
+    api_v8.AIL_register_trace_callback_v8(scp, scp);
+    api_v8.AIL_sound_asset_filename_v8(scp, ri, ri);
+    if (api_v8.AIL_create_event()) |ev8| {
+        _ = api_v8.AIL_add_control_sounds_event_step_v8(ev8, scp, scp, scp, scp, scp, ri, rf, ri);
+        _ = api_v8.AIL_add_sound_limit_event_step_v8(ev8, scp);
+        _ = api_v8.AIL_add_start_sound_event_step_v8(ev8, scp, scp, ri, scp, scp, scp, scp, scp, scp, ru, ri, ri, ri, ri, ri, scp, rf, rf, rf, rf);
+        if (api_v8.AIL_close_event(ev8)) |s8| std.c.free(s8);
     }
     _ = api_rib.MIX_RIB_MAIN(prov, ru, scp, scp, scp);
     if (api_memory.MSS_alloc_info(rsz, rz, rstr, ru)) |mp| api_memory.MSS_free_info(mp, rz, rstr, ru);
