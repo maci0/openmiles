@@ -649,6 +649,80 @@ test "fuzz: invoke every export with adversarial inputs" {
     if (api_digital.AIL_allocate_file_sample(hd, scp, rsz)) |fsamp| fsamp.deinit();
     if (api_v8.AIL_mem_create()) |m| api_v8.AIL_mem_close(m, null, null);
     api_memory.AIL_mem_use_free(null);
+    // allocate/release lifecycle on throwaway handles (exercises C-ABI wrappers
+    // without tearing down the shared hd/hm/hs handles the loop reuses)
+    if (api_digital.AIL_allocate_sample_handle(hd)) |ts| api_digital.AIL_release_sample_handle(ts);
+    if (api_3d.AIL_allocate_3D_sample_handle(hd)) |t3| api_3d.AIL_release_3D_sample_handle(t3);
+    if (api_midi.AIL_allocate_sequence_handle(hm)) |tq| {
+        api_midi.AIL_release_channel(tq, ri);
+        api_midi.AIL_release_sequence_handle(tq);
+    }
+    if (api_memory.AIL_mem_alloc_lock(rsz)) |lk| api_memory.AIL_mem_free_lock(lk);
+    // quick load with adversarial filename (-> null) and unload of null/handle
+    if (api_quick.AIL_quick_load(rstr)) |qs| api_quick.AIL_quick_unload(qs);
+    if (api_quick.AIL_quick_load_and_play(rstr, ri, ri)) |qs| api_quick.AIL_quick_unload(qs);
+    api_quick.AIL_quick_unload(null);
+    // filter subsystem (open -> attribute -> attach -> enumerate -> close)
+    if (api_filter.AIL_open_filter(openmiles.startup_provider, hd)) |filt| {
+        var fval: f32 = rf;
+        api_filter.AIL_filter_attribute(filt, rstr, &fval);
+        api_filter.AIL_set_filter_attribute(filt, rstr, &fval);
+        api_filter.AIL_set_filter_preference(filt, rstr, &fval);
+        api_filter.AIL_set_sample_filter(hs, filt, ri);
+        var fnext: ?*anyopaque = null;
+        var fname: [*:0]const u8 = undefined;
+        _ = api_filter.AIL_enumerate_filter_attributes(filt, &fnext, &fname);
+        fnext = null;
+        _ = api_filter.AIL_enumerate_filter_sample_attributes(filt, &fnext, &fname);
+        api_filter.AIL_close_filter(filt); // deinit nulls hs.attached_filter
+    }
+    // stream subsystem (adversarial filename exercises the parse/open path)
+    if (api_stream.AIL_open_stream(hd, rstr, ri)) |st| {
+        api_digital.AIL_start_sample_at(st, ru);
+        api_stream.AIL_close_stream(st);
+    }
+    if (api_stream.AIL_open_stream_ex(hd, rstr, ri, ri)) |st| api_stream.AIL_close_stream(st);
+    api_digital.AIL_start_sample_at(hs, ru);
+    // input device open/close
+    if (api_input.AIL_open_input(scp)) |inp| api_input.AIL_close_input(inp);
+    // 3D provider/listener/object open-close cycle
+    _ = api_3d.AIL_open_3D_provider(null);
+    _ = api_3d.AIL_open_3D_provider(scp);
+    api_3d.AIL_close_3D_provider(scp);
+    if (api_3d.AIL_open_3D_listener(hd)) |lis| api_3d.AIL_close_3D_listener(lis);
+    if (api_3d.AIL_open_3D_object(hd)) |o3| api_3d.AIL_close_3D_object(o3);
+    {
+        var lvl: f32 = 0;
+        _ = api_v7.AIL_calculate_3D_channel_levels_v7(hd, &lvl, scp, scp, scp, scp, rf, rf, rf, rf, rf, scp, scp, rf);
+    }
+    // Win16-legacy handle release/reacquire are no-ops; safe on shared handles
+    _ = api_digital.AIL_digital_handle_release(hd);
+    api_midi.AIL_MIDI_handle_release(@ptrCast(hm));
+    api_dls.DLSUnloadAll(hm);
+    _ = api_digital.AIL_init_sample_v8(hs, ri);
+    {
+        var p0: u32 = 0;
+        var l0: u32 = 0;
+        var p1: u32 = 0;
+        var l1: u32 = 0;
+        api_digital.AIL_sample_buffer_info_old(hs, &p0, &l0, &p1, &l1);
+    }
+    {
+        var dptr: ?*openmiles.DigitalDriver = null;
+        var mptr: ?*openmiles.MidiDriver = null;
+        api_quick.AIL_quick_handles_v3(&dptr, &mptr);
+    }
+    // null-branch coverage for teardown exports that free their argument
+    api_digital.AIL_waveOutClose(null);
+    api_redbook.AIL_redbook_close(null);
+    api_midi.AIL_close_XMIDI_driver(null);
+    api_v8.AIL_close_soundbank(null);
+    api_rib.AIL_close_ASI_provider(null);
+    api_rib.RIB_free_provider_handle(null);
+    api_rib.RIB_free_provider_library(null);
+    // wave synthesizer + DLS open with garbage SF2 image (exercises parse path)
+    if (api_digital.AIL_create_wave_synthesizer(hd, hq, scp, ru)) |ws| api_digital.AIL_destroy_wave_synthesizer(ws);
+    if (api_dls.AIL_DLS_open(hd, hq, scp, ru, ri, ri, ru)) |dh| api_dls.AIL_DLS_close(dh, ru);
     // event constructor + steps + decode
     if (api_v8.AIL_create_event()) |evh| {
         _ = api_v8.AIL_add_comment_event_step(evh, rstr);

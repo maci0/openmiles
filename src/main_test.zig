@@ -2264,3 +2264,35 @@ test "event constructor + decoder round-trip (byte-faithful text)" {
     cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
     try testing.expect(cur == null);
 }
+
+const api_dls_t = @import("api/dls.zig");
+const api_timer_t = @import("api/timer.zig");
+
+test "DLS unload C-ABI variants free a loaded soundfont" {
+    const hm = openmiles.MidiDriver.init(testing.allocator) catch return;
+    defer hm.deinit();
+    // Each unload variant frees the bank, so reload a fresh one before the next.
+    inline for (.{
+        api_dls_t.AIL_DLS_unload,
+        api_dls_t.AIL_DLS_unload_file,
+        api_dls_t.DLSClose,
+        api_dls_t.DLSUnloadFile,
+    }) |unloadFn| {
+        const bank = api_dls_t.AIL_DLS_load_file(hm, "test_media/test.sf2", 0) orelse return;
+        try testing.expect(hm.soundfont != null);
+        unloadFn(hm, bank);
+        try testing.expect(hm.soundfont == null);
+    }
+}
+
+fn noopTimerCb(_: u32) callconv(.winapi) void {}
+
+test "release_all_timers frees registered timers and registration still works" {
+    const h1 = api_timer_t.AIL_register_timer(noopTimerCb);
+    try testing.expect(h1 != null);
+    api_timer_t.AIL_release_all_timers();
+    // Registry usable again after a bulk release.
+    const h2 = api_timer_t.AIL_register_timer(noopTimerCb);
+    try testing.expect(h2 != null);
+    api_timer_t.AIL_release_all_timers();
+}
