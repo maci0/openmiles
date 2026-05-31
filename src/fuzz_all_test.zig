@@ -239,6 +239,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_v9.AIL_file_size_info(null, null, ru);
     _ = api_file.AIL_file_type(scp, rsz);
     _ = api_v8.AIL_file_type_named(null, null, ru);
+    _ = api_v8.AIL_file_type_named(scp, rstr, rsz); // exercise the suffix-match path
     api_dls.AIL_filter_DLS_attribute(hm, rstr, scp);
     _ = api_dls.AIL_filter_DLS_with_XMI(null, null, &pp, &uo, ri, null);
     _ = api_v8.AIL_filter_property(null, null, null, null, null);

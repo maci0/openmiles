@@ -1523,8 +1523,15 @@ test "AIL_file_type_named delegates to file_type, special-cases voice suffixes" 
     defer allocator.free(wav);
     // No special suffix -> delegates to AIL_file_type(data) -> PCM_WAV (1).
     try testing.expectEqual(@as(i32, 1), api_v8b.AIL_file_type_named(@ptrCast(wav.ptr), "sound.wav", @intCast(wav.len)));
-    // .V24 suffix (case-insensitive) -> AILFILETYPE_V24_VOICE (18), ignoring data.
+    // All six voice suffixes (case-insensitive) short-circuit, ignoring the data.
+    try testing.expectEqual(@as(i32, 17), api_v8b.AIL_file_type_named(@ptrCast(wav.ptr), "voice.v12", @intCast(wav.len)));
     try testing.expectEqual(@as(i32, 18), api_v8b.AIL_file_type_named(@ptrCast(wav.ptr), "voice.V24", @intCast(wav.len)));
+    try testing.expectEqual(@as(i32, 19), api_v8b.AIL_file_type_named(@ptrCast(wav.ptr), "voice.v29", @intCast(wav.len)));
+    try testing.expectEqual(@as(i32, 21), api_v8b.AIL_file_type_named(@ptrCast(wav.ptr), "v.Speex8", @intCast(wav.len)));
+    try testing.expectEqual(@as(i32, 22), api_v8b.AIL_file_type_named(@ptrCast(wav.ptr), "v.speex16", @intCast(wav.len)));
+    try testing.expectEqual(@as(i32, 23), api_v8b.AIL_file_type_named(@ptrCast(wav.ptr), "v.SPEEX32", @intCast(wav.len)));
+    // .speex16 must not be shadowed by the .speex8/.speex32 checks (distinct suffixes).
+    try testing.expectEqual(@as(i32, 22), api_v8b.AIL_file_type_named(null, "track.speex16", 0));
     // Null data, no special suffix -> 0 (UNKNOWN).
     try testing.expectEqual(@as(i32, 0), api_v8b.AIL_file_type_named(null, "x.bin", 0));
 }
