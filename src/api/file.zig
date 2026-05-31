@@ -103,25 +103,99 @@ pub fn AIL_file_size(filename: [*:0]const u8) callconv(.winapi) u32 {
 }
 // Returns an AILFILETYPE_* code: UNKNOWN=0, PCM_WAV=1, ADPCM_WAV=2, MIDI=5,
 // XMIDI=6 (consistent across MSS 3.x-9.x). These are NOT sequential 1/2/3.
-pub fn AIL_file_type(data: *anyopaque, len: u32) callconv(.winapi) i32 {
-    if (len < 4) return 0; // AILFILETYPE_UNKNOWN
-    const raw: [*]const u8 = @ptrCast(@alignCast(data));
-    if (raw[0] == 'R' and raw[1] == 'I' and raw[2] == 'F' and raw[3] == 'F') {
-        // Distinguish ADPCM from PCM via the fmt-chunk wFormatTag (WAVE_FORMAT_
-        // IMA_ADPCM = 0x0011), when the "fmt " chunk is first (the common case).
-        if (len >= 22 and raw[12] == 'f' and raw[13] == 'm' and raw[14] == 't' and raw[15] == ' ') {
-            const tag: u16 = @as(u16, raw[20]) | (@as(u16, raw[21]) << 8);
-            if (tag == 0x0011) return 2; // AILFILETYPE_ADPCM_WAV
-        }
-        return 1; // AILFILETYPE_PCM_WAV
+// Exact / case-insensitive 4..N-byte magic compares with bounds checking.
+fn eq(buf: []const u8, off: usize, lit: []const u8) bool {
+    return off + lit.len <= buf.len and std.mem.eql(u8, buf[off .. off + lit.len], lit);
+}
+fn eqi(buf: []const u8, off: usize, lit: []const u8) bool {
+    return off + lit.len <= buf.len and std.ascii.eqlIgnoreCase(buf[off .. off + lit.len], lit);
+}
+
+// MPEG audio detection: ID3v2 skip then a frame-sync scan, ported from
+// AIL_API_file_type (miscutil.cpp). Returns the MPEG layer file type or null.
+fn detectMpeg(in: []const u8) ?i32 {
+    var s = in;
+    if (s.len >= 10 and s[0] == 'I' and s[1] == 'D' and s[2] == '3' and
+        s[3] < 0xff and s[4] < 0xff and s[6] < 0x80 and s[7] < 0x80 and s[8] < 0x80 and s[9] < 0x80)
+    {
+        const skip: u32 = 10 + (@as(u32, s[9]) | (@as(u32, s[8]) << 7) | (@as(u32, s[7]) << 14) | (@as(u32, s[6]) << 21));
+        if (skip < s.len) s = s[skip..] else return null;
     }
-    if (raw[0] == 'M' and raw[1] == 'T' and raw[2] == 'h' and raw[3] == 'd') return 5; // AILFILETYPE_MIDI
-    if (raw[0] == 'F' and raw[1] == 'O' and raw[2] == 'R' and raw[3] == 'M' and len >= 12) {
-        if ((raw[8] == 'X' and raw[9] == 'D' and raw[10] == 'I' and raw[11] == 'R') or
-            (raw[8] == 'X' and raw[9] == 'M' and raw[10] == 'I' and raw[11] == 'D'))
-        {
-            return 6; // AILFILETYPE_XMIDI
+    const lim = @min(s.len, 8192); // AIL_MAX_FILE_HEADER_SIZE
+    var ftype: i32 = 0;
+    var p: usize = 0;
+    while (p + 4 <= lim) {
+        const w16: u16 = @as(u16, s[p]) | (@as(u16, s[p + 1]) << 8); // LE read
+        if ((w16 & 0xF0FF) == 0xF0FF) { // 11-bit frame sync candidate
+            const w32: u32 = @as(u32, s[p]) | (@as(u32, s[p + 1]) << 8) | (@as(u32, s[p + 2]) << 16) | (@as(u32, s[p + 3]) << 24);
+            if (w32 != 0xFFFFFFFF and ((w32 >> 18) & 0x3f) != 0x3F) {
+                switch ((w16 >> 9) & 3) {
+                    1 => return 13, // MPEG_L3_AUDIO
+                    2 => ftype = 12, // MPEG_L2_AUDIO
+                    3 => ftype = 11, // MPEG_L1_AUDIO
+                    else => {},
+                }
+            }
+            p += 3;
         }
+        p += 1;
+    }
+    return if (ftype != 0) ftype else null;
+}
+
+pub fn AIL_file_type(data: *anyopaque, len: u32) callconv(.winapi) i32 {
+    if (len < 8) return 0; // AILFILETYPE_UNKNOWN (SDK: data==0 || size<8)
+    const buf = @as([*]const u8, @ptrCast(@alignCast(data)))[0..@intCast(len)];
+    const AILSOUNDINFO = openmiles.AILSOUNDINFO;
+    const digital = @import("digital.zig");
+
+    // 1. WAV: classify via the robust AIL_WAV_info parser (needs a data chunk).
+    var si: AILSOUNDINFO = .{};
+    var mp3_off: usize = 0;
+    var mp3_len: usize = buf.len;
+    if (digital.AIL_WAV_info(data, &si) != 0) {
+        switch (si.format) {
+            1 => return 1, // PCM_WAV (EXTENSIBLE PCM is reported as 1 by WAV_info)
+            0x0011 => return if (si.bits == 4) 2 else 3, // ADPCM_WAV / OTHER_WAV
+            0x0069 => return if (si.bits == 4) 15 else 3, // XBOX_ADPCM_WAV / OTHER_WAV
+            0x77 => return 17, // V12_VOICE
+            0x74 => return 18, // V24_VOICE
+            0x75 => return 19, // V29_VOICE
+            85 => { // MPEG wrapped in a WAV: scan the data chunk as MP3 below
+                const base = @intFromPtr(si.data_ptr) -% @intFromPtr(data);
+                if (base < buf.len) {
+                    mp3_off = base;
+                    mp3_len = @min(@as(usize, si.data_len), buf.len - base);
+                }
+            },
+            else => return 3, // OTHER_WAV (no ASI provider registry to consult)
+        }
+    } else {
+        // 2. Non-WAV container magic (SDK uses case-insensitive compares).
+        if (eq(buf, 0, "1FCB")) return 24; // BINKA (*(S32*)data == 'BCF1' on LE)
+        if (eqi(buf, 0, "OggS")) {
+            const ogg_lim = @min(buf.len, 128);
+            var i: usize = 0;
+            while (i + 5 <= ogg_lim) : (i += 1) {
+                if (eqi(buf, i, "Speex")) return 20; // OGG_SPEEX
+            }
+            return 16; // OGG_VORBIS
+        }
+        if (eqi(buf, 0, "Creative")) return 4; // VOC
+        if (eqi(buf, 0, "FORM") and eqi(buf, 8, "XDIR")) return 6; // XMIDI
+        if (eq(buf, 0, "RIFF")) {
+            if (eq(buf, 8, "DLS ")) return 9; // DLS
+            if (eq(buf, 8, "MLS ")) return 10; // MLS
+        }
+    }
+
+    // 3. MPEG audio (also reached for an MPEG-in-WAV after unwrapping).
+    if (detectMpeg(buf[mp3_off .. mp3_off + mp3_len])) |t| return t;
+
+    // 4. Last resort: scan the whole image for an 'MThd' header -> MIDI.
+    var i: usize = 0;
+    while (i + 4 <= buf.len) : (i += 1) {
+        if (eqi(buf, i, "MThd")) return 5; // MIDI
     }
     return 0; // AILFILETYPE_UNKNOWN
 }

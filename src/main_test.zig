@@ -1275,21 +1275,50 @@ test "AIL_set_timer_user stores new and returns the previous value (SDK)" {
     try testing.expectEqual(@as(u32, 0), api_timer.AIL_set_timer_user(null, 5));
 }
 
-test "AIL_file_type returns AILFILETYPE_* codes (MIDI=5, XMIDI=6)" {
-    // PCM WAV: RIFF....WAVE fmt <size> <wFormatTag=1>
-    var wav = [_]u8{ 'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ', 16, 0, 0, 0, 1, 0, 0, 0 };
-    try testing.expectEqual(@as(i32, 1), api_file.AIL_file_type(&wav, wav.len)); // PCM_WAV
-    wav[20] = 0x11; // WAVE_FORMAT_IMA_ADPCM
-    try testing.expectEqual(@as(i32, 2), api_file.AIL_file_type(&wav, wav.len)); // ADPCM_WAV
+test "AIL_file_type classifies WAV/MIDI/XMIDI/OGG/VOC/BINKA/DLS/MLS (SDK)" {
+    // Complete PCM WAV — AIL_WAV_info (and thus file_type) needs a data chunk.
+    const pcm = [_]u8{0} ** 32;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    try testing.expectEqual(@as(i32, 1), api_file.AIL_file_type(wav.ptr, @intCast(wav.len))); // PCM_WAV
+
+    // IMA ADPCM WAV (tag 0x11, bits 4, block_align 512) -> ADPCM_WAV(2).
+    var adpcm = [_]u8{
+        'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ', 16, 0, 0, 0,
+        0x11, 0, 1, 0, 0x40, 0x1f, 0, 0, 0, 0, 0, 0, 0, 2, 4, 0,
+        'd', 'a', 't', 'a', 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    };
+    adpcm[4] = @truncate(@as(u32, adpcm.len) - 8);
+    try testing.expectEqual(@as(i32, 2), api_file.AIL_file_type(&adpcm, adpcm.len)); // ADPCM_WAV
 
     var midi = [_]u8{ 'M', 'T', 'h', 'd', 0, 0, 0, 6 };
-    try testing.expectEqual(@as(i32, 5), api_file.AIL_file_type(&midi, midi.len)); // MIDI, not 2
+    try testing.expectEqual(@as(i32, 5), api_file.AIL_file_type(&midi, midi.len)); // MIDI
+    var xmidi = [_]u8{ 'F', 'O', 'R', 'M', 0, 0, 0, 0, 'X', 'D', 'I', 'R' };
+    try testing.expectEqual(@as(i32, 6), api_file.AIL_file_type(&xmidi, xmidi.len)); // XMIDI
 
-    var xmidi = [_]u8{ 'F', 'O', 'R', 'M', 0, 0, 0, 0, 'X', 'M', 'I', 'D' };
-    try testing.expectEqual(@as(i32, 6), api_file.AIL_file_type(&xmidi, xmidi.len)); // XMIDI, not 3
+    var ogg = [_]u8{ 'O', 'g', 'g', 'S', 0, 0, 0, 0, 1, 2, 3, 4 };
+    try testing.expectEqual(@as(i32, 16), api_file.AIL_file_type(&ogg, ogg.len)); // OGG_VORBIS
+    var speex = [_]u8{ 'O', 'g', 'g', 'S', 0, 0, 0, 0, 0, 0, 0, 0, 'S', 'p', 'e', 'e', 'x', 0, 0, 0 };
+    try testing.expectEqual(@as(i32, 20), api_file.AIL_file_type(&speex, speex.len)); // OGG_SPEEX
 
-    var junk = [_]u8{ 'J', 'U', 'N', 'K' };
+    var voc = [_]u8{ 'C', 'r', 'e', 'a', 't', 'i', 'v', 'e', ' ' };
+    try testing.expectEqual(@as(i32, 4), api_file.AIL_file_type(&voc, voc.len)); // VOC
+    var binka = [_]u8{ '1', 'F', 'C', 'B', 0, 0, 0, 0 }; // *(S32*)=='BCF1' on LE
+    try testing.expectEqual(@as(i32, 24), api_file.AIL_file_type(&binka, binka.len)); // BINKA
+    var dls = [_]u8{ 'R', 'I', 'F', 'F', 0, 0, 0, 0, 'D', 'L', 'S', ' ' };
+    try testing.expectEqual(@as(i32, 9), api_file.AIL_file_type(&dls, dls.len)); // DLS
+    var mls = [_]u8{ 'R', 'I', 'F', 'F', 0, 0, 0, 0, 'M', 'L', 'S', ' ' };
+    try testing.expectEqual(@as(i32, 10), api_file.AIL_file_type(&mls, mls.len)); // MLS
+
+    var junk = [_]u8{ 'J', 'U', 'N', 'K', 0, 0, 0, 0 };
     try testing.expectEqual(@as(i32, 0), api_file.AIL_file_type(&junk, junk.len)); // UNKNOWN
+}
+
+test "AIL_file_type detects MPEG audio by frame sync (MP3 = layer III)" {
+    // ID3v2 header (10 bytes, size 0) then an MPEG-1 Layer III frame sync.
+    var mp3 = [_]u8{ 'I', 'D', '3', 3, 0, 0, 0, 0, 0, 0, 0xFF, 0xFB, 0x90, 0x00, 0, 0, 0, 0 };
+    try testing.expectEqual(@as(i32, 13), api_file.AIL_file_type(&mp3, mp3.len)); // MPEG_L3_AUDIO
 }
 
 test "AIL_redbook_status returns REDBOOK_* codes (STOPPED=3, ERROR=0)" {
