@@ -103,6 +103,8 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_3d.AIL_3D_sample_attribute(@as(?*anyopaque, @ptrCast(h3)), rstr, scp);
     api_3d.AIL_3D_sample_cone(@as(?*anyopaque, @ptrCast(h3)), &fo, &fo, &io);
     api_3d.AIL_3D_sample_distances(h3, &fo, &fo);
+    api_3d.AIL_set_3D_sample_float_distances_v5(@as(?*anyopaque, @ptrCast(h3)), rf, rf, rf, rf);
+    api_3d.AIL_3D_sample_float_distances_v5(h3, &fo, &fo, &fo, &fo);
     _ = api_3d.AIL_3D_sample_effects_level(@as(?*anyopaque, @ptrCast(h3)));
     _ = api_3d.AIL_3D_sample_length(@as(?*anyopaque, @ptrCast(h3)));
     _ = api_3d.AIL_3D_sample_loop_count(@as(?*anyopaque, @ptrCast(h3)));
