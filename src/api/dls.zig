@@ -24,7 +24,7 @@ pub fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flag
         if (buf) |b| {
             defer openmiles.global_allocator.free(b);
             const tsf_mod = openmiles.tsf;
-            const loaded = tsf_mod.tsf_load_memory(b.ptr, @intCast(b.len));
+            const loaded = tsf_mod.tsf_load_memory(b.ptr, @intCast(@min(b.len, @as(usize, std.math.maxInt(c_int)))));
             if (loaded == null) {
                 openmiles.setLastError("Failed to load DLS/SF2 from callback");
                 return null;
@@ -105,13 +105,22 @@ pub fn AIL_DLS_load_memory(driver_opt: ?*MidiDriver, mem: *anyopaque, flags: u32
         return null;
     }
     const size = detected;
+    // `size` is taken from the file header (detectAudioSize), so an adversarial
+    // header can claim ~4GB. tsf_load_memory takes a C `int`; a buffer larger
+    // than that can't exist in the 32-bit target's address space, so such a
+    // header is necessarily bogus — reject it instead of casting (which would
+    // panic) or truncating (which would make tsf read out of bounds).
+    if (size > std.math.maxInt(c_int)) {
+        openmiles.setLastError("DLS/SF2 header declares an implausible size");
+        return null;
+    }
     if (driver.soundfont) |sf| {
         if (driver.owns_soundfont) tsf_mod.tsf_close(sf);
     }
     driver.soundfont = tsf_mod.tsf_load_memory(data, @intCast(size));
     driver.owns_soundfont = true;
     if (driver.soundfont == null) return null;
-    driver.soundfont_size_bytes = @intCast(size);
+    driver.soundfont_size_bytes = @intCast(@min(size, std.math.maxInt(u32)));
     tsf_mod.tsf_set_output(driver.soundfont, tsf_mod.TSF_STEREO_INTERLEAVED, 44100, 0);
     return @ptrCast(driver.soundfont.?);
 }

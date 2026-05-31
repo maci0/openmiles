@@ -2279,6 +2279,19 @@ test "v9 system-state push/pop tracks depth and restores volume" {
     try testing.expect(@abs(drv.getMasterVolume() - 1.0) < 0.001);
 }
 
+test "AIL_DLS_load_memory rejects an implausibly-large header size (no panic)" {
+    const md = try openmiles.MidiDriver.init(testing.allocator);
+    defer md.deinit();
+    // "RIFF" with a 0xFFFFFFFF size field -> detectAudioSize returns ~4GB, which
+    // exceeds maxInt(c_int); the loader must reject it (return null) rather than
+    // panic on the cast or hand tsf an out-of-range size.
+    var buf = [_]u8{ 'R', 'I', 'F', 'F', 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0 };
+    try testing.expect(api_dls.AIL_DLS_load_memory(md, &buf, 0) == null);
+    // A valid 'RIFF' size that simply isn't a soundfont also returns null safely.
+    std.mem.writeInt(u32, buf[4..8], 4, .little); // body=4 -> total 12 == buf len
+    try testing.expect(api_dls.AIL_DLS_load_memory(md, &buf, 0) == null);
+}
+
 test "v9 set_sample_3D_volume_falloff maps graph range to distance attenuation" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
