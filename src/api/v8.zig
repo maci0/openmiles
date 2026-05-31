@@ -329,9 +329,16 @@ pub fn AIL_ftoa(v: f32, buf: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     return b;
 }
 pub fn AIL_get_event_contents(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    _ = a2;
+    // (SoundBank* bank, char const* name, U8 const** out_event)
+    const b: *openmiles.Bank = @ptrCast(@alignCast(a0 orelse return 0));
+    const name_p = a1 orelse return 0;
+    const name = std.mem.span(@as([*:0]const u8, @ptrCast(name_p)));
+    const out: *?[*]const u8 = @ptrCast(@alignCast(a2 orelse return 0));
+    if (b.findEventContents(name)) |ev| {
+        out.* = ev;
+        return 1;
+    }
+    out.* = null;
     return 0;
 }
 pub fn AIL_get_marker_list(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) void {

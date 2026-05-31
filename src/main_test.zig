@@ -2624,3 +2624,16 @@ test "MilesGetEventSystemState reports the live loaded-bank count" {
     api_miles_t.MilesGetEventSystemState(null, &state);
     try testing.expectEqual(base, state.LoadedBankCount);
 }
+
+test "AIL_get_event_contents returns the event bytecode pointer" {
+    var img: [128]u8 = undefined;
+    const n = buildEventBank(&img);
+    const bank = try openmiles.soundbank.loadFromMemory(openmiles.global_allocator, "syn.mbnk", img[0..n]);
+    defer bank.deinit();
+    const bptr: ?*anyopaque = @ptrCast(bank);
+    var ev: ?[*]const u8 = null;
+    try testing.expectEqual(@as(i32, 1), api_v8b.AIL_get_event_contents(bptr, cstr("boom"), @ptrCast(&ev)));
+    try testing.expectEqualStrings("9;4;<;", std.mem.span(@as([*:0]const u8, @ptrCast(ev.?))));
+    try testing.expectEqual(@as(i32, 0), api_v8b.AIL_get_event_contents(bptr, cstr("nope"), @ptrCast(&ev)));
+    try testing.expect(ev == null);
+}
