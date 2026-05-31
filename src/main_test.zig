@@ -1221,6 +1221,22 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
+test "AIL_size_processed_digital_audio counts points from data_len (SDK)" {
+    var info: openmiles.AILSOUNDINFO = .{};
+    info.format = 1; // WAVE_FORMAT_PCM
+    info.bits = 16;
+    info.channels = 1;
+    info.rate = 8000;
+    info.data_len = 1600; // 800 16-bit mono points
+
+    // Same rate/format (mono 16-bit) -> 800 points * 2 bytes = 1600.
+    try testing.expectEqual(@as(i32, 1600), dg.AIL_size_processed_digital_audio(8000, 1, 1, &info));
+    // Upsample 2x -> 1600 points * 2 = 3200.
+    try testing.expectEqual(@as(i32, 3200), dg.AIL_size_processed_digital_audio(16000, 1, 1, &info));
+    // Stereo 16-bit dest (format 3): point size = 4 -> 800 * 4 = 3200.
+    try testing.expectEqual(@as(i32, 3200), dg.AIL_size_processed_digital_audio(8000, 3, 1, &info));
+}
+
 test "Redbook init deinit and default state" {
     const allocator = testing.allocator;
     const rb = try openmiles.Redbook.init(allocator, 0);

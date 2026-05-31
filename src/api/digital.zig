@@ -557,12 +557,21 @@ pub fn AIL_size_processed_digital_audio(dest_rate: u32, dest_format: u32, num_sr
     if (num_srcs <= 0 or dest_rate == 0) return 0;
     const sp = src orelse return 0;
     const info: *const openmiles.AILSOUNDINFO = @ptrCast(@alignCast(sp));
+    // Mirror AIL_API_size_processed_digital_audio (wavefile.cpp): count sample
+    // "points" (time positions = frames) from data_len, where ADPCM packs 2
+    // samples/byte, 16-bit uses 2 bytes/sample, and a stereo point is 2 samples.
+    var points: u64 = info.data_len;
+    if (info.format == 0x0011) { // WAVE_FORMAT_IMA_ADPCM
+        points <<= 1;
+    } else if (info.bits != 8) {
+        points >>= 1;
+    }
+    if (info.channels == 2) points >>= 1;
     const src_rate: u64 = if (info.rate == 0) dest_rate else info.rate;
-    const out_samples: u64 = @as(u64, info.samples) * dest_rate / src_rate;
-    const dest_bps: u64 = if ((dest_format & 1) != 0) 2 else 1; // bit0 set => 16-bit
-    const dest_ch: u64 = if (dest_format >= 2) 2 else 1; // >=2 => stereo
-    const bytes = out_samples * dest_bps * dest_ch;
-    return @intCast(@min(bytes, std.math.maxInt(i32)));
+    points = points *| dest_rate / src_rate;
+    // dest point size = (stereo?2:1) * (16-bit?2:1); DIG_F bit0=16BITS, bit1=STEREO.
+    const dest_point_size: u64 = (if ((dest_format & 2) != 0) @as(u64, 2) else 1) * (if ((dest_format & 1) != 0) @as(u64, 2) else 1);
+    return @intCast(@min(points *| dest_point_size, std.math.maxInt(i32)));
 }
 pub fn AIL_ms_count() callconv(.winapi) u32 {
     return openmiles.getMsCount();
