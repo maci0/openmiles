@@ -126,9 +126,22 @@ pub fn AIL_set_sample_volume_levels(s_opt: ?*Sample, left_level: f32, right_leve
 }
 pub fn AIL_sample_volume_levels(s_opt: ?*Sample, left_level: ?*f32, right_level: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    const v: f32 = @as(f32, @floatFromInt(s.original_volume)) / 127.0;
-    if (left_level) |p| p.* = v;
-    if (right_level) |p| p.* = v;
+    // Invert AIL_set_sample_volume_levels: it stored vol=max(L,R) and
+    // pan=R/(L+R). Reconstruct the per-channel levels from those so the
+    // levels round-trip (losslessly when the originals were <=1).
+    const vol: f32 = @as(f32, @floatFromInt(s.original_volume)) / 127.0;
+    const pan: f32 = @as(f32, @floatFromInt(s.original_pan)) / 127.0;
+    var l = vol;
+    var r = vol;
+    if (pan > 0.5) {
+        // R is the louder (clamped-to-vol) channel; recover L.
+        l = if (pan > 0.0) vol * (1.0 - pan) / pan else 0.0;
+    } else if (pan < 0.5) {
+        // L is the louder channel; recover R.
+        r = if (pan < 1.0) vol * pan / (1.0 - pan) else 0.0;
+    }
+    if (left_level) |p| p.* = l;
+    if (right_level) |p| p.* = r;
 }
 pub fn AIL_sample_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;

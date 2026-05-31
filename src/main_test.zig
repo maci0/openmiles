@@ -2160,6 +2160,32 @@ test "v7 unified 3D pos/vel/orient round-trip in MSS left-handed space" {
     try testing.expect(@abs(ux) < 0.001 and @abs(uy - 1) < 0.001 and @abs(uz) < 0.001);
 }
 
+test "v7 sample_volume_levels reconstructs asymmetric L/R from volume+pan" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+
+    // Asymmetric: left louder than right.
+    api_v7.AIL_set_sample_volume_levels(s, 0.8, 0.2);
+    var l: f32 = 0;
+    var r: f32 = 0;
+    api_v7.AIL_sample_volume_levels(s, &l, &r);
+    // vol=max=0.8 (rounds via 0..127), R/(L+R)=0.2 -> recover ~0.8/0.2.
+    try testing.expect(l > r); // imbalance preserved, not symmetric
+    try testing.expect(@abs(l - 0.8) < 0.02);
+    try testing.expect(@abs(r - 0.2) < 0.02);
+
+    // Symmetric stays symmetric.
+    api_v7.AIL_set_sample_volume_levels(s, 0.5, 0.5);
+    api_v7.AIL_sample_volume_levels(s, &l, &r);
+    try testing.expect(@abs(l - r) < 0.02);
+}
+
 test "v7 master reverb decay/predelay/damping all round-trip" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
