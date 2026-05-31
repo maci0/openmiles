@@ -1134,6 +1134,25 @@ test "AIL_redbook_status returns REDBOOK_* codes (STOPPED=3, ERROR=0)" {
     try testing.expectEqual(@as(u32, 0), api_redbook.AIL_redbook_status(null)); // ERROR (null handle)
 }
 
+test "AILSOUNDINFO layout: channel_mask present only for v9+" {
+    // 3.x/6.1/6.5 have 9 fields (36 bytes); 9.3 added channel_mask between
+    // `channels` and `samples` -> 10 fields (40 bytes). A wrong layout shifts
+    // samples/block_size/initial_ptr and corrupts what a game reads.
+    // Offsets in bytes depend on pointer size (4 on the x86 DLL, 8 on the
+    // native test target), so assert pointer-size-independent properties:
+    // field presence and ordering (channel_mask between channels and samples).
+    const T = openmiles.AILSOUNDINFO;
+    if (openmiles.mss_version >= 90) {
+        try testing.expect(@hasField(T, "channel_mask"));
+        try testing.expect(@offsetOf(T, "channels") < @offsetOf(T, "channel_mask"));
+        try testing.expect(@offsetOf(T, "channel_mask") < @offsetOf(T, "samples"));
+    } else {
+        try testing.expect(!@hasField(T, "channel_mask"));
+    }
+    try testing.expect(@offsetOf(T, "channels") < @offsetOf(T, "samples"));
+    try testing.expect(@offsetOf(T, "samples") < @offsetOf(T, "block_size"));
+}
+
 test "Redbook init deinit and default state" {
     const allocator = testing.allocator;
     const rb = try openmiles.Redbook.init(allocator, 0);

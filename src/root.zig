@@ -85,16 +85,32 @@ pub const xmidiBareToSmf = xmidi.xmidiBareToSmf;
 
 pub const deg2rad = std.math.pi / 180.0;
 
-pub const AILSOUNDINFO = extern struct {
-    format: i32,
-    data_ptr: ?*const anyopaque,
-    data_len: u32,
-    rate: u32,
-    bits: i32,
-    channels: i32,
-    samples: u32,
-    block_size: u32,
-    initial_ptr: ?*const anyopaque,
+// MSS 7/8 -> 9 added a `channel_mask` (U32) field between `channels` and
+// `samples` (for multichannel WAVE_FORMAT_EXTENSIBLE data). 3.x/6.1/6.5 have the
+// 9-field layout; 9.3 has the 10-field one. The field is confirmed present only
+// at 9.x, so it is added at the verified boundary (>=90) — gating it lower would
+// risk an out-of-bounds write into a smaller caller-allocated struct.
+pub const AILSOUNDINFO = if (mss_version >= 90) extern struct {
+    format: i32 = 0,
+    data_ptr: ?*const anyopaque = null,
+    data_len: u32 = 0,
+    rate: u32 = 0,
+    bits: i32 = 0,
+    channels: i32 = 0,
+    channel_mask: u32 = 0,
+    samples: u32 = 0,
+    block_size: u32 = 0,
+    initial_ptr: ?*const anyopaque = null,
+} else extern struct {
+    format: i32 = 0,
+    data_ptr: ?*const anyopaque = null,
+    data_len: u32 = 0,
+    rate: u32 = 0,
+    bits: i32 = 0,
+    channels: i32 = 0,
+    samples: u32 = 0,
+    block_size: u32 = 0,
+    initial_ptr: ?*const anyopaque = null,
 };
 
 pub const provider_3d_attr_names = [_][*:0]const u8{
