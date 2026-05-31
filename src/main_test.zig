@@ -363,14 +363,15 @@ test "detectAudioSize for MThd MIDI format" {
     try testing.expectEqual(@as(usize, 26), openmiles.detectAudioSize(&midi));
 }
 
-test "Sample initial status is stopped" {
+test "Sample initial status is done (SMP_DONE), not stopped" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
     defer driver.deinit();
 
     const sample = try openmiles.Sample.init(driver);
     defer sample.deinit();
-    try testing.expectEqual(openmiles.SampleStatus.stopped, sample.status());
+    // SDK inits a sample to SMP_DONE; SMP_STOPPED is only after an explicit stop.
+    try testing.expectEqual(openmiles.SampleStatus.done, sample.status());
 }
 
 test "Sequence initial status is done when uninitialized" {
@@ -713,7 +714,7 @@ test "Sample3D setPosition updates coordinates" {
     try testing.expectEqual(@as(f32, 3.0), s.pos_z);
 }
 
-test "Sample3D initial status is stopped" {
+test "Sample3D initial status is done (SMP_DONE), not stopped" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
     defer driver.deinit();
@@ -721,7 +722,7 @@ test "Sample3D initial status is stopped" {
     const s = try openmiles.Sample3D.init(driver);
     defer s.deinit();
 
-    try testing.expectEqual(openmiles.SampleStatus.stopped, s.status());
+    try testing.expectEqual(openmiles.SampleStatus.done, s.status());
 }
 
 test "Sequence setChannelMap and getPhysicalChannel" {
@@ -965,7 +966,7 @@ test "Sample end sets done status" {
     const sample = try openmiles.Sample.init(driver);
     defer sample.deinit();
 
-    try testing.expectEqual(openmiles.SampleStatus.stopped, sample.status());
+    try testing.expectEqual(openmiles.SampleStatus.done, sample.status()); // SMP_DONE default
 
     sample.end();
     try testing.expectEqual(openmiles.SampleStatus.done, sample.status());
@@ -982,8 +983,10 @@ test "Sample start on uninitialized resets done flag" {
     sample.end();
     try testing.expectEqual(openmiles.SampleStatus.done, sample.status());
 
+    // start() on an uninitialized sample can't actually play; status stays
+    // SMP_DONE (not SMP_STOPPED -- nothing was explicitly stopped).
     sample.start();
-    try testing.expectEqual(openmiles.SampleStatus.stopped, sample.status());
+    try testing.expectEqual(openmiles.SampleStatus.done, sample.status());
 }
 
 test "Sample setReverb and getReverb roundtrip" {
@@ -1050,7 +1053,7 @@ test "Sample loadFromMemory initializes sample" {
 
     try sample.loadFromMemory(wav, true);
     try testing.expect(sample.is_initialized);
-    try testing.expectEqual(openmiles.SampleStatus.stopped, sample.status());
+    try testing.expectEqual(openmiles.SampleStatus.done, sample.status()); // loaded, never played -> SMP_DONE
 }
 
 test "Sample loadFromMemory then start and stop lifecycle" {
@@ -1777,7 +1780,7 @@ test "Sample3D loadFromMemory and start stop lifecycle" {
 
     try s.loadFromMemory(wav, true);
     try testing.expect(s.is_initialized);
-    try testing.expectEqual(openmiles.SampleStatus.stopped, s.status());
+    try testing.expectEqual(openmiles.SampleStatus.done, s.status()); // loaded, never played -> SMP_DONE
 
     s.start();
     try testing.expectEqual(openmiles.SampleStatus.playing, s.status());
@@ -1904,7 +1907,7 @@ test "Sample3D loadFromPcm initializes sample" {
     const pcm = [_]u8{0} ** 4410;
     try s.loadFromPcm(&pcm, 1, 44100, 8);
     try testing.expect(s.is_initialized);
-    try testing.expectEqual(openmiles.SampleStatus.stopped, s.status());
+    try testing.expectEqual(openmiles.SampleStatus.done, s.status()); // loaded, never played -> SMP_DONE
 }
 
 test "Sequence setVolume boundary values" {

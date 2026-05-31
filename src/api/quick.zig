@@ -119,9 +119,12 @@ pub fn AIL_quick_status(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     // The Quick API uses its own QSTAT_* enum (DONE=1, LOADED=2, PLAYING=3),
     // NOT the SMP_* sample-status bitmask (FREE=1/DONE=2/PLAYING=4/STOPPED=8).
+    // A loaded-but-never-played sample is SMP_DONE at the sample level, but the
+    // Quick API reports it as QSTAT_LOADED; only after it has actually played and
+    // finished is it QSTAT_DONE.
     return switch (s.status()) {
         .playing, .playing_but_released => 3, // QSTAT_PLAYING
-        .done => 1, // QSTAT_DONE
+        .done => if (s.has_played) 1 else 2, // QSTAT_DONE (finished) vs QSTAT_LOADED (never played)
         .free, .stopped => 2, // QSTAT_LOADED (loaded, ready to (re)play)
     };
 }

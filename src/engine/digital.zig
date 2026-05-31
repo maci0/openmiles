@@ -545,6 +545,14 @@ pub const Sample = struct {
     is_initialized: bool = false,
     is_done: bool = false, // true when all loops exhausted (avoids false .done from ma_sound_at_end)
     is_paused: bool = false, // MSS: paused samples still report SMP_PLAYING (4)
+    // The SDK inits a sample to SMP_DONE and only reports SMP_STOPPED after an
+    // explicit AIL_stop_sample. This flag distinguishes "never played / done"
+    // (SMP_DONE) from "explicitly stopped" (SMP_STOPPED).
+    was_stopped: bool = false,
+    // Whether the sample has ever been started. The Quick API uses this to tell
+    // QSTAT_LOADED (loaded, never played) from QSTAT_DONE (played and finished),
+    // since both map to SMP_DONE at the sample level.
+    has_played: bool = false,
     volume: f32 = 1.0,
     original_volume: i32 = 127,
     pan: f32 = 0.0, // value handed to miniaudio's balance panner
@@ -1035,6 +1043,8 @@ pub const Sample = struct {
         self.loops_remaining = self.loop_count;
         self.is_done = false;
         self.is_paused = false;
+        self.was_stopped = false;
+        self.has_played = true;
         if (self.is_initialized) {
             if (self.loop_count == 0) {
                 ma.ma_sound_set_looping(&self.sound, ma.MA_TRUE);
@@ -1063,6 +1073,7 @@ pub const Sample = struct {
         }
         self.is_done = false;
         self.is_paused = false;
+        self.was_stopped = true;
     }
 
     pub fn end(self: *Sample) void {
@@ -1092,19 +1103,15 @@ pub const Sample = struct {
     }
 
     pub fn status(self: *Sample) SampleStatus {
-        // NOTE: the SDK initializes a sample to SMP_DONE and reserves SMP_STOPPED
-        // for after an explicit AIL_stop_sample; a freshly loaded-but-unplayed
-        // sample is SMP_DONE there, whereas we derive status from ma state and
-        // report .stopped. Matching it needs an explicit status field (a broader
-        // change); tracked as a known deviation.
         if (self.is_done) return .done;
         if (self.is_paused) return .playing; // MSS: paused samples report SMP_PLAYING
         if (self.is_initialized) {
             if (ma.ma_sound_is_playing(&self.sound) != 0) return .playing;
             if (ma.ma_sound_at_end(&self.sound) != 0) return .done;
-            return .stopped;
         }
-        return .stopped;
+        // Never played, or finished playing -> SMP_DONE; only after an explicit
+        // AIL_stop_sample -> SMP_STOPPED (the SDK inits samples to SMP_DONE).
+        return if (self.was_stopped) .stopped else .done;
     }
 
     pub fn setVolume(self: *Sample, volume: i32) void {
@@ -1427,6 +1434,7 @@ pub const Sample3D = struct {
     is_initialized: bool = false,
     is_done: bool = false,
     is_paused: bool = false,
+    was_stopped: bool = false, // SMP_STOPPED only after explicit stop (else SMP_DONE)
     driver_is_dead: bool = false,
     volume: f32 = 1.0,
     original_volume: i32 = 127,
@@ -1727,6 +1735,7 @@ pub const Sample3D = struct {
         self.loops_remaining = self.loop_count;
         self.is_done = false;
         self.is_paused = false;
+        self.was_stopped = false;
         if (self.is_initialized) {
             if (self.loop_count == 0) {
                 ma.ma_sound_set_looping(&self.sound, ma.MA_TRUE);
@@ -1747,6 +1756,7 @@ pub const Sample3D = struct {
         }
         self.is_done = false;
         self.is_paused = false;
+        self.was_stopped = true;
     }
 
     pub fn end(self: *Sample3D) void {
@@ -1778,9 +1788,9 @@ pub const Sample3D = struct {
         if (self.is_initialized) {
             if (ma.ma_sound_is_playing(&self.sound) != 0) return .playing;
             if (ma.ma_sound_at_end(&self.sound) != 0) return .done;
-            return .stopped;
         }
-        return .stopped;
+        // Never played / finished -> SMP_DONE; only explicit stop -> SMP_STOPPED.
+        return if (self.was_stopped) .stopped else .done;
     }
 
     pub fn applyCone(self: *Sample3D) void {
