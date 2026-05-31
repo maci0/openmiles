@@ -3242,6 +3242,15 @@ test "v7 sample_volume_levels returns the L/R scalars verbatim (SDK)" {
     try testing.expectEqual(@as(f32, 0.8), l);
     try testing.expectEqual(@as(f32, 0.2), r);
 
+    // set_sample_volume_levels also reconstructs save_pan/save_volume (wavefile.cpp):
+    // ratio=(0.2/0.8)^(10/3)=0.00982 -> save_pan=0.00972;
+    // save_volume=0.2*save_pan^-0.3=0.803 -> volume_pan returns save_volume^0.6=0.876.
+    var vol: f32 = 0;
+    var pan: f32 = 0;
+    api_v7.AIL_sample_volume_pan(s, &vol, &pan);
+    try testing.expect(@abs(pan - 0.00972) < 0.001);
+    try testing.expect(@abs(vol - 0.876) < 0.003);
+
     // Setting via volume_pan also updates the reported L/R scalars
     // (left=gain*0.812..., right=gain*0.812... for centre, vol=1).
     dg.AIL_set_sample_volume_pan(s, 1.0, 0.5);

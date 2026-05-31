@@ -966,14 +966,19 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
         pcm.ensureTotalCapacity(openmiles.global_allocator, @intCast(hint)) catch {};
     }
 
-    // align(2): miniaudio writes ma_int16 PCM here, which requires 2-byte alignment.
-    var chunk_buf: [4096 * 8]u8 align(2) = undefined; // up to 4096 frames × 8 bytes (4ch 16-bit)
-    const chunk_frames: u64 = chunk_buf.len / @as(usize, bpf);
+    // Heap-allocate the decode scratch: the allocator guarantees high alignment,
+    // avoiding a stack-layout-dependent misaligned write inside miniaudio's IMA
+    // decoder that a stack [u8 align(2)] / [i16] array did not reliably prevent.
+    const chunk_bytes: usize = 4096 * 8; // up to 4096 frames x 8 bytes (4ch 16-bit)
+    const chunk_buf = openmiles.global_allocator.alignedAlloc(u8, .@"16", chunk_bytes) catch return 0;
+    defer openmiles.global_allocator.free(chunk_buf);
+    const chunk_frames: u64 = chunk_bytes / @as(usize, bpf);
     while (true) {
         var fr: u64 = 0;
-        _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, &chunk_buf, chunk_frames, &fr);
+        _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk_buf.ptr, chunk_frames, &fr);
         if (fr == 0) break;
-        pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..@intCast(fr * @as(u64, bpf))]) catch break;
+        const nbytes: usize = @intCast(fr * @as(u64, bpf));
+        pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..nbytes]) catch break;
     }
     if (pcm.items.len == 0) return 0;
 
