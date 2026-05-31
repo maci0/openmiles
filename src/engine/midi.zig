@@ -96,28 +96,31 @@ pub const MidiDriver = struct {
     }
 };
 
-pub var locked_channels: [16]?*Sequence = .{null} ** 16;
+// Channel locks reserve a MIDI channel at the driver level; the owner pointer
+// is opaque (the SDK's AIL_lock_channel/release_channel take an HMDIDRIVER) and
+// used only for release matching.
+pub var locked_channels: [16]?*anyopaque = .{null} ** 16;
 var locked_channels_mutex: std.Io.Mutex = .init;
 
-pub fn lockChannel(seq: *Sequence) i32 {
+pub fn lockChannel(owner: *anyopaque) i32 {
     locked_channels_mutex.lockUncancelable(io);
     defer locked_channels_mutex.unlock(io);
     for (&locked_channels, 0..) |*slot, i| {
         if (i == 9) continue;
         if (slot.* == null) {
-            slot.* = seq;
+            slot.* = owner;
             return @intCast(i);
         }
     }
     return -1;
 }
 
-pub fn releaseChannel(seq: *Sequence, channel: i32) void {
+pub fn releaseChannel(owner: *anyopaque, channel: i32) void {
     if (channel < 0 or channel > 15) return;
     locked_channels_mutex.lockUncancelable(io);
     defer locked_channels_mutex.unlock(io);
     const idx: usize = @intCast(channel);
-    if (locked_channels[idx] == seq) {
+    if (locked_channels[idx] == owner) {
         locked_channels[idx] = null;
     }
 }

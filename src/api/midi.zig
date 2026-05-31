@@ -272,9 +272,10 @@ pub fn AIL_send_channel_voice_message(mdi_opt: ?*MidiDriver, seq_opt: ?*Sequence
         else => {},
     }
 }
-pub fn AIL_send_sysex_message(seq_opt: ?*Sequence, data: *anyopaque) callconv(.winapi) void {
-    const seq = seq_opt orelse return;
-    const sf = seq.driver.soundfont orelse return;
+// SDK: AIL_send_sysex_message(HMDIDRIVER mdi, void const* buffer).
+pub fn AIL_send_sysex_message(mdi_opt: ?*MidiDriver, data: *anyopaque) callconv(.winapi) void {
+    const mdi = mdi_opt orelse return;
+    const sf = mdi.soundfont orelse return;
     const bytes: [*]const u8 = @ptrCast(data);
     if (bytes[0] != 0xF0) return;
     var body_len: usize = 0;
@@ -303,13 +304,14 @@ pub fn AIL_send_sysex_message(seq_opt: ?*Sequence, data: *anyopaque) callconv(.w
         }
     }
 }
-pub fn AIL_lock_channel(seq_opt: ?*Sequence) callconv(.winapi) i32 {
-    const seq = seq_opt orelse return -1;
-    return openmiles.lockChannel(seq);
+// SDK: AIL_lock_channel(HMDIDRIVER mdi) / AIL_release_channel(HMDIDRIVER, S32).
+pub fn AIL_lock_channel(mdi_opt: ?*MidiDriver) callconv(.winapi) i32 {
+    const mdi = mdi_opt orelse return -1;
+    return openmiles.lockChannel(@ptrCast(mdi));
 }
-pub fn AIL_release_channel(seq_opt: ?*Sequence, channel: i32) callconv(.winapi) void {
-    const seq = seq_opt orelse return;
-    openmiles.releaseChannel(seq, channel);
+pub fn AIL_release_channel(mdi_opt: ?*MidiDriver, channel: i32) callconv(.winapi) void {
+    const mdi = mdi_opt orelse return;
+    openmiles.releaseChannel(@ptrCast(mdi), channel);
 }
 pub fn AIL_register_beat_callback(seq_opt: ?*Sequence, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const seq = seq_opt orelse return null;

@@ -594,7 +594,7 @@ test "lockChannel and releaseChannel" {
     try testing.expect(ch != 9);
 
     openmiles.releaseChannel(seq, ch);
-    try testing.expectEqual(@as(?*openmiles.Sequence, null), openmiles.locked_channels[@intCast(ch)]);
+    try testing.expectEqual(@as(?*anyopaque, null), openmiles.locked_channels[@intCast(ch)]);
 }
 
 test "lockChannel skips percussion channel 9" {
@@ -2305,6 +2305,18 @@ const api_v7 = @import("api/v7.zig");
 const api_stream = @import("api/stream.zig");
 const api_3d = @import("api/3d.zig");
 const api_dls = @import("api/dls.zig");
+const api_midi = @import("api/midi.zig");
+
+test "AIL_lock_channel/release_channel take the MIDI driver handle (SDK)" {
+    const driver = try openmiles.MidiDriver.init(testing.allocator);
+    defer driver.deinit();
+    for (&openmiles.locked_channels.*) |*slot| slot.* = null;
+    const ch = api_midi.AIL_lock_channel(driver); // HMDIDRIVER, not a sequence
+    try testing.expect(ch >= 0 and ch <= 15 and ch != 9);
+    try testing.expect(openmiles.locked_channels[@intCast(ch)] != null);
+    api_midi.AIL_release_channel(driver, ch);
+    try testing.expectEqual(@as(?*anyopaque, null), openmiles.locked_channels[@intCast(ch)]);
+}
 test "v9 update_sample_3D_position dead-reckons by velocity" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

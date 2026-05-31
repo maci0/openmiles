@@ -435,9 +435,9 @@ test "coverage: midi.zig exports" {
     _ = md.AIL_channel_notes(seq, 0);
     _ = md.AIL_controller_value(seq, 0, 7);
     md.AIL_send_channel_voice_message(mdi, seq, 0x90, 60, 64);
-    md.AIL_send_sysex_message(seq, sc());
-    _ = md.AIL_lock_channel(seq);
-    md.AIL_release_channel(seq, 0);
+    md.AIL_send_sysex_message(mdi, sc());
+    _ = md.AIL_lock_channel(mdi);
+    md.AIL_release_channel(mdi, 0);
     _ = md.AIL_register_beat_callback(seq, null);
     _ = md.AIL_register_event_callback(mdi, null);
     _ = md.AIL_register_prefix_callback(seq, null);

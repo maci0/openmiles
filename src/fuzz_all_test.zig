@@ -269,7 +269,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_v7.AIL_listener_3D_velocity(hd, &fo, &fo, &fo);
     _ = api_v7.AIL_listener_relative_receiver_array(hd, &io);
     api_digital.AIL_lock();
-    _ = api_midi.AIL_lock_channel(hq);
+    _ = api_midi.AIL_lock_channel(hm);
     api_digital.AIL_lock_mutex();
     api_midi.AIL_map_sequence_channel(hq, ri, ri);
     _ = api_memory.AIL_mem_alloc_lock(rsz);
@@ -409,7 +409,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_v7.AIL_sample_volume_levels(hs, &fo, &fo);
     api_v7.AIL_sample_volume_pan(hs, &fo, &fo);
     api_midi.AIL_send_channel_voice_message(hm, hq, ri, ri, ri);
-    api_midi.AIL_send_sysex_message(hq, scp);
+    api_midi.AIL_send_sysex_message(hm, scp);
     _ = api_midi.AIL_sequence_loop_count(hq);
     api_midi.AIL_sequence_ms_position(hq, &io, &io);
     api_midi.AIL_sequence_position(hq, &io, &io);
@@ -710,7 +710,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     if (api_digital.AIL_allocate_sample_handle(hd)) |ts| api_digital.AIL_release_sample_handle(ts);
     if (api_3d.AIL_allocate_3D_sample_handle(hd)) |t3| api_3d.AIL_release_3D_sample_handle(t3);
     if (api_midi.AIL_allocate_sequence_handle(hm)) |tq| {
-        api_midi.AIL_release_channel(tq, ri);
+        api_midi.AIL_release_channel(hm, ri); // release_channel takes the MIDI driver
         api_midi.AIL_release_sequence_handle(tq);
     }
     if (api_memory.AIL_mem_alloc_lock(rsz)) |lk| api_memory.AIL_mem_free_lock(lk);
