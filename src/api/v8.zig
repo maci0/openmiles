@@ -244,11 +244,11 @@ const EventConstruct = openmiles.event.EventConstruct;
 pub fn AIL_create_event() callconv(.winapi) ?*anyopaque {
     return @ptrCast(EventConstruct.create(openmiles.global_allocator));
 }
-pub fn AIL_debug(a0: ?*anyopaque) callconv(.winapi) void {
+pub fn AIL_debug(a0: ?*anyopaque) callconv(.c) void {
     _ = a0;
 
 }
-pub fn AIL_debug_log(a0: ?*anyopaque) callconv(.winapi) void {
+pub fn AIL_debug_log(a0: ?*anyopaque) callconv(.c) void {
     _ = a0;
 
 }
@@ -354,7 +354,7 @@ pub fn AIL_get_soundbank_mem_usage(bank: ?*anyopaque) callconv(.winapi) i32 {
     const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return 0));
     return b.metaSize();
 }
-pub fn AIL_indent(a0: i32) callconv(.winapi) void {
+pub fn AIL_indent(a0: i32) callconv(.c) void {
     _ = a0;
 
 }
@@ -422,7 +422,7 @@ pub fn AIL_mem_printc(mem: ?*anyopaque, c: i32) callconv(.winapi) i32 {
     var ch: [1]u8 = .{@truncate(@as(u32, @bitCast(c)))};
     return AIL_mem_write(mem, &ch, 1);
 }
-pub fn AIL_mem_printf(mem: ?*anyopaque, fmt: ?*anyopaque) callconv(.winapi) i32 {
+pub fn AIL_mem_printf(mem: ?*anyopaque, fmt: ?*anyopaque) callconv(.c) i32 {
     // Variadic formatting is not bridged; write the format string verbatim.
     return AIL_mem_prints(mem, fmt);
 }
@@ -700,7 +700,7 @@ pub fn AIL_strnicmp(a: ?*anyopaque, b: ?*anyopaque, n: u32) callconv(.winapi) i3
     }
     return 0;
 }
-pub fn AIL_sys_debug(a0: ?*anyopaque) callconv(.winapi) void {
+pub fn AIL_sys_debug(a0: ?*anyopaque) callconv(.c) void {
     _ = a0;
 
 }

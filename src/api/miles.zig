@@ -709,7 +709,7 @@ pub fn MilesRegisterRand(rand: ?*anyopaque) callconv(.winapi) void {
 pub fn MilesSetEventErrorCallback(callback: ?*anyopaque) callconv(.winapi) void {
     g_error_cb = callback;
 }
-pub fn MilesEventSetAuditionFunctions(functions: ?*const anyopaque) callconv(.winapi) void {
+pub fn MilesEventSetAuditionFunctions(functions: ?*const anyopaque) callconv(.c) void {
     _ = functions;
 }
 pub fn MilesGetBankFunctions() callconv(.winapi) ?*const anyopaque {
