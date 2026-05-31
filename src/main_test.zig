@@ -3168,6 +3168,16 @@ test "volume/pan match the exact MSS curve (gain = volume^(10/6))" {
     try testing.expectEqual(@as(i32, 31), dg.AIL_sample_pan(s)); // 0.25*127
     dg.AIL_set_sample_pan(s, 100);
     try testing.expectEqual(@as(i32, 100), dg.AIL_sample_pan(s));
+
+    // The F32 AIL_sample_volume_pan getter returns the original 0..1 vol/pan
+    // the app set (the SDK inverts the gain curve / returns save_pan), not the
+    // internal balance-pan value.
+    dg.AIL_set_sample_volume_pan(s, 0.8, 0.25);
+    var gv: f32 = 0;
+    var gp: f32 = 0;
+    api_v7.AIL_sample_volume_pan(s, &gv, &gp);
+    try testing.expectApproxEqAbs(@as(f32, 0.8), gv, 0.02);
+    try testing.expectApproxEqAbs(@as(f32, 0.25), gp, 0.02);
 }
 
 test "AIL_redbook_set_volume_level returns the previous volume (F32)" {
