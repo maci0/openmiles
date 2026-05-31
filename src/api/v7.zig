@@ -178,12 +178,13 @@ pub fn AIL_sample_reverb_levels(s_opt: ?*Sample, dry_level: ?*f32, wet_level: ?*
     if (dry_level) |p| p.* = s.reverb_dry_level;
     if (wet_level) |p| p.* = s.reverb_level;
 }
-pub fn AIL_set_sample_info(s_opt: ?*Sample, info: *const AILSOUNDINFO) callconv(.winapi) void {
-    const s = s_opt orelse return;
+pub fn AIL_set_sample_info(s_opt: ?*Sample, info: *const AILSOUNDINFO) callconv(.winapi) i32 {
+    const s = s_opt orelse return 0; // SDK (wavefile.cpp): 0 on null S/info
     const ch: u16 = if (info.channels >= 2) 2 else 1;
     const bits: u16 = if (info.bits == 8) 8 else 16;
     s.pcm_format = .{ .channels = ch, .bits = bits };
     if (@hasField(AILSOUNDINFO, "channel_mask")) s.channel_mask = info.channel_mask;
+    return 1; // success (the miniaudio mixer accepts any PCM/ADPCM format we set)
 }
 
 // Obstruction / occlusion / exclusion: stored attenuation hints (reuse Sample3D

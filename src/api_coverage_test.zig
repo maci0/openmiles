@@ -388,7 +388,7 @@ test "coverage: file/input.zig exports" {
     const ip = inp.AIL_open_input(sc());
     if (ip) |p| {
         const ipt: *openmiles.Input = @ptrCast(@alignCast(p));
-        inp.AIL_set_input_state(ipt, 0);
+        _ = inp.AIL_set_input_state(ipt, 0);
         _ = inp.AIL_input_info(ipt);
         inp.AIL_close_input(ipt);
     }
@@ -626,7 +626,7 @@ test "coverage: v7.zig unified exports" {
     v7.AIL_set_sample_reverb_levels(s, 0.7, 0.3);
     v7.AIL_sample_reverb_levels(s, &f32o, &f32o);
     var si: openmiles.AILSOUNDINFO = .{ .format = 0, .data_ptr = sc(), .data_len = 16, .rate = 8000, .bits = 16, .channels = 1, .samples = 0, .block_size = 0, .initial_ptr = null };
-    v7.AIL_set_sample_info(s, &si);
+    _ = v7.AIL_set_sample_info(s, &si);
     v7.AIL_set_sample_obstruction(s, 0.5);
     _ = v7.AIL_sample_obstruction(s);
     v7.AIL_set_sample_occlusion(s, 0.5);

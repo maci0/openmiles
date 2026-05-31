@@ -456,7 +456,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_dls.AIL_set_filter_DLS_preference(hm, rstr, scp);
     api_filter.AIL_set_filter_sample_preference(hs, rstr, scp);
     api_stream.AIL_set_filter_stream_preference(hs, rstr, scp);
-    api_input.AIL_set_input_state(null, ri);
+    _ = api_input.AIL_set_input_state(null, ri);
     api_3d.AIL_set_listener_3D_orientation(hd, rf, rf, rf, rf, rf, rf);
     api_3d.AIL_set_listener_3D_position(hd, rf, rf, rf);
     api_3d.AIL_set_listener_3D_velocity(hd, rf, rf, rf, rf);
@@ -606,7 +606,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     var pco: ?*const anyopaque = null;
     _ = api_digital.AIL_set_sample_file(hs, scp, ri);
     api_digital.AIL_set_sample_address(hs, scp, rsz);
-    api_v7.AIL_set_sample_info(hs, &info);
+    _ = api_v7.AIL_set_sample_info(hs, &info);
     _ = api_digital.AIL_set_named_sample_file(hs, rstr, scp, rszi, ru);
     _ = api_3d.AIL_set_3D_sample_file(@as(?*anyopaque, @ptrCast(h3)), scp);
     _ = api_3d.AIL_set_3D_sample_info(@as(?*anyopaque, @ptrCast(h3)), @as(?*anyopaque, &info));

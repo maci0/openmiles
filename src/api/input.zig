@@ -33,14 +33,16 @@ pub fn AIL_input_open(info: ?*anyopaque, a1: usize, a2: usize) callconv(.winapi)
     };
     return input;
 }
-pub fn AIL_set_input_state(input_ptr: ?*openmiles.Input, state: i32) callconv(.winapi) void {
-    const input = input_ptr orelse return;
+pub fn AIL_set_input_state(input_ptr: ?*openmiles.Input, state: i32) callconv(.winapi) i32 {
+    const input = input_ptr orelse return 0;
     log("AIL_set_input_state: input={*}, state={d}\n", .{ input, state });
-    if (state != 0) {
-        input.start();
-    } else {
-        input.stop();
-    }
+    // SDK (capture.cpp): a no-op (already in the requested state) returns the
+    // current input_enabled flag; a successful enable OR disable returns 1.
+    const want: i32 = if (state != 0) 1 else 0;
+    const cur = @atomicLoad(i32, &input.state, .acquire);
+    if (cur == want) return cur;
+    if (want != 0) input.start() else input.stop();
+    return 1;
 }
 pub fn AIL_input_info(input_ptr: ?*openmiles.Input) callconv(.winapi) u32 {
     const input = input_ptr orelse return 0;

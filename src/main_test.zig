@@ -1375,10 +1375,19 @@ test "AIL_set_sample_info channel_mask round-trips via channel_count" {
     info.channels = 2;
     info.bits = 16;
     info.channel_mask = 0x3; // explicit FL|FR
-    api_v7.AIL_set_sample_info(s, &info);
+    try testing.expectEqual(@as(i32, 1), api_v7.AIL_set_sample_info(s, &info)); // SDK: 1 on success
     var mask: u32 = 0;
     _ = api_v8b.AIL_sample_channel_count(s, &mask);
     try testing.expectEqual(@as(u32, 0x3), mask);
+    // Null sample returns 0 (SDK guard).
+    try testing.expectEqual(@as(i32, 0), api_v7.AIL_set_sample_info(null, &info));
+}
+
+test "AIL_set_input_state returns 0 for a null handle (SDK guard)" {
+    const api_input = @import("api/input.zig");
+    // Null handle: no device needed, deterministic. SDK returns 0.
+    try testing.expectEqual(@as(i32, 0), api_input.AIL_set_input_state(null, 1));
+    try testing.expectEqual(@as(i32, 0), api_input.AIL_set_input_state(null, 0));
 }
 
 test "AIL_size_processed_digital_audio counts points from data_len (SDK)" {
