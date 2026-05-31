@@ -3002,6 +3002,25 @@ test "AIL_open_stream_by_sample (6.1a leaked internal) is a safe null stub" {
     try testing.expectEqual(@as(?*openmiles.Sample, null), api_stream.AIL_open_stream_by_sample(p, p, p, -1));
 }
 
+test "AIL_decompress_ASI decodes to a WAV (runs the decode loop; align-safe)" {
+    const api_rib = @import("api/rib.zig");
+    // A real PCM WAV (mono) that miniaudio can decode through the ASI path.
+    const pcm = [_]u8{0} ** 512;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 22050, 16);
+    defer testing.allocator.free(wav);
+    var out_ptr: ?*anyopaque = null;
+    var out_size: u32 = 0;
+    const rc = api_rib.AIL_decompress_ASI(wav.ptr, @intCast(wav.len), null, &out_ptr, &out_size, null);
+    try testing.expectEqual(@as(i32, 1), rc);
+    try testing.expect(out_ptr != null and out_size > 0);
+    defer std.c.free(out_ptr);
+    // Output is a valid 16-bit PCM WAV (the decode loop wrote i16 samples).
+    var info: openmiles.AILSOUNDINFO = .{};
+    try testing.expect(dg.AIL_WAV_info(out_ptr.?, &info) != 0);
+    try testing.expectEqual(@as(i32, 1), info.format);
+    try testing.expectEqual(@as(i32, 16), info.bits);
+}
+
 test "AIL_MIDI_to_XMI allocates the output and returns it via XMIDI** (SDK)" {
     const smf = [_]u8{ 'M', 'T', 'h', 'd', 1, 2, 3, 4, 5, 6, 7, 8 };
     // Size query: null output pointer, just reports the size.

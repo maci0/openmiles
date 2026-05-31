@@ -363,7 +363,8 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
 
     var all_pcm: std.ArrayListUnmanaged(u8) = .empty;
     defer all_pcm.deinit(openmiles.global_allocator);
-    var chunk_buf: [4096 * 4]u8 = undefined; // 4096 frames x 4 bytes (s16 stereo)
+    // align(2): miniaudio writes ma_int16 PCM here, which needs 2-byte alignment.
+    var chunk_buf: [4096 * 4]u8 align(2) = undefined; // 4096 frames x 4 bytes (s16 stereo)
     while (true) {
         var fr: u64 = 0;
         _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, &chunk_buf, 4096, &fr);
