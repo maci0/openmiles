@@ -197,15 +197,18 @@ pub fn AIL_DLS_open(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque,
         const tsf_mod = openmiles.tsf;
         const raw: [*c]const u8 = @ptrCast(@alignCast(data));
         const detected = openmiles.detectAudioSize(raw);
-        if (detected > 0) {
+        // A header claiming > maxInt(c_int) is bogus (no such buffer fits the
+        // 32-bit address space) -- skip the soundfont rather than panic on the
+        // cast tsf_load_memory needs; the driver still opens without it.
+        if (detected > 0 and detected <= std.math.maxInt(c_int)) {
             driver.soundfont = tsf_mod.tsf_load_memory(raw, @intCast(detected));
             driver.owns_soundfont = true;
             if (driver.soundfont) |sf| {
-                driver.soundfont_size_bytes = @intCast(detected);
+                driver.soundfont_size_bytes = @intCast(@min(detected, std.math.maxInt(u32)));
                 tsf_mod.tsf_set_output(sf, tsf_mod.TSF_STEREO_INTERLEAVED, 44100, 0);
             }
         } else {
-            log("AIL_DLS_open: could not determine SF2 size from header; opening without soundfont\n", .{});
+            log("AIL_DLS_open: could not determine a plausible SF2 size from header; opening without soundfont\n", .{});
         }
     }
     return driver;
