@@ -844,6 +844,25 @@ test "Sample3D setObstruction and setOcclusion" {
     try testing.expectEqual(@as(f32, 0.5), s.occlusion);
 }
 
+test "Sample3D obstruction has no volume effect; occlusion attenuates (m3d model)" {
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample3D.init(driver);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    s.setVolume(127); // gain ~1.0
+    const base = openmiles.ma.ma_sound_get_volume(&s.sound);
+    // Obstruction: stored, but no change to the mixed volume.
+    s.setObstruction(0.9);
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_volume(&s.sound) - base) < 0.001);
+    // Occlusion 0.5: volume scaled by (1 - 0.5).
+    s.setOcclusion(0.5);
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_volume(&s.sound) - base * 0.5) < 0.01);
+}
+
 test "Sample3D setVelocity" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);

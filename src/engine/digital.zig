@@ -1725,9 +1725,12 @@ pub const Sample3D = struct {
 
     fn applyVolume(self: *Sample3D) void {
         if (self.is_initialized) {
-            // Obstruction: attenuates direct sound path (0=clear, 1=fully blocked)
-            // Occlusion: attenuates all sound paths (0=clear, 1=fully occluded)
-            const eff = self.volume * (1.0 - self.obstruction * 0.5) * (1.0 - self.occlusion);
+            // MSS software 3D (m3d.cpp): obstruction has NO mix effect (it is only
+            // volume-attenuated on EAX hardware, which we don't emulate); occlusion
+            // drives a low-pass cutoff, not volume. The legacy H3DSAMPLE path has
+            // no per-voice filter, so occlusion is approximated as a loudness
+            // reduction here. Obstruction is intentionally omitted.
+            const eff = self.volume * (1.0 - self.occlusion);
             ma.ma_sound_set_volume(&self.sound, @max(0.0, eff));
         }
     }
@@ -1739,8 +1742,8 @@ pub const Sample3D = struct {
     }
 
     pub fn setObstruction(self: *Sample3D, val: f32) void {
+        // Stored only: MSS's software 3D applies no mix effect for obstruction.
         self.obstruction = @min(1.0, @max(0.0, val));
-        self.applyVolume();
     }
 
     pub fn setOcclusion(self: *Sample3D, val: f32) void {
