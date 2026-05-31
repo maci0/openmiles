@@ -1355,6 +1355,49 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
+test "AIL_WAV_info handles WAVEFORMATEXTENSIBLE PCM (format->1, channel_mask, reject non-PCM)" {
+    // fmt chunk = 40 bytes (WAVEFORMATEXTENSIBLE), data = 16 bytes (stereo 16-bit).
+    const mk = struct {
+        fn build(buf: []u8, guid: [16]u8) void {
+            @memset(buf, 0);
+            @memcpy(buf[0..4], "RIFF");
+            const riff: u32 = @intCast(buf.len - 8);
+            buf[4] = @truncate(riff);
+            buf[5] = @truncate(riff >> 8);
+            @memcpy(buf[8..12], "WAVE");
+            @memcpy(buf[12..16], "fmt ");
+            buf[16] = 40; // fmt chunk size
+            buf[20] = 0xFE;
+            buf[21] = 0xFF; // format_tag = 0xFFFE (EXTENSIBLE)
+            buf[22] = 2; // channels
+            buf[24] = 0x44;
+            buf[25] = 0xAC; // 44100
+            buf[32] = 4; // block_align = 4 (= channels*2)
+            buf[34] = 16; // bits
+            buf[36] = 22; // cbSize
+            buf[38] = 16; // validBitsPerSample
+            buf[40] = 0x03; // dwChannelMask = FL|FR
+            @memcpy(buf[44..60], &guid); // SubFormat GUID
+            @memcpy(buf[60..64], "data");
+            buf[64] = 16; // data_len
+        }
+    };
+    const pcm_guid = [16]u8{ 0x01, 0, 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71 };
+    var buf: [84]u8 = undefined; // 12 + 8 + 40 + 8 + 16
+    mk.build(&buf, pcm_guid);
+    var info: openmiles.AILSOUNDINFO = .{};
+    try testing.expect(dg.AIL_WAV_info(&buf, &info) != 0);
+    try testing.expectEqual(@as(i32, 1), info.format); // reported as plain PCM
+    if (@hasField(openmiles.AILSOUNDINFO, "channel_mask"))
+        try testing.expectEqual(@as(u32, 0x3), info.channel_mask); // from dwChannelMask
+    try testing.expectEqual(@as(u32, 8), info.samples); // 16 bytes * 8 / 16 bits
+    // A non-PCM subformat (IEEE float GUID) is rejected.
+    const float_guid = [16]u8{ 0x03, 0, 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71 };
+    mk.build(&buf, float_guid);
+    var info2: openmiles.AILSOUNDINFO = .{};
+    try testing.expectEqual(@as(i32, 0), dg.AIL_WAV_info(&buf, &info2));
+}
+
 test "AIL_WAV_info computes IMA ADPCM sample count via the SDK block formula" {
     // Production-like block_align so the formula (not the degenerate <spb0 path)
     // runs: stereo, block_align=512, data_len=1024 (2 blocks). SDK (wavefile.cpp):

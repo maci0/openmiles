@@ -655,6 +655,10 @@ pub fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
     var data_ptr: ?*const anyopaque = null;
     var data_len: u32 = 0;
     var fact_samples: ?u32 = null;
+    // WAVEFORMATEXTENSIBLE (0xFFFE) extension fields, captured if present.
+    var ext_cbsize: u16 = 0;
+    var ext_channel_mask: u32 = 0;
+    var ext_subformat_pcm: bool = false;
     while (offset + 8 <= file_end) {
         const tag = raw[offset .. offset + 4];
         const chunk_size = std.mem.readInt(u32, raw[offset + 4 .. offset + 8][0..4], .little);
@@ -665,6 +669,15 @@ pub fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
             sample_rate = std.mem.readInt(u32, raw[offset + 4 .. offset + 8][0..4], .little);
             block_align = std.mem.readInt(u16, raw[offset + 12 .. offset + 14][0..2], .little);
             bits_per_sample = std.mem.readInt(u16, raw[offset + 14 .. offset + 16][0..2], .little);
+            // WAVEFORMATEXTENSIBLE: read cbSize, dwChannelMask, and the SubFormat
+            // GUID so we can validate/convert PCMEX the way the SDK does.
+            if (audio_format == 0xFFFE and chunk_size >= 40 and offset + 40 <= file_end) {
+                ext_cbsize = std.mem.readInt(u16, raw[offset + 16 .. offset + 18][0..2], .little);
+                ext_channel_mask = std.mem.readInt(u32, raw[offset + 20 .. offset + 24][0..4], .little);
+                // KSDATAFORMAT_SUBTYPE_PCM = {00000001-0000-0010-8000-00aa00389b71}
+                const pcm_guid = [16]u8{ 0x01, 0, 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71 };
+                ext_subformat_pcm = std.mem.eql(u8, raw[offset + 24 .. offset + 40], &pcm_guid);
+            }
         } else if (std.mem.eql(u8, tag, "fact") and chunk_size >= 4 and offset + 4 <= file_end) {
             fact_samples = std.mem.readInt(u32, raw[offset .. offset + 4][0..4], .little);
         } else if (std.mem.eql(u8, tag, "data")) {
@@ -692,6 +705,14 @@ pub fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
     out.block_size = block_align;
     out.initial_ptr = data_ptr;
     if (@hasField(AILSOUNDINFO, "channel_mask")) out.channel_mask = ~@as(u32, 0);
+    if (audio_format == 0xFFFE) {
+        // WAVEFORMATEXTENSIBLE: the SDK only accepts a 16-bit PCM subformat whose
+        // block alignment is channels*2, reports it as plain WAVE_FORMAT_PCM, and
+        // carries the file's dwChannelMask. Anything else is rejected (return 0).
+        if (ext_cbsize < 22 or !ext_subformat_pcm or block_align != num_channels *| 2) return 0;
+        out.format = 1; // WAVE_FORMAT_PCM
+        if (@hasField(AILSOUNDINFO, "channel_mask")) out.channel_mask = ext_channel_mask;
+    }
     if (audio_format == 0x0011 and bits_per_sample == 4) {
         // IMA ADPCM: use the fact chunk's sample count if present, else derive
         // from the block size (SDK formula).
