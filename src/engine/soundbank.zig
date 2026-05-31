@@ -118,6 +118,48 @@ pub const Bank = struct {
         return self.assetData(.events, event_name);
     }
 
+    /// Resolve a sound asset's source filename into `out` as the SDK formats it:
+    /// "*" + bank filename + the sound's own filename. Returns the sound's
+    /// DataLen (MILESBANKSOUNDINFO.DataLen) on success, or -1 if not found.
+    /// `out` must be large enough for the result (the C API takes no size, matching
+    /// the SDK). The Sound layout (NameOffset@0, FileNameOffset@4, Info@12 with
+    /// DataLen at Info+12) is from hlbank.cpp.
+    pub fn soundAssetFilename(self: *const Bank, sound_name: []const u8, out: [*]u8) i32 {
+        const count = self.countFor(.sounds);
+        var i: u32 = 0;
+        while (i < count) : (i += 1) {
+            const entry = @as(usize, self.tableOff(.sounds)) + @as(usize, i) * asset_entry_size;
+            const name_off = self.rdU32(entry);
+            if (name_off == 0 or name_off >= self.meta.len) continue;
+            const nm = std.mem.sliceTo(self.meta[name_off..], 0);
+            if (!std.ascii.eqlIgnoreCase(nm, sound_name)) continue;
+            const data_off = self.rdU32(entry + 4);
+            if (data_off == 0 or data_off + 8 > self.meta.len) {
+                out[0] = 0;
+                return -1;
+            }
+            const fn_abs = data_off + self.rdU32(data_off + 4); // pSound + FileNameOffset
+            if (fn_abs >= self.meta.len) {
+                out[0] = 0;
+                return -1;
+            }
+            const sfn = std.mem.sliceTo(self.meta[fn_abs..], 0);
+            var w: usize = 0;
+            out[w] = '*';
+            w += 1;
+            @memcpy(out[w .. w + self.filename.len], self.filename);
+            w += self.filename.len;
+            @memcpy(out[w .. w + sfn.len], sfn);
+            w += sfn.len;
+            out[w] = 0;
+            // MILESBANKSOUNDINFO.DataLen is at Sound+12 (Info) +12.
+            if (data_off + 28 > self.meta.len) return 0;
+            return self.rdI32(data_off + 24);
+        }
+        out[0] = 0;
+        return -1;
+    }
+
     pub fn deinit(self: *Bank) void {
         _ = @atomicRmw(u32, &g_loaded_count, .Sub, 1, .seq_cst);
         self.allocator.free(self.meta);

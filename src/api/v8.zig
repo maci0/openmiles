@@ -735,9 +735,13 @@ pub fn AIL_register_trace_callback_v8(a0: ?*anyopaque, a1: ?*anyopaque) callconv
     _ = a1;
     AIL_register_trace_callback(a0);
 }
-pub fn AIL_sound_asset_filename_v8(a0: ?*anyopaque, a1: i32, a2: i32) callconv(.winapi) void {
-    _ = a2;
-    AIL_sound_asset_filename(a0, a1);
+// AIL_sound_asset_filename(SoundBank* bank, char const* name, char* out_filename)
+// @12 — writes "*<bankfile><soundfile>" and returns the sound's DataLen (hlbank.cpp).
+pub fn AIL_sound_asset_filename_v8(bank: ?*anyopaque, name: ?*anyopaque, out: ?*anyopaque) callconv(.winapi) i32 {
+    const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return -1));
+    const nm = std.mem.span(@as([*:0]const u8, @ptrCast(name orelse return -1)));
+    const o: [*]u8 = @ptrCast(out orelse return -1);
+    return b.soundAssetFilename(nm, o);
 }
 // MSSDisableThreadLibraryCalls(HMODULE)@4 — a v8 DllMain helper; no-op here.
 pub fn MSSDisableThreadLibraryCalls(hmodule: ?*anyopaque) callconv(.winapi) void {

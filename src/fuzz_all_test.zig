@@ -868,7 +868,8 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_v8.AIL_ftoa_v8(rf);
     _ = api_v8.AIL_open_soundbank_v8(scp);
     api_v8.AIL_register_trace_callback_v8(scp, scp);
-    api_v8.AIL_sound_asset_filename_v8(scp, ri, ri);
+    // dereferences+formats the bank handle (real DLL too) -> null, not garbage
+    _ = api_v8.AIL_sound_asset_filename_v8(null, scp, scp);
     if (api_v8.AIL_create_event()) |ev8| {
         _ = api_v8.AIL_add_control_sounds_event_step_v8(ev8, scp, scp, scp, scp, scp, ri, rf, ri);
         _ = api_v8.AIL_add_sound_limit_event_step_v8(ev8, scp);

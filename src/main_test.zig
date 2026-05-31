@@ -2637,3 +2637,32 @@ test "AIL_get_event_contents returns the event bytecode pointer" {
     try testing.expectEqual(@as(i32, 0), api_v8b.AIL_get_event_contents(bptr, cstr("nope"), @ptrCast(&ev)));
     try testing.expect(ev == null);
 }
+
+test "AIL_sound_asset_filename formats *<bank><sound> and returns DataLen" {
+    var img: [200]u8 = undefined;
+    @memset(&img, 0);
+    const sb = openmiles.soundbank;
+    std.mem.writeInt(u32, img[0..4], sb.BANK_TAG, .little);
+    std.mem.writeInt(i32, img[4..8], 8, .little);
+    std.mem.writeInt(u32, img[32..36], 60, .little); // sounds table offset
+    std.mem.writeInt(u32, img[52..56], 1, .little); // sound count
+    @memcpy(img[56..60], "g\x00\x00\x00");
+    std.mem.writeInt(u32, img[60..64], 68, .little); // Sounds[0].NameOffset
+    std.mem.writeInt(u32, img[64..68], 80, .little); // Sounds[0].DataOffset -> Sound struct
+    @memcpy(img[68..73], "shot\x00");
+    // Sound struct at 80: FileNameOffset (Sound+4) = 40 -> filename at 120
+    std.mem.writeInt(u32, img[84..88], 40, .little);
+    // MILESBANKSOUNDINFO.DataLen at Sound+12(Info)+12 = 104
+    std.mem.writeInt(i32, img[104..108], 12345, .little);
+    @memcpy(img[120..129], "shot.wav\x00");
+    const total: i32 = 129;
+    std.mem.writeInt(i32, img[8..12], total, .little);
+
+    const bank = try openmiles.soundbank.loadFromMemory(openmiles.global_allocator, "guns.mbnk", img[0..@intCast(total)]);
+    defer bank.deinit();
+    var out: [128]u8 = undefined;
+    const dl = api_v8b.AIL_sound_asset_filename_v8(@ptrCast(bank), cstr("shot"), @ptrCast(&out));
+    try testing.expectEqual(@as(i32, 12345), dl);
+    try testing.expectEqualStrings("*guns.mbnkshot.wav", std.mem.span(@as([*:0]const u8, @ptrCast(&out))));
+    try testing.expectEqual(@as(i32, -1), api_v8b.AIL_sound_asset_filename_v8(@ptrCast(bank), cstr("nope"), @ptrCast(&out)));
+}
