@@ -382,6 +382,13 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_digital.AIL_sample_buffer_ready(hs);
     _ = api_v8.AIL_sample_channel_count(null, null);
     api_v7.AIL_sample_channel_levels(hs, null, null, &fo, rszi);
+    {
+        // Array path with a real, sized levels buffer (scp supplies the speaker
+        // index arrays). n bounded so the loop stays inside lvbuf/the scratch.
+        var lvbuf: [8]f32 = undefined;
+        api_v7.AIL_sample_channel_levels(hs, scp, scp, &lvbuf[0], 8);
+        api_v7.AIL_set_sample_channel_levels(hs, scp, scp, @as(?*const f32, @ptrCast(@alignCast(scp))), 8);
+    }
     _ = api_v7.AIL_sample_exclusion(hs);
     _ = api_digital.AIL_sample_granularity(hs);
     _ = api_v9.AIL_sample_loaded_len(null);

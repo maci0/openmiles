@@ -804,9 +804,9 @@ pub fn AIL_set_sample_playback_rate_factor(s_opt: ?*Sample, factor: f32) callcon
 // output_speaker_index[logical_channels][MSS_SPEAKER] -> driver channel, or -1
 // (wavefile.cpp). MSS_SPEAKER enum: FL=0,FR=1,FC=2,LFE=3,BL=4,BR=5,FLC=6,FRC=7,
 // BC=8,SL=9,SR=10,TC=11,TFL=12,TFC=13,TFR=14,TBL=15,TBC=16,TBR=17 (MAX_INDEX=17).
-const SPK_MAX_INDEX: usize = 17;
+pub const SPK_MAX_INDEX: usize = 17;
 const SPK_X: i8 = -1;
-const output_speaker_index = [10][SPK_MAX_INDEX + 1]i8{
+pub const output_speaker_index = [10][SPK_MAX_INDEX + 1]i8{
     .{ SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 0: invalid
     .{ 0, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 1: mono
     .{ 0, 1, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 2: stereo

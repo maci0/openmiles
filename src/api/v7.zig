@@ -20,6 +20,7 @@ const DigitalDriver = openmiles.DigitalDriver;
 const Redbook = openmiles.Redbook;
 const MidiDriver = openmiles.MidiDriver;
 const AILSOUNDINFO = openmiles.AILSOUNDINFO;
+const openmiles_v8 = @import("v8.zig"); // shared output_speaker_index table
 
 // --- Unified 3D on HSAMPLE (reuses the sample's miniaudio spatial state) -----
 
@@ -387,19 +388,77 @@ pub fn AIL_enumerate_sample_stage_attributes(s_opt: ?*Sample, next: *?*anyopaque
     next.* = null;
     return 0;
 }
+// Number of source channels carried by the sample (S->n_channels).
+fn sampleSourceChannels(s: *Sample) u32 {
+    if (s.pcm_format) |f| return @max(1, f.channels);
+    if (s.decoder) |d| return @max(1, @as(u32, d.outputChannels));
+    return 1;
+}
+// speaker_enum_to_source_chan (wavefile.cpp): the source channel carrying an
+// MSS_SPEAKER, derived from channel_mask — the Nth set bit maps to source N.
+fn srcChanOf(s: *Sample, speaker: i32) i32 {
+    if (speaker < 0 or speaker > 31) return -1;
+    const bit = @as(u32, 1) << @intCast(speaker);
+    if (s.channel_mask & bit == 0) return -1;
+    const idx: u32 = @popCount(s.channel_mask & (bit - 1));
+    return if (idx >= sampleSourceChannels(s)) -1 else @intCast(idx);
+}
+// Default mono/stereo routing (set_user_channel_defaults) used until the matrix
+// is explicitly set: stereo source is identity; mono source feeds outputs 0 & 1.
+fn defaultChannelLevel(s: *Sample, dest: usize, src: usize) f32 {
+    if (sampleSourceChannels(s) >= 2) return if (dest < 2 and dest == src) 1.0 else 0.0;
+    return if (src == 0 and dest < 2) 1.0 else 0.0;
+}
+fn logicalChannels(s: *Sample) usize {
+    return @min(@as(usize, ma.ma_engine_get_channels(&s.driver.engine)), 9);
+}
 pub fn AIL_sample_channel_levels(s_opt: ?*Sample, src: ?*const anyopaque, dst: ?*const anyopaque, levels: ?*f32, n_levels: i32) callconv(.winapi) void {
-    _ = s_opt;
-    _ = src;
-    _ = dst;
-    _ = levels;
-    _ = n_levels;
+    const s = s_opt orelse return;
+    const src_idx: [*]const i32 = @ptrCast(@alignCast(src orelse return));
+    const dst_idx: [*]const i32 = @ptrCast(@alignCast(dst orelse return));
+    const lv: [*]f32 = @ptrCast(@alignCast(levels orelse return));
+    if (n_levels <= 0) return;
+    const row = openmiles_v8.output_speaker_index[logicalChannels(s)];
+    var i: usize = 0;
+    while (i < @as(usize, @intCast(n_levels))) : (i += 1) {
+        const sc = srcChanOf(s, src_idx[i]);
+        const dspk = dst_idx[i];
+        const dc: i32 = if (dspk >= 0 and dspk <= openmiles_v8.SPK_MAX_INDEX) row[@intCast(dspk)] else -1;
+        if (sc < 0 or dc < 0) {
+            lv[i] = 0.0;
+            continue;
+        }
+        lv[i] = if (s.user_channel_levels_set) s.user_channel_levels[@intCast(dc)][@intCast(sc)] else defaultChannelLevel(s, @intCast(dc), @intCast(sc));
+    }
 }
 pub fn AIL_set_sample_channel_levels(s_opt: ?*Sample, src: ?*const anyopaque, dst: ?*const anyopaque, levels: ?*const f32, n_levels: i32) callconv(.winapi) void {
-    _ = s_opt;
-    _ = src;
-    _ = dst;
-    _ = levels;
-    _ = n_levels;
+    const s = s_opt orelse return;
+    // SDK: null source/dest/levels resets the matrix to the channel defaults.
+    if (src == null or dst == null or levels == null) {
+        s.user_channel_levels_set = false;
+        return;
+    }
+    const src_idx: [*]const i32 = @ptrCast(@alignCast(src.?));
+    const dst_idx: [*]const i32 = @ptrCast(@alignCast(dst.?));
+    const lv: [*]const f32 = @ptrCast(@alignCast(levels.?));
+    if (n_levels <= 0) return;
+    // Materialize the current defaults before the first explicit edit so
+    // unspecified entries keep their default routing.
+    if (!s.user_channel_levels_set) {
+        for (0..9) |d| for (0..9) |c| {
+            s.user_channel_levels[d][c] = defaultChannelLevel(s, d, c);
+        };
+        s.user_channel_levels_set = true;
+    }
+    const row = openmiles_v8.output_speaker_index[logicalChannels(s)];
+    var i: usize = 0;
+    while (i < @as(usize, @intCast(n_levels))) : (i += 1) {
+        const sc = srcChanOf(s, src_idx[i]);
+        const dspk = dst_idx[i];
+        const dc: i32 = if (dspk >= 0 and dspk <= openmiles_v8.SPK_MAX_INDEX) row[@intCast(dspk)] else -1;
+        if (sc < 0 or dc < 0) continue;
+        s.user_channel_levels[@intCast(dc)][@intCast(sc)] = lv[i];
+    }
 }
 pub fn AIL_listener_relative_receiver_array(dig_opt: ?*DigitalDriver, n_receivers: ?*i32) callconv(.winapi) ?*anyopaque {
     _ = dig_opt;

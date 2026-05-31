@@ -1204,6 +1204,39 @@ test "AIL_speaker_configuration returns the default stereo speaker array (SDK)" 
     try testing.expect(@abs(falloff - 0.9) < 0.0001); // still 0.9, not 0.1
 }
 
+test "AIL_set/sample_channel_levels round-trip + default routing (SDK)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2); // stereo out
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    s.channel_mask = ~@as(u32, 0); // FL->src0, FR->src1
+    s.pcm_format = .{ .channels = 2, .bits = 16 }; // stereo source
+
+    // Default (unset): stereo identity. (FL->FL)=1, (FR->FR)=1, (FL->FR)=0.
+    const src = [_]i32{ 0, 1, 0 }; // source speakers: FL, FR, FL
+    const dst = [_]i32{ 0, 1, 1 }; // dest speakers:   FL, FR, FR
+    var out = [_]f32{ -1, -1, -1 };
+    api_v7.AIL_sample_channel_levels(s, &src, &dst, &out[0], 3);
+    try testing.expectEqual(@as(f32, 1.0), out[0]); // FL->FL
+    try testing.expectEqual(@as(f32, 1.0), out[1]); // FR->FR
+    try testing.expectEqual(@as(f32, 0.0), out[2]); // FL->FR (off-diagonal)
+
+    // Explicitly set FL->FR to 0.5; it round-trips, diagonal defaults retained.
+    const sset = [_]i32{0};
+    const dset = [_]i32{1};
+    const lset = [_]f32{0.5};
+    api_v7.AIL_set_sample_channel_levels(s, &sset, &dset, &lset[0], 1);
+    api_v7.AIL_sample_channel_levels(s, &src, &dst, &out[0], 3);
+    try testing.expectEqual(@as(f32, 1.0), out[0]); // FL->FL still 1 (default kept)
+    try testing.expectEqual(@as(f32, 1.0), out[1]); // FR->FR still 1
+    try testing.expectEqual(@as(f32, 0.5), out[2]); // FL->FR now 0.5
+
+    // Null args reset to defaults: FL->FR back to 0.
+    api_v7.AIL_set_sample_channel_levels(s, null, null, null, 0);
+    api_v7.AIL_sample_channel_levels(s, &src, &dst, &out[0], 3);
+    try testing.expectEqual(@as(f32, 0.0), out[2]);
+}
+
 test "AIL_set/sample_speaker_scale_factors round-trip via the channel map (SDK)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2); // stereo
     defer drv.deinit();
