@@ -3465,6 +3465,35 @@ test "volume/pan match the exact MSS curve (gain = volume^(10/6))" {
     try testing.expectApproxEqAbs(@as(f32, 0.25), gp, 0.0001);
 }
 
+test "5.1 set_levels reconstructs save_pan/fb_pan/volume (inverts volume_pan)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    // Set via volume_pan, read the six levels, feed them back through set_levels,
+    // then query volume_pan -- the params must come back (the SDK reconstruction).
+    api_v8.AIL_set_sample_51_volume_pan(s, 0.8, 0.5, 0.5, 0.7, 0.3);
+    var fl: f32 = 0;
+    var fr: f32 = 0;
+    var bl: f32 = 0;
+    var br: f32 = 0;
+    var c: f32 = 0;
+    var sub: f32 = 0;
+    api_v8.AIL_sample_51_volume_levels(s, &fl, &fr, &bl, &br, &c, &sub);
+    api_v8.AIL_set_sample_51_volume_levels(s, fl, fr, bl, br, c, sub);
+    var v: f32 = 0;
+    var p: f32 = 0;
+    var fb: f32 = 0;
+    var cl: f32 = 0;
+    var sl: f32 = 0;
+    api_v8.AIL_sample_51_volume_pan(s, &v, &p, &fb, &cl, &sl);
+    try testing.expectApproxEqAbs(@as(f32, 0.8), v, 0.005);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), p, 0.005);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), fb, 0.005);
+    try testing.expectApproxEqAbs(@as(f32, 0.7), cl, 0.005);
+    try testing.expectApproxEqAbs(@as(f32, 0.3), sl, 0.005);
+}
+
 test "AIL_set/sample_51_volume_pan round-trips the params verbatim" {
     // The getter must return the params the app set (save_*), not values derived
     // from the computed channel levels.

@@ -629,19 +629,75 @@ pub fn AIL_sample_stage_property_v7(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque, a
     _ = a5;
     return 0;
 }
+// The save_volume reconstruction shared by the f_left>0 and b_left>0 branches
+// of AIL_API_set_sample_51_volume_levels (wavefile.cpp).
+fn recon51Volume(save_pan: f32, save_fb_pan: f32, f_left: f32, f_right: f32, b_left: f32, b_right: f32) f32 {
+    if (save_pan > 0.0001) {
+        return if (save_fb_pan > 0.0001)
+            b_right * std.math.pow(f32, save_pan * save_fb_pan, -0.3)
+        else
+            f_right * std.math.pow(f32, save_pan, -0.3);
+    } else {
+        return if (save_fb_pan > 0.0001)
+            b_left * std.math.pow(f32, save_fb_pan, -0.3)
+        else
+            f_left;
+    }
+}
 // SDK header order: (S, f_left, f_right, b_left, b_right, center, sub).
-// Note: the SDK additionally reconstructs save_pan/save_fb_pan/save_volume from
-// the levels so a subsequent AIL_sample_51_volume_pan query reflects them; we
-// store the levels verbatim (round-tripping via the levels getter) but leave
-// the volume/pan params at their prior values -- a minor gap for the uncommon
-// set-levels-then-query-pan sequence.
 pub fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, f_left: f32, f_right: f32, b_left: f32, b_right: f32, center: f32, sub: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.v51_levels = .{ f_left, f_right, b_left, b_right, center, sub }; // canonical order, round-trips via the getter
-    // Engine is stereo; drive volume from the front L/R pair.
+
+    // Reconstruct save_pan/save_fb_pan/save_volume from the levels exactly as
+    // AIL_API_set_sample_51_volume_levels does, so a later volume_pan query
+    // reflects them (this inverts AIL_set_sample_51_volume_pan).
+    var save_pan: f32 = 0.5;
+    var save_fb_pan: f32 = 0.5;
+    var save_volume: f32 = 0;
+    if (f_left > 0.0001) {
+        const r1 = std.math.pow(f32, f_right / f_left, 10.0 / 3.0);
+        save_pan = r1 / (r1 + 1);
+        const r2 = std.math.pow(f32, b_left / f_left, 10.0 / 3.0);
+        save_fb_pan = r2 / (r2 + 1);
+        save_volume = recon51Volume(save_pan, save_fb_pan, f_left, f_right, b_left, b_right);
+    } else if (b_left > 0.0001) {
+        const r1 = std.math.pow(f32, b_right / b_left, 10.0 / 3.0);
+        save_pan = r1 / (r1 + 1);
+        const r2 = std.math.pow(f32, f_left / b_left, 10.0 / 3.0);
+        save_fb_pan = 1.0 - (r2 / (r2 + 1));
+        save_volume = recon51Volume(save_pan, save_fb_pan, f_left, f_right, b_left, b_right);
+    } else if (f_right > 0.0001) {
+        const r1 = std.math.pow(f32, b_right / f_right, 10.0 / 3.0);
+        save_fb_pan = r1 / (r1 + 1);
+        save_pan = 1.0;
+        save_volume = if (save_fb_pan > 0.0001) b_right * std.math.pow(f32, save_fb_pan, -0.3) else f_right;
+    } else if (b_right > 0.0001) {
+        save_pan = 1.0;
+        save_fb_pan = 1.0;
+        save_volume = b_right;
+    } else {
+        save_pan = 0.5;
+        save_fb_pan = 0.5;
+        save_volume = 0;
+    }
+    const center_ratio: f32 = if (save_volume > 0.0001) center / save_volume else 0;
+    const sub_ratio: f32 = if (save_volume > 0.0001) sub / save_volume else 0;
+
+    // Engine is stereo; drive output from the front L/R pair (this sets the
+    // quantized save_*; we overwrite with the exact reconstruction below).
     s.setVolume(@intFromFloat(std.math.clamp(@max(f_left, f_right), 0.0, 1.0) * 127.0));
     const sum = f_left + f_right;
     if (sum > 0.0001) s.setPan(@intFromFloat(std.math.clamp(f_right / sum, 0.0, 1.0) * 127.0));
+
+    // Store the reconstructed save_* (the F32 getter returns volume = save_volume^(6/10)).
+    s.save_pan_f = std.math.clamp(save_pan, 0.0, 1.0);
+    s.save_vol_f = std.math.pow(f32, @max(save_volume, 0.0), 6.0 / 10.0);
+    s.original_pan = @intFromFloat(std.math.clamp(s.save_pan_f, 0.0, 1.0) * 127.0);
+    s.original_volume = @intFromFloat(std.math.clamp(s.save_vol_f, 0.0, 1.0) * 127.0);
+    s.v51_fb_pan = std.math.clamp(save_fb_pan, 0.0, 1.0);
+    s.v51_center_level = center_ratio;
+    s.v51_sub_level = sub_ratio;
 }
 // SDK order (wavefile.cpp): (S, volume, pan, fb_pan, center_level, sub_level).
 pub fn AIL_set_sample_51_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32, fb_pan: f32, center_level: f32, sub_level: f32) callconv(.winapi) void {
