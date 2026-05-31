@@ -273,6 +273,63 @@ test "fuzz Sample scalar setters with adversarial values" {
     }
 }
 
+test "fuzz AIL_mem_* in-memory IO with adversarial sizes/positions" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE60);
+    const rand = prng.random();
+    var scratch: [512]u8 = undefined;
+
+    // (1) Growable write stream: hammer write/seek/printc/prints/read with
+    // adversarial counts and positions, then close (freeing the malloc'd copy).
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const mem = api_v8.AIL_mem_create() orelse continue;
+        var ops: usize = 0;
+        while (ops < 8) : (ops += 1) {
+            // read/write counts are src/dst capacities — bound to scratch (a
+            // larger value would be the harness lying about its own buffer);
+            // -1/0 still exercise the early-out branches.
+            const cap_n = rand.intRangeAtMost(i32, -1, @intCast(scratch.len));
+            // seek positions are fully adversarial: the impl must clamp them.
+            const seek_n = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
+            switch (rand.intRangeAtMost(u8, 0, 5)) {
+                0 => _ = api_v8.AIL_mem_write(mem, &scratch, cap_n),
+                1 => _ = api_v8.AIL_mem_read(mem, &scratch, cap_n),
+                2 => _ = api_v8.AIL_mem_seek(mem, seek_n),
+                3 => _ = api_v8.AIL_mem_printc(mem, seek_n),
+                4 => {
+                    scratch[rand.intRangeLessThan(usize, 0, scratch.len)] = 0; // ensure a NUL
+                    _ = api_v8.AIL_mem_prints(mem, &scratch);
+                },
+                5 => {
+                    _ = api_v8.AIL_mem_pos(mem);
+                    _ = api_v8.AIL_mem_size(mem);
+                    _ = api_v8.AIL_mem_error(mem);
+                },
+                else => unreachable,
+            }
+        }
+        var data: ?*anyopaque = null;
+        var size: u32 = 0;
+        api_v8.AIL_mem_close(mem, &data, &size);
+        if (data) |d| std.c.free(d); // AIL_mem_close hands back a malloc'd copy
+    }
+
+    // (2) Read-only view over a fixed buffer: seek/read past the end must clamp.
+    var view: [256]u8 = undefined;
+    rand.bytes(&view);
+    var j: usize = 0;
+    while (j < ITERS) : (j += 1) {
+        // Size must not exceed the real buffer (AIL_mem_open trusts it); the
+        // adversarial part is the seek/read positions our code has to clamp.
+        const sz: i32 = @intCast(rand.intRangeAtMost(usize, 0, view.len));
+        const mem = api_v8.AIL_mem_open(&view, sz) orelse continue;
+        _ = api_v8.AIL_mem_seek(mem, adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)]);
+        _ = api_v8.AIL_mem_read(mem, &scratch, adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)]);
+        _ = api_v8.AIL_mem_write(mem, &scratch, 8); // read-only: must be a no-op
+        api_v8.AIL_mem_close(mem, null, null);
+    }
+}
+
 test "fuzz 6.5/6.6 stream + DLS reverb-level setters with adversarial floats" {
     var prng = std.Random.DefaultPrng.init(0xC0FFEE5A);
     const rand = prng.random();
