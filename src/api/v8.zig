@@ -581,7 +581,8 @@ pub fn AIL_sample_buffer_available(s_opt: ?*Sample) callconv(.winapi) i32 {
 }
 pub fn AIL_sample_buffer_count(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    return if (s.stream_active) 2 else 1; // ping-pong double buffer while streaming
+    if (s.n_buffers > 0) return s.n_buffers; // explicitly set via set_sample_buffer_count
+    return if (s.stream_active) 2 else 1; // default: ping-pong double buffer while streaming
 }
 pub fn AIL_sample_channel_count(s_opt: ?*Sample, mask: ?*u32) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
@@ -756,10 +757,13 @@ pub fn AIL_set_sample_51_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32, fb_p
     s.v51_levels[4] = sv * center_level; // center
     s.v51_levels[5] = sv * sub_level; // sub
 }
-pub fn AIL_set_sample_buffer_count(a0: ?*anyopaque, a1: i32) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    return 0;
+// SDK: AIL_API_set_sample_buffer_count -- rejects n_buffers outside [2,8]
+// (returns 0), otherwise sets the ring count and returns 1.
+pub fn AIL_set_sample_buffer_count(s_opt: ?*Sample, n_buffers: i32) callconv(.winapi) i32 {
+    const s = s_opt orelse return 0;
+    if (n_buffers < 2 or n_buffers > 8) return 0;
+    s.n_buffers = n_buffers;
+    return 1;
 }
 pub fn AIL_set_sample_is_3D(s_opt: ?*Sample, is_3D: i32) callconv(.winapi) void {
     const s = s_opt orelse return;

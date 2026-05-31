@@ -177,9 +177,12 @@ pub fn AIL_sound_asset_info(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a
     const out_info: ?[*]u8 = if (a3) |p| @ptrCast(@alignCast(p)) else null;
     return b.soundAssetInfo(nm, out_fn, out_info);
 }
-pub fn AIL_stream_filled_percent(a0: ?*anyopaque) callconv(.winapi) f32 {
-    _ = a0;
-    return 0;
+// SDK (AIL_API_stream_filled_percent): 1.0 for a preloaded/primed stream, the
+// fill level otherwise, 0.0 on null/error. Our streams load fully into memory
+// (always preloaded), so an initialized stream is 100% filled.
+pub fn AIL_stream_filled_percent(s_opt: ?*Sample) callconv(.winapi) f32 {
+    const s = s_opt orelse return 0.0;
+    return if (s.is_initialized) 1.0 else 0.0;
 }
 pub fn AIL_time_to_ms(t: u64) callconv(.winapi) u64 {
     return t / 1000;

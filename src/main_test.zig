@@ -1221,6 +1221,36 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
+test "AIL_set/sample_buffer_count validates [2,8] and round-trips" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    // Default (unset, non-streaming) -> 1.
+    try testing.expectEqual(@as(i32, 1), api_v8b.AIL_sample_buffer_count(s));
+    // Valid count -> stored, setter returns 1.
+    try testing.expectEqual(@as(i32, 1), api_v8b.AIL_set_sample_buffer_count(s, 4));
+    try testing.expectEqual(@as(i32, 4), api_v8b.AIL_sample_buffer_count(s));
+    // Out-of-range -> rejected (0), count unchanged.
+    try testing.expectEqual(@as(i32, 0), api_v8b.AIL_set_sample_buffer_count(s, 1));
+    try testing.expectEqual(@as(i32, 0), api_v8b.AIL_set_sample_buffer_count(s, 9));
+    try testing.expectEqual(@as(i32, 4), api_v8b.AIL_sample_buffer_count(s));
+}
+
+test "AIL_stream_filled_percent is 1.0 for a loaded (preloaded) stream" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try testing.expectEqual(@as(f32, 0.0), api_v9.AIL_stream_filled_percent(s)); // not loaded yet
+    try s.loadFromMemory(wav, false);
+    try testing.expectEqual(@as(f32, 1.0), api_v9.AIL_stream_filled_percent(s)); // preloaded
+    try testing.expectEqual(@as(f32, 0.0), api_v9.AIL_stream_filled_percent(null));
+}
+
 test "AIL_file_type_named delegates to file_type, special-cases voice suffixes" {
     const allocator = testing.allocator;
     const pcm = [_]u8{0} ** 16;

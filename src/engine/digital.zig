@@ -588,6 +588,9 @@ pub const Sample = struct {
     // stereo WAVs); an explicit speaker mask only comes from WAVEFORMATEXTENSIBLE
     // or AIL_set_sample_info. AIL_sample_channel_count returns this verbatim.
     channel_mask: u32 = ~@as(u32, 0),
+    // Streaming double-buffer ring count set via AIL_set_sample_buffer_count
+    // (valid 2..8). 0 = unset -> AIL_sample_buffer_count falls back to a default.
+    n_buffers: i32 = 0,
     // Which buffer ID was last loaded via AIL_load_sample_buffer (for EOB callback parameter)
     last_loaded_buffer: i32 = 0,
     user_data: [8]u32 = [_]u32{0} ** 8,
@@ -1042,6 +1045,7 @@ pub const Sample = struct {
         self.sob_callback = 0;
         self.pcm_format = null;
         self.channel_mask = ~@as(u32, 0);
+        self.n_buffers = 0;
         self.last_loaded_buffer = 0;
         self.user_data = [_]u32{0} ** 8;
     }
