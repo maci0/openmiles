@@ -161,7 +161,9 @@ pub fn AIL_set_sample_low_pass_cut_off(s_opt: ?*Sample, channel: i32, cut_off: f
 }
 pub fn AIL_sample_low_pass_cut_off(s_opt: ?*Sample, channel: i32) callconv(.winapi) f32 {
     _ = channel;
-    const s = s_opt orelse return 0;
+    // SDK (wavefile.cpp) returns 1.0 (fully open / no filtering) for a null
+    // handle and whenever no low-pass is active — never 0.
+    const s = s_opt orelse return 1.0;
     return s.getLowPassNormalized();
 }
 pub fn AIL_set_sample_reverb_levels(s_opt: ?*Sample, dry_level: f32, wet_level: f32) callconv(.winapi) void {

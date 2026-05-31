@@ -302,6 +302,8 @@ pub fn AIL_set_stream_low_pass_cut_off(s_opt: ?*Sample, cut_off: f32) callconv(.
     s.setLowPassNormalized(cut_off); // normalized 0..1 (MSS), not Hz
 }
 pub fn AIL_stream_low_pass_cut_off(s_opt: ?*Sample) callconv(.winapi) f32 {
-    const s = s_opt orelse return 0;
+    // 1.0 = fully open (no filtering) is the MSS default, returned for a null
+    // handle too — consistent with AIL_sample_low_pass_cut_off (wavefile.cpp).
+    const s = s_opt orelse return 1.0;
     return s.getLowPassNormalized();
 }

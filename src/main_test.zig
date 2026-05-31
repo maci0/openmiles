@@ -2781,6 +2781,7 @@ test "6.5/6.6 stream volume/reverb/low-pass round-trip" {
     // Low-pass cutoff is MSS's normalized 0..1 (default 1.0 = fully open). It
     // round-trips through the stored value regardless of filter attachment.
     try testing.expectEqual(@as(f32, 1.0), api_stream.AIL_stream_low_pass_cut_off(s)); // default open
+    try testing.expectEqual(@as(f32, 1.0), api_stream.AIL_stream_low_pass_cut_off(null)); // null -> open, not 0
     api_stream.AIL_set_stream_low_pass_cut_off(s, 0.5);
     try testing.expectEqual(@as(f32, 0.5), api_stream.AIL_stream_low_pass_cut_off(s));
     api_stream.AIL_set_stream_low_pass_cut_off(s, 4000.0); // >= 0.999 -> fully open
@@ -2853,6 +2854,8 @@ test "occlusion drives the low-pass cutoff (m3d.cpp model), obstruction does not
     defer s.deinit();
     try s.loadFromMemory(wav, false);
 
+    // A null handle returns 1.0 (fully open), never 0 (SDK wavefile.cpp).
+    try testing.expectEqual(@as(f32, 1.0), api_v7.AIL_sample_low_pass_cut_off(null, 0));
     // occlusion=0.75 -> cutoff = (1-0.75)+0.01 = 0.26 (muffled).
     api_v7.AIL_set_sample_occlusion(s, 0.75);
     try testing.expect(@abs(api_v7.AIL_sample_low_pass_cut_off(s, 0) - 0.26) < 0.001);
