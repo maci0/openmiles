@@ -778,11 +778,14 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
     outsize.* = @intCast(wav.len);
     return 1;
 }
-pub fn AIL_create_wave_synthesizer(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, flags: u32) callconv(.winapi) ?*MidiDriver {
+// SDK: AIL_create_wave_synthesizer(HDIGDRIVER dig, HMDIDRIVER mdi,
+// void const* wave_lib, S32 polyphony) -- param 2 is the MIDI driver (not a
+// sequence) and param 4 is the polyphony count.
+pub fn AIL_create_wave_synthesizer(dig_opt: ?*DigitalDriver, mdi: ?*MidiDriver, dls: ?*anyopaque, polyphony: i32) callconv(.winapi) ?*MidiDriver {
     const dig = dig_opt orelse return null;
     _ = dig;
-    _ = seq;
-    _ = flags;
+    _ = mdi;
+    _ = polyphony;
     const driver = MidiDriver.init(openmiles.global_allocator) catch |err| {
         log("Error: {any}\n", .{err});
         return null;

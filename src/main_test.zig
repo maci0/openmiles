@@ -2576,12 +2576,11 @@ test "AIL_DLS_load_memory rejects an implausibly-large header size (no panic)" {
     std.mem.writeInt(u32, buf[4..8], 4, .little); // body=4 -> total 12 == buf len
     try testing.expect(api_dls.AIL_DLS_load_memory(md, &buf, 0) == null);
 
-    // AIL_DLS_open shares the size-detection path: a bogus ~4GB header must not
-    // panic -- the driver opens without a soundfont.
+    // AIL_DLS_open(mdi, dig, libname, ...) takes a file NAME; a null/missing
+    // library just opens the device without a soundfont (no crash).
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
-    std.mem.writeInt(u32, buf[4..8], 0xFFFFFFFF, .little);
-    const dls_drv = api_dls.AIL_DLS_open(drv, null, &buf, 44100, 16, 2, 0);
+    const dls_drv = api_dls.AIL_DLS_open(md, drv, null, 0, 44100, 16, 2);
     try testing.expect(dls_drv != null);
     if (dls_drv) |d| api_dls.AIL_DLS_close(d, 0);
 }

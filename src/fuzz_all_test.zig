@@ -573,7 +573,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_dls.DLSLoadFile(hm, rstr, ru);
     _ = api_dls.DLSLoadMemFile(hm, scp, ru);
     _ = api_dls.DLSMSSGetCPU(hm);
-    _ = api_dls.DLSMSSOpen(hd, hq, null, ru, ri, ri, ru);
+    _ = api_dls.DLSMSSOpen(hm, hd, null, ru, ru, ri, ri); // (mdi, dig, libname, flags, rate, bits, channels)
     api_dls.DLSSetAttribute(hm, rstr, scp);
     _ = api_digital.DllMain(scp, ru, null);
     _ = api_v7.RIB_MAIN(null, rstr);
@@ -789,8 +789,8 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_rib.RIB_free_provider_handle(null);
     api_rib.RIB_free_provider_library(null);
     // wave synthesizer + DLS open with garbage SF2 image (exercises parse path)
-    if (api_digital.AIL_create_wave_synthesizer(hd, hq, scp, ru)) |ws| api_digital.AIL_destroy_wave_synthesizer(ws);
-    if (api_dls.AIL_DLS_open(hd, hq, scp, ru, ri, ri, ru)) |dh| api_dls.AIL_DLS_close(dh, ru);
+    if (api_digital.AIL_create_wave_synthesizer(hd, hm, scp, ri)) |ws| api_digital.AIL_destroy_wave_synthesizer(ws); // (dig, mdi, wave_lib, polyphony)
+    if (api_dls.AIL_DLS_open(hm, hd, null, ru, ru, ri, ri)) |dh| api_dls.AIL_DLS_close(dh, ru); // (mdi, dig, libname, ...)
     // event constructor + steps + decode
     if (api_v8.AIL_create_event()) |evh| {
         _ = api_v8.AIL_add_comment_event_step(evh, rstr);

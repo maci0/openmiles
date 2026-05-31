@@ -182,34 +182,26 @@ pub fn AIL_DLS_get_reverb_levels(driver_opt: ?*MidiDriver, dry_level: ?*f32, wet
     if (dry_level) |p| p.* = driver.dls_reverb_dry_level;
     if (wet_level) |p| p.* = driver.dls_reverb_level;
 }
-pub fn AIL_DLS_open(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, freq: u32, bits: i32, channels: i32, flags: u32) callconv(.winapi) ?*openmiles.MidiDriver {
-    _ = dig_opt orelse return null;
-    _ = seq;
-    _ = freq;
+// SDK (all versions): AIL_DLS_open(HMDIDRIVER mdi, HDIGDRIVER dig,
+// char const* libname, U32 flags, U32 rate, S32 bits, S32 channels) -> HDLSDEVICE.
+// libname is the DLS/SF2 *file name* to load; mdi/dig are the MIDI/digital
+// drivers the device renders through. Our HDLSDEVICE is a MidiDriver with the
+// named library loaded as its soundfont.
+pub fn AIL_DLS_open(mdi_opt: ?*MidiDriver, dig_opt: ?*DigitalDriver, libname: ?[*:0]const u8, flags: u32, rate: u32, bits: i32, channels: i32) callconv(.winapi) ?*openmiles.MidiDriver {
+    _ = mdi_opt;
+    _ = dig_opt;
+    _ = flags;
+    _ = rate;
     _ = bits;
     _ = channels;
-    _ = flags;
     const driver = openmiles.MidiDriver.init(openmiles.global_allocator) catch |err| {
         log("Error: {any}\n", .{err});
         return null;
     };
-    if (dls) |data| {
-        const tsf_mod = openmiles.tsf;
-        const raw: [*c]const u8 = @ptrCast(@alignCast(data));
-        const detected = openmiles.detectAudioSize(raw);
-        // A header claiming > maxInt(c_int) is bogus (no such buffer fits the
-        // 32-bit address space) -- skip the soundfont rather than panic on the
-        // cast tsf_load_memory needs; the driver still opens without it.
-        if (detected > 0 and detected <= std.math.maxInt(c_int)) {
-            driver.soundfont = tsf_mod.tsf_load_memory(raw, @intCast(detected));
-            driver.owns_soundfont = true;
-            if (driver.soundfont) |sf| {
-                driver.soundfont_size_bytes = @intCast(@min(detected, std.math.maxInt(u32)));
-                tsf_mod.tsf_set_output(sf, tsf_mod.TSF_STEREO_INTERLEAVED, 44100, 0);
-            }
-        } else {
-            log("AIL_DLS_open: could not determine a plausible SF2 size from header; opening without soundfont\n", .{});
-        }
+    if (libname) |name| {
+        _ = driver.loadDLS(std.mem.span(name)) catch {
+            log("AIL_DLS_open: failed to load DLS library '{s}'\n", .{name});
+        };
     }
     return driver;
 }
@@ -379,8 +371,8 @@ pub fn DLSLoadFile(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flags: u32
 pub fn DLSLoadMemFile(driver_opt: ?*MidiDriver, mem: *anyopaque, flags: u32) callconv(.c) ?*anyopaque {
     return AIL_DLS_load_memory(driver_opt, mem, flags);
 }
-pub fn DLSMSSOpen(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, freq: u32, bits: i32, channels: i32, flags: u32) callconv(.c) ?*openmiles.MidiDriver {
-    return AIL_DLS_open(dig_opt, seq, dls, freq, bits, channels, flags);
+pub fn DLSMSSOpen(mdi_opt: ?*MidiDriver, dig_opt: ?*DigitalDriver, libname: ?[*:0]const u8, flags: u32, rate: u32, bits: i32, channels: i32) callconv(.c) ?*openmiles.MidiDriver {
+    return AIL_DLS_open(mdi_opt, dig_opt, libname, flags, rate, bits, channels);
 }
 pub fn DLSMSSGetCPU(driver_opt: ?*MidiDriver) callconv(.winapi) f32 {
     _ = driver_opt;
