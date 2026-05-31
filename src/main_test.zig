@@ -3527,6 +3527,12 @@ test "AIL_set/sample_reverb_levels round-trips dry and wet independently" {
     api_v7.AIL_sample_reverb_levels(s, &dry, &wet);
     try testing.expectApproxEqAbs(@as(f32, 0.5), dry, 0.001); // not 1-0.3
     try testing.expectApproxEqAbs(@as(f32, 0.3), wet, 0.001);
+    // The SDK stores dry/wet verbatim (no clamp); out-of-range values round-trip
+    // even though the engine drives the reverb node with a clamped wet.
+    api_v7.AIL_set_sample_reverb_levels(s, 1.5, 1.8);
+    api_v7.AIL_sample_reverb_levels(s, &dry, &wet);
+    try testing.expectEqual(@as(f32, 1.5), dry);
+    try testing.expectEqual(@as(f32, 1.8), wet);
 }
 
 test "digital master volume is linear (vol/127), not the sample-volume curve" {

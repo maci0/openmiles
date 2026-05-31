@@ -276,6 +276,7 @@ pub fn AIL_set_stream_reverb_levels(s_opt: ?*Sample, dry_level: f32, wet_level: 
     const s = s_opt orelse return;
     s.reverb_dry_level = dry_level;
     s.setReverb(s.reverb_room_type, std.math.clamp(wet_level, 0.0, 1.0), if (s.reverb_reflect_time > 0) s.reverb_reflect_time else 0.05);
+    s.reverb_level = wet_level; // verbatim for the getter (SDK stores dry/wet as-is)
 }
 pub fn AIL_stream_reverb_levels(s_opt: ?*Sample, dry_level: ?*f32, wet_level: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
