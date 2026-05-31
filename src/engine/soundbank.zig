@@ -221,8 +221,26 @@ pub const Bank = struct {
         return -1;
     }
 
-    // MILESBANKSOUNDINFO is 11 x 4-byte fields (mss.h _MILESBANKSOUNDINFO).
-    const sound_info_size = 44;
+    // MILESBANKSOUNDINFO (mss.h) — the compiled-bank sound record, copied verbatim
+    // into AIL_sound_asset_info's out_info. The SDK warns this layout is bank-
+    // format-critical, so define it and lock its size at comptime.
+    pub const MILESBANKSOUNDINFO = extern struct {
+        ChannelCount: i32,
+        ChannelMask: u32,
+        Rate: i32,
+        DataLen: i32,
+        SoundLimit: i32,
+        IsExternal: i32,
+        DurationMs: u32,
+        StreamBufferSize: i32,
+        IsAdpcm: i32,
+        AdpcmBlockSize: i32,
+        MixVolumeDAC: f32,
+    };
+    const sound_info_size = @sizeOf(MILESBANKSOUNDINFO);
+    comptime {
+        if (sound_info_size != 44) @compileError("MILESBANKSOUNDINFO must be 44 bytes (compiled-bank format)");
+    }
 
     /// AIL_sound_asset_info: optionally copy the sound's MILESBANKSOUNDINFO into
     /// `out_info`, optionally format its path into `out_filename`, and return the
