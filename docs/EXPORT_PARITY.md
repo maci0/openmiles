@@ -103,15 +103,29 @@ did not have:
 | v8  | 566  | 323       | 243   |
 | v9  | 635  | 355       | 280   |
 
-These are later-version functions leaking into earlier builds because their
-target `.ver` floor is too low (often the default 30/40). Confirmed real, not a
-comparison artifact: e.g. v5 has no `AIL_open_digital_driver` (5.x opens the
-digital driver via `AIL_waveOutOpen`); that function is a v6 addition we
-currently export in v5.
+EXTRA breaks down into two very different groups:
 
-EXTRA exports are benign for **name-based** imports (a game never looks up a
-symbol absent from its header) but shift **ordinal** numbering, which a handful
-of old titles import by. Fixing requires raising each function's floor to its
-true first-appearance version — determinable from the per-version reference
-DLLs (`check_exports.py` against each), but it must be done carefully and
-re-verified so the byte-exact MISSING/MISMATCH parity above is preserved.
+1. **Sub-version variance (the large majority).** Of v9's ~280 extras, only 17
+   are absent from *every* Miles DLL; the other ~263 are genuine Miles functions
+   that simply aren't in the one sub-version we diff against (they exist in other
+   9.x point releases, or are earlier functions a later release dropped).
+   Exporting these is a benign superset — the build serves more titles, not
+   fewer — and forcing EXTRA to 0 against one sub-version would *reduce* fidelity
+   to the others.
+
+2. **Truly spurious (17, in no Miles DLL or SDK header).** `RIB_MAIN` (removed —
+   real plugins export `RIB_Main`; the host exports `MIX_RIB_MAIN`),
+   `DllMainCRTStartup` (a Zig/lld entry-point artifact), and 15 convenience
+   wrappers the project added (`AIL_pause_sequence`, `AIL_quick_stop`,
+   `AIL_open_midi_driver`, ...). The wrappers are harmless for real games (never
+   named in any header) and several back the project's own C tests, so they are
+   kept deliberately.
+
+**Why not auto-raise floors:** lowering EXTRA by raising each function's `.ver`
+floor to its first-appearance is unsafe to automate. A first-appearance map
+built from the reference DLLs cannot cleanly separate 6.0 from 6.1 (different
+directories, overlapping majors), and an over-raise silently turns an EXTRA into
+a MISSING — regressing the verified byte-exact parity. The byte-exact
+MISSING/MISMATCH result (every function a game *calls* resolves with the correct
+ABI) is the load-bearing fidelity guarantee; EXTRA-trimming is deferred as
+careful, individually-verified work.
