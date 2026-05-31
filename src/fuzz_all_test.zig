@@ -328,7 +328,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_redbook.AIL_redbook_resume(hr);
     _ = api_redbook.AIL_redbook_retract(hr);
     api_redbook.AIL_redbook_set_volume(hr, ri);
-    api_v7.AIL_redbook_set_volume_level(hr, rf);
+    _ = api_v7.AIL_redbook_set_volume_level(hr, rf);
     _ = api_redbook.AIL_redbook_status(hr);
     _ = api_redbook.AIL_redbook_stop(hr);
     _ = api_redbook.AIL_redbook_track(hr);

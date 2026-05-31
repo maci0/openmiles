@@ -3019,3 +3019,12 @@ test "set_sample_volume_pan maps F32 0..1 to the engine volume/pan scale" {
     try testing.expectEqual(@as(i32, 63), s.original_volume);
     try testing.expectApproxEqAbs(@as(f32, 1.0), s.pan, 0.02);
 }
+
+test "AIL_redbook_set_volume_level returns the previous volume (F32)" {
+    const rb = try openmiles.Redbook.init(testing.allocator, 0);
+    defer rb.deinit();
+    _ = api_v7.AIL_redbook_set_volume_level(rb, 0.8);
+    const prev = api_v7.AIL_redbook_set_volume_level(rb, 0.3); // returns the prior 0.8
+    try testing.expectApproxEqAbs(@as(f32, 0.8), prev, 0.02);
+    try testing.expectApproxEqAbs(@as(f32, 0.3), api_v7.AIL_redbook_volume_level(rb), 0.02);
+}

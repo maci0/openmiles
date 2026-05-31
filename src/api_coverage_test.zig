@@ -652,7 +652,7 @@ test "coverage: v7.zig unified exports" {
     // Redbook + quick + bridges + stubs.
     const h = rb.AIL_redbook_open_drive(0);
     if (h) |hh| {
-        v7.AIL_redbook_set_volume_level(hh, 0.5);
+        _ = v7.AIL_redbook_set_volume_level(hh, 0.5);
         _ = v7.AIL_redbook_volume_level(hh);
         rb.AIL_redbook_close(hh);
     }

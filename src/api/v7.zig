@@ -276,9 +276,14 @@ pub fn AIL_room_type(dig_opt: ?*DigitalDriver, bus_index: i32) callconv(.winapi)
 
 // --- Redbook volume (reuse) --------------------------------------------------
 
-pub fn AIL_redbook_set_volume_level(hand: ?*Redbook, volume: f32) callconv(.winapi) void {
-    const rb = hand orelse return;
+// SDK: F32 AIL_redbook_set_volume_level(HREDBOOK, F32 volume) — returns the
+// PREVIOUS volume level (F32 in ST(0)); returning void left a caller's float
+// result undefined.
+pub fn AIL_redbook_set_volume_level(hand: ?*Redbook, volume: f32) callconv(.winapi) f32 {
+    const rb = hand orelse return 0;
+    const old = @as(f32, @floatFromInt(rb.volume)) / 127.0;
     rb.volume = @intFromFloat(std.math.clamp(volume, 0.0, 1.0) * 127.0);
+    return old;
 }
 pub fn AIL_redbook_volume_level(hand: ?*Redbook) callconv(.winapi) f32 {
     const rb = hand orelse return 0;
