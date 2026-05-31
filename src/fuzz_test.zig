@@ -700,7 +700,7 @@ test "fuzz v7/v8 unified sample setters with adversarial floats" {
         const a = advf[rand.intRangeLessThan(usize, 0, advf.len)];
         const b = advf[rand.intRangeLessThan(usize, 0, advf.len)];
         const c = advf[rand.intRangeLessThan(usize, 0, advf.len)];
-        switch (rand.intRangeAtMost(u8, 0, 9)) {
+        switch (rand.intRangeAtMost(u8, 0, 12)) {
             0 => api_v7.AIL_set_sample_volume_levels(s, a, b),
             1 => api_v7.AIL_set_sample_reverb_levels(s, a, b),
             2 => api_v7.AIL_set_sample_low_pass_cut_off(s, 0, a),
@@ -711,6 +711,9 @@ test "fuzz v7/v8 unified sample setters with adversarial floats" {
             7 => api_v8.AIL_set_sample_51_volume_levels(s, a, b, c, a, b, c),
             8 => api_v8.AIL_set_sample_51_volume_pan(s, a, b, c, a, b),
             9 => api_v8.AIL_set_sample_playback_rate_factor(s, a),
+            10 => api_v7.AIL_set_sample_3D_orientation(s, a, b, c, c, b, a),
+            11 => api_v7.AIL_set_sample_3D_velocity(s, a, b, c, a),
+            12 => api_v7.AIL_set_digital_master_reverb(driver, 0, a, b, c),
             else => unreachable,
         }
     }
