@@ -630,6 +630,11 @@ pub fn AIL_sample_stage_property_v7(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque, a
     return 0;
 }
 // SDK header order: (S, f_left, f_right, b_left, b_right, center, sub).
+// Note: the SDK additionally reconstructs save_pan/save_fb_pan/save_volume from
+// the levels so a subsequent AIL_sample_51_volume_pan query reflects them; we
+// store the levels verbatim (round-tripping via the levels getter) but leave
+// the volume/pan params at their prior values -- a minor gap for the uncommon
+// set-levels-then-query-pan sequence.
 pub fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, f_left: f32, f_right: f32, b_left: f32, b_right: f32, center: f32, sub: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.v51_levels = .{ f_left, f_right, b_left, b_right, center, sub }; // canonical order, round-trips via the getter
