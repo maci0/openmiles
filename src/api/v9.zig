@@ -142,11 +142,18 @@ pub fn AIL_sample_loaded_len(a0: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
     return 0;
 }
-pub fn AIL_sample_ms_lookup(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque) callconv(.winapi) u32 {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    return 0;
+// SDK (AIL_API_sample_ms_lookup, wavefile.cpp): convert a ms position to the
+// source byte position. datarate = effective_rate * bytes-per-frame, datapos =
+// datarate * ms / 1000; *actualms = ms (the input, unchanged). Null S -> ~0U.
+pub fn AIL_sample_ms_lookup(s_opt: ?*Sample, milliseconds: i32, actualms: ?*i32) callconv(.winapi) u32 {
+    const s = s_opt orelse return ~@as(u32, 0);
+    if (actualms) |p| p.* = milliseconds;
+    const d = s.decoder orelse return 0;
+    const native = @as(f32, @floatFromInt(d.outputSampleRate));
+    const effective = (s.target_rate orelse native) * s.v7_rate_factor;
+    const datarate = effective * @as(f32, @floatFromInt(s.bytesPerFrame())); // bytes/sec
+    const datapos = datarate * @as(f32, @floatFromInt(milliseconds)) / 1000.0;
+    return openmiles.satU32(datapos);
 }
 pub fn AIL_sleep(ms: u32) callconv(.winapi) void {
     openmiles.io.sleep(std.Io.Duration.fromNanoseconds(@as(u64, ms) *| std.time.ns_per_ms), .awake) catch {};

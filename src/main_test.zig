@@ -1221,6 +1221,25 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
+test "AIL_sample_ms_lookup converts ms to a byte position (SDK)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm = [_]u8{0} ** 8000;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16); // 8000 Hz mono16, bpf=2
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    // datarate = 8000 * 2 = 16000 bytes/sec; 1000 ms -> 16000 bytes.
+    var actual: i32 = 0;
+    try testing.expectEqual(@as(u32, 16000), api_v9.AIL_sample_ms_lookup(s, 1000, &actual));
+    try testing.expectEqual(@as(i32, 1000), actual); // actualms = the input
+    // 250 ms -> 4000 bytes.
+    try testing.expectEqual(@as(u32, 4000), api_v9.AIL_sample_ms_lookup(s, 250, null));
+    // Null sample -> ~0U.
+    try testing.expectEqual(~@as(u32, 0), api_v9.AIL_sample_ms_lookup(null, 100, null));
+}
+
 test "ms_position uses the effective playback rate (rate*factor) round-trip" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
