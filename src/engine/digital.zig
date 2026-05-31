@@ -1152,11 +1152,22 @@ pub const Sample = struct {
         } else {
             if (lr_right > 0.0) pan_bal = 1.0 - (lr_left / lr_right); // in [0, 1]
         }
-        // Keep the per-channel scalars in sync (MSS's set_hardware_volume sets
-        // left_volume/right_volume = gain*pan-ratio); AIL_sample_volume_levels
-        // reports these, so a volume_pan->levels query stays consistent.
-        self.v51_levels[0] = gain * lr_left;
-        self.v51_levels[1] = gain * lr_right;
+        // Mirror AIL_API_set_sample_volume_pan's channel bookkeeping (wavefile.cpp)
+        // so the volume_pan/levels getters report consistent values. For a stereo
+        // output (logical_channels_per_sample < 4) the extra front/back 0.8122 is
+        // NOT applied. left_volume/right_volume = gain*pan-ratio; back mirrors
+        // front; center = (L+R)/2; low = center; fb_pan/center/low save = neutral.
+        const lvol = gain * lr_left;
+        const rvol = gain * lr_right;
+        self.v51_levels[0] = lvol; // f_left
+        self.v51_levels[1] = rvol; // f_right
+        self.v51_levels[2] = lvol; // b_left = left
+        self.v51_levels[3] = rvol; // b_right = right
+        self.v51_levels[4] = (lvol + rvol) / 2.0; // center
+        self.v51_levels[5] = self.v51_levels[4]; // low = center
+        self.v51_fb_pan = 0.5;
+        self.v51_center_level = 1.0;
+        self.v51_sub_level = 1.0;
         self.volume = vol;
         self.pan = pan_bal;
         if (self.is_initialized) {

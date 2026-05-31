@@ -705,13 +705,9 @@ pub fn AIL_set_sample_51_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32, fb_p
     const v = std.math.clamp(volume, 0.0, 1.0);
     const p = std.math.clamp(pan, 0.0, 1.0);
     const fb = std.math.clamp(fb_pan, 0.0, 1.0);
-    // Remember the params verbatim for the getter, then compute the 6 channel
-    // levels exactly as AIL_API_set_sample_51_volume_pan does.
-    s.original_volume = @intFromFloat(v * 127.0);
-    s.original_pan = @intFromFloat(p * 127.0);
-    s.v51_fb_pan = fb;
-    s.v51_center_level = center_level;
-    s.v51_sub_level = sub_level;
+    // Compute the 6 channel levels exactly as AIL_API_set_sample_51_volume_pan
+    // does. (v51_fb_pan/center/sub are stored after setVolumePanF below, which
+    // resets them to the 2D-neutral defaults.)
     const sv = std.math.pow(f32, v, 10.0 / 6.0);
     const front: f32 = if (fb == 0.5) 0.812252196 else std.math.pow(f32, 1.0 - fb, 0.3);
     const back: f32 = if (fb == 0.5) 0.812252196 else std.math.pow(f32, fb, 0.3);
@@ -733,6 +729,11 @@ pub fn AIL_set_sample_51_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32, fb_p
     // as the 2D pair) -- then store the full 5.1 channel set so it isn't
     // clobbered.
     s.setVolumePanF(volume, pan);
+    s.original_volume = @intFromFloat(v * 127.0);
+    s.original_pan = @intFromFloat(p * 127.0);
+    s.v51_fb_pan = fb;
+    s.v51_center_level = center_level;
+    s.v51_sub_level = sub_level;
     // SDK channel order (f_left, f_right, b_left, b_right, center, sub).
     s.v51_levels[0] = left * front; // f_left
     s.v51_levels[1] = right * front; // f_right
