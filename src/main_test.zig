@@ -1332,13 +1332,38 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
+test "AIL_load_sample_buffer returns the resolved slot (-1 on bad input) (SDK)" {
+    const api_digital = @import("api/digital.zig");
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    var info: openmiles.AILSOUNDINFO = .{};
+    info.channels = 1;
+    info.bits = 16;
+    _ = api_v7.AIL_set_sample_info(s, &info); // give it a PCM format -> streaming path
+    var buf = [_]u8{0} ** 64;
+    const p: *anyopaque = @ptrCast(&buf);
+    // n_buffers defaults to 2: slots 0 and 1 are valid and echoed back.
+    try testing.expectEqual(@as(i32, 0), api_digital.AIL_load_sample_buffer(s, 0, p, 64));
+    try testing.expectEqual(@as(i32, 1), api_digital.AIL_load_sample_buffer(s, 1, p, 64));
+    // Slot >= n_buffers (2) is rejected with -1.
+    try testing.expectEqual(@as(i32, -1), api_digital.AIL_load_sample_buffer(s, 2, p, 64));
+    // MSS_BUFFER_HEAD (-1) resolves to the ring head and advances it (0,1,0,...).
+    const h0 = api_digital.AIL_load_sample_buffer(s, -1, p, 64);
+    const h1 = api_digital.AIL_load_sample_buffer(s, -1, p, 64);
+    try testing.expect(h0 >= 0 and h1 >= 0 and h0 != h1);
+    // Null sample -> -1.
+    try testing.expectEqual(@as(i32, -1), api_digital.AIL_load_sample_buffer(null, 0, p, 64));
+}
+
 test "AIL_set/sample_buffer_count validates [2,8] and round-trips" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
     const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    // Default (unset, non-streaming) -> 1.
-    try testing.expectEqual(@as(i32, 1), api_v8b.AIL_sample_buffer_count(s));
+    // Default after init -> 2 (SDK AIL_init_sample calls set_sample_buffer_count(S,2)).
+    try testing.expectEqual(@as(i32, 2), api_v8b.AIL_sample_buffer_count(s));
     // Valid count -> stored, setter returns 1.
     try testing.expectEqual(@as(i32, 1), api_v8b.AIL_set_sample_buffer_count(s, 4));
     try testing.expectEqual(@as(i32, 4), api_v8b.AIL_sample_buffer_count(s));

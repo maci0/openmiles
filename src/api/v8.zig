@@ -586,9 +586,9 @@ pub fn AIL_sample_buffer_available(s_opt: ?*Sample) callconv(.winapi) i32 {
     return if (s.stream_active) 1 else 0; // at least one slot free to refill
 }
 pub fn AIL_sample_buffer_count(s_opt: ?*Sample) callconv(.winapi) i32 {
+    // SDK (wavefile.cpp): return S->n_buffers verbatim, 0 for a null handle.
     const s = s_opt orelse return 0;
-    if (s.n_buffers > 0) return s.n_buffers; // explicitly set via set_sample_buffer_count
-    return if (s.stream_active) 2 else 1; // default: ping-pong double buffer while streaming
+    return s.n_buffers;
 }
 pub fn AIL_sample_channel_count(s_opt: ?*Sample, mask: ?*u32) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;

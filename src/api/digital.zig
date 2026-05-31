@@ -373,20 +373,36 @@ pub fn AIL_allocate_file_sample(driver_opt: ?*DigitalDriver, data: *anyopaque, f
     return s;
 }
 // AIL_load_sample_buffer(HSAMPLE S, U32 buff_num, void const *buffer, U32 len)
-pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: u32, data: *anyopaque, len: u32) callconv(.winapi) void {
-    const s = s_opt orelse return;
-    const buffer_id: i32 = @bitCast(buff_num); // just a stored id; don't panic on high bit
-    s.last_loaded_buffer = buffer_id;
+/// MSS_BUFFER_HEAD (mss.h): pass as buff_num to target the ring's head slot.
+const MSS_BUFFER_HEAD: i32 = -1;
+pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: i32, data: ?*anyopaque, len: u32) callconv(.winapi) i32 {
+    // SDK (wavefile.cpp) returns S32: -1 on a null sample or an out-of-range
+    // slot (signed compare, so MSS_BUFFER_HEAD = -1 passes); otherwise the
+    // resolved buffer number that was loaded (or removed).
+    const s = s_opt orelse return -1;
+    if (buff_num >= s.n_buffers) return -1;
+    var bn = buff_num;
+    if (bn == MSS_BUFFER_HEAD) {
+        const n = if (s.n_buffers > 0) s.n_buffers else 1;
+        bn = s.stream_head;
+        s.stream_head = @mod(bn + 1, n);
+    }
+    if (bn < 0) return -1; // defensive: SDK would index buf[<0]; we stay safe
+    s.last_loaded_buffer = bn;
+    if (data == null) {
+        // SDK: a null buffer removes the slot from the ring; nothing to feed.
+        return bn;
+    }
     if (s.pcm_format != null) {
         // Raw PCM + a known format = MSS double-buffer streaming. Feed the buffer
         // into the ping-pong stream source (zero-copy; the app owns it until EOB).
-        s.loadStreamBuffer(@intCast(buff_num), data, len) catch |err| {
+        s.loadStreamBuffer(@intCast(bn), data.?, len) catch |err| {
             openmiles.log("AIL_load_sample_buffer: stream feed failed: {any}\n", .{err});
-            return;
+            return -1;
         };
     } else {
         // No format hint: treat as a complete encoded file image (whole-buffer).
-        s.load(data, @intCast(@min(len, @as(u32, std.math.maxInt(i32))))) catch return;
+        s.load(data.?, @intCast(@min(len, @as(u32, std.math.maxInt(i32))))) catch return -1;
     }
     // Fire SOB (Start Of Buffer) callback now that a new buffer is accepted.
     // AILSAMPLECB: void callback(HSAMPLE S) — single arg; app queries buffer state separately.
@@ -394,6 +410,7 @@ pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: u32, data: *anyopaque, 
         const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(s.sob_callback);
         cb(@ptrCast(s));
     }
+    return bn;
 }
 pub fn AIL_sample_buffer_ready(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;

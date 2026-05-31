@@ -609,8 +609,11 @@ pub const Sample = struct {
     // or AIL_set_sample_info. AIL_sample_channel_count returns this verbatim.
     channel_mask: u32 = ~@as(u32, 0),
     // Streaming double-buffer ring count set via AIL_set_sample_buffer_count
-    // (valid 2..8). 0 = unset -> AIL_sample_buffer_count falls back to a default.
-    n_buffers: i32 = 0,
+    // Ring-buffer count (valid 2..8). SDK AIL_init_sample sets this to 2 via
+    // AIL_set_sample_buffer_count(S,2), so 2 is the default for any live sample.
+    n_buffers: i32 = 2,
+    // Ring head: the slot AIL_load_sample_buffer(MSS_BUFFER_HEAD) resolves to.
+    stream_head: i32 = 0,
     // Which buffer ID was last loaded via AIL_load_sample_buffer (for EOB callback parameter)
     last_loaded_buffer: i32 = 0,
     user_data: [8]u32 = [_]u32{0} ** 8,
@@ -1080,7 +1083,8 @@ pub const Sample = struct {
         self.sob_callback = 0;
         self.pcm_format = null;
         self.channel_mask = ~@as(u32, 0);
-        self.n_buffers = 0;
+        self.n_buffers = 2; // AIL_init_sample sets the ring count to 2 (mssdig.cpp)
+        self.stream_head = 0;
         self.falloff_count = [_]u8{0} ** 4;
         self.s3d_face = .{ 1, 0, 0 };
         self.s3d_up = .{ 0, 1, 0 };

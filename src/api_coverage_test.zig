@@ -144,7 +144,7 @@ test "coverage: digital.zig exports" {
     dg.AIL_set_sample_address(s, sc(), 0);
     _ = dg.AIL_set_sample_file(s, @ptrCast(wav.ptr), -1);
     _ = dg.AIL_set_named_sample_file(s, "wav", @ptrCast(wav.ptr), @intCast(wav.len), 0);
-    dg.AIL_load_sample_buffer(s, 0, sc(), 0);
+    _ = dg.AIL_load_sample_buffer(s, 0, sc(), 0);
     flt.AIL_filter_sample_attribute(s, "Cutoff", sc());
     flt.AIL_set_filter_sample_preference(s, "Cutoff", sc());
 
