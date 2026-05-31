@@ -53,6 +53,15 @@ pub fn AIL_set_sample_3D_orientation(obj: ?*Sample, fx: f32, fy: f32, fz: f32, u
 }
 pub fn AIL_set_sample_3D_cone(obj: ?*Sample, inner_angle: f32, outer_angle: f32, outer_volume_level: f32) callconv(.winapi) void {
     const s = obj orelse return;
+    // MSS takes full (diameter) cone angles in degrees and stores half-angle
+    // radians (DEGS_TO_DIAMS = deg*pi/360); miniaudio takes the full angle in
+    // radians and internally halves it (cos(angle*0.5)). So deg->rad is the
+    // correct, faithful conversion and the inner/outer cutoffs match MSS.
+    // Known minor deviation: in the inner..outer transition band MSS lerps the
+    // gain linearly in ANGLE (alpha=(outer-angle)/(outer-inner)) whereas
+    // miniaudio lerps in COSINE; endpoints match exactly, mid-band differs a
+    // few percent. Faithfully matching it would require bypassing ma's
+    // per-frame spatializer, so the (rarely-used) cone curve is left to ma.
     if (s.is_initialized) ma.ma_sound_set_cone(&s.sound, inner_angle * openmiles.deg2rad, outer_angle * openmiles.deg2rad, std.math.clamp(outer_volume_level, 0.0, 1.0));
 }
 pub fn AIL_set_sample_3D_distances(obj: ?*Sample, max_dist: f32, min_dist: f32, auto_3D_wet_atten: i32) callconv(.winapi) void {
