@@ -171,6 +171,73 @@ fn persistClear() void {
     for (g_persists.items) |n| openmiles.global_allocator.free(n);
     g_persists.clearRetainingCapacity();
 }
+
+// Per-label concurrent-sound caps (MilesSetSoundLabelLimits / set_limits steps).
+// Format: "label count:label2 count2" (mss.h). A new sound must fit under the cap
+// of every label it carries; the oldest matching instance is evicted to make room.
+const Limit = struct { label: [:0]u8, count: u32 };
+var g_limits: std.ArrayListUnmanaged(Limit) = .empty;
+
+fn limitsClear() void {
+    for (g_limits.items) |l| openmiles.global_allocator.free(l.label);
+    g_limits.clearRetainingCapacity();
+}
+fn setLimits(limits_str: []const u8) void {
+    limitsClear();
+    var it = std.mem.tokenizeScalar(u8, limits_str, ':');
+    while (it.next()) |entry| {
+        var pit = std.mem.tokenizeAny(u8, entry, " \t");
+        const label = pit.next() orelse continue;
+        const count_s = pit.next() orelse continue;
+        const count = std.fmt.parseInt(u32, count_s, 10) catch continue;
+        const dup = openmiles.global_allocator.dupeZ(u8, label) catch continue;
+        g_limits.append(openmiles.global_allocator, .{ .label = dup, .count = count }) catch openmiles.global_allocator.free(dup);
+    }
+}
+fn limitFor(label: []const u8) ?u32 {
+    for (g_limits.items) |l| {
+        if (std.ascii.eqlIgnoreCase(l.label, label)) return l.count;
+    }
+    return null;
+}
+fn instanceHasLabel(inst: *const SoundInstance, label: []const u8) bool {
+    var lit = std.mem.tokenizeAny(u8, inst.labels, ", ");
+    while (lit.next()) |lbl| {
+        if (std.ascii.eqlIgnoreCase(lbl, label)) return true;
+    }
+    return false;
+}
+fn countWithLabel(label: []const u8) u32 {
+    var n: u32 = 0;
+    for (g_instances.items) |inst| {
+        if (instanceHasLabel(inst, label)) n += 1;
+    }
+    return n;
+}
+// Evict the oldest (lowest instance_id) instance carrying `label`; returns false
+// if none found.
+fn evictOldestWithLabel(label: []const u8) bool {
+    var oldest: ?usize = null;
+    for (g_instances.items, 0..) |inst, i| {
+        if (!instanceHasLabel(inst, label)) continue;
+        if (oldest == null or inst.instance_id < g_instances.items[oldest.?].instance_id) oldest = i;
+    }
+    if (oldest) |i| {
+        destroyInstance(g_instances.swapRemove(i));
+        return true;
+    }
+    return false;
+}
+// Make room under each limited label of a new sound before it is added.
+fn enforceLimits(labels_in: []const u8) void {
+    var lit = std.mem.tokenizeAny(u8, labels_in, ", ");
+    while (lit.next()) |lbl| {
+        const lim = limitFor(lbl) orelse continue;
+        while (countWithLabel(lbl) >= lim) {
+            if (!evictOldestWithLabel(lbl)) break;
+        }
+    }
+}
 // Apply a cache/purge step's namelist (built by the decoder) to the cache set.
 fn applyCacheStep(load: anytype, add: bool) void {
     const list = load.namelist orelse return;
@@ -208,6 +275,7 @@ fn destroyInstance(inst: *SoundInstance) void {
 // Create a tracked instance for a start-sound step. soundname is taken up to the
 // first ':'; its duration is resolved from the loaded-bank container.
 fn createInstance(queued_id: u64, soundname_full: []const u8, labels_in: []const u8, user_buffer: ?*anyopaque, ubl: i32) void {
+    enforceLimits(labels_in); // evict to make room under each labelled cap
     const cut = std.mem.indexOfScalar(u8, soundname_full, ':') orelse soundname_full.len;
     const sound = soundname_full[0..cut];
     const dur: u32 = openmiles.soundbank.containerSoundDurationMs(sound) orelse 0;
@@ -383,6 +451,7 @@ pub fn MilesShutdownEventSystem() callconv(.winapi) void {
     g_instances.clearRetainingCapacity();
     cacheClear();
     persistClear();
+    limitsClear();
     var s = g_root;
     while (s) |sys| {
         const nxt = sys.next;
@@ -559,7 +628,7 @@ pub fn MilesSetSoundStartOffset(instance: usize, offset: i32, is_ms: i32) callco
 }
 pub fn MilesSetSoundLabelLimits(system: ?*anyopaque, sound_limits: ?[*:0]const u8) callconv(.winapi) i32 {
     _ = system;
-    _ = sound_limits;
+    setLimits(if (sound_limits) |p| std.mem.span(p) else "");
     return 1;
 }
 

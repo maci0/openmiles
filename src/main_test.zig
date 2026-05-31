@@ -2877,3 +2877,32 @@ test "Miles sound instances filter by label query" {
     try testing.expectEqual(@as(i32, 1), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, null, 0, @ptrCast(&info)));
     try testing.expectEqualStrings("music_a", std.mem.span(info.UsedSound.?));
 }
+
+test "MilesSetSoundLabelLimits caps concurrent sounds per label (evicts oldest)" {
+    api_miles_t.MilesShutdownEventSystem();
+    defer api_miles_t.MilesShutdownEventSystem();
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesSetSoundLabelLimits(null, cstr2("music 2:sfx 4")));
+
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("m1"), 0, 0, cstr2("music"), null, 0, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("m2"), 0, 0, cstr2("music"), null, 0, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("m3"), 0, 0, cstr2("music"), null, 0, 0);
+
+    // Only 2 "music" instances survive; the oldest (m1) was evicted.
+    var count: i32 = 0;
+    var seen_m1 = false;
+    var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
+    while (api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("music"), 0, @ptrCast(&info)) == 1) {
+        count += 1;
+        if (std.mem.eql(u8, std.mem.span(info.UsedSound.?), "m1")) seen_m1 = true;
+    }
+    try testing.expectEqual(@as(i32, 2), count);
+    try testing.expect(!seen_m1);
+
+    // sfx limit of 4 leaves a single sfx untouched.
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("s1"), 0, 0, cstr2("sfx"), null, 0, 0);
+    nx = @ptrFromInt(std.math.maxInt(usize));
+    var sfx: i32 = 0;
+    while (api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("sfx"), 0, @ptrCast(&info)) == 1) sfx += 1;
+    try testing.expectEqual(@as(i32, 1), sfx);
+}
