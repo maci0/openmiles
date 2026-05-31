@@ -130,8 +130,14 @@ pub fn buildAdpcmWav(alloc: std.mem.Allocator, pcm: [*]const i16, total_per_ch: 
     // IMA ADPCM WAV is mono or stereo only; >2 channels would underflow the
     // `block_size - 4*ch` samples-per-block computation below.
     if (channels == 0 or channels > 2) return error.InvalidParam;
-    const block_size: u32 = 512;
     const ch: u32 = channels;
+    // MSS block alignment (mssadpcm.cpp): 256<<(channels/2) — 256 mono, 512
+    // stereo — scaled up with the sample rate above 11025 Hz. Computed in u64 so
+    // an adversarial rate can't overflow; clamped to the u16 blockalign field.
+    var bs: u64 = @as(u64, 256) << @intCast(ch / 2);
+    if (rate > 11025) bs *= (@as(u64, rate) + 5000) / 11025;
+    if (bs <= 4 * ch or bs > 0xFFFF) return error.InvalidParam;
+    const block_size: u32 = @intCast(bs);
     const spb: u32 = (block_size - 4 * ch) * 8 / (4 * ch) + 1;
     const num_blocks: usize = (total_per_ch + spb - 1) / spb;
     // Reject inputs whose encoded size would not fit the 32-bit WAV size fields.

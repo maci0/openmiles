@@ -757,10 +757,26 @@ pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, r
 /// Allocates a new buffer which must be freed by the caller using AIL_mem_free_lock.
 pub fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsize: *u32) callconv(.winapi) i32 {
     if (info.data_ptr == null or info.data_len == 0) return 0;
-    if (info.bits != 16) return 0; // IMA ADPCM only encodes from 16-bit PCM
-    const channels: u16 = @intCast(@max(1, @min(2, info.channels)));
-    const pcm: [*]const i16 = @ptrCast(@alignCast(info.data_ptr.?));
-    const total_per_ch: usize = @as(usize, info.data_len) / (@as(usize, channels) * 2);
+    // SDK (mssadpcm.cpp): source must be PCM, 8- or 16-bit, mono or stereo.
+    if (info.format != 1) return 0; // "Data is already compressed."
+    if ((info.bits != 8 and info.bits != 16) or (info.channels != 1 and info.channels != 2)) return 0;
+    const channels: u16 = @intCast(info.channels);
+    const bytes_per_sample: usize = if (info.bits == 8) 1 else 2;
+    const total_per_ch: usize = @as(usize, info.data_len) / (bytes_per_sample * @as(usize, channels));
+    // The encoder works on 16-bit samples; promote 8-bit unsigned PCM (128 = 0).
+    var pcm16_owned: ?[]i16 = null;
+    defer if (pcm16_owned) |p| openmiles.global_allocator.free(p);
+    const pcm: [*]const i16 = blk: {
+        if (info.bits == 8) {
+            const u8data: [*]const u8 = @ptrCast(info.data_ptr.?);
+            const n: usize = info.data_len;
+            const tmp = openmiles.global_allocator.alloc(i16, n) catch return 0;
+            for (0..n) |i| tmp[i] = (@as(i16, u8data[i]) - 128) << 8;
+            pcm16_owned = tmp;
+            break :blk tmp.ptr;
+        }
+        break :blk @ptrCast(@alignCast(info.data_ptr.?));
+    };
     const wav = openmiles.buildAdpcmWav(openmiles.global_allocator, pcm, total_per_ch, channels, info.rate) catch |err| {
         log("Error: {any}\n", .{err});
         return 0;

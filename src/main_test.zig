@@ -1339,6 +1339,8 @@ test "AIL_compress_ADPCM/decompress_ADPCM round-trip through raw-block AILSOUNDI
     try testing.expect(dg.AIL_WAV_info(@constCast(@ptrCast(adpcm_wav.ptr)), &mid) != 0);
     try testing.expectEqual(@as(i32, 0x11), mid.format);
     try testing.expectEqual(@as(i32, 4), mid.bits);
+    // SDK block alignment for mono @ 22050: 256<<0 * ((22050+5000)/11025=2) = 512.
+    try testing.expectEqual(@as(u32, 512), mid.block_size);
 
     var out_ptr: *anyopaque = undefined;
     var out_size: u32 = 0;
@@ -1360,6 +1362,52 @@ test "AIL_compress_ADPCM/decompress_ADPCM round-trip through raw-block AILSOUNDI
     mid.format = 0x11;
     mid.samples = 0;
     try testing.expectEqual(@as(i32, 0), dg.AIL_decompress_ADPCM(&mid, &out_ptr, &out_size));
+}
+
+test "AIL_compress_ADPCM: SDK block alignment, 8-bit input, and validation guards" {
+    // Block alignment scales with rate: 256<<(ch/2), ×(rate+5000)/11025 above 11025.
+    const cases = [_]struct { ch: i32, rate: u32, blk: u32 }{
+        .{ .ch = 1, .rate = 8000, .blk = 256 }, // <= 11025 -> base 256 (mono)
+        .{ .ch = 2, .rate = 8000, .blk = 512 }, // base 512 (stereo)
+        .{ .ch = 1, .rate = 44100, .blk = 1024 }, // 256 * ((44100+5000)/11025=4)
+        .{ .ch = 2, .rate = 44100, .blk = 2048 }, // 512 * 4
+    };
+    var pcm = [_]i16{0} ** 64;
+    for (cases) |c| {
+        var info: openmiles.AILSOUNDINFO = .{};
+        info.data_ptr = @ptrCast(&pcm);
+        info.data_len = pcm.len * 2;
+        info.format = 1;
+        info.bits = 16;
+        info.channels = c.ch;
+        info.rate = c.rate;
+        var op: *anyopaque = undefined;
+        var os: u32 = 0;
+        try testing.expect(dg.AIL_compress_ADPCM(&info, &op, &os) != 0);
+        defer std.c.free(op);
+        var wi: openmiles.AILSOUNDINFO = .{};
+        try testing.expect(dg.AIL_WAV_info(op, &wi) != 0);
+        try testing.expectEqual(c.blk, wi.block_size);
+    }
+    // 8-bit unsigned PCM is accepted (promoted to 16-bit) and compresses.
+    var u8pcm = [_]u8{128} ** 64;
+    var info8: openmiles.AILSOUNDINFO = .{};
+    info8.data_ptr = @ptrCast(&u8pcm);
+    info8.data_len = u8pcm.len;
+    info8.format = 1;
+    info8.bits = 8;
+    info8.channels = 1;
+    info8.rate = 22050;
+    var op8: *anyopaque = undefined;
+    var os8: u32 = 0;
+    try testing.expect(dg.AIL_compress_ADPCM(&info8, &op8, &os8) != 0);
+    std.c.free(op8);
+    // Validation: non-PCM format and unsupported bit depth are rejected.
+    info8.format = 0x11; // already compressed
+    try testing.expectEqual(@as(i32, 0), dg.AIL_compress_ADPCM(&info8, &op8, &os8));
+    info8.format = 1;
+    info8.bits = 24; // unsupported
+    try testing.expectEqual(@as(i32, 0), dg.AIL_compress_ADPCM(&info8, &op8, &os8));
 }
 
 test "AIL_file_type detects MPEG audio by frame sync (MP3 = layer III)" {
