@@ -245,17 +245,17 @@ pub fn AIL_set_digital_master_volume_level(dig_opt: ?*DigitalDriver, master_volu
 }
 pub fn AIL_set_digital_master_reverb(dig_opt: ?*DigitalDriver, bus_index: i32, reverb_decay_time: f32, reverb_predelay: f32, reverb_damping: f32) callconv(.winapi) void {
     _ = bus_index;
-    _ = reverb_predelay;
-    _ = reverb_damping;
     const d = dig_opt orelse return;
     d.v7_master_reverb_decay = reverb_decay_time;
+    d.v7_master_reverb_predelay = reverb_predelay;
+    d.v7_master_reverb_damping = reverb_damping;
 }
 pub fn AIL_digital_master_reverb(dig_opt: ?*DigitalDriver, bus_index: i32, reverb_time: ?*f32, reverb_predelay: ?*f32, reverb_damping: ?*f32) callconv(.winapi) void {
     _ = bus_index;
     const d = dig_opt orelse return;
     if (reverb_time) |p| p.* = d.v7_master_reverb_decay;
-    if (reverb_predelay) |p| p.* = 0;
-    if (reverb_damping) |p| p.* = 0;
+    if (reverb_predelay) |p| p.* = d.v7_master_reverb_predelay;
+    if (reverb_damping) |p| p.* = d.v7_master_reverb_damping;
 }
 pub fn AIL_set_digital_master_reverb_levels(dig_opt: ?*DigitalDriver, bus_index: i32, dry_level: f32, wet_level: f32) callconv(.winapi) void {
     _ = bus_index;

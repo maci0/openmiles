@@ -214,6 +214,8 @@ pub const DigitalDriver = struct {
     speaker_type: i32 = 0,
     // MSS v7 unified-API master-reverb / room state (stored; queried back).
     v7_master_reverb_decay: f32 = 0.0,
+    v7_master_reverb_predelay: f32 = 0.0,
+    v7_master_reverb_damping: f32 = 0.0,
     v7_master_reverb_dry: f32 = 1.0,
     v7_master_reverb_wet: f32 = 0.0,
     v7_room_type: i32 = 0,

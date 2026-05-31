@@ -2160,6 +2160,19 @@ test "v7 unified 3D pos/vel/orient round-trip in MSS left-handed space" {
     try testing.expect(@abs(ux) < 0.001 and @abs(uy - 1) < 0.001 and @abs(uz) < 0.001);
 }
 
+test "v7 master reverb decay/predelay/damping all round-trip" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    api_v7.AIL_set_digital_master_reverb(drv, 0, 1.5, 0.02, 0.7);
+    var t: f32 = 0;
+    var pd: f32 = 0;
+    var dmp: f32 = 0;
+    api_v7.AIL_digital_master_reverb(drv, 0, &t, &pd, &dmp);
+    try testing.expect(@abs(t - 1.5) < 0.001);
+    try testing.expect(@abs(pd - 0.02) < 0.001); // formerly hardcoded to 0
+    try testing.expect(@abs(dmp - 0.7) < 0.001); // formerly hardcoded to 0
+}
+
 test "v9 system-state push/pop tracks depth and restores volume" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
