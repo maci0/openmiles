@@ -3197,6 +3197,27 @@ test "volume/pan match the exact MSS curve (gain = volume^(10/6))" {
     try testing.expectApproxEqAbs(@as(f32, 0.25), gp, 0.02);
 }
 
+test "AIL_set/sample_51_volume_pan round-trips the params verbatim" {
+    // The getter must return the params the app set (save_*), not values derived
+    // from the computed channel levels.
+    const hd = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer hd.deinit();
+    const s = try openmiles.Sample.init(hd);
+    defer s.deinit();
+    api_v8.AIL_set_sample_51_volume_pan(s, 0.8, 0.3, 0.7, 0.5, 0.9);
+    var v: f32 = 0;
+    var p: f32 = 0;
+    var fb: f32 = 0;
+    var c: f32 = 0;
+    var sub: f32 = 0;
+    api_v8.AIL_sample_51_volume_pan(s, &v, &p, &fb, &c, &sub);
+    try testing.expectApproxEqAbs(@as(f32, 0.8), v, 0.02);
+    try testing.expectApproxEqAbs(@as(f32, 0.3), p, 0.02);
+    try testing.expectApproxEqAbs(@as(f32, 0.7), fb, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), c, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.9), sub, 0.001);
+}
+
 test "digital master volume is linear (vol/127), not the sample-volume curve" {
     // The master volume is a linear final gain (F32 master sets dig->master_volume
     // directly), unlike the perceptual ^(10/6) sample-volume curve.

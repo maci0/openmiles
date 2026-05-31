@@ -553,17 +553,13 @@ pub fn AIL_sample_51_volume_levels(s_opt: ?*Sample, fl: ?*f32, fr: ?*f32, fc: ?*
 }
 pub fn AIL_sample_51_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32, fb_pan: ?*f32, center_level: ?*f32, lfe_level: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    const fl = s.v51_levels[0];
-    const fr = s.v51_levels[1];
-    const bl = s.v51_levels[4];
-    const br = s.v51_levels[5];
-    if (volume) |p| p.* = @max(@max(fl, fr), @max(bl, br));
-    const lr = fl + fr;
-    if (pan) |p| p.* = if (lr > 0.0001) fr / lr else 0.5; // left..right balance
-    const fb = (fl + fr) + (bl + br);
-    if (fb_pan) |p| p.* = if (fb > 0.0001) (bl + br) / fb else 0.5; // front..back
-    if (center_level) |p| p.* = s.v51_levels[2];
-    if (lfe_level) |p| p.* = s.v51_levels[3];
+    // Return the params the app set verbatim (the SDK getter returns save_*),
+    // not values derived from the channel levels.
+    if (volume) |p| p.* = @as(f32, @floatFromInt(s.original_volume)) / 127.0;
+    if (pan) |p| p.* = @as(f32, @floatFromInt(s.original_pan)) / 127.0;
+    if (fb_pan) |p| p.* = s.v51_fb_pan;
+    if (center_level) |p| p.* = s.v51_center_level;
+    if (lfe_level) |p| p.* = s.v51_sub_level;
 }
 pub fn AIL_sample_buffer_available(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
@@ -639,13 +635,44 @@ pub fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, fl: f32, fr: f32, fc: f3
     const sum = fl + fr;
     if (sum > 0.0001) s.setPan(@intFromFloat(std.math.clamp(fr / sum, 0.0, 1.0) * 127.0));
 }
-pub fn AIL_set_sample_51_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32, fb: f32, lfe: f32, fc: f32) callconv(.winapi) void {
-    _ = fb;
-    _ = lfe;
-    _ = fc;
+// SDK order (wavefile.cpp): (S, volume, pan, fb_pan, center_level, sub_level).
+pub fn AIL_set_sample_51_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32, fb_pan: f32, center_level: f32, sub_level: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    s.setVolume(@intFromFloat(std.math.clamp(volume, 0.0, 1.0) * 127.0));
-    s.setPan(@intFromFloat(std.math.clamp(pan, 0.0, 1.0) * 127.0));
+    const v = std.math.clamp(volume, 0.0, 1.0);
+    const p = std.math.clamp(pan, 0.0, 1.0);
+    const fb = std.math.clamp(fb_pan, 0.0, 1.0);
+    // Remember the params verbatim for the getter, then compute the 6 channel
+    // levels exactly as AIL_API_set_sample_51_volume_pan does.
+    s.original_volume = @intFromFloat(v * 127.0);
+    s.original_pan = @intFromFloat(p * 127.0);
+    s.v51_fb_pan = fb;
+    s.v51_center_level = center_level;
+    s.v51_sub_level = sub_level;
+    const sv = std.math.pow(f32, v, 10.0 / 6.0);
+    const front: f32 = if (fb == 0.5) 0.812252196 else std.math.pow(f32, 1.0 - fb, 0.3);
+    const back: f32 = if (fb == 0.5) 0.812252196 else std.math.pow(f32, fb, 0.3);
+    var left: f32 = undefined;
+    var right: f32 = undefined;
+    if (p != fb) {
+        if (p == 0.5) {
+            left = sv * 0.812252196;
+            right = sv * 0.812252196;
+        } else {
+            left = sv * std.math.pow(f32, 1.0 - p, 0.3);
+            right = sv * std.math.pow(f32, p, 0.3);
+        }
+    } else {
+        left = sv * front;
+        right = sv * back;
+    }
+    s.v51_levels[0] = left * front; // FL
+    s.v51_levels[1] = right * front; // FR
+    s.v51_levels[2] = sv * center_level; // FC
+    s.v51_levels[3] = sv * sub_level; // LFE
+    s.v51_levels[4] = left * back; // BL
+    s.v51_levels[5] = right * back; // BR
+    // Drive the actual (stereo) engine output with the exact 2D law.
+    s.setVolumePanF(volume, pan);
 }
 pub fn AIL_set_sample_buffer_count(a0: ?*anyopaque, a1: i32) callconv(.winapi) i32 {
     _ = a0;

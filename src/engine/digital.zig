@@ -523,6 +523,11 @@ pub const Sample = struct {
     original_volume: i32 = 127,
     pan: f32 = 0.0, // value handed to miniaudio's balance panner
     original_pan: i32 = 64, // the 0..127 pan the app set (64 = center), for the getter
+    // 5.1 volume/pan params the app set (AIL_set_sample_51_volume_pan), returned
+    // verbatim by its getter. Defaults per wavefile.cpp (save_fb_pan/center/low).
+    v51_fb_pan: f32 = 0.5,
+    v51_center_level: f32 = 1.0,
+    v51_sub_level: f32 = 1.0,
     pitch: f32 = 1.0,
     target_rate: ?f32 = null,
     loop_count: i32 = 1,
