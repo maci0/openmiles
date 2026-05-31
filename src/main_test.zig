@@ -2298,6 +2298,28 @@ test "distance_factor folds into the per-sample Doppler factor (matches MSS)" {
     try testing.expect(@abs(openmiles.ma.ma_sound_get_doppler_factor(&s.sound) - 6.0) < 0.001);
 }
 
+test "occlusion drives the low-pass cutoff (m3d.cpp model), obstruction does not" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+
+    // occlusion=0.75 -> cutoff = (1-0.75)+0.01 = 0.26 (muffled).
+    api_v7.AIL_set_sample_occlusion(s, 0.75);
+    try testing.expect(@abs(api_v7.AIL_sample_low_pass_cut_off(s, 0) - 0.26) < 0.001);
+    // occlusion=0 -> cutoff 1.01 -> fully open (1.0).
+    api_v7.AIL_set_sample_occlusion(s, 0.0);
+    try testing.expectEqual(@as(f32, 1.0), api_v7.AIL_sample_low_pass_cut_off(s, 0));
+    // obstruction is stored only (no low-pass effect in the software model).
+    api_v7.AIL_set_sample_obstruction(s, 0.9);
+    try testing.expectEqual(@as(f32, 1.0), api_v7.AIL_sample_low_pass_cut_off(s, 0));
+    try testing.expect(@abs(api_v7.AIL_sample_obstruction(s) - 0.9) < 0.001);
+}
+
 test "Doppler uses MSS speed of sound (0.355), not miniaudio's 343.3 default" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
