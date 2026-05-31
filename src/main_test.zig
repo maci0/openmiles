@@ -2852,3 +2852,28 @@ test "persist events populate PersistCount and MilesEnumeratePresetPersists" {
 
     api_miles_t.MilesShutdownEventSystem();
 }
+
+test "Miles sound instances filter by label query" {
+    api_miles_t.MilesShutdownEventSystem();
+    // Two start-sound instances with different labels.
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("music_a"), 0, 0, cstr2("music"), null, 0, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("sfx_a"), 0, 0, cstr2("sfx,gun"), null, 0, 0);
+    defer api_miles_t.MilesShutdownEventSystem();
+
+    // Enumerate by label "music" -> only the music instance.
+    var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("music"), 0, @ptrCast(&info)));
+    try testing.expectEqualStrings("music_a", std.mem.span(info.UsedSound.?));
+    try testing.expectEqual(@as(i32, 0), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("music"), 0, @ptrCast(&info)));
+
+    // Glob: "gu*" matches the "gun" label.
+    nx = @ptrFromInt(std.math.maxInt(usize));
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("gu*"), 0, @ptrCast(&info)));
+
+    // Stop only "sfx" -> one removed, music remains.
+    try testing.expectEqual(@as(u64, 1), api_miles_t.MilesStopSoundInstances(cstr2("sfx"), 0));
+    nx = @ptrFromInt(std.math.maxInt(usize));
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, null, 0, @ptrCast(&info)));
+    try testing.expectEqualStrings("music_a", std.mem.span(info.UsedSound.?));
+}

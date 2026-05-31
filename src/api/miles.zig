@@ -79,9 +79,53 @@ const SoundInstance = struct {
     start_ms: u64,
     duration_ms: u32,
     sound_name: [:0]u8, // owned
+    labels: [:0]u8, // owned (comma/space-separated)
     user_buffer: ?*anyopaque,
     user_buffer_len: i32,
 };
+
+// Case-insensitive glob with '*' (any run) and '?' (one char).
+fn globMatch(pat: []const u8, text: []const u8) bool {
+    var pi: usize = 0;
+    var ti: usize = 0;
+    var star: ?usize = null;
+    var star_ti: usize = 0;
+    while (ti < text.len) {
+        if (pi < pat.len and pat[pi] == '*') {
+            star = pi;
+            star_ti = ti;
+            pi += 1;
+        } else if (pi < pat.len and (pat[pi] == '?' or std.ascii.toLower(pat[pi]) == std.ascii.toLower(text[ti]))) {
+            pi += 1;
+            ti += 1;
+        } else if (star) |s| {
+            pi = s + 1;
+            star_ti += 1;
+            ti = star_ti;
+        } else return false;
+    }
+    while (pi < pat.len and pat[pi] == '*') pi += 1;
+    return pi == pat.len;
+}
+
+// An instance matches the label query if the query is empty (match all) or any
+// comma/space-separated query term globs onto any of the instance's labels.
+// (The SDK uses a richer comma-list wildcard grammar in mileseventsupport.cpp;
+// this token-glob approximation covers the common stop/enumerate-by-label case
+// and is strictly more correct than ignoring labels entirely.)
+fn labelMatch(labels: []const u8, query: ?[*:0]const u8) bool {
+    const q = if (query) |p| std.mem.span(p) else "";
+    if (q.len == 0) return true;
+    if (labels.len == 0) return false;
+    var qit = std.mem.tokenizeAny(u8, q, ", ");
+    while (qit.next()) |qterm| {
+        var lit = std.mem.tokenizeAny(u8, labels, ", ");
+        while (lit.next()) |lbl| {
+            if (globMatch(qterm, lbl)) return true;
+        }
+    }
+    return false;
+}
 
 var g_instances: std.ArrayListUnmanaged(*SoundInstance) = .empty;
 var g_next_id: u64 = 1;
@@ -157,18 +201,24 @@ fn updateInstances() void {
 
 fn destroyInstance(inst: *SoundInstance) void {
     openmiles.global_allocator.free(inst.sound_name);
+    openmiles.global_allocator.free(inst.labels);
     openmiles.global_allocator.destroy(inst);
 }
 
 // Create a tracked instance for a start-sound step. soundname is taken up to the
 // first ':'; its duration is resolved from the loaded-bank container.
-fn createInstance(queued_id: u64, soundname_full: []const u8, user_buffer: ?*anyopaque, ubl: i32) void {
+fn createInstance(queued_id: u64, soundname_full: []const u8, labels_in: []const u8, user_buffer: ?*anyopaque, ubl: i32) void {
     const cut = std.mem.indexOfScalar(u8, soundname_full, ':') orelse soundname_full.len;
     const sound = soundname_full[0..cut];
     const dur: u32 = openmiles.soundbank.containerSoundDurationMs(sound) orelse 0;
     const name = openmiles.global_allocator.dupeZ(u8, sound) catch return;
+    const labels = openmiles.global_allocator.dupeZ(u8, labels_in) catch {
+        openmiles.global_allocator.free(name);
+        return;
+    };
     const inst = openmiles.global_allocator.create(SoundInstance) catch {
         openmiles.global_allocator.free(name);
+        openmiles.global_allocator.free(labels);
         return;
     };
     inst.* = .{
@@ -178,6 +228,7 @@ fn createInstance(queued_id: u64, soundname_full: []const u8, user_buffer: ?*any
         .start_ms = openmiles.getMsCount64(),
         .duration_ms = dur,
         .sound_name = name,
+        .labels = labels,
         .user_buffer = user_buffer,
         .user_buffer_len = ubl,
     };
@@ -200,7 +251,9 @@ fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: 
             if (next == null) break;
             if (step.type == @intFromEnum(openmiles.event.StepType.start_sound)) {
                 const sn = step.u.start.soundname;
-                if (sn.str) |sp| createInstance(qid, sp[0..@intCast(@max(sn.len, 0))], user_buffer, ubl);
+                const lb = step.u.start.labels;
+                const lbl: []const u8 = if (lb.str) |lp| lp[0..@intCast(@max(lb.len, 0))] else "";
+                if (sn.str) |sp| createInstance(qid, sp[0..@intCast(@max(sn.len, 0))], lbl, user_buffer, ubl);
             } else if (step.type == @intFromEnum(openmiles.event.StepType.cache_sounds)) {
                 applyCacheStep(step.u.load, true);
             } else if (step.type == @intFromEnum(openmiles.event.StepType.purge_sounds)) {
@@ -417,26 +470,27 @@ pub fn MilesClearEventQueue() callconv(.winapi) void {
 pub fn MilesStartSoundInstance(bank: ?*anyopaque, sound_name: ?[*:0]const u8, loop_count: u32, stream: i32, labels: ?[*:0]const u8, user_buffer: ?*anyopaque, user_buffer_len: i32, user_buffer_flags: i32) callconv(.winapi) u64 {
     _ = loop_count;
     _ = stream;
-    _ = labels;
     _ = user_buffer_flags;
     _ = bank;
     const nm = sound_name orelse return 0;
+    const lbl: []const u8 = if (labels) |p| std.mem.span(p) else "";
     const qid = nextId();
-    createInstance(qid, std.mem.span(nm), user_buffer, user_buffer_len);
+    createInstance(qid, std.mem.span(nm), lbl, user_buffer, user_buffer_len);
     return qid;
 }
-// Stop/Pause/Resume operate over instances matching the status filter (filter 0
-// means all). Returns the number affected. Without a wired mixer, pause/resume
-// have no audible effect but report the matching count for API faithfulness.
-fn matchFilter(inst: *const SoundInstance, filter: u64) bool {
-    return filter == 0 or (@as(u64, @intCast(inst.status)) & filter) != 0;
+// Stop/Pause/Resume operate over instances matching both the status filter
+// (filter 0 = all) and the label query (null/empty = all). Returns the count.
+// Without a wired mixer, pause/resume have no audible effect but report the
+// matching count for API faithfulness.
+fn matchFilter(inst: *const SoundInstance, labels: ?[*:0]const u8, filter: u64) bool {
+    const status_ok = filter == 0 or (@as(u64, @intCast(inst.status)) & filter) != 0;
+    return status_ok and labelMatch(inst.labels, labels);
 }
 pub fn MilesStopSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.winapi) u64 {
-    _ = labels;
     var n: u64 = 0;
     var i: usize = 0;
     while (i < g_instances.items.len) {
-        if (matchFilter(g_instances.items[i], filter)) {
+        if (matchFilter(g_instances.items[i], labels, filter)) {
             destroyInstance(g_instances.swapRemove(i));
             n += 1;
         } else i += 1;
@@ -444,10 +498,9 @@ pub fn MilesStopSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.wi
     return n;
 }
 pub fn MilesPauseSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.winapi) u64 {
-    _ = labels;
     var n: u64 = 0;
     for (g_instances.items) |inst| {
-        if (matchFilter(inst, filter)) n += 1;
+        if (matchFilter(inst, labels, filter)) n += 1;
     }
     return n;
 }
@@ -456,7 +509,6 @@ pub fn MilesResumeSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.
 }
 pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque, status: i32, labels: ?[*:0]const u8, search_for_id: u64, out_info: ?*anyopaque) callconv(.winapi) i32 {
     _ = system;
-    _ = labels;
     _ = search_for_id;
     const np = io_next orelse return 0;
     updateInstances();
@@ -467,6 +519,7 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
     while (idx < g_instances.items.len) : (idx += 1) {
         const inst = g_instances.items[idx];
         if ((@as(u64, @intCast(inst.status)) & filter) == 0) continue;
+        if (!labelMatch(inst.labels, labels)) continue;
         if (out_info) |oi| {
             const o: *MILESEVENTSOUNDINFO = @ptrCast(@alignCast(oi));
             o.* = .{
