@@ -247,10 +247,11 @@ pub const DigitalDriver = struct {
         if (@import("builtin").is_test) {
             config.noDevice = ma.MA_TRUE;
         }
-        config.sampleRate = frequency;
-        config.channels = channels;
-        if (frequency == 0) config.sampleRate = 44100;
-        if (channels == 0) config.channels = 2;
+        // Clamp to miniaudio's supported ranges; insane values (e.g. a 2-billion
+        // channel count from a bogus AIL_quick_startup call) otherwise abort
+        // inside ma_engine_init. MA_MAX_CHANNELS is 254; max standard rate 384k.
+        config.sampleRate = if (frequency == 0) 44100 else @min(frequency, 384000);
+        config.channels = if (channels == 0) 2 else @min(channels, 254);
         config.onProcess = &mixDispatch; // drives AIL_register_mix_callback
         config.pProcessUserData = self;
         const result = ma.ma_engine_init(&config, &self.engine);

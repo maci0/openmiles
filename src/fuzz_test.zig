@@ -273,6 +273,37 @@ test "fuzz Sample scalar setters with adversarial values" {
     }
 }
 
+test "fuzz lifecycle (startup/shutdown/close/unload) with adversarial args" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE62);
+    const rand = prng.random();
+
+    var i: usize = 0;
+    while (i < 64) : (i += 1) {
+        // Paired quick start/shutdown with adversarial format args (0 rate/bits/
+        // channels must not divide-by-zero or crash the device setup).
+        const rate: u32 = @bitCast(adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)]);
+        const bits = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
+        const ch = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
+        api_quick.AIL_quick_startup(@intFromBool(rand.boolean()), @intFromBool(rand.boolean()), rate, bits, ch);
+        api_quick.AIL_quick_shutdown();
+
+        // Global startup/shutdown must survive repeated cycles.
+        api_digital.AIL_startup();
+        api_digital.AIL_shutdown();
+        api_timer.AIL_release_all_timers();
+
+        // close_*(null) is a guarded no-op; DLS unload only pointer-compares the
+        // bank, so a non-matching garbage handle is a safe no-op too.
+        api_digital.AIL_close_digital_driver(null);
+        api_midi.AIL_close_midi_driver(null);
+        const md = openmiles.MidiDriver.init(testing.allocator) catch continue;
+        defer md.deinit();
+        const garbage: *anyopaque = @ptrFromInt(@as(usize, 0x1000) + @as(usize, @intCast(i)) * 8);
+        api_dls.AIL_DLS_unload(md, garbage);
+        api_dls.AIL_DLS_unload_file(md, garbage);
+    }
+}
+
 test "fuzz AIL_next_event_step with tight output buffers (scratch bounds)" {
     var prng = std.Random.DefaultPrng.init(0xC0FFEE61);
     const rand = prng.random();
@@ -381,7 +412,7 @@ test "fuzz 6.5/6.6 stream + DLS reverb-level setters with adversarial floats" {
         const b = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
         var o1: f32 = 0;
         var o2: f32 = 0;
-        switch (rand.intRangeAtMost(u8, 0, 6)) {
+        switch (rand.intRangeAtMost(u8, 0, 10)) {
             0 => api_stream.AIL_set_stream_volume_levels(s, a, b),
             1 => api_stream.AIL_stream_volume_levels(s, &o1, &o2),
             2 => api_stream.AIL_set_stream_reverb_levels(s, a, b),
@@ -389,6 +420,10 @@ test "fuzz 6.5/6.6 stream + DLS reverb-level setters with adversarial floats" {
             4 => api_stream.AIL_set_stream_volume_pan(s, a, b),
             5 => api_dls.AIL_DLS_set_reverb_levels(md, a, b),
             6 => api_dls.AIL_DLS_get_reverb_levels(md, &o1, &o2),
+            7 => api_stream.AIL_stream_reverb_levels(s, &o1, &o2),
+            8 => o1 = api_stream.AIL_stream_low_pass_cut_off(s),
+            9 => api_stream.AIL_stream_volume_pan(s, &o1, &o2),
+            10 => api_v7.AIL_set_digital_master_room_type(driver, adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)]),
             else => unreachable,
         }
     }
@@ -697,13 +732,14 @@ test "fuzz 3D spatial exports with adversarial floats (C-ABI)" {
         const b = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
         const c = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
         const iv = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
-        switch (rand.intRangeAtMost(u8, 0, 5)) {
+        switch (rand.intRangeAtMost(u8, 0, 6)) {
             0 => api_3d.AIL_set_3D_position(obj, a, b, c),
             1 => api_3d.AIL_set_3D_velocity(obj, a, b, c, a),
             2 => api_3d.AIL_set_3D_orientation(obj, a, b, c, a, b, c),
             3 => api_3d.AIL_set_3D_sample_distances(obj, a, b),
             4 => api_3d.AIL_set_3D_sample_cone(obj, a, b, iv),
             5 => api_3d.AIL_set_3D_sample_exclusion(obj, a),
+            6 => _ = api_3d.AIL_3D_sample_exclusion(obj),
             else => unreachable,
         }
     }
