@@ -1355,6 +1355,40 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
+test "AIL_WAV_info computes IMA ADPCM sample count via the SDK block formula" {
+    // Production-like block_align so the formula (not the degenerate <spb0 path)
+    // runs: stereo, block_align=512, data_len=1024 (2 blocks). SDK (wavefile.cpp):
+    //   spb0 = 4 << (channels/2) = 8
+    //   samples_per_block = 1 + (512-8)*8/8 = 505
+    //   samples = ceil(1024/512) * 505 = 2 * 505 = 1010
+    const data_len: u32 = 1024;
+    const buf = try testing.allocator.alloc(u8, 44 + data_len);
+    defer testing.allocator.free(buf);
+    @memset(buf, 0);
+    @memcpy(buf[0..4], "RIFF");
+    @memcpy(buf[8..12], "WAVE");
+    @memcpy(buf[12..16], "fmt ");
+    buf[16] = 16; // fmt chunk size
+    buf[20] = 0x11; // IMA ADPCM
+    buf[22] = 2; // channels
+    buf[24] = 0x44;
+    buf[25] = 0xAC; // 44100
+    buf[32] = 0x00;
+    buf[33] = 0x02; // block_align = 512
+    buf[34] = 4; // bits
+    @memcpy(buf[36..40], "data");
+    buf[40] = 0x00;
+    buf[41] = 0x04; // data_len = 1024
+    const riff_size: u32 = @intCast(buf.len - 8);
+    buf[4] = @truncate(riff_size);
+    buf[5] = @truncate(riff_size >> 8);
+    var info: openmiles.AILSOUNDINFO = .{};
+    try testing.expect(dg.AIL_WAV_info(buf.ptr, &info) != 0);
+    try testing.expectEqual(@as(i32, 0x11), info.format);
+    try testing.expectEqual(@as(u32, 512), info.block_size);
+    try testing.expectEqual(@as(u32, 1010), info.samples);
+}
+
 test "AIL_load_sample_buffer returns the resolved slot (-1 on bad input) (SDK)" {
     const api_digital = @import("api/digital.zig");
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
