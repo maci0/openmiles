@@ -45,7 +45,7 @@ provider-management calls, and `DLSMSSGetCPU` stay **__stdcall/decorated**.
 Reproduced via callconv(.c) on those 21 functions plus a `.cdecl` flag on their
 export targets. (No .DEF file needed — Zig emits the bare name for cdecl.)
 
-## Result: v5 / v6 / v7 are byte-for-byte exact
+## Result: v5 / v6 / v7 / v8 / v9 are byte-for-byte exact
 
 Against a representative mainline DLL for each major version the export tables
 match exactly (0 missing, 0 decoration mismatch):
@@ -53,6 +53,21 @@ match exactly (0 missing, 0 decoration mismatch):
 - v5 vs `MSS-5.x/5.0m-mss32.dll` (also 5.0r): 0 / 0
 - v6 vs `MSS-6.0/6.0m-mss32.dll` (also 6.0k): 0 / 0
 - v7 vs `MSS-7.x/ragnarok-online-redist/mss32.dll`: 0 / 0
+- v8 vs `MSS-8.x/8.0j-mss32.dll`: 0 / 0
+- v9 vs `MSS-9.x/9.1d-mss32.dll`: 0 / 0
+
+### v8/v9 specifics
+
+- The RIB interface API switches from __cdecl (undecorated, v6-v8.0b) to
+  __stdcall (decorated, v8.0j+/v9); the DLS API is dropped in v8. The debug
+  functions (`AIL_debug`, `AIL_indent`, `AIL_mem_printf`, ...) and
+  `MilesEventSetAuditionFunctions` are __cdecl in v8/v9.
+- v9 targets the **9.1+ family** (bus_index reverb/room args, added in 9.1);
+  9.0e is the early-9.0 outlier.
+- Several event-step builders gain trailing args in v9
+  (`add_apply_environment` @8→@12, `add_control_sounds` @32→@40,
+  `add_persist_preset` @16→@20, `add_start_sound` @76→@96); v8 gets the shorter
+  forms. `get_soundbank_filename` instead *loses* an arg in v9 (@8→@4).
 
 ### Choosing a representative point release
 

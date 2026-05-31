@@ -885,9 +885,9 @@ test "fuzz: invoke every export with adversarial inputs" {
     // dereferences+formats the bank handle (real DLL too) -> null, not garbage
     _ = api_v8.AIL_sound_asset_filename_v8(null, scp, scp);
     if (api_v8.AIL_create_event()) |ev8| {
-        _ = api_v8.AIL_add_control_sounds_event_step_v8(ev8, scp, scp, scp, scp, scp, ri, rf, ri);
+        _ = api_v8.AIL_add_control_sounds_event_step_v8(ev8, scp, scp, scp, scp, scp, ri, rf);
         _ = api_v8.AIL_add_sound_limit_event_step_v8(ev8, scp);
-        _ = api_v8.AIL_add_start_sound_event_step_v8(ev8, scp, scp, ri, scp, scp, scp, scp, scp, scp, ru, ri, ri, ri, ri, ri, scp, rf, rf, rf, rf);
+        _ = api_v8.AIL_add_start_sound_event_step_v8(ev8, scp, scp, ri, scp, scp, scp, scp, scp, scp, ru, ri, ri, ri, ri, ri, scp, rf, rf);
         if (api_v8.AIL_close_event(ev8)) |s8| std.c.free(s8);
     }
     _ = api_rib.MIX_RIB_MAIN(prov, ru, scp, scp, scp);
