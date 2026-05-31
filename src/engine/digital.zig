@@ -1030,6 +1030,9 @@ pub const Sample = struct {
         self.loop_end_frame = 0;
         self.is_done = false;
         self.is_paused = false;
+        // Re-init returns the sample to the fresh SMP_DONE / never-played state.
+        self.was_stopped = false;
+        self.has_played = false;
         self.eos_callback = 0;
         self.eob_callback = 0;
         self.sob_callback = 0;
