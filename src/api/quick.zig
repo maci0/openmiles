@@ -119,6 +119,7 @@ pub fn AIL_quick_status(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     return @intCast(@intFromEnum(s.status()));
 }
+// v3-v6: S32 volume/extravol on the legacy 0..127 scale.
 pub fn AIL_quick_set_volume(s_opt: ?*Sample, volume: i32, extravol: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_quick_set_volume(s={*}, volume={d}, extravol={d})\n", .{ s, volume, extravol });
@@ -126,6 +127,13 @@ pub fn AIL_quick_set_volume(s_opt: ?*Sample, volume: i32, extravol: i32) callcon
     const ev = std.math.clamp(extravol, 0, 127);
     const scaled: i32 = @intCast(@divTrunc(@as(i64, std.math.clamp(volume, 0, 127)) * ev, 127));
     s.setVolume(scaled);
+}
+// v7+: the Miles-7 float API uses F32 volume/extravol on the 0.0..1.0 scale.
+pub fn AIL_quick_set_volume_f32(s_opt: ?*Sample, volume: f32, extravol: f32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    log("AIL_quick_set_volume_f32(s={*}, volume={d}, extravol={d})\n", .{ s, volume, extravol });
+    const v = std.math.clamp(volume, 0.0, 1.0) * std.math.clamp(extravol, 0.0, 1.0);
+    s.setVolume(@intFromFloat(v * 127.0));
 }
 pub fn AIL_quick_set_speed(s_opt: ?*Sample, rate: i32) callconv(.winapi) void {
     const s = s_opt orelse return;

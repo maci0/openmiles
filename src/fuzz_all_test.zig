@@ -318,6 +318,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_v7.AIL_quick_set_reverb_levels(hs, rf, rf);
     api_quick.AIL_quick_set_speed(hs, ri);
     api_quick.AIL_quick_set_volume(hs, ri, ri);
+    api_quick.AIL_quick_set_volume_f32(hs, rf, rf);
     _ = api_quick.AIL_quick_status(hs);
     if (api_quick.AIL_quick_load_named_mem(scp, rstr, rsz)) |qs| qs.deinit();
     // 6.x-only legacy exports
