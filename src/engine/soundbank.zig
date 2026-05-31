@@ -15,6 +15,13 @@ const std = @import("std");
 pub const BANK_TAG: u32 = (@as(u32, 'B') << 24) | (@as(u32, 'A') << 16) | (@as(u32, 'N') << 8) | @as(u32, 'K');
 pub const BANK_VERSION: i32 = 8;
 
+// Count of banks currently loaded, maintained automatically by loadFromMemory /
+// Bank.deinit. The Miles event-system state reports this as LoadedBankCount.
+var g_loaded_count: u32 = 0;
+pub fn loadedCount() u32 {
+    return @atomicLoad(u32, &g_loaded_count, .seq_cst);
+}
+
 // Field byte offsets in the on-disk SoundBank header (32-bit pointer layout).
 const off_tag = 0;
 const off_version = 4;
@@ -112,6 +119,7 @@ pub const Bank = struct {
     }
 
     pub fn deinit(self: *Bank) void {
+        _ = @atomicRmw(u32, &g_loaded_count, .Sub, 1, .seq_cst);
         self.allocator.free(self.meta);
         self.allocator.free(self.filename);
         self.allocator.destroy(self);
@@ -149,5 +157,6 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
             if (base == 0 or end > msz) return error.BadAssetTable;
         }
     }
+    _ = @atomicRmw(u32, &g_loaded_count, .Add, 1, .seq_cst);
     return self;
 }

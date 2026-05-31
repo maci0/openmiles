@@ -2608,3 +2608,19 @@ test "MilesFindEvent and MilesReleaseSoundBank operate on a loaded bank" {
     try testing.expect(api_miles_t.MilesFindEvent(bptr, "nope") == null);
     try testing.expectEqual(@as(i32, 1), api_miles_t.MilesReleaseSoundBank(bptr));
 }
+
+test "MilesGetEventSystemState reports the live loaded-bank count" {
+    var img: [128]u8 = undefined;
+    const n = buildEventBank(&img);
+    var state: api_miles_t.MILESEVENTSTATE = undefined;
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    const base = state.LoadedBankCount; // order-independent baseline
+    const b1 = try openmiles.soundbank.loadFromMemory(openmiles.global_allocator, "a.mbnk", img[0..n]);
+    const b2 = try openmiles.soundbank.loadFromMemory(openmiles.global_allocator, "b.mbnk", img[0..n]);
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(base + 2, state.LoadedBankCount);
+    b1.deinit();
+    b2.deinit();
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(base, state.LoadedBankCount);
+}

@@ -162,6 +162,7 @@ pub fn MilesShutdownEventSystem() callconv(.winapi) void {
 pub fn MilesGetEventSystemState(system: ?*anyopaque, state: ?*MILESEVENTSTATE) callconv(.winapi) void {
     const o = state orelse return;
     o.* = std.mem.zeroes(MILESEVENTSTATE);
+    o.LoadedBankCount = @intCast(openmiles.soundbank.loadedCount());
     if (resolveSystem(@intFromPtr(system))) |sys| {
         o.CommandBufferSize = sys.command_buffer_size;
     }
