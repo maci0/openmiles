@@ -468,7 +468,7 @@ test "coverage: dls.zig exports" {
     _ = dl.AIL_DLS_load_memory(nd, sc(), 0);
     dl.AIL_DLS_unload(nd, sc());
     dl.AIL_DLS_compact(nd);
-    _ = dl.AIL_DLS_get_info(nd, sc(), sc());
+    dl.AIL_DLS_get_info(nd, sc(), @ptrCast(@alignCast(sc())));
     dl.AIL_DLS_get_reverb(nd, &f32o, &f32o, &f32o);
     dl.AIL_DLS_set_reverb(nd, 1, 0.5, 0.1);
     _ = dl.AIL_DLS_open(null, null, null, 44100, 16, 2, 0);
@@ -476,7 +476,7 @@ test "coverage: dls.zig exports" {
     _ = dl.AIL_set_DLS_processor(nd, 0, null);
     dl.DLSClose(nd, sc());
     dl.DLSCompactMemory(nd);
-    _ = dl.DLSGetInfo(nd, sc(), sc());
+    dl.DLSGetInfo(nd, sc(), @ptrCast(@alignCast(sc())));
     _ = dl.DLSLoadFile(nd, "/nonexistent", 0);
     _ = dl.DLSLoadMemFile(nd, sc(), 0);
     _ = dl.DLSMSSOpen(null, null, null, 44100, 16, 2, 0);

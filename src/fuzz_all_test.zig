@@ -656,7 +656,7 @@ test "fuzz: invoke every export with adversarial inputs" {
         var dbuf: [4096]u8 align(2) = undefined;
         _ = api_digital.AIL_process_digital_audio(&dbuf, @intCast(dbuf.len), ru, ru, @min(@max(rszi, -1), 2), &pmix);
     }
-    _ = api_dls.AIL_DLS_get_info(hm, scp, scp);
+    api_dls.AIL_DLS_get_info(hm, scp, @ptrCast(@alignCast(scp)));
     {
         var ds_out: ?*anyopaque = null;
         var dsb_out: ?*anyopaque = null;
@@ -671,7 +671,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     if (api_quick.AIL_quick_load_mem(scp, rsz)) |qs| qs.deinit();
     api_digital.AIL_init_sample(hs);
     _ = api_midi.AIL_init_sequence(hq, scp, ri);
-    _ = api_dls.DLSGetInfo(hm, scp, scp);
+    api_dls.DLSGetInfo(hm, scp, @ptrCast(@alignCast(scp)));
     _ = api_dls.DLSLoadMemFile(hm, scp, ru);
     var rib_entry: openmiles.RIB_INTERFACE_ENTRY = undefined;
     _ = api_rib.RIB_enumerate_interface(prov, rstr, ru, &pp, &rib_entry);

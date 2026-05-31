@@ -3388,6 +3388,31 @@ test "AIL_DLS_load_memory rejects an implausibly-large header size (no panic)" {
     if (dls_drv) |d| api_dls.AIL_DLS_close(d, 0);
 }
 
+test "AIL_DLS_get_info writes AILDLSINFO to param 2 and PercentCPU to param 3 (SDK)" {
+    const md = try openmiles.MidiDriver.init(testing.allocator);
+    defer md.deinit();
+    // AILDLSINFO is 148 bytes: char Description[128] + 5 S32.
+    const AILDLSINFO = extern struct {
+        Description: [128]u8,
+        MaxDLSMemory: i32,
+        CurrentDLSMemory: i32,
+        LargestSize: i32,
+        GMAvailable: i32,
+        GMBankSize: i32,
+    };
+    var info: AILDLSINFO = undefined;
+    var cpu: i32 = -1;
+    api_dls.AIL_DLS_get_info(md, &info, &cpu);
+    // The description is written into param 2 (not the CPU S32).
+    try testing.expect(std.mem.startsWith(u8, &info.Description, "OpenMiles DLS"));
+    // No soundfont loaded -> GM not available, memory 0; CPU% written to param 3.
+    try testing.expectEqual(@as(i32, 0), info.GMAvailable);
+    try testing.expectEqual(@as(i32, 0), cpu);
+    // Null out-params and null driver are safe no-ops.
+    api_dls.AIL_DLS_get_info(md, null, null);
+    api_dls.AIL_DLS_get_info(null, &info, &cpu);
+}
+
 test "v7 set_sample_3D_distances orders the min/max pair (SDK swap)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

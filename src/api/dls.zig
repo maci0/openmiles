@@ -133,30 +133,33 @@ pub fn AIL_DLS_compact(driver_opt: ?*MidiDriver) callconv(.winapi) void {
 }
 // MSS DLS_INFO structure (6.6-era): first field is total memory usage in bytes.
 // Games typically inspect only the first field for "how much RAM does the soundfont use?"
-const DlsInfo = extern struct {
-    total_memory: u32,
-    preset_count: u32,
-    instrument_count: u32,
-    sample_count: u32,
+// AILDLSINFO (mss.h): 148-byte device-info struct returned by AIL_DLS_get_info.
+const AILDLSINFO = extern struct {
+    Description: [128]u8 = [_]u8{0} ** 128,
+    MaxDLSMemory: i32 = 0,
+    CurrentDLSMemory: i32 = 0,
+    LargestSize: i32 = 0,
+    GMAvailable: i32 = 0,
+    GMBankSize: i32 = 0,
 };
 
-pub fn AIL_DLS_get_info(driver_opt: ?*MidiDriver, bank: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
-    const driver = driver_opt orelse return 0;
-    _ = bank;
-    const out: *DlsInfo = @ptrCast(@alignCast(info));
-    const presets: u32 = if (driver.soundfont) |sf| blk: {
-        const n = openmiles.tsf.tsf_get_presetcount(sf);
-        break :blk if (n > 0) @intCast(n) else 0;
-    } else 0;
-    out.* = .{
-        .total_memory = driver.soundfont_size_bytes,
-        .preset_count = presets,
-        // TSF exposes preset count only; SF2 instrument/sample subcounts are not
-        // surfaced separately, so report presets as the instrument count.
-        .instrument_count = presets,
-        .sample_count = 0,
-    };
-    return if (driver.soundfont != null) 1 else 0;
+// void AIL_DLS_get_info(HDLSDEVICE dls, AILDLSINFO* info, S32* PercentCPU)
+pub fn AIL_DLS_get_info(driver_opt: ?*MidiDriver, info: ?*anyopaque, percent_cpu: ?*i32) callconv(.winapi) void {
+    const driver = driver_opt orelse return;
+    if (info) |ip| {
+        var out: AILDLSINFO = .{};
+        const desc = "OpenMiles DLS (TinySoundFont)";
+        @memcpy(out.Description[0..desc.len], desc);
+        const cur: i32 = openmiles.satI32(@floatFromInt(driver.soundfont_size_bytes));
+        out.CurrentDLSMemory = cur;
+        out.LargestSize = cur;
+        out.MaxDLSMemory = std.math.maxInt(i32); // no fixed DLS memory cap
+        out.GMAvailable = if (driver.soundfont != null) 1 else 0;
+        out.GMBankSize = cur;
+        const dst: *AILDLSINFO = @ptrCast(@alignCast(ip));
+        dst.* = out;
+    }
+    if (percent_cpu) |p| p.* = 0; // DLS synth CPU% (not measured)
 }
 pub fn AIL_DLS_get_reverb(driver_opt: ?*MidiDriver, room_type: ?*f32, level: ?*f32, reflect_time: ?*f32) callconv(.winapi) void {
     const driver = driver_opt orelse return;
@@ -362,8 +365,8 @@ pub fn DLSClose(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.c) void {
 pub fn DLSCompactMemory(driver_opt: ?*MidiDriver) callconv(.c) void {
     AIL_DLS_compact(driver_opt);
 }
-pub fn DLSGetInfo(driver_opt: ?*MidiDriver, bank: *anyopaque, info: *anyopaque) callconv(.c) i32 {
-    return AIL_DLS_get_info(driver_opt, bank, info);
+pub fn DLSGetInfo(driver_opt: ?*MidiDriver, info: ?*anyopaque, percent_cpu: ?*i32) callconv(.c) void {
+    AIL_DLS_get_info(driver_opt, info, percent_cpu);
 }
 pub fn DLSLoadFile(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flags: u32) callconv(.c) ?*anyopaque {
     return AIL_DLS_load_file(driver_opt, filename, flags);
