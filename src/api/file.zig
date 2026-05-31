@@ -76,13 +76,15 @@ pub fn AIL_file_read(filename: [*:0]const u8, dest: ?*anyopaque) callconv(.winap
 pub fn AIL_file_size(filename: [*:0]const u8) callconv(.winapi) u32 {
     openmiles.clearFileError();
     if (openmiles.cb_file_open != null) {
-        var size: u32 = 0;
         const open_fn = openmiles.cb_file_open.?;
         const close_fn = openmiles.cb_file_close orelse return 0;
-        const handle = open_fn(filename, &size) orelse {
+        // open returns the file length and fills the handle out-param.
+        var handle: u32 = 0;
+        const size = open_fn(filename, &handle);
+        if (size == 0) {
             openmiles.setFileError("File not found");
             return 0;
-        };
+        }
         close_fn(handle);
         return size;
     }
@@ -127,14 +129,15 @@ pub fn AIL_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32) callc
     };
     return 1;
 }
-pub fn AIL_set_file_callbacks(open_fn: ?*anyopaque, close_fn: ?*anyopaque, read_fn: ?*anyopaque, seek_fn: ?*anyopaque) callconv(.winapi) void {
+// SDK arg order is (open, close, SEEK, READ) — not (open, close, read, seek).
+pub fn AIL_set_file_callbacks(open_fn: ?*anyopaque, close_fn: ?*anyopaque, seek_fn: ?*anyopaque, read_fn: ?*anyopaque) callconv(.winapi) void {
     log("AIL_set_file_callbacks\n", .{});
     openmiles.cb_file_open = if (open_fn) |f| @ptrCast(f) else null;
     openmiles.cb_file_close = if (close_fn) |f| @ptrCast(f) else null;
-    openmiles.cb_file_read = if (read_fn) |f| @ptrCast(f) else null;
     openmiles.cb_file_seek = if (seek_fn) |f| @ptrCast(f) else null;
+    openmiles.cb_file_read = if (read_fn) |f| @ptrCast(f) else null;
 }
-pub fn AIL_set_file_async_callbacks(open_fn: ?*anyopaque, close_fn: ?*anyopaque, read_fn: ?*anyopaque, seek_fn: ?*anyopaque, callback_fn: ?*anyopaque) callconv(.winapi) void {
+pub fn AIL_set_file_async_callbacks(open_fn: ?*anyopaque, close_fn: ?*anyopaque, seek_fn: ?*anyopaque, read_fn: ?*anyopaque, callback_fn: ?*anyopaque) callconv(.winapi) void {
     _ = callback_fn;
-    AIL_set_file_callbacks(open_fn, close_fn, read_fn, seek_fn);
+    AIL_set_file_callbacks(open_fn, close_fn, seek_fn, read_fn);
 }

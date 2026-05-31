@@ -142,10 +142,16 @@ pub fn clearFileError() void {
 
 // --- Custom file I/O callbacks ---
 
-pub var cb_file_open: ?*const fn ([*:0]const u8, *u32) callconv(.winapi) ?*anyopaque = null;
-pub var cb_file_close: ?*const fn (?*anyopaque) callconv(.winapi) void = null;
-pub var cb_file_read: ?*const fn (?*anyopaque, *anyopaque, u32) callconv(.winapi) u32 = null;
-pub var cb_file_seek: ?*const fn (?*anyopaque, i32) callconv(.winapi) i32 = null;
+// MSS file callbacks (mss.h). FileHandle is a U32 token (4 bytes on x86, same
+// width as a pointer). open RETURNS the file length and fills *FileHandle;
+// seek takes (handle, offset, type) where type is 0=SET, 1=CUR, 2=END.
+pub const SEEK_SET: u32 = 0;
+pub const SEEK_CUR: u32 = 1;
+pub const SEEK_END: u32 = 2;
+pub var cb_file_open: ?*const fn ([*:0]const u8, *u32) callconv(.winapi) u32 = null;
+pub var cb_file_close: ?*const fn (u32) callconv(.winapi) void = null;
+pub var cb_file_read: ?*const fn (u32, *anyopaque, u32) callconv(.winapi) u32 = null;
+pub var cb_file_seek: ?*const fn (u32, i32, u32) callconv(.winapi) i32 = null;
 
 /// If file callbacks are set, open the file via the game's VFS, read it all into
 /// a freshly-allocated slice (caller must free with global_allocator), and close it.
@@ -154,20 +160,25 @@ pub fn fileCallbackReadAll(filename: [*:0]const u8) ![]u8 {
     const close_fn = cb_file_close orelse return error.NoCallbacks;
     const read_fn = cb_file_read orelse return error.NoCallbacks;
 
-    var file_size: u32 = 0;
-    const handle = open_fn(filename, &file_size) orelse return error.FileNotFound;
-    defer close_fn(handle);
-
+    // open returns the file length and writes the handle to the out-param;
+    // a 0 length means the file could not be opened.
+    var handle: u32 = 0;
+    var file_size = open_fn(filename, &handle);
     if (file_size == 0) {
+        // Some VFS return 0 from open and require a seek-to-end to learn the size.
         if (cb_file_seek) |seek_fn| {
-            const end_pos = seek_fn(handle, std.math.maxInt(i32));
+            const end_pos = seek_fn(handle, 0, SEEK_END);
             if (end_pos > 0) {
                 file_size = @intCast(end_pos);
-                _ = seek_fn(handle, 0);
+                _ = seek_fn(handle, 0, SEEK_SET);
             }
         }
-        if (file_size == 0) return error.UnknownSize;
+        if (file_size == 0) {
+            close_fn(handle);
+            return error.FileNotFound;
+        }
     }
+    defer close_fn(handle);
 
     const buf = try global_allocator.alloc(u8, file_size);
     errdefer global_allocator.free(buf);

@@ -1832,6 +1832,7 @@ test "StreamSource underrun emits silence and keeps playing" {
 const api_v8 = @import("api/v8.zig");
 const api_v9 = @import("api/v9.zig");
 const dg = @import("api/digital.zig");
+const api_file = @import("api/file.zig");
 
 test "v8 AIL_mem in-memory stream round-trips" {
     const m = api_v8.AIL_mem_create() orelse return error.NoMem;
@@ -3027,4 +3028,51 @@ test "AIL_redbook_set_volume_level returns the previous volume (F32)" {
     const prev = api_v7.AIL_redbook_set_volume_level(rb, 0.3); // returns the prior 0.8
     try testing.expectApproxEqAbs(@as(f32, 0.8), prev, 0.02);
     try testing.expectApproxEqAbs(@as(f32, 0.3), api_v7.AIL_redbook_volume_level(rb), 0.02);
+}
+
+// A minimal in-memory VFS exercising the MSS file-callback ABI.
+var vfs_data: []const u8 = "";
+var vfs_pos: u32 = 0;
+fn vfsOpen(name: [*:0]const u8, handle: *u32) callconv(.winapi) u32 {
+    _ = name;
+    handle.* = 0xABCD; // arbitrary token
+    vfs_pos = 0;
+    return @intCast(vfs_data.len); // MSS open returns the file length
+}
+fn vfsClose(h: u32) callconv(.winapi) void {
+    _ = h;
+}
+fn vfsSeek(h: u32, offset: i32, typ: u32) callconv(.winapi) i32 {
+    _ = h;
+    vfs_pos = switch (typ) {
+        openmiles.SEEK_SET => @intCast(@max(offset, 0)),
+        openmiles.SEEK_END => @intCast(@max(@as(i64, @intCast(vfs_data.len)) + offset, 0)),
+        else => vfs_pos +% @as(u32, @bitCast(offset)),
+    };
+    return @intCast(vfs_pos);
+}
+fn vfsRead(h: u32, buffer: *anyopaque, bytes: u32) callconv(.winapi) u32 {
+    _ = h;
+    const remain: u32 = @intCast(vfs_data.len - vfs_pos);
+    const n = @min(bytes, remain);
+    @memcpy(@as([*]u8, @ptrCast(buffer))[0..n], vfs_data[vfs_pos..][0..n]);
+    vfs_pos += n;
+    return n;
+}
+
+test "file callbacks route through the VFS with the correct ABI" {
+    vfs_data = "Hello VFS payload!";
+    // SDK order: (open, close, seek, read). If seek/read were swapped, the read
+    // below would invoke the seek callback and fail.
+    api_file.AIL_set_file_callbacks(@constCast(@ptrCast(&vfsOpen)), @constCast(@ptrCast(&vfsClose)), @constCast(@ptrCast(&vfsSeek)), @constCast(@ptrCast(&vfsRead)));
+    defer api_file.AIL_set_file_callbacks(null, null, null, null);
+
+    // AIL_file_size returns open()'s length value.
+    try testing.expectEqual(@as(u32, @intCast(vfs_data.len)), api_file.AIL_file_size("any"));
+
+    // AIL_file_read pulls the whole file through open->read->close.
+    var dst: [64]u8 = undefined;
+    const r = api_file.AIL_file_read("any", &dst);
+    try testing.expect(r != null);
+    try testing.expectEqualStrings("Hello VFS payload!", dst[0..vfs_data.len]);
 }
