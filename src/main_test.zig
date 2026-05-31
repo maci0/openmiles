@@ -1583,6 +1583,32 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
+test "AIL_WAV_file_write interprets the DIG_F format code (not a bit depth)" {
+    const data = [_]u8{0} ** 64;
+    const path = "/tmp/om_wavfmt_test.wav";
+    const H = struct {
+        fn readWav(p: []const u8, buf: []u8) ![]u8 {
+            const io = openmiles.io;
+            const f = try openmiles.fs_compat.openFile(io, p, .{});
+            defer f.close(io);
+            const n: usize = @intCast(try f.length(io));
+            _ = try f.readPositionalAll(io, buf[0..n], 0);
+            return buf[0..n];
+        }
+    };
+    var rb: [512]u8 = undefined;
+    // DIG_F format 3 = DIG_F_16BITS_MASK|DIG_F_STEREO_MASK -> 16-bit stereo.
+    try testing.expectEqual(@as(i32, 1), dg.AIL_WAV_file_write(path, @constCast(@ptrCast(&data)), data.len, 22050, 3));
+    const b = try H.readWav(path, &rb);
+    try testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, b[22..][0..2], .little)); // channels
+    try testing.expectEqual(@as(u16, 16), std.mem.readInt(u16, b[34..][0..2], .little)); // bits
+    // DIG_F format 0 -> 8-bit mono.
+    try testing.expectEqual(@as(i32, 1), dg.AIL_WAV_file_write(path, @constCast(@ptrCast(&data)), data.len, 22050, 0));
+    const b2 = try H.readWav(path, &rb);
+    try testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, b2[22..][0..2], .little));
+    try testing.expectEqual(@as(u16, 8), std.mem.readInt(u16, b2[34..][0..2], .little));
+}
+
 test "AIL_WAV_info handles WAVEFORMATEXTENSIBLE PCM (format->1, channel_mask, reject non-PCM)" {
     // fmt chunk = 40 bytes (WAVEFORMATEXTENSIBLE), data = 16 bytes (stereo 16-bit).
     const mk = struct {

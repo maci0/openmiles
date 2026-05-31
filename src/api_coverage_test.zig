@@ -567,7 +567,7 @@ test "coverage: lifecycle / driver open-close exports" {
 
     // WAV file write.
     const wbytes = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0 };
-    _ = dg.AIL_WAV_file_write("/tmp/om_cov.wav", @constCast(@ptrCast(&wbytes)), wbytes.len, 44100, 16);
+    _ = dg.AIL_WAV_file_write("/tmp/om_cov.wav", @constCast(@ptrCast(&wbytes)), wbytes.len, 44100, 1);
 
     // XMIDI driver close (open covered in midi test).
     const xm = md.AIL_open_XMIDI_driver(0);

@@ -855,12 +855,14 @@ pub fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
     } else out.samples = 0;
     return 1;
 }
-pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, rate: i32, bits: i32) callconv(.winapi) i32 {
-    // Reject nonsensical sample rate / bit depth rather than panicking on the
-    // narrowing cast when a caller passes adversarial values.
-    if (rate <= 0 or bits <= 0 or bits > 32) return 0;
+pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, rate: i32, format: i32) callconv(.winapi) i32 {
+    // The 5th arg is a DIG_F format code (mss.h), NOT a bit depth:
+    //   DIG_F_16BITS_MASK (1) -> 16-bit else 8-bit; DIG_F_STEREO_MASK (2) -> stereo.
+    if (rate <= 0) return 0;
+    const channels: u16 = if (format & 2 != 0) 2 else 1;
+    const bits: u16 = if (format & 1 != 0) 16 else 8;
     const pcm_data: []const u8 = @as([*]const u8, @ptrCast(@alignCast(data)))[0..len];
-    const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, pcm_data, 1, @intCast(rate), @intCast(bits)) catch |err| {
+    const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, pcm_data, channels, @intCast(rate), bits) catch |err| {
         log("Error: {any}\n", .{err});
         return 0;
     };
