@@ -627,6 +627,20 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_dls.DLSLoadMemFile(hm, scp, ru);
     var rib_entry: openmiles.RIB_INTERFACE_ENTRY = undefined;
     _ = api_rib.RIB_enumerate_interface(prov, rstr, ru, &pp, &rib_entry);
+    // stdcall RIB variants (the v8.0j+/v9 decorated exports) — same logic,
+    // distinct symbols, so they must be exercised too.
+    _ = api_rib.RIB_alloc_provider_handle_std(scp);
+    _ = api_rib.RIB_error_std();
+    _ = api_rib.RIB_find_file_provider_std(rstr, rstr, rstr);
+    _ = api_rib.RIB_load_provider_library_std(rstr);
+    api_rib.RIB_free_provider_handle_std(prov);
+    api_rib.RIB_free_provider_library_std(prov);
+    api_rib.RIB_register_interface_std(prov, rstr, rszi, scp);
+    _ = api_rib.RIB_request_interface_std(prov, rstr, rszi, scp);
+    _ = api_rib.RIB_request_interface_entry_std(prov, rstr, ru, rstr, &zo);
+    _ = api_rib.RIB_enumerate_interface_std(prov, rstr, ru, &pp, &rib_entry);
+    { var tsv2: i32 = ri; _ = api_rib.RIB_type_string_std(&tsv2, ru); }
+    api_rib.RIB_unregister_interface_std(prov, rstr, rszi, scp);
     // --- functions added this session (v8/v9 subsystems) ---
     const h3a: ?*anyopaque = @ptrCast(h3);
     api_3d.AIL_3D_update_position(h3a, rf);
@@ -888,6 +902,10 @@ test "fuzz: invoke every export with adversarial inputs" {
         _ = api_v8.AIL_add_control_sounds_event_step_v8(ev8, scp, scp, scp, scp, scp, ri, rf);
         _ = api_v8.AIL_add_sound_limit_event_step_v8(ev8, scp);
         _ = api_v8.AIL_add_start_sound_event_step_v8(ev8, scp, scp, ri, scp, scp, scp, scp, scp, scp, ru, ri, ri, ri, ri, ri, scp, rf, rf);
+        _ = api_v8.AIL_add_apply_environment_event_step_v8(ev8, scp);
+        _ = api_v8.AIL_add_persist_preset_event_step_v8(ev8, scp, scp, scp);
+        _ = api_v8.AIL_sample_stage_property_v7(scp, ri, scp, ri, scp, scp);
+        _ = api_v8.AIL_get_soundbank_filename_v8(scp, scp);
         if (api_v8.AIL_close_event(ev8)) |s8| std.c.free(s8);
     }
     _ = api_rib.MIX_RIB_MAIN(prov, ru, scp, scp, scp);

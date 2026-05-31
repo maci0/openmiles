@@ -1308,7 +1308,6 @@ comptime {
             .{ .name = "AIL_inspect_MP3", .stack_size = 12, .ver = 60 },
             .{ .name = "AIL_enumerate_MP3_frames", .stack_size = 4, .ver = 60 },
             .{ .name = "RIB_load_static_provider_library", .stack_size = 8, .ver = 60 },
-            .{ .name = "RIB_MAIN", .stack_size = 8, .ver = 70 },
             .{ .name = "AIL_WAV_marker_by_index", .stack_size = 12, .ver = 60 },
             .{ .name = "AIL_WAV_marker_by_name", .stack_size = 8, .ver = 60 },
             .{ .name = "AIL_WAV_marker_count", .stack_size = 4, .ver = 60 },
