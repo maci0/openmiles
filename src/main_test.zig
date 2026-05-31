@@ -1507,6 +1507,28 @@ test "Sample setPlaybackRate ignores rate <= 0 (SDK behavior)" {
     try testing.expectEqual(@as(?f32, 22050.0), sample.target_rate);
 }
 
+test "playback rate and rate_factor compose into the pitch (not overwrite)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+
+    // native = 8000. rate 4000 -> pitch 0.5.
+    dg.AIL_set_sample_playback_rate(s, 4000);
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_pitch(&s.sound) - 0.5) < 0.001);
+    // factor 2.0 composes: pitch = 0.5 * 2.0 = 1.0 (does not reset to 2.0).
+    api_v8.AIL_set_sample_playback_rate_factor(s, 2.0);
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_pitch(&s.sound) - 1.0) < 0.001);
+    // factor <= 0 is ignored (pitch unchanged, factor getter stays 2.0).
+    api_v8.AIL_set_sample_playback_rate_factor(s, -1.0);
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_pitch(&s.sound) - 1.0) < 0.001);
+    try testing.expectEqual(@as(f32, 2.0), api_v8.AIL_sample_playback_rate_factor(s));
+}
+
 test "AIL_sample_playback_rate defaults to the file's native rate" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

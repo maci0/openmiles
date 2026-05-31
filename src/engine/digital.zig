@@ -1282,22 +1282,28 @@ pub const Sample = struct {
         };
     }
 
+    fn nativeRate(self: *const Sample) f32 {
+        if (self.decoder) |d| return @floatFromInt(d.outputSampleRate);
+        return @floatFromInt(ma.ma_engine_get_sample_rate(&self.driver.engine));
+    }
+
+    /// Effective pitch = (playback_rate / native) * playback_rate_factor, matching
+    /// MSS's effective rate = original_playback_rate * playback_rate_factor. The
+    /// rate and the factor compose rather than overwriting each other.
+    pub fn applyEffectivePitch(self: *Sample) void {
+        if (!self.is_initialized or self.decoder == null) return;
+        const native = self.nativeRate();
+        const base = self.target_rate orelse native;
+        self.pitch = if (native > 0) (base / native) * self.v7_rate_factor else self.v7_rate_factor;
+        ma.ma_sound_set_pitch(&self.sound, self.pitch);
+    }
+
     pub fn setPlaybackRate(self: *Sample, rate: i32) void {
         // SDK (AIL_API_set_sample_playback_rate): a rate <= 0 is ignored, the
         // current rate is left unchanged.
         if (rate <= 0) return;
-        const tr = @as(f32, @floatFromInt(rate));
-        self.target_rate = tr;
-        if (self.is_initialized) {
-            if (self.decoder) |d| {
-                const native_rate = @as(f32, @floatFromInt(d.outputSampleRate));
-                self.pitch = tr / native_rate;
-                log("Sample.setPlaybackRate: s={*}, rate={d}, native={d}, pitch={d}\n", .{ self, rate, native_rate, self.pitch });
-                ma.ma_sound_set_pitch(&self.sound, self.pitch);
-            }
-        } else {
-            log("Sample.setPlaybackRate: s={*}, rate={d} (deferred)\n", .{ self, rate });
-        }
+        self.target_rate = @floatFromInt(rate);
+        self.applyEffectivePitch();
     }
 
     /// Set the low-pass cutoff using MSS's normalized 0..1 convention (1.0 =

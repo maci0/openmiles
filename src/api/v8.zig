@@ -757,8 +757,12 @@ pub fn AIL_set_sample_playback_delay(s_opt: ?*Sample, delay_ms: i32) callconv(.w
 }
 pub fn AIL_set_sample_playback_rate_factor(s_opt: ?*Sample, factor: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    if (s.is_initialized and factor > 0) ma.ma_sound_set_pitch(&s.sound, factor);
+    // SDK (AIL_API_set_sample_playback_rate_factor): a factor <= 0 is ignored.
+    // The factor composes with the playback rate (effective rate = rate*factor),
+    // it does not overwrite the rate's pitch.
+    if (factor <= 0) return;
     s.v7_rate_factor = factor;
+    s.applyEffectivePitch();
 }
 pub fn AIL_set_sample_speaker_scale_factors(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32) callconv(.winapi) void {
     _ = a0;
