@@ -74,7 +74,7 @@ extern "C" {
 #endif
 
 // Core System
-void       MSS_CALLBACK AIL_startup(void);
+S32        MSS_CALLBACK AIL_startup(void);
 void       MSS_CALLBACK AIL_shutdown(void);
 char*      MSS_CALLBACK AIL_last_error(void);
 void       MSS_CALLBACK AIL_set_redist_directory(char const* dir);

@@ -10,14 +10,22 @@ const Filter = openmiles.Filter;
 const MidiDriver = openmiles.MidiDriver;
 const AILSOUNDINFO = openmiles.AILSOUNDINFO;
 
-pub fn AIL_startup() callconv(.winapi) void {
+// Miles startup is reference-counted: AIL_startup returns the new use count (1
+// on the first call), and the public AIL_startup maps to AIL_startup_reg/_stack
+// in mss.h. AIL_shutdown stays void. We don't re-init the engine on nested
+// calls; the count just mirrors the documented return value.
+var g_startup_count: i32 = 0;
+pub fn AIL_startup() callconv(.winapi) i32 {
     log("ENTER AIL_startup\n", .{});
     openmiles.startup();
+    g_startup_count +|= 1;
     log("EXIT AIL_startup\n", .{});
+    return g_startup_count;
 }
 pub fn AIL_shutdown() callconv(.winapi) void {
     log("AIL_shutdown()\n", .{});
     openmiles.shutdown();
+    if (g_startup_count > 0) g_startup_count -= 1;
 }
 pub fn AIL_set_redist_directory(path: [*:0]const u8) callconv(.winapi) void {
     log("AIL_set_redist_directory(path={s})\n", .{path});

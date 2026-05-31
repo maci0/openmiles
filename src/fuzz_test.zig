@@ -288,7 +288,7 @@ test "fuzz lifecycle (startup/shutdown/close/unload) with adversarial args" {
         api_quick.AIL_quick_shutdown();
 
         // Global startup/shutdown must survive repeated cycles.
-        api_digital.AIL_startup();
+        _ = api_digital.AIL_startup();
         api_digital.AIL_shutdown();
         api_timer.AIL_release_all_timers();
 

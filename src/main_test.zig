@@ -1159,6 +1159,16 @@ test "AIL_quick_play returns S32 success (1) and 0 for a null handle" {
     try testing.expectEqual(@as(i32, 0), api_quick.AIL_quick_play(null, 1)); // SDK null guard
 }
 
+test "AIL_startup returns an incrementing use count (SDK refcount)" {
+    const api_digital = @import("api/digital.zig");
+    // Order-independent: each call bumps the use count by 1 and returns the new
+    // value. (openmiles.startup() itself is idempotent, so this is safe to repeat.)
+    const c1 = api_digital.AIL_startup();
+    const c2 = api_digital.AIL_startup();
+    try testing.expect(c1 >= 1);
+    try testing.expectEqual(c1 + 1, c2);
+}
+
 test "AIL_speaker_configuration returns the default stereo speaker array (SDK)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
