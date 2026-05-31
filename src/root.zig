@@ -432,6 +432,12 @@ pub fn getRedistDirectory() []const u8 {
     return std.mem.sliceTo(&redist_directory, 0);
 }
 
+/// NUL-terminated pointer to the stored redist directory (for the char* return
+/// of AIL_set_redist_directory).
+pub fn redistDirectoryZ() [*:0]const u8 {
+    return &redist_directory;
+}
+
 // --- Preferences ---
 
 pub const Pref = enum(u32) {

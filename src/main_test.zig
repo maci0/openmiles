@@ -545,6 +545,17 @@ test "setRedistDirectory and getRedistDirectory roundtrip" {
     try testing.expectEqualStrings("./test_plugins", openmiles.getRedistDirectory());
 }
 
+test "AIL_set_redist_directory returns the stored directory pointer (SDK char*)" {
+    const api_digital = @import("api/digital.zig");
+    defer openmiles.setRedistDirectory("");
+    const ret = api_digital.AIL_set_redist_directory("/opt/miles");
+    try testing.expectEqualStrings("/opt/miles", std.mem.span(ret));
+    // AIL_MIDI_handle_release now returns S32 (1 = released).
+    const mh = @import("api/midi.zig");
+    var scratch: u8 = 0;
+    try testing.expectEqual(@as(i32, 1), mh.AIL_MIDI_handle_release(@ptrCast(&scratch)));
+}
+
 test "setRedistDirectory truncates long paths" {
     const long_path = "/" ++ "a" ** 300;
     openmiles.setRedistDirectory(long_path);

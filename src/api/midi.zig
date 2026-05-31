@@ -167,8 +167,11 @@ pub fn AIL_midiOutOpen(driver: *anyopaque, hmidiout: **anyopaque, device_id: i32
     hmidiout.* = driver;
     return 0;
 }
-pub fn AIL_MIDI_handle_release(driver: *anyopaque) callconv(.winapi) void {
+pub fn AIL_MIDI_handle_release(driver: *anyopaque) callconv(.winapi) i32 {
+    // SDK returns S32. We hold no exclusive OS MIDI handle, so releasing it
+    // always "succeeds" (1) — consistent with AIL_MIDI_handle_reacquire.
     _ = driver;
+    return 1;
 }
 pub fn AIL_MIDI_handle_reacquire(driver: *anyopaque) callconv(.winapi) i32 {
     _ = driver;

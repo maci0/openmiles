@@ -72,7 +72,7 @@ test "coverage: digital.zig exports" {
     _ = dg.AIL_HWND();
     dg.AIL_set_error("x");
     dg.AIL_serve();
-    dg.AIL_set_redist_directory("x");
+    _ = dg.AIL_set_redist_directory("x");
 
     // A real device-less driver + initialized sample + filter for the params
     // that get dereferenced.
@@ -447,7 +447,7 @@ test "coverage: midi.zig exports" {
     md.AIL_register_ICA_array(seq, sc());
 
     // Driver-handle legacy / conversion.
-    md.AIL_MIDI_handle_release(mp);
+    _ = md.AIL_MIDI_handle_release(mp);
     _ = md.AIL_MIDI_handle_reacquire(mp);
     var hmo: *anyopaque = undefined;
     _ = md.AIL_midiOutOpen(mp, &hmo, 0);

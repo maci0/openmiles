@@ -27,9 +27,12 @@ pub fn AIL_shutdown() callconv(.winapi) void {
     openmiles.shutdown();
     if (g_startup_count > 0) g_startup_count -= 1;
 }
-pub fn AIL_set_redist_directory(path: [*:0]const u8) callconv(.winapi) void {
+pub fn AIL_set_redist_directory(path: [*:0]const u8) callconv(.winapi) [*:0]const u8 {
+    // SDK returns char* — a pointer to the stored redist directory so callers
+    // can read it back. (EAX was previously left undefined as a void return.)
     log("AIL_set_redist_directory(path={s})\n", .{path});
     openmiles.setRedistDirectory(std.mem.span(path));
+    return openmiles.redistDirectoryZ();
 }
 pub fn AIL_last_error() callconv(.winapi) [*:0]const u8 {
     if (openmiles.last_error_buf[0] == 0) return "";

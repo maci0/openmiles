@@ -474,7 +474,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_memory.AIL_set_mem_callbacks(null, null);
     api_v7.AIL_set_output_filter_driver_preference(null, rstr, scp);
     _ = api_digital.AIL_set_preference(ru, ri);
-    api_digital.AIL_set_redist_directory(rstr);
+    _ = api_digital.AIL_set_redist_directory(rstr);
     api_v7.AIL_set_room_type(hd, ri, ri);
     api_v7.AIL_set_sample_3D_cone(hs, rf, rf, rf);
     api_v7.AIL_set_sample_3D_distances(hs, rf, rf, ri);
@@ -809,7 +809,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     }
     // Win16-legacy handle release/reacquire are no-ops; safe on shared handles
     _ = api_digital.AIL_digital_handle_release(hd);
-    api_midi.AIL_MIDI_handle_release(@ptrCast(hm));
+    _ = api_midi.AIL_MIDI_handle_release(@ptrCast(hm));
     api_dls.DLSUnloadAll(hm);
     _ = api_digital.AIL_init_sample_v8(hs, ri);
     {
