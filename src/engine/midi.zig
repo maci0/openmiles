@@ -145,6 +145,10 @@ pub const Sequence = struct {
     is_playing: bool = false,
     is_paused: bool = false,
     is_done: bool = false,
+    // SEQ_STOPPED only after an explicit AIL_stop_sequence; otherwise a loaded-
+    // but-unplayed sequence is SEQ_DONE (the SDK comment: "finished playing, or
+    // has [not yet played]").
+    was_stopped: bool = false,
     loop_count: i32 = 1,
     loops_remaining: i32 = 1,
     sound: ma.ma_sound,
@@ -640,6 +644,7 @@ pub const Sequence = struct {
         self.is_playing = true;
         self.is_paused = false;
         self.is_done = false;
+        self.was_stopped = false;
     }
 
     pub fn stopAndUninit(self: *Sequence) void {
@@ -660,6 +665,7 @@ pub const Sequence = struct {
         self.is_playing = false;
         self.is_paused = false;
         self.is_done = false;
+        self.was_stopped = true;
         self.resetToBeginning();
     }
 
@@ -685,7 +691,9 @@ pub const Sequence = struct {
         if (!self.is_initialized) return .done; // MSS: uninitialized sequences report SEQ_DONE
         if (self.is_playing) return .playing; // includes paused state
         if (self.is_done) return .done;
-        return .stopped;
+        // Loaded-but-never-played -> SEQ_DONE; only after AIL_stop_sequence is it
+        // SEQ_STOPPED (SEQ_DONE covers "finished or not yet played").
+        return if (self.was_stopped) .stopped else .done;
     }
 
     pub fn setVolume(self: *Sequence, volume: i32, ms: i32) void {

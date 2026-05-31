@@ -384,6 +384,16 @@ test "Sequence initial status is done when uninitialized" {
 
     // Per MSS spec: uninitialized sequence reports SEQ_DONE
     try testing.expectEqual(openmiles.MidiStatus.done, seq.status());
+
+    // An initialized-but-never-played sequence is SEQ_DONE; only after an
+    // explicit AIL_stop_sequence is it SEQ_STOPPED (SEQ_DONE = finished or not
+    // yet played). Drive the status() logic via the flags directly.
+    seq.is_initialized = true;
+    seq.was_stopped = false;
+    try testing.expectEqual(openmiles.MidiStatus.done, seq.status());
+    seq.was_stopped = true;
+    try testing.expectEqual(openmiles.MidiStatus.stopped, seq.status());
+    seq.is_initialized = false; // restore so deinit doesn't touch the undefined sound
 }
 
 test "setLastError and clearLastError" {
