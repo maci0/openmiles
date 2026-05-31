@@ -1015,6 +1015,26 @@ test "Sample start on uninitialized resets done flag" {
     try testing.expectEqual(openmiles.SampleStatus.done, sample.status());
 }
 
+test "AIL_set/stream_reverb + AIL_quick_set_reverb param roles (level, reflect, decay)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    const sq = @import("api/stream.zig");
+    const qk2 = @import("api/quick.zig");
+    // Stream set/get round-trips with the SDK slot order.
+    sq.AIL_set_stream_reverb(s, 0.5, 0.1, 0.8); // level, reflect, decay
+    var level: f32 = 0;
+    var reflect: f32 = 0;
+    var decay: f32 = 0;
+    sq.AIL_stream_reverb(s, &level, &reflect, &decay);
+    try testing.expect(@abs(level - 0.5) < 0.001 and @abs(reflect - 0.1) < 0.001 and @abs(decay - 0.8) < 0.001);
+    // quick_set_reverb uses the same order; verify via the sample-reverb getter.
+    qk2.AIL_quick_set_reverb(s, 0.25, 0.2, 0.6);
+    dg.AIL_sample_reverb(s, &level, &reflect, &decay);
+    try testing.expect(@abs(level - 0.25) < 0.001 and @abs(reflect - 0.2) < 0.001 and @abs(decay - 0.6) < 0.001);
+}
+
 test "AIL_set/sample_reverb param roles: (level, reflect_time, decay_time) (SDK)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

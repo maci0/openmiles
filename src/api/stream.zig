@@ -184,16 +184,21 @@ pub fn AIL_set_stream_user_data(s_opt: ?*Sample, index: i32, value: u32) callcon
     const idx: usize = @intCast(@min(@max(index, 0), 7));
     s.user_data[idx] = value;
 }
-pub fn AIL_stream_reverb(s_opt: ?*Sample, room_type: ?*f32, level: ?*f32, reflect_time: ?*f32) callconv(.winapi) void {
+// SDK: AIL_stream_reverb(HSTREAM, F32* reverb_level, F32* reverb_reflect_time,
+// F32* reverb_decay_time). The engine's .room_type field holds the decay value.
+pub fn AIL_stream_reverb(s_opt: ?*Sample, reverb_level: ?*f32, reverb_reflect_time: ?*f32, reverb_decay_time: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     const rev = s.getReverb();
-    if (room_type) |p| p.* = rev.room_type;
-    if (level) |p| p.* = rev.level;
-    if (reflect_time) |p| p.* = rev.reflect_time;
+    if (reverb_level) |p| p.* = rev.level;
+    if (reverb_reflect_time) |p| p.* = rev.reflect_time;
+    if (reverb_decay_time) |p| p.* = rev.room_type;
 }
-pub fn AIL_set_stream_reverb(s_opt: ?*Sample, room_type: f32, level: f32, reflect_time: f32) callconv(.winapi) void {
+// SDK (mss.h): AIL_set_stream_reverb(HSTREAM, F32 reverb_level,
+// F32 reverb_reflect_time, F32 reverb_decay_time) -- no "room_type". Map onto the
+// engine's setReverb(decay, wet level, delay).
+pub fn AIL_set_stream_reverb(s_opt: ?*Sample, reverb_level: f32, reverb_reflect_time: f32, reverb_decay_time: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    s.setReverb(room_type, level, reflect_time);
+    s.setReverb(reverb_decay_time, reverb_level, reverb_reflect_time);
 }
 // Real MSS: AIL_stream_info(HSTREAM, S32 *datarate, S32 *sndtype, S32 *length,
 // S32 *memory) — datarate in bytes/sec, sndtype a DIG_F format code, length in

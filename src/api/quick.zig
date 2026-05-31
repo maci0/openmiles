@@ -174,9 +174,12 @@ pub fn AIL_quick_halt(s_opt: ?*Sample) callconv(.winapi) void {
     // here would dangle every later AIL_quick_* call on the same handle.
     s.end();
 }
-pub fn AIL_quick_set_reverb(s_opt: ?*Sample, room_type: f32, level: f32, reflect_time: f32) callconv(.winapi) void {
+// SDK (mss.h): AIL_quick_set_reverb(HAUDIO, F32 reverb_level,
+// F32 reverb_reflect_time, F32 reverb_decay_time) -- no "room_type". The engine's
+// setReverb takes (decay, wet level, delay), so map accordingly.
+pub fn AIL_quick_set_reverb(s_opt: ?*Sample, reverb_level: f32, reverb_reflect_time: f32, reverb_decay_time: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    s.setReverb(room_type, level, reflect_time);
+    s.setReverb(reverb_decay_time, reverb_level, reverb_reflect_time);
 }
 pub fn AIL_quick_load_and_play(filename: [*:0]const u8, loop_count: i32, start_paused: i32) callconv(.winapi) ?*Sample {
     openmiles.clearLastError();
