@@ -2447,20 +2447,34 @@ test "v8 sample channel_count and loop_block report real state" {
     try testing.expectEqual(@as(i32, 0), api_v8b.AIL_sample_loop_block(s, &ls, &le));
 }
 
-test "v8 5.1 volume levels round-trip" {
+test "v8 5.1 volume levels round-trip and volume_pan channel order" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
     const s = try openmiles.Sample.init(drv);
     defer s.deinit();
+    // SDK channel order: f_left, f_right, b_left, b_right, center, sub.
     api_v8b.AIL_set_sample_51_volume_levels(s, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6);
-    var fl: f32 = 0;
-    var fr: f32 = 0;
-    var fc: f32 = 0;
-    var lfe: f32 = 0;
-    var bl: f32 = 0;
-    var br: f32 = 0;
-    api_v8b.AIL_sample_51_volume_levels(s, &fl, &fr, &fc, &lfe, &bl, &br);
-    try testing.expect(@abs(fc - 0.3) < 0.001 and @abs(lfe - 0.4) < 0.001 and @abs(br - 0.6) < 0.001);
+    var f_left: f32 = 0;
+    var f_right: f32 = 0;
+    var b_left: f32 = 0;
+    var b_right: f32 = 0;
+    var center: f32 = 0;
+    var sub: f32 = 0;
+    api_v8b.AIL_sample_51_volume_levels(s, &f_left, &f_right, &b_left, &b_right, &center, &sub);
+    try testing.expect(@abs(f_left - 0.1) < 0.001 and @abs(f_right - 0.2) < 0.001);
+    try testing.expect(@abs(b_left - 0.3) < 0.001 and @abs(b_right - 0.4) < 0.001);
+    try testing.expect(@abs(center - 0.5) < 0.001 and @abs(sub - 0.6) < 0.001);
+
+    // The levels reported after set_51_volume_pan must use the same channel
+    // order: with pan=fb_pan=0.5 and volume=1, center/sub carry their levels
+    // (1.0) while the four corners get left*front etc. -- center must NOT land
+    // in a back-channel slot (the bug this guards against).
+    api_v8b.AIL_set_sample_51_volume_pan(s, 1.0, 0.5, 0.5, 1.0, 1.0);
+    api_v8b.AIL_sample_51_volume_levels(s, &f_left, &f_right, &b_left, &b_right, &center, &sub);
+    try testing.expectEqual(@as(f32, 1.0), center); // sv*center_level = 1
+    try testing.expectEqual(@as(f32, 1.0), sub); // sv*sub_level = 1
+    const corner = 0.812252196 * 0.812252196; // (left=front)*front
+    try testing.expect(@abs(f_left - corner) < 0.001 and @abs(b_right - corner) < 0.001);
 }
 
 test "v8 WAV cue markers parse from cue/labl chunks" {

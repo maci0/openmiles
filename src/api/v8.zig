@@ -542,14 +542,16 @@ pub fn AIL_register_trace_callback(a0: ?*anyopaque) callconv(.winapi) void {
     _ = a0;
 
 }
-pub fn AIL_sample_51_volume_levels(s_opt: ?*Sample, fl: ?*f32, fr: ?*f32, fc: ?*f32, lfe: ?*f32, bl: ?*f32, br: ?*f32) callconv(.winapi) void {
+// Channel order matches the SDK header: f_left, f_right, b_left, b_right,
+// center, sub. v51_levels is stored in exactly this order.
+pub fn AIL_sample_51_volume_levels(s_opt: ?*Sample, f_left: ?*f32, f_right: ?*f32, b_left: ?*f32, b_right: ?*f32, center: ?*f32, sub: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    if (fl) |p| p.* = s.v51_levels[0];
-    if (fr) |p| p.* = s.v51_levels[1];
-    if (fc) |p| p.* = s.v51_levels[2];
-    if (lfe) |p| p.* = s.v51_levels[3];
-    if (bl) |p| p.* = s.v51_levels[4];
-    if (br) |p| p.* = s.v51_levels[5];
+    if (f_left) |p| p.* = s.v51_levels[0];
+    if (f_right) |p| p.* = s.v51_levels[1];
+    if (b_left) |p| p.* = s.v51_levels[2];
+    if (b_right) |p| p.* = s.v51_levels[3];
+    if (center) |p| p.* = s.v51_levels[4];
+    if (sub) |p| p.* = s.v51_levels[5];
 }
 pub fn AIL_sample_51_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32, fb_pan: ?*f32, center_level: ?*f32, lfe_level: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
@@ -627,13 +629,14 @@ pub fn AIL_sample_stage_property_v7(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque, a
     _ = a5;
     return 0;
 }
-pub fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, fl: f32, fr: f32, fc: f32, lfe: f32, bl: f32, br: f32) callconv(.winapi) void {
+// SDK header order: (S, f_left, f_right, b_left, b_right, center, sub).
+pub fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, f_left: f32, f_right: f32, b_left: f32, b_right: f32, center: f32, sub: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    s.v51_levels = .{ fl, fr, fc, lfe, bl, br }; // remember all six (round-trips via the getter)
+    s.v51_levels = .{ f_left, f_right, b_left, b_right, center, sub }; // canonical order, round-trips via the getter
     // Engine is stereo; drive volume from the front L/R pair.
-    s.setVolume(@intFromFloat(std.math.clamp(@max(fl, fr), 0.0, 1.0) * 127.0));
-    const sum = fl + fr;
-    if (sum > 0.0001) s.setPan(@intFromFloat(std.math.clamp(fr / sum, 0.0, 1.0) * 127.0));
+    s.setVolume(@intFromFloat(std.math.clamp(@max(f_left, f_right), 0.0, 1.0) * 127.0));
+    const sum = f_left + f_right;
+    if (sum > 0.0001) s.setPan(@intFromFloat(std.math.clamp(f_right / sum, 0.0, 1.0) * 127.0));
 }
 // SDK order (wavefile.cpp): (S, volume, pan, fb_pan, center_level, sub_level).
 pub fn AIL_set_sample_51_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32, fb_pan: f32, center_level: f32, sub_level: f32) callconv(.winapi) void {
@@ -665,12 +668,14 @@ pub fn AIL_set_sample_51_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32, fb_p
         left = sv * front;
         right = sv * back;
     }
-    s.v51_levels[0] = left * front; // FL
-    s.v51_levels[1] = right * front; // FR
-    s.v51_levels[2] = sv * center_level; // FC
-    s.v51_levels[3] = sv * sub_level; // LFE
-    s.v51_levels[4] = left * back; // BL
-    s.v51_levels[5] = right * back; // BR
+    // Store in the SDK's channel order (f_left, f_right, b_left, b_right,
+    // center, sub) so AIL_sample_51_volume_levels reports them correctly.
+    s.v51_levels[0] = left * front; // f_left
+    s.v51_levels[1] = right * front; // f_right
+    s.v51_levels[2] = left * back; // b_left
+    s.v51_levels[3] = right * back; // b_right
+    s.v51_levels[4] = sv * center_level; // center
+    s.v51_levels[5] = sv * sub_level; // sub
     // Drive the actual (stereo) engine output with the exact 2D law.
     s.setVolumePanF(volume, pan);
 }
