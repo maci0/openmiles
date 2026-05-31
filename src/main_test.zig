@@ -1315,6 +1315,53 @@ test "AIL_file_type classifies WAV/MIDI/XMIDI/OGG/VOC/BINKA/DLS/MLS (SDK)" {
     try testing.expectEqual(@as(i32, 0), api_file.AIL_file_type(&junk, junk.len)); // UNKNOWN
 }
 
+test "AIL_compress_ADPCM/decompress_ADPCM round-trip through raw-block AILSOUNDINFO" {
+    // Original 16-bit mono PCM: a slow ramp (ADPCM tracks it well).
+    var pcm: [2000]i16 = undefined;
+    for (&pcm, 0..) |*s, i| s.* = @intCast(@as(i32, @intCast(i % 200)) * 50 - 5000);
+    var in: openmiles.AILSOUNDINFO = .{};
+    in.data_ptr = @ptrCast(&pcm);
+    in.data_len = pcm.len * 2;
+    in.format = 1;
+    in.bits = 16;
+    in.channels = 1;
+    in.rate = 22050;
+
+    var adpcm_ptr: *anyopaque = undefined;
+    var adpcm_size: u32 = 0;
+    try testing.expect(dg.AIL_compress_ADPCM(&in, &adpcm_ptr, &adpcm_size) != 0);
+    defer std.c.free(adpcm_ptr);
+    const adpcm_wav = @as([*]const u8, @ptrCast(adpcm_ptr))[0..adpcm_size];
+
+    // AIL_WAV_info reports the raw ADPCM block data (format 0x11, bits 4), which
+    // is exactly what AIL_decompress_ADPCM expects (SDK convention).
+    var mid: openmiles.AILSOUNDINFO = .{};
+    try testing.expect(dg.AIL_WAV_info(@constCast(@ptrCast(adpcm_wav.ptr)), &mid) != 0);
+    try testing.expectEqual(@as(i32, 0x11), mid.format);
+    try testing.expectEqual(@as(i32, 4), mid.bits);
+
+    var out_ptr: *anyopaque = undefined;
+    var out_size: u32 = 0;
+    try testing.expect(dg.AIL_decompress_ADPCM(&mid, &out_ptr, &out_size) != 0);
+    defer std.c.free(out_ptr);
+
+    // The output is a valid 16-bit PCM WAV with the source's channels/rate.
+    var outi: openmiles.AILSOUNDINFO = .{};
+    try testing.expect(dg.AIL_WAV_info(out_ptr, &outi) != 0);
+    try testing.expectEqual(@as(i32, 1), outi.format); // PCM
+    try testing.expectEqual(@as(i32, 16), outi.bits);
+    try testing.expectEqual(@as(i32, 1), outi.channels);
+    try testing.expectEqual(@as(u32, 22050), outi.rate);
+    try testing.expect(outi.samples >= 1800 and outi.samples <= 2200); // ~2000, block-rounded
+
+    // SDK validation guards: non-IMA format and zero samples both return 0.
+    mid.format = 1;
+    try testing.expectEqual(@as(i32, 0), dg.AIL_decompress_ADPCM(&mid, &out_ptr, &out_size));
+    mid.format = 0x11;
+    mid.samples = 0;
+    try testing.expectEqual(@as(i32, 0), dg.AIL_decompress_ADPCM(&mid, &out_ptr, &out_size));
+}
+
 test "AIL_file_type detects MPEG audio by frame sync (MP3 = layer III)" {
     // ID3v2 header (10 bytes, size 0) then an MPEG-1 Layer III frame sync.
     var mp3 = [_]u8{ 'I', 'D', '3', 3, 0, 0, 0, 0, 0, 0, 0xFF, 0xFB, 0x90, 0x00, 0, 0, 0, 0 };

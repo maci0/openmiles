@@ -776,8 +776,19 @@ pub fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsi
 /// Decodes the ADPCM image described by `info` to a 16-bit PCM WAV. Allocates
 /// `outdata` (free with AIL_mem_free_lock) and sets `outsize`. Returns 1 on success.
 pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsize: *u32) callconv(.winapi) i32 {
-    if (info.data_ptr == null or info.data_len == 0) return 0;
-    const raw: []const u8 = @as([*]const u8, @ptrCast(@alignCast(info.data_ptr.?)))[0..info.data_len];
+    // SDK (miscutil.cpp): info->data_ptr is the RAW IMA ADPCM block data (as
+    // AIL_WAV_info reports it), not a WAV image. Validate exactly as the SDK:
+    // need data, samples, and an IMA ADPCM 4-bit source.
+    if (info.data_ptr == null or info.data_len == 0 or info.samples == 0) return 0;
+    if (info.format != 0x0011 or info.bits != 4) return 0; // "Data is not IMA compressed."
+    const adpcm: []const u8 = @as([*]const u8, @ptrCast(@alignCast(info.data_ptr.?)))[0..info.data_len];
+    // Reconstruct an IMA ADPCM WAV around the raw blocks so the decoder can read
+    // it (block_size/channels/rate come from the AILSOUNDINFO).
+    const src_channels: u16 = @intCast(@max(1, @min(2, info.channels)));
+    const block_size: u32 = if (info.block_size > 4 * @as(u32, src_channels)) info.block_size else 512;
+    const adpcm_wav = openmiles.wrapAdpcmInWav(openmiles.global_allocator, adpcm, block_size, src_channels, info.rate, info.samples) catch return 0;
+    defer openmiles.global_allocator.free(adpcm_wav);
+    const raw: []const u8 = adpcm_wav;
     var decoder: openmiles.ma.ma_decoder = undefined;
     var config = openmiles.ma.ma_decoder_config_init(openmiles.ma.ma_format_s16, 0, 0); // preserve channel/rate from source
     if (openmiles.ma.ma_decoder_init_memory(raw.ptr, raw.len, &config, &decoder) != openmiles.ma.MA_SUCCESS) return 0;
@@ -802,7 +813,8 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
         pcm.ensureTotalCapacity(openmiles.global_allocator, @intCast(hint)) catch {};
     }
 
-    var chunk_buf: [4096 * 8]u8 = undefined; // up to 4096 frames × 8 bytes (4ch 16-bit)
+    // align(2): miniaudio writes ma_int16 PCM here, which requires 2-byte alignment.
+    var chunk_buf: [4096 * 8]u8 align(2) = undefined; // up to 4096 frames × 8 bytes (4ch 16-bit)
     const chunk_frames: u64 = chunk_buf.len / @as(usize, bpf);
     while (true) {
         var fr: u64 = 0;

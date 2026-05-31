@@ -1,5 +1,63 @@
 const std = @import("std");
 
+/// Wrap already-encoded IMA ADPCM block data in a WAV container so a standard
+/// WAV decoder (miniaudio) can decode it. Mirrors buildAdpcmWav's header layout
+/// but copies the supplied ADPCM bytes verbatim instead of encoding. `block_size`
+/// is the ADPCM block alignment; `total_per_ch` is the decoded sample count per
+/// channel (the fact-chunk value).
+pub fn wrapAdpcmInWav(alloc: std.mem.Allocator, adpcm: []const u8, block_size: u32, channels: u16, rate: u32, total_per_ch: u32) ![]u8 {
+    if (channels == 0 or channels > 2) return error.InvalidParam;
+    const ch: u32 = channels;
+    // block_size is a u16 WAV field; reject out-of-range values so neither the
+    // u16 store nor the (block_size-4*ch)*8 math can overflow/panic.
+    if (block_size <= 4 * ch or block_size > 0xFFFF) return error.InvalidParam;
+    const spb: u32 = (block_size - 4 * ch) * 8 / (4 * ch) + 1;
+    if (adpcm.len > std.math.maxInt(u32)) return error.InvalidParam;
+    const data_size: u32 = @intCast(adpcm.len);
+    const avg_bps: u32 = @intCast(@min(@as(u64, rate) * block_size / spb, std.math.maxInt(u32)));
+    const header_sz: usize = 8 + 4 + 8 + 20 + 8 + 4 + 8;
+    var buf = try alloc.alloc(u8, header_sz + adpcm.len);
+    errdefer alloc.free(buf);
+    var o: usize = 0;
+    const wr16 = struct {
+        fn f(b: []u8, p: *usize, v: u16) void {
+            std.mem.writeInt(u16, b[p.*..][0..2], v, .little);
+            p.* += 2;
+        }
+    }.f;
+    const wr32 = struct {
+        fn f(b: []u8, p: *usize, v: u32) void {
+            std.mem.writeInt(u32, b[p.*..][0..4], v, .little);
+            p.* += 4;
+        }
+    }.f;
+    @memcpy(buf[o .. o + 4], "RIFF");
+    o += 4;
+    wr32(buf, &o, @intCast(buf.len - 8));
+    @memcpy(buf[o .. o + 4], "WAVE");
+    o += 4;
+    @memcpy(buf[o .. o + 4], "fmt ");
+    o += 4;
+    wr32(buf, &o, 20);
+    wr16(buf, &o, 0x0011); // WAVE_FORMAT_IMA_ADPCM
+    wr16(buf, &o, channels);
+    wr32(buf, &o, rate);
+    wr32(buf, &o, avg_bps);
+    wr16(buf, &o, @intCast(block_size));
+    wr16(buf, &o, 4); // bits per sample
+    wr16(buf, &o, 2); // cbSize
+    wr16(buf, &o, @intCast(spb)); // wSamplesPerBlock
+    @memcpy(buf[o .. o + 4], "fact");
+    o += 4;
+    wr32(buf, &o, 4);
+    wr32(buf, &o, total_per_ch);
+    @memcpy(buf[o .. o + 4], "data");
+    o += 4;
+    wr32(buf, &o, data_size);
+    @memcpy(buf[o..], adpcm);
+    return buf;
+}
+
 pub fn buildWavFromPcm(allocator: std.mem.Allocator, pcm_data: []const u8, channels: u16, sample_rate: u32, bits: u16) ![]u8 {
     if (pcm_data.len > std.math.maxInt(u32) - 44) return error.InvalidParam;
     // Header fields only — saturate rather than panic on absurd rate/channels.
