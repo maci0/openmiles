@@ -4,15 +4,19 @@
 //! `AIL_*` names. The real mss32.dll (9.3f/9.3k) exports the `Miles*` set; this
 //! module supplies them.
 //!
-//! Faithful behaviour is implemented for the parts that are self-contained: the
-//! event-system lifecycle (a linked list of systems rooted at `g_root`) and the
-//! per-system variable store (the `context == 0` "default system" path and the
-//! explicit-system-pointer path from `MilesGetVarInternal`/`Var_SetInstance`).
-//! The command queue, sound-bank loader, sound-instance manager and async file
-//! I/O are large interlocking subsystems (MilesEventExec.cpp, ~3800 LOC); until
-//! those are ported, their entry points return the same empty-state values the
-//! real functions return when nothing is loaded (no instances, no banks, queue
-//! empty), so games that probe them behave correctly rather than crashing.
+//! Implemented behaviour: the event-system lifecycle (a linked list of systems
+//! rooted at `g_root`), the per-system variable store, the soundbank container
+//! (banks register on load; events/sounds resolve by name across them), event
+//! enqueue/decode that creates tracked sound instances per start_sound step, the
+//! sound-instance lifecycle (PENDING→PLAYING→COMPLETE progressed by the bank
+//! sound duration), cache/purge bookkeeping (LoadedSoundCount) and the persisted-
+//! preset list (PersistCount). MilesGetEventLength resolves a sound's duration
+//! via the container.
+//!
+//! Not yet wired: actual audio playback through the miniaudio mixer (instances
+//! progress by duration, not by a playing sample), the ramp/blend/LFO/persist
+//! *application* to live sounds, and async file I/O (MilesAsync*) — those return
+//! safe defaults.
 //!
 //! Divergence from the SDK, deliberately: `MilesGetVarInternal` dereferences an
 //! arbitrary `i_Context` as a `U32*` to sniff the 'ESYS' tag. We instead verify
