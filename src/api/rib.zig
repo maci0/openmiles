@@ -380,3 +380,45 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
     if (wavsize) |o| o.* = @intCast(wav.len);
     return 1;
 }
+
+// --- v8.0j+ / v9 stdcall RIB exports ------------------------------------------
+// The RIB interface API switched from __cdecl (undecorated, v6-v8.0b) to
+// __stdcall (decorated `_RIB_*@N`, v8.0j onward). These thin wrappers carry the
+// stdcall convention for the v8+ export targets; the bodies above stay cdecl for
+// the v6/v7 undecorated exports.
+pub fn RIB_alloc_provider_handle_std(module: *anyopaque) callconv(.winapi) ?*Provider {
+    return RIB_alloc_provider_handle(module);
+}
+pub fn RIB_free_provider_handle_std(provider_opt: ?*Provider) callconv(.winapi) void {
+    RIB_free_provider_handle(provider_opt);
+}
+pub fn RIB_register_interface_std(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) void {
+    RIB_register_interface(provider_opt, name, count, entries);
+}
+pub fn RIB_unregister_interface_std(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) void {
+    RIB_unregister_interface(provider_opt, name, count, entries);
+}
+pub fn RIB_request_interface_std(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) i32 {
+    return RIB_request_interface(provider_opt, name, count, entries);
+}
+pub fn RIB_error_std() callconv(.winapi) [*:0]const u8 {
+    return RIB_error();
+}
+pub fn RIB_find_file_provider_std(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8) callconv(.winapi) ?*Provider {
+    return RIB_find_file_provider(name, property, filename);
+}
+pub fn RIB_load_provider_library_std(path: [*:0]const u8) callconv(.winapi) ?*Provider {
+    return RIB_load_provider_library(path);
+}
+pub fn RIB_free_provider_library_std(provider_opt: ?*Provider) callconv(.winapi) void {
+    RIB_free_provider_library(provider_opt);
+}
+pub fn RIB_request_interface_entry_std(provider_opt: ?*Provider, name: [*:0]const u8, entry_type: u32, entry_name: [*:0]const u8, token: ?*usize) callconv(.winapi) i32 {
+    return RIB_request_interface_entry(provider_opt, name, entry_type, entry_name, token);
+}
+pub fn RIB_enumerate_interface_std(provider_opt: ?*Provider, name: [*:0]const u8, entry_type: u32, next: *?*anyopaque, dest: *openmiles.RIB_INTERFACE_ENTRY) callconv(.winapi) i32 {
+    return RIB_enumerate_interface(provider_opt, name, entry_type, next, dest);
+}
+pub fn RIB_type_string_std(data: ?*const anyopaque, subtype: u32) callconv(.winapi) [*:0]const u8 {
+    return RIB_type_string(data, subtype);
+}
