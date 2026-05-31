@@ -1760,12 +1760,26 @@ test "AIL_size_processed_digital_audio counts points from data_len (SDK)" {
     info.rate = 8000;
     info.data_len = 1600; // 800 16-bit mono points
 
-    // Same rate/format (mono 16-bit) -> 800 points * 2 bytes = 1600.
-    try testing.expectEqual(@as(i32, 1600), dg.AIL_size_processed_digital_audio(8000, 1, 1, &info));
-    // Upsample 2x -> 1600 points * 2 = 3200.
-    try testing.expectEqual(@as(i32, 3200), dg.AIL_size_processed_digital_audio(16000, 1, 1, &info));
-    // Stereo 16-bit dest (format 3): point size = 4 -> 800 * 4 = 3200.
-    try testing.expectEqual(@as(i32, 3200), dg.AIL_size_processed_digital_audio(8000, 3, 1, &info));
+    // Same rate/format (mono 16-bit) -> 800 points * 2 bytes + 256 slop = 1856.
+    try testing.expectEqual(@as(i32, 1856), dg.AIL_size_processed_digital_audio(8000, 1, 1, &info));
+    // Upsample 2x -> 1600 points * 2 + 256 = 3456.
+    try testing.expectEqual(@as(i32, 3456), dg.AIL_size_processed_digital_audio(16000, 1, 1, &info));
+    // Stereo 16-bit dest (format 3): point size = 4 -> 800 * 4 + 256 = 3456.
+    try testing.expectEqual(@as(i32, 3456), dg.AIL_size_processed_digital_audio(8000, 3, 1, &info));
+}
+
+test "AIL_size_processed_digital_audio takes the max over multiple sources (SDK)" {
+    // Two AILMIXINFO sources; the function sizes for the largest after resampling.
+    var srcs = [_]openmiles.AILMIXINFO{ .{}, .{} };
+    srcs[0].Info = .{ .format = 1, .bits = 16, .channels = 1, .rate = 8000, .data_len = 1600 }; // 800 pts
+    srcs[1].Info = .{ .format = 1, .bits = 16, .channels = 1, .rate = 8000, .data_len = 4000 }; // 2000 pts (max)
+    // dest mono 16-bit @ 8000: 2000 * 2 + 256 = 4256.
+    try testing.expectEqual(@as(i32, 4256), dg.AIL_size_processed_digital_audio(8000, 1, 2, &srcs));
+    // Order independent: same result with the larger source first.
+    const tmp = srcs[0];
+    srcs[0] = srcs[1];
+    srcs[1] = tmp;
+    try testing.expectEqual(@as(i32, 4256), dg.AIL_size_processed_digital_audio(8000, 1, 2, &srcs));
 }
 
 test "Redbook init deinit and default state" {

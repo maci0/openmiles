@@ -117,6 +117,33 @@ pub const AILSOUNDINFO = if (mss_version >= 90) extern struct {
     initial_ptr: ?*const anyopaque = null,
 };
 
+/// ADPCMDATA (mss.h): per-stream IMA ADPCM decode state. Only used here to size
+/// AILMIXINFO correctly; UINTa fields are pointer-sized.
+pub const ADPCMDATA = extern struct {
+    blocksize: u32 = 0,
+    extrasamples: u32 = 0,
+    blockleft: u32 = 0,
+    step: u32 = 0,
+    savesrc: usize = 0,
+    sample: u32 = 0,
+    destend: usize = 0,
+    srcend: usize = 0,
+    samplesL: u32 = 0,
+    samplesR: u32 = 0,
+    moresamples: [16]u16 = [_]u16{0} ** 16,
+};
+
+/// AILMIXINFO (mss.h): one input to the software mixer. Begins with an
+/// AILSOUNDINFO, so an AILSOUNDINFO* and an AILMIXINFO* coincide for the first
+/// source; the full layout is needed to stride an array of sources.
+pub const AILMIXINFO = extern struct {
+    Info: AILSOUNDINFO = .{},
+    mss_adpcm: ADPCMDATA = .{},
+    src_fract: u32 = 0,
+    left_val: i32 = 0,
+    right_val: i32 = 0,
+};
+
 pub const provider_3d_attr_names = [_][*:0]const u8{
     "Rolloff factor",
     "Doppler factor",

@@ -591,22 +591,29 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
 pub fn AIL_size_processed_digital_audio(dest_rate: u32, dest_format: u32, num_srcs: i32, src: ?*const anyopaque) callconv(.winapi) i32 {
     if (num_srcs <= 0 or dest_rate == 0) return 0;
     const sp = src orelse return 0;
-    const info: *const openmiles.AILSOUNDINFO = @ptrCast(@alignCast(sp));
-    // Mirror AIL_API_size_processed_digital_audio (wavefile.cpp): count sample
-    // "points" (time positions = frames) from data_len, where ADPCM packs 2
-    // samples/byte, 16-bit uses 2 bytes/sample, and a stereo point is 2 samples.
-    var points: u64 = info.data_len;
-    if (info.format == 0x0011) { // WAVE_FORMAT_IMA_ADPCM
-        points <<= 1;
-    } else if (info.bits != 8) {
-        points >>= 1;
+    // Mirror AIL_API_size_processed_digital_audio (wavefile.cpp): a "point" is one
+    // time position (mono sample / stereo pair). ADPCM packs 2 samples/byte,
+    // 16-bit uses 2 bytes/sample, a stereo point is 2 samples. Take the largest
+    // source's point count after resampling to dest_rate, then size the dest.
+    const srcs: [*]const openmiles.AILMIXINFO = @ptrCast(@alignCast(sp));
+    var max_points: u64 = 0;
+    var i: usize = 0;
+    while (i < @as(usize, @intCast(num_srcs))) : (i += 1) {
+        const info = &srcs[i].Info;
+        var points: u64 = info.data_len;
+        if (info.format == 0x0011) { // WAVE_FORMAT_IMA_ADPCM
+            points <<= 1;
+        } else if (info.bits != 8) {
+            points >>= 1;
+        }
+        if (info.channels == 2) points >>= 1;
+        const src_rate: u64 = if (info.rate == 0) dest_rate else info.rate;
+        points = points *| dest_rate / src_rate;
+        if (points > max_points) max_points = points;
     }
-    if (info.channels == 2) points >>= 1;
-    const src_rate: u64 = if (info.rate == 0) dest_rate else info.rate;
-    points = points *| dest_rate / src_rate;
     // dest point size = (stereo?2:1) * (16-bit?2:1); DIG_F bit0=16BITS, bit1=STEREO.
     const dest_point_size: u64 = (if ((dest_format & 2) != 0) @as(u64, 2) else 1) * (if ((dest_format & 1) != 0) @as(u64, 2) else 1);
-    return @intCast(@min(points *| dest_point_size, std.math.maxInt(i32)));
+    return @intCast(@min(dest_point_size *| max_points +| 256, std.math.maxInt(i32))); // +256 slop (SDK)
 }
 pub fn AIL_ms_count() callconv(.winapi) u32 {
     return openmiles.getMsCount();

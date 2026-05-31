@@ -620,7 +620,13 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_3d.AIL_set_3D_sample_file(@as(?*anyopaque, @ptrCast(h3)), scp);
     _ = api_3d.AIL_set_3D_sample_info(@as(?*anyopaque, @ptrCast(h3)), @as(?*anyopaque, &info));
     _ = api_digital.AIL_load_sample_buffer(hs, ri, scp, rsz);
-    _ = api_digital.AIL_size_processed_digital_audio(ru, ru, rszi, &info);
+    {
+        // Pass a real AILMIXINFO array with a count that matches its length so
+        // the multi-source loop stays in bounds (the SDK trusts num_srcs).
+        var mix = [_]openmiles.AILMIXINFO{ .{ .Info = info }, .{ .Info = info }, .{ .Info = info }, .{ .Info = info } };
+        const n: i32 = @min(@max(rszi, -1), 4);
+        _ = api_digital.AIL_size_processed_digital_audio(ru, ru, n, &mix);
+    }
     _ = api_digital.AIL_process_digital_audio(scp, rszi, ru, ru, rszi, scp);
     _ = api_dls.AIL_DLS_get_info(hm, scp, scp);
     {
