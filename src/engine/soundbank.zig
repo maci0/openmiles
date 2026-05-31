@@ -15,11 +15,64 @@ const std = @import("std");
 pub const BANK_TAG: u32 = (@as(u32, 'B') << 24) | (@as(u32, 'A') << 16) | (@as(u32, 'N') << 8) | @as(u32, 'K');
 pub const BANK_VERSION: i32 = 8;
 
-// Count of banks currently loaded, maintained automatically by loadFromMemory /
-// Bank.deinit. The Miles event-system state reports this as LoadedBankCount.
-var g_loaded_count: u32 = 0;
+// Global registry of currently-loaded banks (the SDK's "container"). Banks add
+// themselves in loadFromMemory and remove themselves in Bank.deinit, so the
+// container can resolve an event or sound by name across every loaded bank —
+// what MilesGetEventLength / event enqueue look it up through.
+var g_registry: std.ArrayListUnmanaged(*Bank) = .empty;
+var g_registry_lock: std.atomic.Value(bool) = .init(false);
+// The registry backing uses a process-stable allocator, independent of any
+// bank's own allocator (which in tests may be the leak-checked test allocator).
+const registry_alloc = std.heap.page_allocator;
+
+fn regLock() void {
+    while (g_registry_lock.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {}
+}
+fn regUnlock() void {
+    g_registry_lock.store(false, .release);
+}
+
+fn registryAdd(bank: *Bank) void {
+    regLock();
+    defer regUnlock();
+    g_registry.append(registry_alloc, bank) catch {};
+}
+fn registryRemove(bank: *Bank) void {
+    regLock();
+    defer regUnlock();
+    for (g_registry.items, 0..) |b, i| {
+        if (b == bank) {
+            _ = g_registry.swapRemove(i);
+            return;
+        }
+    }
+}
+
 pub fn loadedCount() u32 {
-    return @atomicLoad(u32, &g_loaded_count, .seq_cst);
+    regLock();
+    defer regUnlock();
+    return @intCast(g_registry.items.len);
+}
+
+/// Resolve a named event's step bytecode across all loaded banks (Container_GetEvent).
+pub fn containerFindEvent(event_name: []const u8) ?[*]const u8 {
+    regLock();
+    defer regUnlock();
+    for (g_registry.items) |b| {
+        if (b.findEventContents(event_name)) |ev| return ev;
+    }
+    return null;
+}
+
+/// Resolve a named sound's playback duration (ms) across all loaded banks
+/// (Container_GetSound -> MILESBANKSOUNDINFO.DurationMs).
+pub fn containerSoundDurationMs(sound_name: []const u8) ?u32 {
+    regLock();
+    defer regUnlock();
+    for (g_registry.items) |b| {
+        if (b.soundDurationMs(sound_name)) |ms| return ms;
+    }
+    return null;
 }
 
 // Field byte offsets in the on-disk SoundBank header (32-bit pointer layout).
@@ -209,8 +262,25 @@ pub const Bank = struct {
         return 0;
     }
 
+    /// MILESBANKSOUNDINFO.DurationMs (Sound+12 Info, +24) for a named sound.
+    pub fn soundDurationMs(self: *const Bank, sound_name: []const u8) ?u32 {
+        const count = self.countFor(.sounds);
+        var i: u32 = 0;
+        while (i < count) : (i += 1) {
+            const entry = @as(usize, self.tableOff(.sounds)) + @as(usize, i) * asset_entry_size;
+            const name_off = self.rdU32(entry);
+            if (name_off == 0 or name_off >= self.meta.len) continue;
+            const nm = std.mem.sliceTo(self.meta[name_off..], 0);
+            if (!std.ascii.eqlIgnoreCase(nm, sound_name)) continue;
+            const data_off = self.rdU32(entry + 4);
+            if (data_off + 40 > self.meta.len) return 0;
+            return self.rdU32(data_off + 36);
+        }
+        return null;
+    }
+
     pub fn deinit(self: *Bank) void {
-        _ = @atomicRmw(u32, &g_loaded_count, .Sub, 1, .seq_cst);
+        registryRemove(self);
         self.allocator.free(self.meta);
         self.allocator.free(self.filename);
         self.allocator.destroy(self);
@@ -248,6 +318,6 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
             if (base == 0 or end > msz) return error.BadAssetTable;
         }
     }
-    _ = @atomicRmw(u32, &g_loaded_count, .Add, 1, .seq_cst);
+    registryAdd(self);
     return self;
 }

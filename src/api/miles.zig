@@ -296,8 +296,29 @@ pub fn MilesFindEvent(bank: ?*anyopaque, event_name: ?[*:0]const u8) callconv(.w
     const name = std.mem.span(event_name orelse return null);
     return b.findEventContents(name);
 }
+// MilesGetEventLength(name): find the event across loaded banks, locate its first
+// start_sound step, and return that sound's playback duration in ms
+// (Container_GetEvent -> first start sound -> Container_GetSound.DurationMs).
 pub fn MilesGetEventLength(event_name: ?[*:0]const u8) callconv(.winapi) i32 {
-    _ = event_name;
+    const name = std.mem.span(event_name orelse return 0);
+    const ev = openmiles.soundbank.containerFindEvent(name) orelse return 0;
+    var step: openmiles.event.EVENT_STEP_INFO = undefined;
+    var scratch: [512]u8 align(8) = undefined;
+    var cur: ?[*:0]const u8 = @ptrCast(ev);
+    var guard: u32 = 0;
+    while (cur != null and guard < 256) : (guard += 1) {
+        const next = openmiles.event.nextStep(cur.?, &step, &scratch);
+        if (next == null) break;
+        if (step.type == @intFromEnum(openmiles.event.StepType.start_sound)) {
+            const sn = step.u.start.soundname;
+            const sp = sn.str orelse return 0;
+            const full = sp[0..@intCast(@max(sn.len, 0))];
+            const cut = std.mem.indexOfScalar(u8, full, ':') orelse full.len;
+            if (openmiles.soundbank.containerSoundDurationMs(full[0..cut])) |ms| return @intCast(ms);
+            return 0;
+        }
+        cur = next;
+    }
     return 0;
 }
 pub fn MilesTextDumpEventSystem() callconv(.winapi) ?[*:0]u8 {

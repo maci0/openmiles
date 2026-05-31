@@ -2702,3 +2702,43 @@ test "AIL_sound_asset_info copies MILESBANKSOUNDINFO and returns buffer requirem
     // querying with null output buffers still returns the requirement
     try testing.expectEqual(@as(i32, 19), api_v9.AIL_sound_asset_info(@ptrCast(bank), cstr("shot"), null, null));
 }
+
+test "MilesGetEventLength resolves first start-sound duration via the container" {
+    // Build a start-sound event that references sound "boom".
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v8b.AIL_add_start_sound_event_step(ev, cstr("boom:0:"), null, 0, null, null, null, null, null, null, 0, 0, 0, 0, 0, 0, null, 0, 0, 0, 0, 0, 0, 0);
+    const estr = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    defer std.c.free(estr);
+    const etext = std.mem.span(@as([*:0]const u8, @ptrCast(estr)));
+    const elen = etext.len + 1;
+
+    var img: [512]u8 = undefined;
+    @memset(&img, 0);
+    const sb = openmiles.soundbank;
+    std.mem.writeInt(u32, img[0..4], sb.BANK_TAG, .little);
+    std.mem.writeInt(i32, img[4..8], 8, .little);
+    std.mem.writeInt(u32, img[20..24], 60, .little); // events table @60
+    std.mem.writeInt(u32, img[32..36], 68, .little); // sounds table @68
+    std.mem.writeInt(u32, img[40..44], 1, .little); // event count
+    std.mem.writeInt(u32, img[52..56], 1, .little); // sound count
+    @memcpy(img[56..60], "b\x00\x00\x00");
+    std.mem.writeInt(u32, img[60..64], 76, .little); // Events[0].NameOffset -> "evt"
+    std.mem.writeInt(u32, img[64..68], 100, .little); // Events[0].DataOffset -> event text
+    std.mem.writeInt(u32, img[68..72], 82, .little); // Sounds[0].NameOffset -> "boom"
+    std.mem.writeInt(u32, img[72..76], 300, .little); // Sounds[0].DataOffset -> Sound struct
+    @memcpy(img[76..80], "evt\x00");
+    @memcpy(img[82..87], "boom\x00");
+    @memcpy(img[100 .. 100 + elen], etext.ptr[0..elen]);
+    // Sound struct @300: DurationMs is at Sound+12(Info)+24 = 336.
+    std.mem.writeInt(u32, img[336..340], 4500, .little);
+    std.mem.writeInt(i32, img[8..12], 344, .little); // meta_size
+
+    const bank = try openmiles.soundbank.loadFromMemory(openmiles.global_allocator, "fx.mbnk", img[0..344]);
+    defer bank.deinit();
+    try testing.expectEqual(@as(i32, 4500), api_miles_t.MilesGetEventLength(cstr2("evt")));
+    try testing.expectEqual(@as(i32, 0), api_miles_t.MilesGetEventLength(cstr2("missing")));
+}
+
+fn cstr2(s: [*:0]const u8) [*:0]const u8 {
+    return s;
+}
