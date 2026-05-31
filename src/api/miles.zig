@@ -106,6 +106,23 @@ fn cacheClear() void {
     for (g_cached.items) |n| openmiles.global_allocator.free(n);
     g_cached.clearRetainingCapacity();
 }
+
+// Persisted presets (persist event steps); enumerated by MilesEnumeratePresetPersists
+// and counted in MILESEVENTSTATE.PersistCount. Keyed (deduped) by persist name.
+var g_persists: std.ArrayListUnmanaged([:0]u8) = .empty;
+
+fn persistAdd(name: []const u8) void {
+    if (name.len == 0) return;
+    for (g_persists.items) |n| {
+        if (std.mem.eql(u8, n, name)) return; // dedup by name
+    }
+    const dup = openmiles.global_allocator.dupeZ(u8, name) catch return;
+    g_persists.append(openmiles.global_allocator, dup) catch openmiles.global_allocator.free(dup);
+}
+fn persistClear() void {
+    for (g_persists.items) |n| openmiles.global_allocator.free(n);
+    g_persists.clearRetainingCapacity();
+}
 // Apply a cache/purge step's namelist (built by the decoder) to the cache set.
 fn applyCacheStep(load: anytype, add: bool) void {
     const list = load.namelist orelse return;
@@ -184,6 +201,9 @@ fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: 
                 applyCacheStep(step.u.load, true);
             } else if (step.type == @intFromEnum(openmiles.event.StepType.purge_sounds)) {
                 applyCacheStep(step.u.load, false);
+            } else if (step.type == @intFromEnum(openmiles.event.StepType.persist)) {
+                const pn = step.u.persist.name;
+                if (pn.str) |sp| persistAdd(sp[0..@intCast(@max(pn.len, 0))]);
             }
             cur = next;
         }
@@ -305,6 +325,7 @@ pub fn MilesShutdownEventSystem() callconv(.winapi) void {
     for (g_instances.items) |inst| destroyInstance(inst);
     g_instances.clearRetainingCapacity();
     cacheClear();
+    persistClear();
     var s = g_root;
     while (s) |sys| {
         const nxt = sys.next;
@@ -319,6 +340,7 @@ pub fn MilesGetEventSystemState(system: ?*anyopaque, state: ?*MILESEVENTSTATE) c
     o.* = std.mem.zeroes(MILESEVENTSTATE);
     o.LoadedBankCount = @intCast(openmiles.soundbank.loadedCount());
     o.LoadedSoundCount = @intCast(g_cached.items.len);
+    o.PersistCount = @intCast(g_persists.items.len);
     updateInstances();
     for (g_instances.items) |inst| {
         if (inst.status == STATUS_PLAYING) o.PlayingSoundCount += 1;
@@ -461,9 +483,17 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
 }
 pub fn MilesEnumeratePresetPersists(system: ?*anyopaque, io_next: ?*?*anyopaque, out_name: ?*?[*:0]const u8) callconv(.winapi) i32 {
     _ = system;
-    if (io_next) |n| n.* = null;
-    if (out_name) |o| o.* = null;
-    return 0;
+    const np = io_next orelse return 0;
+    const first = @intFromPtr(np.*) == std.math.maxInt(usize) or @intFromPtr(np.*) == 0;
+    const idx: usize = if (first) 0 else @intFromPtr(np.*);
+    if (idx >= g_persists.items.len) {
+        np.* = @ptrFromInt(idx);
+        if (out_name) |o| o.* = null;
+        return 0;
+    }
+    if (out_name) |o| o.* = g_persists.items[idx].ptr;
+    np.* = @ptrFromInt(idx + 1);
+    return 1;
 }
 pub fn MilesSetSoundStartOffset(instance: usize, offset: i32, is_ms: i32) callconv(.winapi) void {
     _ = instance;

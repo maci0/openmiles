@@ -2822,3 +2822,33 @@ test "cache_sounds/purge_sounds events update LoadedSoundCount" {
 
     api_miles_t.MilesShutdownEventSystem();
 }
+
+test "persist events populate PersistCount and MilesEnumeratePresetPersists" {
+    api_miles_t.MilesShutdownEventSystem(); // clear persists/cache/instances
+
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    // persist(preset, name, labels, isdynamic): the persist's identity is "name".
+    _ = api_v8b.AIL_add_persist_preset_event_step(ev, cstr("preset_a"), cstr("save1"), cstr(""), 0);
+    const e1 = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    _ = api_miles_t.MilesEnqueueEvent(@ptrCast(e1), null, 0, 0x2, 0);
+
+    var state: api_miles_t.MILESEVENTSTATE = undefined;
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(@as(i32, 1), state.PersistCount);
+
+    var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var name: ?[*:0]const u8 = null;
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesEnumeratePresetPersists(null, &nx, &name));
+    try testing.expectEqualStrings("save1", std.mem.span(name.?));
+    try testing.expectEqual(@as(i32, 0), api_miles_t.MilesEnumeratePresetPersists(null, &nx, &name));
+
+    // Re-persisting the same name is deduped.
+    const ev2 = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v8b.AIL_add_persist_preset_event_step(ev2, cstr("preset_b"), cstr("save1"), cstr(""), 0);
+    const e2 = api_v8b.AIL_close_event(ev2) orelse return error.NoStr;
+    _ = api_miles_t.MilesEnqueueEvent(@ptrCast(e2), null, 0, 0x2, 0);
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(@as(i32, 1), state.PersistCount);
+
+    api_miles_t.MilesShutdownEventSystem();
+}
