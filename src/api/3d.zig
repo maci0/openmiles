@@ -300,6 +300,17 @@ pub fn AIL_3D_sample_occlusion(s: ?*anyopaque) callconv(.winapi) f32 {
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     return sample.occlusion;
 }
+// 6.5/6.6 only: H3DSAMPLE exclusion attenuation hint (stored, queried back).
+pub fn AIL_set_3D_sample_exclusion(s: ?*anyopaque, exclusion: f32) callconv(.winapi) void {
+    const p = s orelse return;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
+    sample.exclusion = std.math.clamp(exclusion, 0.0, 1.0);
+}
+pub fn AIL_3D_sample_exclusion(s: ?*anyopaque) callconv(.winapi) f32 {
+    const p = s orelse return 0.0;
+    const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
+    return sample.exclusion;
+}
 pub fn AIL_set_3D_sample_preference(s: ?*anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const p = s orelse return;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));

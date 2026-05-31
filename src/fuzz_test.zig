@@ -25,6 +25,7 @@ const api_3d = @import("api/3d.zig");
 const api_timer = @import("api/timer.zig");
 const api_v8 = @import("api/v8.zig");
 const api_v7 = @import("api/v7.zig");
+const api_stream = @import("api/stream.zig");
 
 fn freeLock(p: ?*anyopaque) void {
     if (p) |ptr| api_memory.AIL_mem_free_lock(ptr);
@@ -267,6 +268,39 @@ test "fuzz Sample scalar setters with adversarial values" {
             5 => s.setPosition(@bitCast(iv)),
             6 => s.setLoopBlock(iv, adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)]),
             7 => s.setReverb(f1, f2, f3),
+            else => unreachable,
+        }
+    }
+}
+
+test "fuzz 6.5/6.6 stream + DLS reverb-level setters with adversarial floats" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE5A);
+    const rand = prng.random();
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const md = try openmiles.MidiDriver.init(testing.allocator);
+    defer md.deinit();
+    const pcm = [_]u8{0} ** 256;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const s = openmiles.Sample.init(driver) catch continue;
+        defer s.deinit();
+        s.loadFromMemory(wav, false) catch continue;
+        const a = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        const b = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
+        var o1: f32 = 0;
+        var o2: f32 = 0;
+        switch (rand.intRangeAtMost(u8, 0, 6)) {
+            0 => api_stream.AIL_set_stream_volume_levels(s, a, b),
+            1 => api_stream.AIL_stream_volume_levels(s, &o1, &o2),
+            2 => api_stream.AIL_set_stream_reverb_levels(s, a, b),
+            3 => api_stream.AIL_set_stream_low_pass_cut_off(s, a),
+            4 => api_stream.AIL_set_stream_volume_pan(s, a, b),
+            5 => api_dls.AIL_DLS_set_reverb_levels(md, a, b),
+            6 => api_dls.AIL_DLS_get_reverb_levels(md, &o1, &o2),
             else => unreachable,
         }
     }
@@ -575,12 +609,13 @@ test "fuzz 3D spatial exports with adversarial floats (C-ABI)" {
         const b = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
         const c = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
         const iv = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
-        switch (rand.intRangeAtMost(u8, 0, 4)) {
+        switch (rand.intRangeAtMost(u8, 0, 5)) {
             0 => api_3d.AIL_set_3D_position(obj, a, b, c),
             1 => api_3d.AIL_set_3D_velocity(obj, a, b, c, a),
             2 => api_3d.AIL_set_3D_orientation(obj, a, b, c, a, b, c),
             3 => api_3d.AIL_set_3D_sample_distances(obj, a, b),
             4 => api_3d.AIL_set_3D_sample_cone(obj, a, b, iv),
+            5 => api_3d.AIL_set_3D_sample_exclusion(obj, a),
             else => unreachable,
         }
     }

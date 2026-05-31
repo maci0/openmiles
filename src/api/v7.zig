@@ -564,6 +564,10 @@ pub fn AIL_room_type_v7(dig_opt: ?*DigitalDriver) callconv(.winapi) i32 {
 pub fn AIL_set_room_type_v7(dig_opt: ?*DigitalDriver, room_type: i32) callconv(.winapi) void {
     AIL_set_room_type(dig_opt, 0, room_type);
 }
+// 6.5/6.6-only spelling of the master room-type setter (@8: driver, room_type).
+pub fn AIL_set_digital_master_room_type(dig_opt: ?*DigitalDriver, room_type: i32) callconv(.winapi) void {
+    AIL_set_room_type(dig_opt, 0, room_type);
+}
 pub fn AIL_digital_master_reverb_v7(dig_opt: ?*DigitalDriver, reverb_time: ?*f32, reverb_predelay: ?*f32, reverb_damping: ?*f32) callconv(.winapi) void {
     AIL_digital_master_reverb(dig_opt, 0, reverb_time, reverb_predelay, reverb_damping);
 }

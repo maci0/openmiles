@@ -161,6 +161,18 @@ pub fn AIL_DLS_set_reverb(driver_opt: ?*MidiDriver, room_type: f32, level: f32, 
     driver.dls_reverb_level = level;
     driver.dls_reverb_reflect_time = reflect_time;
 }
+// 6.5/6.6 only: dry/wet level pair for the DLS device's reverb send (HDLSDEVICE
+// is our MidiDriver). Stored and queried back; not actively mixed.
+pub fn AIL_DLS_set_reverb_levels(driver_opt: ?*MidiDriver, dry_level: f32, wet_level: f32) callconv(.winapi) void {
+    const driver = driver_opt orelse return;
+    driver.dls_reverb_dry_level = dry_level;
+    driver.dls_reverb_level = wet_level;
+}
+pub fn AIL_DLS_get_reverb_levels(driver_opt: ?*MidiDriver, dry_level: ?*f32, wet_level: ?*f32) callconv(.winapi) void {
+    const driver = driver_opt orelse return;
+    if (dry_level) |p| p.* = driver.dls_reverb_dry_level;
+    if (wet_level) |p| p.* = driver.dls_reverb_level;
+}
 pub fn AIL_DLS_open(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, freq: u32, bits: i32, channels: i32, flags: u32) callconv(.winapi) ?*openmiles.MidiDriver {
     _ = dig_opt orelse return null;
     _ = seq;

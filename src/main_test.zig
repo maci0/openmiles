@@ -2099,6 +2099,9 @@ test "v9 sample groups operate on samples by id" {
 }
 
 const api_v7 = @import("api/v7.zig");
+const api_stream = @import("api/stream.zig");
+const api_3d = @import("api/3d.zig");
+const api_dls = @import("api/dls.zig");
 test "v9 update_sample_3D_position dead-reckons by velocity" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
@@ -2197,6 +2200,70 @@ test "v7 master reverb decay/predelay/damping all round-trip" {
     try testing.expect(@abs(t - 1.5) < 0.001);
     try testing.expect(@abs(pd - 0.02) < 0.001); // formerly hardcoded to 0
     try testing.expect(@abs(dmp - 0.7) < 0.001); // formerly hardcoded to 0
+}
+
+test "6.5/6.6 stream volume/reverb/low-pass round-trip" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+
+    // Stream volume levels reconstruct like the sample form.
+    api_stream.AIL_set_stream_volume_levels(s, 0.8, 0.2);
+    var l: f32 = 0;
+    var r: f32 = 0;
+    api_stream.AIL_stream_volume_levels(s, &l, &r);
+    try testing.expect(l > r and @abs(l - 0.8) < 0.02 and @abs(r - 0.2) < 0.02);
+
+    // Combined volume/pan getter returns what the setter stored.
+    api_stream.AIL_set_stream_volume_pan(s, 0.5, 0.75);
+    var vol: f32 = 0;
+    var pan: f32 = 0;
+    api_stream.AIL_stream_volume_pan(s, &vol, &pan);
+    try testing.expect(@abs(vol - 0.5) < 0.02 and @abs(pan - 0.75) < 0.02);
+
+    // Reverb dry/wet stored independently.
+    api_stream.AIL_set_stream_reverb_levels(s, 0.3, 0.6);
+    var dry: f32 = 0;
+    var wet: f32 = 0;
+    api_stream.AIL_stream_reverb_levels(s, &dry, &wet);
+    try testing.expect(@abs(dry - 0.3) < 0.001 and @abs(wet - 0.6) < 0.001);
+
+    // Low-pass cutoff routes through the attached filter (like the sample form);
+    // with no filter attached it is a safe no-op returning 0.
+    api_stream.AIL_set_stream_low_pass_cut_off(s, 4000.0);
+    try testing.expectEqual(@as(f32, 0), api_stream.AIL_stream_low_pass_cut_off(s));
+}
+
+test "6.5/6.6 3D sample exclusion round-trips" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample3D.init(drv);
+    defer s.deinit();
+    api_3d.AIL_set_3D_sample_exclusion(s, 0.42);
+    try testing.expect(@abs(api_3d.AIL_3D_sample_exclusion(s) - 0.42) < 0.001);
+    // Clamped to [0,1].
+    api_3d.AIL_set_3D_sample_exclusion(s, 5.0);
+    try testing.expect(@abs(api_3d.AIL_3D_sample_exclusion(s) - 1.0) < 0.001);
+}
+
+test "6.5/6.6 DLS reverb levels and master room type round-trip" {
+    const md = try openmiles.MidiDriver.init(testing.allocator);
+    defer md.deinit();
+    api_dls.AIL_DLS_set_reverb_levels(md, 0.25, 0.7);
+    var dry: f32 = 0;
+    var wet: f32 = 0;
+    api_dls.AIL_DLS_get_reverb_levels(md, &dry, &wet);
+    try testing.expect(@abs(dry - 0.25) < 0.001 and @abs(wet - 0.7) < 0.001);
+
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    api_v7.AIL_set_digital_master_room_type(drv, 3);
+    try testing.expectEqual(@as(i32, 3), api_v7.AIL_room_type_v7(drv));
 }
 
 test "v9 system-state push/pop tracks depth and restores volume" {

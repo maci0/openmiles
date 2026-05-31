@@ -23,6 +23,9 @@ pub const MidiDriver = struct {
     dls_reverb_room_type: f32 = 0.0,
     dls_reverb_level: f32 = 0.0,
     dls_reverb_reflect_time: f32 = 0.0,
+    // 6.5/6.6 AIL_DLS_*_reverb_levels: separate wet/dry pair (wet reuses
+    // dls_reverb_level; dry defaults to fully-wet-passthrough 1.0).
+    dls_reverb_dry_level: f32 = 1.0,
     // Approximate soundfont memory footprint, captured at load time
     soundfont_size_bytes: u32 = 0,
     // DLS processor callback (stored but not invoked; TSF has its own pipeline)

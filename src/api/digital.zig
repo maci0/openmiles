@@ -1231,14 +1231,14 @@ comptime {
             .{ .name = "AIL_set_sample_volume_levels", .stack_size = 12, .ver = 60 },
             .{ .name = "AIL_sample_volume_levels", .stack_size = 12, .ver = 60 },
             .{ .name = "AIL_sample_volume_pan", .stack_size = 12, .ver = 60 },
-            // low-pass cutoff: v7 was per-sample only (narrow); v8 added the
-            // channel parameter (wide @8/@12), kept through v9.
+            // low-pass cutoff first appears in 6.5 as the narrow no-channel
+            // form (set @8 / get @4), carried through 7.x. v8 widened it with a
+            // channel parameter (set @12 / get @8), kept through v9. 6.0/6.1
+            // never exported it, so it is gated to 65+.
             .{ .name = "AIL_set_sample_low_pass_cut_off", .stack_size = 12, .ver = 80 },
-            .{ .name = "AIL_set_sample_low_pass_cut_off", .stack_size = 12, .ver = 60, .ver_max = 69 },
-            .{ .name = "AIL_set_sample_low_pass_cut_off", .stack_size = 8, .ver = 70, .ver_max = 70, .symbol = "AIL_set_sample_low_pass_cut_off_v7" },
+            .{ .name = "AIL_set_sample_low_pass_cut_off", .stack_size = 8, .ver = 65, .ver_max = 70, .symbol = "AIL_set_sample_low_pass_cut_off_v7" },
             .{ .name = "AIL_sample_low_pass_cut_off", .stack_size = 8, .ver = 80 },
-            .{ .name = "AIL_sample_low_pass_cut_off", .stack_size = 8, .ver = 60, .ver_max = 69 },
-            .{ .name = "AIL_sample_low_pass_cut_off", .stack_size = 4, .ver = 70, .ver_max = 70, .symbol = "AIL_sample_low_pass_cut_off_v7" },
+            .{ .name = "AIL_sample_low_pass_cut_off", .stack_size = 4, .ver = 65, .ver_max = 70, .symbol = "AIL_sample_low_pass_cut_off_v7" },
             .{ .name = "AIL_set_sample_reverb_levels", .stack_size = 12, .ver = 60 },
             .{ .name = "AIL_sample_reverb_levels", .stack_size = 12, .ver = 60 },
             .{ .name = "AIL_set_sample_info", .stack_size = 8, .ver = 60 },
@@ -1269,12 +1269,26 @@ comptime {
             .{ .name = "AIL_room_type", .stack_size = 4, .ver = 60, .ver_max = 80, .symbol = "AIL_room_type_v7" },
             .{ .name = "AIL_redbook_set_volume_level", .stack_size = 8, .ver = 60 },
             .{ .name = "AIL_redbook_volume_level", .stack_size = 4, .ver = 60 },
-            // Arity dips in v7: 6.x and 8.x+ take (HAUDIO, S32 channel, F32) @12;
-            // 7.x drops the channel arg to (HAUDIO, F32) @8.
-            .{ .name = "AIL_quick_set_low_pass_cut_off", .stack_size = 12, .ver = 60, .ver_max = 69 },
-            .{ .name = "AIL_quick_set_low_pass_cut_off", .stack_size = 8, .ver = 70, .ver_max = 70, .symbol = "AIL_quick_set_low_pass_cut_off_v7" },
+            // 6.5-7.x take the narrow (HAUDIO, F32) @8; v8+ widened it to
+            // (HAUDIO, S32 channel, F32) @12.
+            .{ .name = "AIL_quick_set_low_pass_cut_off", .stack_size = 8, .ver = 65, .ver_max = 70, .symbol = "AIL_quick_set_low_pass_cut_off_v7" },
             .{ .name = "AIL_quick_set_low_pass_cut_off", .stack_size = 12, .ver = 80 },
             .{ .name = "AIL_quick_set_reverb_levels", .stack_size = 12, .ver = 60 },
+            // 6.5/6.6-only APIs (added in 6.5, dropped in 7.x): per-stream
+            // volume/pan/reverb/low-pass, H3DSAMPLE exclusion, DLS reverb-level
+            // pair, and the 6.x master room-type spelling.
+            .{ .name = "AIL_set_stream_volume_levels", .stack_size = 12, .ver = 65, .ver_max = 66 },
+            .{ .name = "AIL_stream_volume_levels", .stack_size = 12, .ver = 65, .ver_max = 66 },
+            .{ .name = "AIL_stream_volume_pan", .stack_size = 12, .ver = 65, .ver_max = 66 },
+            .{ .name = "AIL_set_stream_reverb_levels", .stack_size = 12, .ver = 65, .ver_max = 66 },
+            .{ .name = "AIL_stream_reverb_levels", .stack_size = 12, .ver = 65, .ver_max = 66 },
+            .{ .name = "AIL_set_stream_low_pass_cut_off", .stack_size = 8, .ver = 65, .ver_max = 66 },
+            .{ .name = "AIL_stream_low_pass_cut_off", .stack_size = 4, .ver = 65, .ver_max = 66 },
+            .{ .name = "AIL_set_3D_sample_exclusion", .stack_size = 8, .ver = 65, .ver_max = 66 },
+            .{ .name = "AIL_3D_sample_exclusion", .stack_size = 4, .ver = 65, .ver_max = 66 },
+            .{ .name = "AIL_DLS_set_reverb_levels", .stack_size = 12, .ver = 65, .ver_max = 66 },
+            .{ .name = "AIL_DLS_get_reverb_levels", .stack_size = 12, .ver = 65, .ver_max = 66 },
+            .{ .name = "AIL_set_digital_master_room_type", .stack_size = 8, .ver = 65, .ver_max = 66 },
             .{ .name = "AIL_stream_sample_handle", .stack_size = 4, .ver = 60 },
             .{ .name = "AIL_DLS_sample_handle", .stack_size = 4, .ver = 60 },
             .{ .name = "AIL_find_filter", .stack_size = 8, .ver = 60 },

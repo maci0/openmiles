@@ -1325,6 +1325,7 @@ pub const Sample3D = struct {
     eos_callback: usize = 0,
     obstruction: f32 = 0.0,
     occlusion: f32 = 0.0,
+    exclusion: f32 = 0.0,
     effects_level: f32 = 0.0,
     auto_update: bool = false,
     velocity_x: f32 = 0.0,

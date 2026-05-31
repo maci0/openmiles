@@ -247,3 +247,58 @@ pub fn AIL_set_filter_stream_preference(s_opt: ?*Sample, name: [*:0]const u8, va
         filter.setAttribute(std.mem.span(name), v.*);
     }
 }
+
+// --- 6.5/6.6-only stream attribute APIs --------------------------------------
+// These existed only in MSS 6.5/6.6 (dropped in 7.x). A stream handle is a
+// Sample, so each mirrors the corresponding AIL_*_sample_* form exactly.
+
+// Per-channel volume levels: store as volume=max(L,R), pan=R/(L+R); the getter
+// reconstructs L/R (lossless when both were <=1). Matches AIL_sample_volume_levels.
+pub fn AIL_set_stream_volume_levels(s_opt: ?*Sample, left_level: f32, right_level: f32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    const vol = std.math.clamp(@max(left_level, right_level), 0.0, 1.0);
+    s.setVolume(@intFromFloat(vol * 127.0));
+    const sum = left_level + right_level;
+    if (sum > 0.0001) s.setPan(@intFromFloat(std.math.clamp(right_level / sum, 0.0, 1.0) * 127.0));
+}
+pub fn AIL_stream_volume_levels(s_opt: ?*Sample, left_level: ?*f32, right_level: ?*f32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    const vol: f32 = @as(f32, @floatFromInt(s.original_volume)) / 127.0;
+    const pan: f32 = @as(f32, @floatFromInt(s.original_pan)) / 127.0;
+    var l = vol;
+    var r = vol;
+    if (pan > 0.5) {
+        l = if (pan > 0.0) vol * (1.0 - pan) / pan else 0.0;
+    } else if (pan < 0.5) {
+        r = if (pan < 1.0) vol * pan / (1.0 - pan) else 0.0;
+    }
+    if (left_level) |p| p.* = l;
+    if (right_level) |p| p.* = r;
+}
+// Combined volume/pan getter (the setter, AIL_set_stream_volume_pan, is above).
+pub fn AIL_stream_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    if (volume) |p| p.* = @as(f32, @floatFromInt(s.original_volume)) / 127.0;
+    if (pan) |p| p.* = @as(f32, @floatFromInt(s.original_pan)) / 127.0;
+}
+// Reverb dry/wet levels (stored independently). Matches AIL_sample_reverb_levels.
+pub fn AIL_set_stream_reverb_levels(s_opt: ?*Sample, dry_level: f32, wet_level: f32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    s.reverb_dry_level = dry_level;
+    s.setReverb(s.reverb_room_type, std.math.clamp(wet_level, 0.0, 1.0), if (s.reverb_reflect_time > 0) s.reverb_reflect_time else 0.05);
+}
+pub fn AIL_stream_reverb_levels(s_opt: ?*Sample, dry_level: ?*f32, wet_level: ?*f32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    if (dry_level) |p| p.* = s.reverb_dry_level;
+    if (wet_level) |p| p.* = s.reverb_level;
+}
+// Low-pass cutoff (no-channel form, like the 6.5-7.x sample variant).
+pub fn AIL_set_stream_low_pass_cut_off(s_opt: ?*Sample, cut_off: f32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    if (s.attached_filter) |f| f.setCutoff(@floatCast(cut_off));
+}
+pub fn AIL_stream_low_pass_cut_off(s_opt: ?*Sample) callconv(.winapi) f32 {
+    const s = s_opt orelse return 0;
+    if (s.attached_filter) |f| return @floatCast(f.getCutoff());
+    return 0;
+}
