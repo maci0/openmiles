@@ -1153,6 +1153,28 @@ test "AILSOUNDINFO layout: channel_mask present only for v9+" {
     try testing.expect(@offsetOf(T, "samples") < @offsetOf(T, "block_size"));
 }
 
+test "AIL_WAV_info DIG_F_* format codes (PCM and ADPCM mask)" {
+    const allocator = testing.allocator;
+    // PCM stereo 16-bit -> DIG_F_STEREO_16 (bit1|bit0) = 3.
+    const pcm = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 2, 44100, 16);
+    defer allocator.free(wav);
+    var info: openmiles.AILSOUNDINFO = .{};
+    try testing.expect(dg.AIL_WAV_info(@ptrCast(wav.ptr), &info) != 0);
+    try testing.expectEqual(@as(i32, 3), info.format);
+
+    // IMA ADPCM (wFormatTag=0x11) stereo -> DIG_F_ADPCM_STEREO_16 = 4|2|1 = 7.
+    var adpcm = [_]u8{
+        'R', 'I', 'F', 'F', 44, 0, 0, 0, 'W', 'A', 'V', 'E',
+        'f', 'm', 't', ' ', 16, 0, 0, 0,
+        0x11, 0, 2, 0, 0x44, 0xAC, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0,
+        'd', 'a', 't', 'a', 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    };
+    var info2: openmiles.AILSOUNDINFO = .{};
+    try testing.expect(dg.AIL_WAV_info(&adpcm, &info2) != 0);
+    try testing.expectEqual(@as(i32, 7), info2.format);
+}
+
 test "Redbook init deinit and default state" {
     const allocator = testing.allocator;
     const rb = try openmiles.Redbook.init(allocator, 0);

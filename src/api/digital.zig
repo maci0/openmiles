@@ -607,9 +607,15 @@ pub fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
     // For PCM (format 1): bytes_per_frame = channels * (bits/8)
     // For ADPCM (format 2) and others: block_align from fmt chunk is used
     // Note: out.samples is left 0 for non-PCM formats (ADPCM etc.) because per-sample counting requires decompression.
-    const fmt: i32 = switch (num_channels) {
-        1 => if (bits_per_sample <= 8) 0 else 1,
-        else => if (bits_per_sample <= 8) 2 else 3,
+    // AILSOUNDINFO.format is a DIG_F_* code: bit0=16BITS, bit1=STEREO, bit2=ADPCM
+    // (per wavefile.cpp). ADPCM always decodes to 16-bit, so DIG_F_ADPCM_*_16 set
+    // both the ADPCM (4) and 16BITS (1) masks. IMA ADPCM = 0x11, MS ADPCM = 0x02.
+    const is_adpcm = (audio_format == 0x0011 or audio_format == 0x0002);
+    const fmt: i32 = if (is_adpcm)
+        (4 | 1 | (if (num_channels >= 2) @as(i32, 2) else 0)) // DIG_F_ADPCM_{MONO,STEREO}_16
+    else switch (num_channels) {
+        1 => if (bits_per_sample <= 8) 0 else 1, // DIG_F_MONO_8 / DIG_F_MONO_16
+        else => if (bits_per_sample <= 8) 2 else 3, // DIG_F_STEREO_8 / DIG_F_STEREO_16
     };
     const bytes_per_frame: u32 = if (audio_format == 1 and bits_per_sample > 0)
         @as(u32, num_channels) * (@as(u32, bits_per_sample) / 8)
