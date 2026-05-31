@@ -701,7 +701,12 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
     var length_frames: u64 = 0;
     _ = openmiles.ma.ma_decoder_get_length_in_pcm_frames(&decoder, &length_frames);
     if (length_frames > 0) {
-        pcm.ensureTotalCapacity(openmiles.global_allocator, @intCast(length_frames * bpf)) catch {};
+        // length_frames is decoder-reported (header-derived, so spoofable); a
+        // saturating multiply + clamp keeps the capacity hint from overflowing
+        // or panicking the usize cast on the 32-bit target. The decode loop is
+        // bounded by real reads, so an inflated hint only over-reserves.
+        const hint: u64 = @min(length_frames *| @as(u64, bpf), std.math.maxInt(usize));
+        pcm.ensureTotalCapacity(openmiles.global_allocator, @intCast(hint)) catch {};
     }
 
     var chunk_buf: [4096 * 8]u8 = undefined; // up to 4096 frames × 8 bytes (4ch 16-bit)

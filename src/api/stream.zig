@@ -201,7 +201,9 @@ pub fn AIL_stream_info(s_opt: ?*Sample, datarate: ?*i32, sndtype: ?*i32, length:
         var length_frames: u64 = 0;
         _ = openmiles.ma.ma_sound_get_length_in_pcm_frames(&s.sound, &length_frames);
         const bpf: u64 = bps64 * ch;
-        if (length) |p| p.* = @intCast(@min(length_frames * bpf, std.math.maxInt(i32)));
+        // Saturate the multiply: length_frames is decoder/header-derived, so the
+        // product could otherwise overflow u64 before the clamp.
+        if (length) |p| p.* = @intCast(@min(length_frames *| bpf, std.math.maxInt(i32)));
         if (memory) |p| p.* = 0; // working-buffer size not separately tracked
     } else {
         if (datarate) |p| p.* = 44100 * 2 * 2;

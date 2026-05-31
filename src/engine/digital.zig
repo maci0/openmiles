@@ -1745,7 +1745,9 @@ pub const Sample3D = struct {
     pub fn getLength(self: *Sample3D) u32 {
         if (self.is_initialized) {
             const bpf = self.bytesPerFrame();
-            return @as(u32, @intCast(@min(self.cached_length_frames * @as(u64, bpf), std.math.maxInt(u32))));
+            // Saturating multiply: cached_length_frames is header-derived and
+            // could overflow u64 before the clamp.
+            return @as(u32, @intCast(@min(self.cached_length_frames *| @as(u64, bpf), std.math.maxInt(u32))));
         }
         return 0;
     }
