@@ -1221,6 +1221,19 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
+test "AIL_file_type_named delegates to file_type, special-cases voice suffixes" {
+    const allocator = testing.allocator;
+    const pcm = [_]u8{0} ** 16;
+    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 8000, 16);
+    defer allocator.free(wav);
+    // No special suffix -> delegates to AIL_file_type(data) -> PCM_WAV (1).
+    try testing.expectEqual(@as(i32, 1), api_v8b.AIL_file_type_named(@ptrCast(wav.ptr), "sound.wav", @intCast(wav.len)));
+    // .V24 suffix (case-insensitive) -> AILFILETYPE_V24_VOICE (18), ignoring data.
+    try testing.expectEqual(@as(i32, 18), api_v8b.AIL_file_type_named(@ptrCast(wav.ptr), "voice.V24", @intCast(wav.len)));
+    // Null data, no special suffix -> 0 (UNKNOWN).
+    try testing.expectEqual(@as(i32, 0), api_v8b.AIL_file_type_named(null, "x.bin", 0));
+}
+
 test "AIL_sample_loaded_len reports remaining unplayed bytes" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

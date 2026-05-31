@@ -298,11 +298,23 @@ pub fn AIL_enumerate_sound_presets(bank: ?*anyopaque, next: ?*anyopaque, list: ?
     _ = list;
     return enumerateAssets(bank, next, name, .presets);
 }
-pub fn AIL_file_type_named(a0: ?*anyopaque, a1: ?*anyopaque, a2: u32) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    return 0;
+fn suffixIgnoreCase(s: []const u8, suf: []const u8) bool {
+    return s.len >= suf.len and std.ascii.eqlIgnoreCase(s[s.len - suf.len ..], suf);
+}
+// SDK (AIL_API_file_type_named, miscutil.cpp): special-case the Voxware/Speex
+// voice suffixes by filename, otherwise delegate to AIL_file_type(data, size).
+pub fn AIL_file_type_named(data: ?*anyopaque, filename: ?[*:0]const u8, size: u32) callconv(.winapi) i32 {
+    if (filename) |fp| {
+        const name = std.mem.span(fp);
+        if (suffixIgnoreCase(name, ".v12")) return 17; // AILFILETYPE_V12_VOICE
+        if (suffixIgnoreCase(name, ".v24")) return 18; // AILFILETYPE_V24_VOICE
+        if (suffixIgnoreCase(name, ".v29")) return 19; // AILFILETYPE_V29_VOICE
+        if (suffixIgnoreCase(name, ".speex8")) return 21; // AILFILETYPE_S8_VOICE
+        if (suffixIgnoreCase(name, ".speex16")) return 22; // AILFILETYPE_S16_VOICE
+        if (suffixIgnoreCase(name, ".speex32")) return 23; // AILFILETYPE_S32_VOICE
+    }
+    const d = data orelse return 0;
+    return @import("file.zig").AIL_file_type(d, size);
 }
 pub fn AIL_filter_property(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
