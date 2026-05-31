@@ -2089,14 +2089,20 @@ pub const Sample3D = struct {
         ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
     }
     pub fn setOrientation(self: *Sample3D, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) void {
-        self.orient_fx = fx;
-        self.orient_fy = fy;
-        self.orient_fz = fz;
-        self.orient_ux = ux;
-        self.orient_uy = uy;
-        self.orient_uz = uz;
+        // SDK (m3d.cpp) normalizes face & up before storing; the getter returns
+        // the stored unit vectors. (Zero-length vectors are left unchanged.)
+        var face = [3]f32{ fx, fy, fz };
+        var up = [3]f32{ ux, uy, uz };
+        normalize3(&face);
+        normalize3(&up);
+        self.orient_fx = face[0];
+        self.orient_fy = face[1];
+        self.orient_fz = face[2];
+        self.orient_ux = up[0];
+        self.orient_uy = up[1];
+        self.orient_uz = up[2];
         if (self.is_initialized) {
-            ma.ma_sound_set_direction(&self.sound, fx, fy, -fz);
+            ma.ma_sound_set_direction(&self.sound, face[0], face[1], -face[2]);
         }
     }
 };

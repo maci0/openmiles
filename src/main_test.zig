@@ -1050,6 +1050,11 @@ test "Sample3D setOrientation stores all components" {
     try testing.expectEqual(@as(f32, 0.0), s.orient_ux);
     try testing.expectEqual(@as(f32, 1.0), s.orient_uy);
     try testing.expectEqual(@as(f32, 0.0), s.orient_uz);
+
+    // SDK normalizes face & up: (0,0,5)->(0,0,1), (0,3,4)->(0,0.6,0.8).
+    s.setOrientation(0.0, 0.0, 5.0, 0.0, 3.0, 4.0);
+    try testing.expect(@abs(s.orient_fz - 1.0) < 0.001 and @abs(s.orient_fx) < 0.001);
+    try testing.expect(@abs(s.orient_uy - 0.6) < 0.001 and @abs(s.orient_uz - 0.8) < 0.001);
 }
 
 test "Sample loadFromMemory initializes sample" {
