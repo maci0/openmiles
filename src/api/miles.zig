@@ -40,6 +40,118 @@ pub const MILESEVENTSTATE = extern struct {
     SoundDataMemory: i32,
 };
 
+// MILESEVENTSOUNDINFO (mss.h) — one active sound instance, filled by
+// MilesEnumerateSoundInstances.
+pub const MILESEVENTSOUNDINFO = extern struct {
+    QueuedID: u64 = 0,
+    InstanceID: u64 = 0,
+    EventID: u64 = 0,
+    Sample: ?*anyopaque = null,
+    Stream: ?*anyopaque = null,
+    UserBuffer: ?*anyopaque = null,
+    UserBufferLen: i32 = 0,
+    Status: i32 = 0,
+    Flags: u32 = 0,
+    UsedDelay: i32 = 0,
+    UsedVolume: f32 = 0,
+    UsedPitch: f32 = 0,
+    UsedSound: ?[*:0]const u8 = null,
+    HasCompletionEvent: i32 = 0,
+};
+
+// MILESEVENTSOUNDSTATUS bitmask (mss.h).
+const STATUS_PENDING: i32 = 0x1;
+const STATUS_PLAYING: i32 = 0x2;
+const STATUS_COMPLETE: i32 = 0x4;
+
+// One tracked sound instance. The miniaudio mixer is not wired to the event VM
+// yet, so instances are tracked and progressed by the sound's bank duration
+// rather than by actual playback — enough for game logic that gates on whether a
+// queued sound is still playing.
+const SoundInstance = struct {
+    queued_id: u64,
+    instance_id: u64,
+    status: i32,
+    start_ms: u64,
+    duration_ms: u32,
+    sound_name: [:0]u8, // owned
+    user_buffer: ?*anyopaque,
+    user_buffer_len: i32,
+};
+
+var g_instances: std.ArrayListUnmanaged(*SoundInstance) = .empty;
+var g_next_id: u64 = 1;
+
+fn nextId() u64 {
+    const id = g_next_id;
+    g_next_id += 1;
+    return id;
+}
+
+// Progress PLAYING instances to COMPLETE once their bank duration has elapsed.
+fn updateInstances() void {
+    const now = openmiles.getMsCount64();
+    for (g_instances.items) |inst| {
+        if (inst.status == STATUS_PLAYING and inst.duration_ms != 0) {
+            if (now -% inst.start_ms >= inst.duration_ms) inst.status = STATUS_COMPLETE;
+        }
+    }
+}
+
+fn destroyInstance(inst: *SoundInstance) void {
+    openmiles.global_allocator.free(inst.sound_name);
+    openmiles.global_allocator.destroy(inst);
+}
+
+// Create a tracked instance for a start-sound step. soundname is taken up to the
+// first ':'; its duration is resolved from the loaded-bank container.
+fn createInstance(queued_id: u64, soundname_full: []const u8, user_buffer: ?*anyopaque, ubl: i32) void {
+    const cut = std.mem.indexOfScalar(u8, soundname_full, ':') orelse soundname_full.len;
+    const sound = soundname_full[0..cut];
+    const dur: u32 = openmiles.soundbank.containerSoundDurationMs(sound) orelse 0;
+    const name = openmiles.global_allocator.dupeZ(u8, sound) catch return;
+    const inst = openmiles.global_allocator.create(SoundInstance) catch {
+        openmiles.global_allocator.free(name);
+        return;
+    };
+    inst.* = .{
+        .queued_id = queued_id,
+        .instance_id = nextId(),
+        .status = STATUS_PENDING,
+        .start_ms = openmiles.getMsCount64(),
+        .duration_ms = dur,
+        .sound_name = name,
+        .user_buffer = user_buffer,
+        .user_buffer_len = ubl,
+    };
+    g_instances.append(openmiles.global_allocator, inst) catch {
+        destroyInstance(inst);
+    };
+}
+
+// Parse an event's bytecode and create an instance per start-sound step.
+fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: i32) u64 {
+    if (event == null) return 0;
+    const qid = nextId();
+    if (event) |ev| {
+        var step: openmiles.event.EVENT_STEP_INFO = undefined;
+        var scratch: [512]u8 align(8) = undefined;
+        var cur: ?[*:0]const u8 = @ptrCast(ev);
+        var guard: u32 = 0;
+        while (cur != null and guard < 256) : (guard += 1) {
+            const next = openmiles.event.nextStep(cur.?, &step, &scratch);
+            if (next == null) break;
+            if (step.type == @intFromEnum(openmiles.event.StepType.start_sound)) {
+                const sn = step.u.start.soundname;
+                if (sn.str) |sp| createInstance(qid, sp[0..@intCast(@max(sn.len, 0))], user_buffer, ubl);
+            }
+            cur = next;
+        }
+        if (flags & ENQUEUE_FREE_EVENT != 0) std.c.free(@constCast(@ptrCast(ev)));
+    }
+    return qid;
+}
+
 const Var = struct {
     next: ?*Var = null,
     name: []u8,
@@ -150,6 +262,8 @@ pub fn MilesAddEventSystem(driver: ?*anyopaque) callconv(.winapi) ?*anyopaque {
 }
 
 pub fn MilesShutdownEventSystem() callconv(.winapi) void {
+    for (g_instances.items) |inst| destroyInstance(inst);
+    g_instances.clearRetainingCapacity();
     var s = g_root;
     while (s) |sys| {
         const nxt = sys.next;
@@ -163,6 +277,10 @@ pub fn MilesGetEventSystemState(system: ?*anyopaque, state: ?*MILESEVENTSTATE) c
     const o = state orelse return;
     o.* = std.mem.zeroes(MILESEVENTSTATE);
     o.LoadedBankCount = @intCast(openmiles.soundbank.loadedCount());
+    updateInstances();
+    for (g_instances.items) |inst| {
+        if (inst.status == STATUS_PLAYING) o.PlayingSoundCount += 1;
+    }
     if (resolveSystem(@intFromPtr(system))) |sys| {
         o.CommandBufferSize = sys.command_buffer_size;
     }
@@ -185,75 +303,118 @@ pub fn MilesGetVarF(context: usize, name: [*:0]const u8, out_value: ?*f32) callc
     return getVar(context, name, true, out_value orelse return 0);
 }
 
-// --- command queue (events are consumed/freed; no executor yet) --------------
-
-fn consumeEvent(event: ?[*]const u8, flags: i32) u64 {
-    if (event) |e| {
-        if (flags & ENQUEUE_FREE_EVENT != 0) std.c.free(@constCast(@ptrCast(e)));
-    }
-    return 0;
-}
+// --- event queue + sound instances -------------------------------------------
 
 pub fn MilesEnqueueEvent(event: ?[*]const u8, user_buffer: ?*anyopaque, user_buffer_len: i32, flags: i32, event_filter: u64) callconv(.winapi) u64 {
-    _ = user_buffer;
-    _ = user_buffer_len;
     _ = event_filter;
-    return consumeEvent(event, flags);
+    return enqueueParse(event, user_buffer, user_buffer_len, flags);
 }
 pub fn MilesEnqueueEventContext(context: ?*anyopaque, event: ?[*]const u8, user_buffer: ?*anyopaque, user_buffer_len: i32, flags: i32, event_filter: u64) callconv(.winapi) u64 {
     _ = context;
-    _ = user_buffer;
-    _ = user_buffer_len;
     _ = event_filter;
-    return consumeEvent(event, flags);
+    return enqueueParse(event, user_buffer, user_buffer_len, flags);
 }
 pub fn MilesEnqueueEventByName(name: ?[*:0]const u8) callconv(.winapi) u64 {
-    _ = name;
-    return 0;
+    const nm = std.mem.span(name orelse return 0);
+    const ev = openmiles.soundbank.containerFindEvent(nm) orelse return 0;
+    return enqueueParse(ev, null, 0, 0);
 }
+// Processing moves new (pending) instances to playing and starts their clock.
 pub fn MilesBeginEventQueueProcessing() callconv(.winapi) i32 {
+    const now = openmiles.getMsCount64();
+    for (g_instances.items) |inst| {
+        if (inst.status == STATUS_PENDING) {
+            inst.status = STATUS_PLAYING;
+            inst.start_ms = now;
+        }
+    }
     return 0;
 }
+// Completion reaps finished instances.
 pub fn MilesCompleteEventQueueProcessing() callconv(.winapi) i32 {
+    updateInstances();
+    var i: usize = 0;
+    while (i < g_instances.items.len) {
+        if (g_instances.items[i].status == STATUS_COMPLETE) {
+            destroyInstance(g_instances.swapRemove(i));
+        } else i += 1;
+    }
     return 0;
 }
-pub fn MilesClearEventQueue() callconv(.winapi) void {}
-
-// --- sound instances (none active until the executor is ported) --------------
+pub fn MilesClearEventQueue() callconv(.winapi) void {
+    for (g_instances.items) |inst| destroyInstance(inst);
+    g_instances.clearRetainingCapacity();
+}
 
 pub fn MilesStartSoundInstance(bank: ?*anyopaque, sound_name: ?[*:0]const u8, loop_count: u32, stream: i32, labels: ?[*:0]const u8, user_buffer: ?*anyopaque, user_buffer_len: i32, user_buffer_flags: i32) callconv(.winapi) u64 {
-    _ = bank;
-    _ = sound_name;
     _ = loop_count;
     _ = stream;
     _ = labels;
-    _ = user_buffer;
-    _ = user_buffer_len;
     _ = user_buffer_flags;
-    return 0;
+    _ = bank;
+    const nm = sound_name orelse return 0;
+    const qid = nextId();
+    createInstance(qid, std.mem.span(nm), user_buffer, user_buffer_len);
+    return qid;
+}
+// Stop/Pause/Resume operate over instances matching the status filter (filter 0
+// means all). Returns the number affected. Without a wired mixer, pause/resume
+// have no audible effect but report the matching count for API faithfulness.
+fn matchFilter(inst: *const SoundInstance, filter: u64) bool {
+    return filter == 0 or (@as(u64, @intCast(inst.status)) & filter) != 0;
 }
 pub fn MilesStopSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.winapi) u64 {
     _ = labels;
-    _ = filter;
-    return 0;
+    var n: u64 = 0;
+    var i: usize = 0;
+    while (i < g_instances.items.len) {
+        if (matchFilter(g_instances.items[i], filter)) {
+            destroyInstance(g_instances.swapRemove(i));
+            n += 1;
+        } else i += 1;
+    }
+    return n;
 }
 pub fn MilesPauseSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.winapi) u64 {
     _ = labels;
-    _ = filter;
-    return 0;
+    var n: u64 = 0;
+    for (g_instances.items) |inst| {
+        if (matchFilter(inst, filter)) n += 1;
+    }
+    return n;
 }
 pub fn MilesResumeSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.winapi) u64 {
-    _ = labels;
-    _ = filter;
-    return 0;
+    return MilesPauseSoundInstances(labels, filter);
 }
 pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque, status: i32, labels: ?[*:0]const u8, search_for_id: u64, out_info: ?*anyopaque) callconv(.winapi) i32 {
     _ = system;
-    _ = status;
     _ = labels;
     _ = search_for_id;
-    _ = out_info;
-    if (io_next) |n| n.* = null;
+    const np = io_next orelse return 0;
+    updateInstances();
+    const filter: u64 = if (status == 0) 0xffffffff else @intCast(@as(u32, @bitCast(status)));
+    // MSS_FIRST sentinel ((HMSSENUM)-1) starts a fresh walk at index 0.
+    const first = @intFromPtr(np.*) == std.math.maxInt(usize);
+    var idx: usize = if (first) 0 else @intFromPtr(np.*);
+    while (idx < g_instances.items.len) : (idx += 1) {
+        const inst = g_instances.items[idx];
+        if ((@as(u64, @intCast(inst.status)) & filter) == 0) continue;
+        if (out_info) |oi| {
+            const o: *MILESEVENTSOUNDINFO = @ptrCast(@alignCast(oi));
+            o.* = .{
+                .QueuedID = inst.queued_id,
+                .InstanceID = inst.instance_id,
+                .EventID = inst.queued_id,
+                .UserBuffer = inst.user_buffer,
+                .UserBufferLen = inst.user_buffer_len,
+                .Status = inst.status,
+                .UsedSound = inst.sound_name.ptr,
+            };
+        }
+        np.* = @ptrFromInt(idx + 1);
+        return 1;
+    }
+    np.* = @ptrFromInt(idx);
     return 0;
 }
 pub fn MilesEnumeratePresetPersists(system: ?*anyopaque, io_next: ?*?*anyopaque, out_name: ?*?[*:0]const u8) callconv(.winapi) i32 {

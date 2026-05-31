@@ -2742,3 +2742,47 @@ test "MilesGetEventLength resolves first start-sound duration via the container"
 fn cstr2(s: [*:0]const u8) [*:0]const u8 {
     return s;
 }
+
+test "Miles sound instance lifecycle: enqueue, enumerate, process, stop" {
+    _ = api_miles_t.MilesStopSoundInstances(null, 0); // clear any leftover
+
+    // Bank with sound "boom" of 4500 ms.
+    var img: [200]u8 = undefined;
+    @memset(&img, 0);
+    const sb = openmiles.soundbank;
+    std.mem.writeInt(u32, img[0..4], sb.BANK_TAG, .little);
+    std.mem.writeInt(i32, img[4..8], 8, .little);
+    std.mem.writeInt(u32, img[32..36], 60, .little); // sounds table @60
+    std.mem.writeInt(u32, img[52..56], 1, .little); // sound count
+    std.mem.writeInt(u32, img[60..64], 76, .little); // Sounds[0].NameOffset
+    std.mem.writeInt(u32, img[64..68], 80, .little); // Sounds[0].DataOffset -> Sound @80
+    @memcpy(img[76..81], "boom\x00");
+    std.mem.writeInt(u32, img[116..120], 4500, .little); // DurationMs at Sound+36
+    std.mem.writeInt(i32, img[8..12], 120, .little);
+    const bank = try openmiles.soundbank.loadFromMemory(openmiles.global_allocator, "fx.mbnk", img[0..120]);
+    defer bank.deinit();
+
+    // A start-sound event referencing "boom".
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v8b.AIL_add_start_sound_event_step(ev, cstr("boom:0:"), null, 0, null, null, null, null, null, null, 0, 0, 0, 0, 0, 0, null, 0, 0, 0, 0, 0, 0, 0);
+    const estr = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    const qid = api_miles_t.MilesEnqueueEvent(@ptrCast(estr), null, 0, 0x2, 0); // FREE_EVENT
+    defer _ = api_miles_t.MilesStopSoundInstances(null, 0);
+    try testing.expect(qid != 0);
+
+    var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize)); // MSS_FIRST
+    var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0x1, null, 0, @ptrCast(&info)));
+    try testing.expectEqualStrings("boom", std.mem.span(info.UsedSound.?));
+    try testing.expectEqual(@as(i32, 0x1), info.Status); // PENDING
+    try testing.expectEqual(@as(i32, 0), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0x1, null, 0, @ptrCast(&info)));
+
+    _ = api_miles_t.MilesBeginEventQueueProcessing();
+    var state: api_miles_t.MILESEVENTSTATE = undefined;
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(@as(i32, 1), state.PlayingSoundCount);
+
+    try testing.expectEqual(@as(u64, 1), api_miles_t.MilesStopSoundInstances(null, 0));
+    nx = @ptrFromInt(std.math.maxInt(usize));
+    try testing.expectEqual(@as(i32, 0), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, null, 0, @ptrCast(&info)));
+}
