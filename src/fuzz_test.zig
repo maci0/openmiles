@@ -273,6 +273,37 @@ test "fuzz Sample scalar setters with adversarial values" {
     }
 }
 
+test "fuzz AIL_next_event_step with tight output buffers (scratch bounds)" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE61);
+    const rand = prng.random();
+    const ssz = @sizeOf(openmiles.event.EVENT_STEP_INFO);
+
+    // Adversarial NUL-terminated "event strings" plus output buffers sized from
+    // exactly ssz (zero scratch) to ssz+32 (tiny scratch). Buffers are allocated
+    // at the exact reported size so any write past `wlimit` is a real overrun the
+    // test allocator catches.
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        var ev: [128]u8 = undefined;
+        const evlen = rand.intRangeLessThan(usize, 1, ev.len);
+        rand.bytes(ev[0..evlen]);
+        // Bias the first byte toward a valid step type digit ('0'..'9').
+        if (rand.boolean()) ev[0] = '0' + rand.intRangeAtMost(u8, 0, 9);
+        ev[evlen] = 0; // NUL-terminate
+
+        const extra = rand.intRangeAtMost(usize, 0, 32);
+        const buf = testing.allocator.alignedAlloc(u8, .of(openmiles.event.EVENT_STEP_INFO), ssz + extra) catch continue;
+        defer testing.allocator.free(buf);
+
+        var sout: ?*openmiles.event.EVENT_STEP_INFO = null;
+        var cur: ?*const anyopaque = @ptrCast(&ev);
+        var guard: u32 = 0;
+        while (cur != null and guard < 32) : (guard += 1) {
+            cur = api_v8.AIL_next_event_step(cur, &sout, buf.ptr, @intCast(buf.len));
+        }
+    }
+}
+
 test "fuzz AIL_mem_* in-memory IO with adversarial sizes/positions" {
     var prng = std.Random.DefaultPrng.init(0xC0FFEE60);
     const rand = prng.random();
