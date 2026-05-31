@@ -2939,3 +2939,46 @@ test "MilesTextDumpEventSystem reports system/instance/persist counts" {
     try testing.expect(std.mem.indexOf(u8, text, "Event System Count: 1") != null);
     try testing.expect(std.mem.indexOf(u8, text, "Sound Instance Count: 1") != null);
 }
+
+test "MilesEnqueueEventByName resolves the event from the container and enqueues it" {
+    api_miles_t.MilesShutdownEventSystem();
+    defer api_miles_t.MilesShutdownEventSystem();
+
+    // Build a start-sound event referencing "boom" and store it in a bank under "evt".
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v8b.AIL_add_start_sound_event_step(ev, cstr("boom:0:"), null, 0, null, null, null, null, null, cstr("ambient"), 0, 0, 0, 0, 0, 0, null, 0, 0, 0, 0, 0, 0, 0);
+    const estr = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    defer std.c.free(estr);
+    const etext = std.mem.span(@as([*:0]const u8, @ptrCast(estr)));
+    const elen = etext.len + 1;
+
+    var img: [512]u8 = undefined;
+    @memset(&img, 0);
+    const sb = openmiles.soundbank;
+    std.mem.writeInt(u32, img[0..4], sb.BANK_TAG, .little);
+    std.mem.writeInt(i32, img[4..8], 8, .little);
+    std.mem.writeInt(u32, img[20..24], 60, .little); // events table
+    std.mem.writeInt(u32, img[32..36], 68, .little); // sounds table
+    std.mem.writeInt(u32, img[40..44], 1, .little);
+    std.mem.writeInt(u32, img[52..56], 1, .little);
+    std.mem.writeInt(u32, img[60..64], 76, .little); // event name @76
+    std.mem.writeInt(u32, img[64..68], 100, .little); // event data @100
+    std.mem.writeInt(u32, img[68..72], 82, .little); // sound name @82
+    std.mem.writeInt(u32, img[72..76], 300, .little); // Sound struct @300
+    @memcpy(img[76..80], "evt\x00");
+    @memcpy(img[82..87], "boom\x00");
+    @memcpy(img[100 .. 100 + elen], etext.ptr[0..elen]);
+    std.mem.writeInt(u32, img[336..340], 2000, .little); // DurationMs at Sound+36
+    std.mem.writeInt(i32, img[8..12], 344, .little);
+    const bank = try openmiles.soundbank.loadFromMemory(openmiles.global_allocator, "amb.mbnk", img[0..344]);
+    defer bank.deinit();
+
+    // Enqueue by name -> creates a "boom" instance with the event's labels.
+    try testing.expect(api_miles_t.MilesEnqueueEventByName(cstr2("evt")) != 0);
+    try testing.expectEqual(@as(u64, 0), api_miles_t.MilesEnqueueEventByName(cstr2("nope")));
+
+    var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("ambient"), 0, @ptrCast(&info)));
+    try testing.expectEqualStrings("boom", std.mem.span(info.UsedSound.?));
+}
