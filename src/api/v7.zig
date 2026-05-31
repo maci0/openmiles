@@ -527,23 +527,66 @@ pub fn AIL_set_speaker_configuration(dig_opt: ?*DigitalDriver, array: ?*anyopaqu
         }
     }
 }
-pub fn AIL_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array: ?*?*f32, dry_array: ?*?*f32, speaker_index_array: ?*?*const anyopaque) callconv(.winapi) i32 {
-    _ = dig_opt;
-    // SDK returns S32 = the number of per-speaker reverb levels available (pairs
-    // with the n_levels of AIL_set_speaker_reverb_levels). We don't model the
-    // per-speaker reverb arrays, so report 0 levels and leave the out-pointers
-    // null — a count of 0 keeps any caller loop from dereferencing them.
-    if (wet_array) |p| p.* = null;
-    if (dry_array) |p| p.* = null;
-    if (speaker_index_array) |p| p.* = null;
-    return 0;
+// output_speaker_order[m][channel] = the MSS_SPEAKER for output channel in an
+// m-channel config (wavefile.cpp). Only the first m entries are valid (-1 fill).
+fn ord(comptime prefix: []const i32) [18]i32 {
+    var r = [_]i32{-1} ** 18;
+    for (prefix, 0..) |v, i| r[i] = v;
+    return r;
 }
-pub fn AIL_set_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array: ?*f32, dry_array: ?*f32, speaker_index_array: ?*const anyopaque, n_levels: i32) callconv(.winapi) void {
-    _ = dig_opt;
-    _ = wet_array;
-    _ = dry_array;
-    _ = speaker_index_array;
-    _ = n_levels;
+// FL=0 FR=1 FC=2 LFE=3 BL=4 BR=5 BC=8 SL=9 SR=10
+const output_speaker_order = [10][18]i32{
+    ord(&.{}), ord(&.{0}), ord(&.{ 0, 1 }), ord(&.{ 0, 1, 8 }),
+    ord(&.{ 0, 1, 4, 5 }), ord(&.{ 0, 1, 2, 4, 5 }), ord(&.{ 0, 1, 2, 3, 4, 5 }),
+    ord(&.{ 0, 1, 2, 3, 4, 5, 8 }), ord(&.{ 0, 1, 2, 3, 4, 5, 9, 10 }), ord(&.{ 0, 1, 2, 3, 4, 5, 8, 9, 10 }),
+};
+var g_speaker_wet_reverb = [_]f32{1.0} ** 9; // D3D.speaker_wet_reverb_response
+var g_speaker_dry_reverb = [_]f32{1.0} ** 9; // D3D.speaker_dry_reverb_response
+fn drvLogical(d: *DigitalDriver) usize {
+    return @min(@as(usize, ma.ma_engine_get_channels(&d.engine)), 9);
+}
+pub fn AIL_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array: ?*?*f32, dry_array: ?*?*f32, speaker_index_array: ?*?*const anyopaque) callconv(.winapi) i32 {
+    // SDK (wavefile.cpp): hand back pointers to the driver's per-speaker wet/dry
+    // reverb response arrays and the speaker order, returning the channel count.
+    const d = dig_opt orelse return 0;
+    const logical = drvLogical(d);
+    if (logical == 0) return 0;
+    if (speaker_index_array) |p| p.* = @ptrCast(&output_speaker_order[logical][0]);
+    if (wet_array) |p| p.* = &g_speaker_wet_reverb[0];
+    if (dry_array) |p| p.* = &g_speaker_dry_reverb[0];
+    return @intCast(logical);
+}
+pub fn AIL_set_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array: ?*const f32, dry_array: ?*const f32, speaker_index_array: ?*const anyopaque, n_levels: i32) callconv(.winapi) void {
+    // SDK (wavefile.cpp): a null wet/speaker (resp. dry/speaker) array resets
+    // that response to 1.0; a null speaker array returns after resetting; else
+    // store per-speaker levels at the mapped driver channel.
+    const d = dig_opt orelse return;
+    const logical = drvLogical(d);
+    if (logical == 0) return;
+    if (wet_array == null or speaker_index_array == null) {
+        for (0..logical) |i| g_speaker_wet_reverb[i] = 1.0;
+    }
+    if (dry_array == null or speaker_index_array == null) {
+        for (0..logical) |i| g_speaker_dry_reverb[i] = 1.0;
+    }
+    const spk = speaker_index_array orelse return;
+    const spks: [*]const i32 = @ptrCast(@alignCast(spk));
+    const n: usize = @min(@as(usize, @intCast(@max(n_levels, 0))), logical);
+    const row = openmiles_v8.output_speaker_index[logical];
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const s = spks[i];
+        const dch: i32 = if (s >= 0 and s <= openmiles_v8.SPK_MAX_INDEX) row[@intCast(s)] else -1;
+        if (dch < 0) continue;
+        if (wet_array) |w| {
+            const wp: [*]const f32 = @ptrCast(@alignCast(w));
+            g_speaker_wet_reverb[@intCast(dch)] = wp[i];
+        }
+        if (dry_array) |dr| {
+            const dp: [*]const f32 = @ptrCast(@alignCast(dr));
+            g_speaker_dry_reverb[@intCast(dch)] = dp[i];
+        }
+    }
 }
 // Real MSS computes per-speaker gains for a positioned 3D source. The full
 // panning/falloff math has no miniaudio equivalent (ma_sound spatializes

@@ -1291,16 +1291,34 @@ test "AIL_set/sample_speaker_scale_factors round-trip via the channel map (SDK)"
     api_v8b.AIL_set_sample_speaker_scale_factors(s, &idx, &set_lv, 0);
 }
 
-test "AIL_speaker_reverb_levels and AIL_get_marker_list report empty (SDK)" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+test "AIL_set/speaker_reverb_levels round-trip; AIL_get_marker_list reports empty (SDK)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2); // stereo
     defer drv.deinit();
-    var wet: ?*f32 = @ptrFromInt(0x1000);
-    var dry: ?*f32 = @ptrFromInt(0x1000);
-    var idx: ?*const anyopaque = @ptrFromInt(0x1000);
-    // No per-speaker reverb levels: returns 0 and nulls the out-arrays.
-    try testing.expectEqual(@as(i32, 0), api_v7.AIL_speaker_reverb_levels(drv, &wet, &dry, &idx));
-    try testing.expectEqual(@as(?*f32, null), wet);
-    try testing.expectEqual(@as(?*f32, null), dry);
+    var wet: ?*f32 = null;
+    var dry: ?*f32 = null;
+    var idx: ?*const anyopaque = null;
+    // Reset to defaults (null arrays) -> all responses 1.0; returns channel count.
+    api_v7.AIL_set_speaker_reverb_levels(drv, null, null, null, 0);
+    try testing.expectEqual(@as(i32, 2), api_v7.AIL_speaker_reverb_levels(drv, &wet, &dry, &idx));
+    try testing.expect(wet != null and dry != null and idx != null);
+    try testing.expectEqual(@as(f32, 1.0), wet.?.*); // FRONT_LEFT default
+    // The speaker order for stereo is FL(0), FR(1).
+    const order: [*]const i32 = @ptrCast(@alignCast(idx.?));
+    try testing.expectEqual(@as(i32, 0), order[0]);
+    try testing.expectEqual(@as(i32, 1), order[1]);
+    // Set FRONT_RIGHT(1) wet=0.3, dry=0.7; reads back at driver channel 1.
+    const spk = [_]i32{1};
+    const w = [_]f32{0.3};
+    const d = [_]f32{0.7};
+    api_v7.AIL_set_speaker_reverb_levels(drv, &w[0], &d[0], &spk[0], 1);
+    _ = api_v7.AIL_speaker_reverb_levels(drv, &wet, &dry, &idx);
+    const wa: [*]const f32 = @ptrCast(@alignCast(wet.?));
+    const da: [*]const f32 = @ptrCast(@alignCast(dry.?));
+    try testing.expectEqual(@as(f32, 0.3), wa[1]);
+    try testing.expectEqual(@as(f32, 0.7), da[1]);
+    try testing.expectEqual(@as(f32, 1.0), wa[0]); // FL untouched
+    // Null driver -> 0.
+    try testing.expectEqual(@as(i32, 0), api_v7.AIL_speaker_reverb_levels(null, &wet, &dry, &idx));
     // No marker list modelled: returns 0 (null handle).
     try testing.expectEqual(@as(isize, 0), api_v8b.AIL_get_marker_list(null, null));
 }

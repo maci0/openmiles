@@ -527,6 +527,12 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_v7.AIL_set_speaker_configuration(hd, null, ri, rf);
     api_v7.AIL_set_speaker_configuration(hd, scp, @min(@max(ri, 0), 9), rf); // array-copy path, bounded count
     api_v7.AIL_set_speaker_reverb_levels(hd, &fo, &fo, null, rszi);
+    {
+        // Store path: sized wet/dry buffers + scratch speaker indexes, n bounded.
+        var wbuf = [_]f32{0} ** 9;
+        var dbuf = [_]f32{0} ** 9;
+        api_v7.AIL_set_speaker_reverb_levels(hd, &wbuf[0], &dbuf[0], scp, @min(@max(ri, 0), 9));
+    }
     api_stream.AIL_set_stream_loop_block(hs, ri, ri);
     api_stream.AIL_set_stream_loop_count(hs, rszi);
     api_stream.AIL_set_stream_ms_position(hs, ri);
