@@ -177,16 +177,28 @@ pub fn AIL_MIDI_handle_reacquire(driver: *anyopaque) callconv(.winapi) i32 {
     _ = driver;
     return 1;
 }
-pub fn AIL_MIDI_to_XMI(data: *anyopaque, len: u32, out: ?*anyopaque, out_len: *u32, flags: u32) callconv(.winapi) i32 {
+// S32 AIL_MIDI_to_XMI(void const* MIDI, U32 MIDI_size, void** XMIDI, U32* XMIDI_size, S32 flags)
+// XMIDI is void** — the function ALLOCATES the output and returns its pointer
+// through *XMIDI (the caller frees it via AIL_mem_free_lock). We previously
+// treated it as a pre-allocated void* buffer and memcpy'd into it, which
+// overran the caller's 4-byte pointer variable.
+pub fn AIL_MIDI_to_XMI(midi: *anyopaque, midi_size: u32, xmidi: ?*?*anyopaque, xmidi_size: ?*u32, flags: u32) callconv(.winapi) i32 {
     _ = flags;
-    // No format conversion needed -- the engine handles both SMF and XMIDI natively.
-    // When out is NULL, this is a size query; otherwise copy the data verbatim.
-    out_len.* = len;
-    if (len == 0) return 0;
-    const out_ptr = out orelse return 1; // NULL = size query only
-    const src: [*]const u8 = @ptrCast(@alignCast(data));
-    const dst: [*]u8 = @ptrCast(@alignCast(out_ptr));
-    @memcpy(dst[0..len], src[0..len]);
+    // The engine reads SMF and XMIDI natively, so "convert" = copy verbatim into
+    // a freshly-allocated buffer whose pointer is returned via *xmidi.
+    if (xmidi_size) |p| p.* = midi_size;
+    const xp = xmidi orelse return if (midi_size != 0) 1 else 0; // null output = size query
+    if (midi_size == 0) {
+        xp.* = null;
+        return 0;
+    }
+    const buf: [*]u8 = @ptrCast(std.c.malloc(midi_size) orelse {
+        xp.* = null;
+        return 0;
+    });
+    const src: [*]const u8 = @ptrCast(@alignCast(midi));
+    @memcpy(buf[0..midi_size], src[0..midi_size]);
+    xp.* = @ptrCast(buf);
     return 1;
 }
 /// AIL_list_MIDI(MIDI, MIDI_size, lst, lst_size, flags)

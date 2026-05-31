@@ -453,7 +453,9 @@ test "coverage: midi.zig exports" {
     _ = md.AIL_midiOutOpen(mp, &hmo, 0);
     md.AIL_midiOutClose(mp);
     var out_len: u32 = scratch.len;
-    _ = md.AIL_MIDI_to_XMI(@constCast(@ptrCast(&smf)), smf.len, sc(), &out_len, 0);
+    var xmi_out: ?*anyopaque = null;
+    _ = md.AIL_MIDI_to_XMI(@constCast(@ptrCast(&smf)), smf.len, &xmi_out, &out_len, 0);
+    freeLock(xmi_out);
     var lst: ?*anyopaque = null;
     var lsz: u32 = 0;
     if (md.AIL_list_MIDI(@ptrCast(&smf), smf.len, &lst, &lsz, 0) != 0) freeLock(lst);

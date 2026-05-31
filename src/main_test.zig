@@ -3002,6 +3002,28 @@ test "AIL_open_stream_by_sample (6.1a leaked internal) is a safe null stub" {
     try testing.expectEqual(@as(?*openmiles.Sample, null), api_stream.AIL_open_stream_by_sample(p, p, p, -1));
 }
 
+test "AIL_MIDI_to_XMI allocates the output and returns it via XMIDI** (SDK)" {
+    const smf = [_]u8{ 'M', 'T', 'h', 'd', 1, 2, 3, 4, 5, 6, 7, 8 };
+    // Size query: null output pointer, just reports the size.
+    var size: u32 = 0;
+    try testing.expectEqual(@as(i32, 1), api_midi.AIL_MIDI_to_XMI(@constCast(@ptrCast(&smf)), smf.len, null, &size, 0));
+    try testing.expectEqual(@as(u32, smf.len), size);
+    // Conversion: the function allocates a buffer and returns its pointer; the
+    // caller's pointer variable is NOT overwritten with the data (no overflow).
+    var out_ptr: ?*anyopaque = null;
+    size = 0;
+    try testing.expectEqual(@as(i32, 1), api_midi.AIL_MIDI_to_XMI(@constCast(@ptrCast(&smf)), smf.len, &out_ptr, &size, 0));
+    try testing.expect(out_ptr != null);
+    try testing.expectEqual(@as(u32, smf.len), size);
+    const got: [*]const u8 = @ptrCast(out_ptr.?);
+    try testing.expectEqualSlices(u8, &smf, got[0..smf.len]);
+    std.c.free(out_ptr);
+    // Empty input -> 0, output pointer set null.
+    out_ptr = @ptrFromInt(0x1234);
+    try testing.expectEqual(@as(i32, 0), api_midi.AIL_MIDI_to_XMI(@constCast(@ptrCast(&smf)), 0, &out_ptr, &size, 0));
+    try testing.expectEqual(@as(?*anyopaque, null), out_ptr);
+}
+
 test "AIL_lock_channel/release_channel take the MIDI driver handle (SDK)" {
     const driver = try openmiles.MidiDriver.init(testing.allocator);
     defer driver.deinit();

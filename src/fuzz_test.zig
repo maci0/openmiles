@@ -679,14 +679,15 @@ test "fuzz AIL_MIDI_to_XMI with random data" {
     var prng = std.Random.DefaultPrng.init(0xC0FFEE11);
     const rand = prng.random();
     var buf: [2048]u8 = undefined;
-    var out: [4096]u8 = undefined;
     var i: usize = 0;
     while (i < ITERS) : (i += 1) {
         const len = rand.intRangeAtMost(usize, 0, buf.len);
         _ = randBytes(rand, &buf, len);
         if (len >= 4 and rand.boolean()) @memcpy(buf[0..4], "MThd");
-        var out_len: u32 = out.len;
-        _ = api_midi.AIL_MIDI_to_XMI(&buf, @intCast(len), &out, &out_len, 0);
+        var out_ptr: ?*anyopaque = null; // function allocates; we free
+        var out_len: u32 = 0;
+        _ = api_midi.AIL_MIDI_to_XMI(&buf, @intCast(len), &out_ptr, &out_len, 0);
+        if (out_ptr) |p| std.c.free(p);
     }
 }
 

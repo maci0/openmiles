@@ -666,7 +666,12 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_file.AIL_file_read(rstr, scp);
     _ = api_file.AIL_file_write(rstr, scp, rsz);
     _ = api_digital.AIL_WAV_file_write(rstr, scp, rsz, ri, ri);
-    _ = api_midi.AIL_MIDI_to_XMI(scp, rsz, null, &uo, ru);
+    _ = api_midi.AIL_MIDI_to_XMI(scp, rsz, null, &uo, ru); // size-query path
+    {
+        var xmi_ptr: ?*anyopaque = null; // allocate path: returns a malloc'd buffer
+        _ = api_midi.AIL_MIDI_to_XMI(scp, rsz, &xmi_ptr, &uo, ru);
+        if (xmi_ptr) |p| std.c.free(p);
+    }
     // More memory parsers fed adversarial (zeroed-prefix) buffers.
     if (api_quick.AIL_quick_load_mem(scp, rsz)) |qs| qs.deinit();
     api_digital.AIL_init_sample(hs);
