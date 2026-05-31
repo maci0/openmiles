@@ -621,6 +621,16 @@ pub fn AIL_sample_stage_property(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque, a3: 
     _ = a6;
     return 0;
 }
+// v7 uses a 6-argument @24 form (the 7-arg @28 form is 6.x and 8.x+).
+pub fn AIL_sample_stage_property_v7(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque, a3: i32, a4: ?*anyopaque, a5: ?*anyopaque) callconv(.winapi) i32 {
+    _ = a0;
+    _ = a1;
+    _ = a2;
+    _ = a3;
+    _ = a4;
+    _ = a5;
+    return 0;
+}
 pub fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, fl: f32, fr: f32, fc: f32, lfe: f32, bl: f32, br: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.v51_levels = .{ fl, fr, fc, lfe, bl, br }; // remember all six (round-trips via the getter)

@@ -1173,9 +1173,9 @@ comptime {
             .{ .name = "AIL_destroy_wave_synthesizer", .stack_size = 4 },
             .{ .name = "AIL_waveOutClose", .stack_size = 4 },
             // EOB ASI reset: v7 @8 (HSAMPLE, buff_num); v8+ added new_stream_position.
-            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 12, .ver = 80 },
-            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 12, .ver = 60, .ver_max = 69 },
-            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 8, .ver = 70, .ver_max = 70, .symbol = "AIL_request_EOB_ASI_reset_v7" },
+            // @12 (3-arg) across 6.x, 7.0h+, and 8.x. Only the earliest 7.0
+            // builds (7.0b-d) used a 2-arg @8 form, which we don't target.
+            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 12, .ver = 60 },
             // DLS utilities
             .{ .name = "AIL_compress_DLS", .stack_size = 20 },
             .{ .name = "AIL_extract_DLS", .stack_size = 28 },
@@ -1365,7 +1365,11 @@ comptime {
             .{ .name = "AIL_sample_playback_delay", .stack_size = 4, .ver = 80 },
             .{ .name = "AIL_sample_playback_rate_factor", .stack_size = 4, .ver = 60 },
             .{ .name = "AIL_sample_speaker_scale_factors", .stack_size = 16, .ver = 60 },
-            .{ .name = "AIL_sample_stage_property", .stack_size = 28, .ver = 60 },
+            // Arity dips in v7: 6.x and 8.x+ take the 7-arg @28 form; v7 takes a
+            // 6-arg @24 form.
+            .{ .name = "AIL_sample_stage_property", .stack_size = 28, .ver = 60, .ver_max = 69 },
+            .{ .name = "AIL_sample_stage_property", .stack_size = 24, .ver = 70, .ver_max = 79, .symbol = "AIL_sample_stage_property_v7" },
+            .{ .name = "AIL_sample_stage_property", .stack_size = 28, .ver = 80 },
             .{ .name = "AIL_set_sample_51_volume_levels", .stack_size = 28, .ver = 60 },
             .{ .name = "AIL_set_sample_51_volume_pan", .stack_size = 24, .ver = 60 },
             .{ .name = "AIL_set_sample_buffer_count", .stack_size = 8, .ver = 60 },

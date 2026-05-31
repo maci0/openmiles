@@ -37,11 +37,27 @@ across several passes:
    `AIL_save_sample_attributes`). All ABI-faithful stubs with safe defaults,
    fuzzed in `fuzz_all_test.zig`.
 
-## Decoration mismatch (23, all versions)
+## Calling-convention split (resolved)
 
-The real DLL exports RIB/DLS functions **undecorated** (`RIB_register_interface`,
-`DLSClose`) — a .DEF-style alias over the stdcall symbol. Zig auto-appends `@N`
-to stdcall `@export` names, so reproducing undecorated aliases needs a module
-definition file fed to the linker (build-system change). Affected: 11 `RIB_*`,
-8 `DLS*`, plus `AIL_init_sample` (@8 vs @4) and `AIL_sample_buffer_info`
-(@24 vs @20) which are stack-size discrepancies, not naming.
+The real DLL exports the public RIB-interface and DLS APIs as **undecorated
+__cdecl** (12 `RIB_*` + 9 `DLS*`), while the AIL_* surface, the RIB
+provider-management calls, and `DLSMSSGetCPU` stay **__stdcall/decorated**.
+Reproduced via callconv(.c) on those 21 functions plus a `.cdecl` flag on their
+export targets. (No .DEF file needed — Zig emits the bare name for cdecl.)
+
+## Remaining: sub-version arity quirks (2 vs the 6.1 Tools DLL only)
+
+`v7` is a byte-for-byte match (0 missing, 0 mismatch). `v6` differs from the
+6.1 Tools/Examples DLL by exactly two symbols:
+
+- `AIL_init_sample`: @4 (v3-6.0) vs @8 (6.1 only) vs @12 (v7) vs @8 (v8). We
+  emit @4, matching the entire 6.0 line (6.0a-6.0m) and the public header.
+- `AIL_sample_buffer_info`: @20 (v5, 6.0, **and v7**) vs @24 (6.1 only). We emit
+  @20, matching 6.0 and 7.0.
+
+Both are 6.1-point-release anomalies; matching them would *break* parity with
+the 6.0 mainline and 7.0, so we deliberately track the 6.0/7.0 majority.
+
+`v5` (vs the NoLF DLL): 2 missing (`AIL_open_input@4`/`AIL_close_input@4`, gated
+too high) and the v4/v5 narrow `AIL_3D_sample_distances@12` vs our @20 — minor,
+tracked.
