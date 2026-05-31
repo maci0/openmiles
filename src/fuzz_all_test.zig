@@ -657,16 +657,16 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_v9.AIL_install_bus_compressor(hd, ri, ri, ri);
     api_v9.AIL_free_all_busses(hd);
     // event command queue
-    api_v9.AIL_enqueue_event_start();
+    _ = api_v9.AIL_enqueue_event_start();
     api_v9.AIL_enqueue_event_cancel(ri);
-    api_v9.AIL_enqueue_event_context(scp, ri);
-    api_v9.AIL_enqueue_event_end_named(scp, scp);
-    api_v9.AIL_enqueue_event_selection(scp, ri);
-    api_v9.AIL_enqueue_event_filter(scp, ri, ri);
-    api_v9.AIL_enqueue_event_variablef(scp, rf, ri);
-    api_v9.AIL_enqueue_event_buffer(scp, ri, scp, ri);
-    api_v9.AIL_enqueue_event_position(scp, rf, rf, rf);
-    api_v9.AIL_enqueue_event_velocity(scp, rf, rf, rf, ri);
+    _ = api_v9.AIL_enqueue_event_context(&io, scp);
+    _ = api_v9.AIL_enqueue_event_end_named(ri, scp);
+    _ = api_v9.AIL_enqueue_event_selection(&io, ru);
+    _ = api_v9.AIL_enqueue_event_filter(&io, ru64);
+    _ = api_v9.AIL_enqueue_event_variablef(&io, scp, rf);
+    _ = api_v9.AIL_enqueue_event_buffer(&io, scp, ri, ri);
+    _ = api_v9.AIL_enqueue_event_position(&io, rf, rf, rf);
+    _ = api_v9.AIL_enqueue_event_velocity(&io, rf, rf, rf, rf);
     _ = api_v9.AIL_event_system_command_queue_remaining();
     api_v9.AIL_set_event_settings(ri);
     api_v9.AIL_set_event_sample_functions(null, null);

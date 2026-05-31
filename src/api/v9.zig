@@ -364,51 +364,58 @@ pub fn AIL_set_sample_3D_position_segments(s_opt: ?*Sample, segments: ?*anyopaqu
     _ = count;
 }
 
-// --- Event command queue ---
-pub fn AIL_enqueue_event_start() callconv(.winapi) void {}
-pub fn AIL_enqueue_event_cancel(a0: i32) callconv(.winapi) void {
-    _ = a0;
+// --- Event command queue (audition/remote-control build API) ---
+// The deferred command queue itself is not implemented; these match the SDK
+// signatures (return types matter — S32 in EAX, U64 in EDX:EAX) and report
+// benign success so a caller's result register is defined. Builders return the
+// running token; the *_start/*_by_name/*_end_named finalizers return an id.
+var g_enqueue_token: i32 = 1;
+pub fn AIL_enqueue_event_start() callconv(.winapi) i32 {
+    g_enqueue_token +%= 1;
+    return g_enqueue_token;
 }
-pub fn AIL_enqueue_event_context(a0: ?*anyopaque, a1: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
+pub fn AIL_enqueue_event_cancel(token: i32) callconv(.winapi) void {
+    _ = token;
 }
-pub fn AIL_enqueue_event_end_named(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
+pub fn AIL_enqueue_event_context(token: ?*i32, system: ?*anyopaque) callconv(.winapi) i32 {
+    _ = system;
+    return if (token) |t| t.* else 0;
 }
-pub fn AIL_enqueue_event_selection(a0: ?*anyopaque, a1: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
+pub fn AIL_enqueue_event_end_named(token: i32, name: ?*anyopaque) callconv(.winapi) u64 {
+    _ = name;
+    return @intCast(@max(token, 0));
 }
-pub fn AIL_enqueue_event_filter(a0: ?*anyopaque, a1: i32, a2: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
+pub fn AIL_enqueue_event_selection(token: ?*i32, selection: u32) callconv(.winapi) i32 {
+    _ = selection;
+    return if (token) |t| t.* else 0;
 }
-pub fn AIL_enqueue_event_variablef(a0: ?*anyopaque, a1: f32, a2: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
+pub fn AIL_enqueue_event_filter(token: ?*i32, apply_to_id: u64) callconv(.winapi) i32 {
+    _ = apply_to_id;
+    return if (token) |t| t.* else 0;
 }
-pub fn AIL_enqueue_event_buffer(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque, a3: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
+pub fn AIL_enqueue_event_variablef(token: ?*i32, name: ?*anyopaque, value: f32) callconv(.winapi) i32 {
+    _ = name;
+    _ = value;
+    return if (token) |t| t.* else 0;
 }
-pub fn AIL_enqueue_event_position(a0: ?*anyopaque, a1: f32, a2: f32, a3: f32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
+pub fn AIL_enqueue_event_buffer(token: ?*i32, user_buffer: ?*anyopaque, user_buffer_len: i32, user_buffer_is_ptr: i32) callconv(.winapi) i32 {
+    _ = user_buffer;
+    _ = user_buffer_len;
+    _ = user_buffer_is_ptr;
+    return if (token) |t| t.* else 0;
 }
-pub fn AIL_enqueue_event_velocity(a0: ?*anyopaque, a1: f32, a2: f32, a3: f32, a4: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    _ = a4;
+pub fn AIL_enqueue_event_position(token: ?*i32, x: f32, y: f32, z: f32) callconv(.winapi) i32 {
+    _ = x;
+    _ = y;
+    _ = z;
+    return if (token) |t| t.* else 0;
+}
+pub fn AIL_enqueue_event_velocity(token: ?*i32, vx: f32, vy: f32, vz: f32, mag: f32) callconv(.winapi) i32 {
+    _ = vx;
+    _ = vy;
+    _ = vz;
+    _ = mag;
+    return if (token) |t| t.* else 0;
 }
 pub fn AIL_event_system_command_queue_remaining() callconv(.winapi) u32 {
     return 0;
