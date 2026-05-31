@@ -27,26 +27,29 @@ fn enable3D(s: *Sample) void {
     if (s.is_initialized) ma.ma_sound_set_spatialization_enabled(&s.sound, ma.MA_TRUE);
 }
 
+// Unified 3D-on-HSAMPLE. Like Sample3D/the listener, negate Z crossing the
+// miniaudio boundary (MSS left-handed +Z forward vs miniaudio right-handed -Z)
+// so all three coordinate spaces stay consistent. See Sample3D.setPosition.
 pub fn AIL_set_sample_3D_position(obj: ?*Sample, x: f32, y: f32, z: f32) callconv(.winapi) void {
     const s = obj orelse return;
     enable3D(s);
-    if (s.is_initialized) ma.ma_sound_set_position(&s.sound, x, y, z);
+    if (s.is_initialized) ma.ma_sound_set_position(&s.sound, x, y, -z);
 }
 pub fn AIL_set_sample_3D_velocity(obj: ?*Sample, dx: f32, dy: f32, dz: f32, magnitude: f32) callconv(.winapi) void {
     _ = magnitude;
     const s = obj orelse return;
-    if (s.is_initialized) ma.ma_sound_set_velocity(&s.sound, dx, dy, dz);
+    if (s.is_initialized) ma.ma_sound_set_velocity(&s.sound, dx, dy, -dz);
 }
 pub fn AIL_set_sample_3D_velocity_vector(obj: ?*Sample, dx: f32, dy: f32, dz: f32) callconv(.winapi) void {
     const s = obj orelse return;
-    if (s.is_initialized) ma.ma_sound_set_velocity(&s.sound, dx, dy, dz);
+    if (s.is_initialized) ma.ma_sound_set_velocity(&s.sound, dx, dy, -dz);
 }
 pub fn AIL_set_sample_3D_orientation(obj: ?*Sample, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) callconv(.winapi) void {
-    _ = ux;
+    _ = ux; // a sound has only a direction in miniaudio (no up vector)
     _ = uy;
     _ = uz;
     const s = obj orelse return;
-    if (s.is_initialized) ma.ma_sound_set_direction(&s.sound, fx, fy, fz);
+    if (s.is_initialized) ma.ma_sound_set_direction(&s.sound, fx, fy, -fz);
 }
 pub fn AIL_set_sample_3D_cone(obj: ?*Sample, inner_angle: f32, outer_angle: f32, outer_volume_level: f32) callconv(.winapi) void {
     const s = obj orelse return;
@@ -75,21 +78,21 @@ pub fn AIL_sample_3D_position(obj: ?*Sample, x: ?*f32, y: ?*f32, z: ?*f32) callc
     const v = if (s.is_initialized) ma.ma_sound_get_position(&s.sound) else ma.ma_vec3f{ .x = 0, .y = 0, .z = 0 };
     if (x) |p| p.* = v.x;
     if (y) |p| p.* = v.y;
-    if (z) |p| p.* = v.z;
+    if (z) |p| p.* = -v.z;
 }
 pub fn AIL_sample_3D_velocity(obj: ?*Sample, dx: ?*f32, dy: ?*f32, dz: ?*f32) callconv(.winapi) void {
     const s = obj orelse return;
     const v = if (s.is_initialized) ma.ma_sound_get_velocity(&s.sound) else ma.ma_vec3f{ .x = 0, .y = 0, .z = 0 };
     if (dx) |p| p.* = v.x;
     if (dy) |p| p.* = v.y;
-    if (dz) |p| p.* = v.z;
+    if (dz) |p| p.* = -v.z;
 }
 pub fn AIL_sample_3D_orientation(obj: ?*Sample, fx: ?*f32, fy: ?*f32, fz: ?*f32, ux: ?*f32, uy: ?*f32, uz: ?*f32) callconv(.winapi) void {
     const s = obj orelse return;
-    const d = if (s.is_initialized) ma.ma_sound_get_direction(&s.sound) else ma.ma_vec3f{ .x = 0, .y = 0, .z = 1 };
+    const d = if (s.is_initialized) ma.ma_sound_get_direction(&s.sound) else ma.ma_vec3f{ .x = 1, .y = 0, .z = 0 };
     if (fx) |p| p.* = d.x;
     if (fy) |p| p.* = d.y;
-    if (fz) |p| p.* = d.z;
+    if (fz) |p| p.* = -d.z;
     if (ux) |p| p.* = 0;
     if (uy) |p| p.* = 1;
     if (uz) |p| p.* = 0;

@@ -2119,6 +2119,47 @@ test "v9 update_sample_3D_position dead-reckons by velocity" {
     try testing.expect(p2.x > 9.0 and p2.x < 11.0);
 }
 
+test "v7 unified 3D pos/vel/orient round-trip in MSS left-handed space" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+
+    // Position: set MSS-space (1,2,3), the getter returns the same values.
+    api_v7.AIL_set_sample_3D_position(s, 1, 2, 3);
+    var px: f32 = 0;
+    var py: f32 = 0;
+    var pz: f32 = 0;
+    api_v7.AIL_sample_3D_position(s, &px, &py, &pz);
+    try testing.expect(@abs(px - 1) < 0.001 and @abs(py - 2) < 0.001 and @abs(pz - 3) < 0.001);
+    // miniaudio stores Z negated (right-handed boundary).
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_position(&s.sound).z - (-3)) < 0.001);
+
+    // Velocity round-trips with Z preserved in MSS space.
+    api_v7.AIL_set_sample_3D_velocity(s, 4, 5, 6, 0);
+    var vx: f32 = 0;
+    var vy: f32 = 0;
+    var vz: f32 = 0;
+    api_v7.AIL_sample_3D_velocity(s, &vx, &vy, &vz);
+    try testing.expect(@abs(vx - 4) < 0.001 and @abs(vy - 5) < 0.001 and @abs(vz - 6) < 0.001);
+
+    // Orientation face round-trips; +Z forward stays +Z forward.
+    api_v7.AIL_set_sample_3D_orientation(s, 0, 0, 1, 0, 1, 0);
+    var fx: f32 = 0;
+    var fy: f32 = 0;
+    var fz: f32 = 0;
+    var ux: f32 = 0;
+    var uy: f32 = 0;
+    var uz: f32 = 0;
+    api_v7.AIL_sample_3D_orientation(s, &fx, &fy, &fz, &ux, &uy, &uz);
+    try testing.expect(@abs(fx) < 0.001 and @abs(fy) < 0.001 and @abs(fz - 1) < 0.001);
+    try testing.expect(@abs(ux) < 0.001 and @abs(uy - 1) < 0.001 and @abs(uz) < 0.001);
+}
+
 test "v9 system-state push/pop tracks depth and restores volume" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
