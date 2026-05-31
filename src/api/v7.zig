@@ -179,7 +179,7 @@ pub fn AIL_set_sample_info(s_opt: ?*Sample, info: *const AILSOUNDINFO) callconv(
 // semantics but on the unified handle; applied as a wet/volume hint).
 pub fn AIL_set_sample_obstruction(s_opt: ?*Sample, obstruction: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    s.v7_obstruction = std.math.clamp(obstruction, 0.0, 1.0);
+    s.v7_obstruction = obstruction; // SDK (m3d.cpp) stores verbatim, no clamp
 }
 pub fn AIL_sample_obstruction(s_opt: ?*Sample) callconv(.winapi) f32 {
     const s = s_opt orelse return 0;
@@ -187,7 +187,7 @@ pub fn AIL_sample_obstruction(s_opt: ?*Sample) callconv(.winapi) f32 {
 }
 pub fn AIL_set_sample_occlusion(s_opt: ?*Sample, occlusion: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    s.v7_occlusion = std.math.clamp(occlusion, 0.0, 1.0);
+    s.v7_occlusion = occlusion; // SDK (m3d.cpp) stores verbatim, no clamp
     // MSS (m3d.cpp AIL_API_set_sample_occlusion): occlusion drives the low-pass
     // cutoff to (1-occlusion)+0.01 (obstruction, by contrast, only stores in the
     // software path). Reproduce that so occluded sources are muffled, not just
@@ -200,7 +200,7 @@ pub fn AIL_sample_occlusion(s_opt: ?*Sample) callconv(.winapi) f32 {
 }
 pub fn AIL_set_sample_exclusion(s_opt: ?*Sample, exclusion: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    s.v7_exclusion = std.math.clamp(exclusion, 0.0, 1.0);
+    s.v7_exclusion = exclusion; // SDK (m3d.cpp) stores verbatim, no clamp
 }
 pub fn AIL_sample_exclusion(s_opt: ?*Sample) callconv(.winapi) f32 {
     const s = s_opt orelse return 0;

@@ -2337,6 +2337,11 @@ test "occlusion drives the low-pass cutoff (m3d.cpp model), obstruction does not
     api_v7.AIL_set_sample_obstruction(s, 0.9);
     try testing.expectEqual(@as(f32, 1.0), api_v7.AIL_sample_low_pass_cut_off(s, 0));
     try testing.expect(@abs(api_v7.AIL_sample_obstruction(s) - 0.9) < 0.001);
+    // m3d.cpp stores these verbatim (no clamp); out-of-range values round-trip.
+    api_v7.AIL_set_sample_obstruction(s, 1.7);
+    try testing.expectEqual(@as(f32, 1.7), api_v7.AIL_sample_obstruction(s));
+    api_v7.AIL_set_sample_exclusion(s, 2.5);
+    try testing.expectEqual(@as(f32, 2.5), api_v7.AIL_sample_exclusion(s));
 }
 
 test "Doppler uses MSS speed of sound (0.355), not miniaudio's 343.3 default" {
