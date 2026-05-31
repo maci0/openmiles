@@ -3161,6 +3161,13 @@ test "volume/pan match the exact MSS curve (gain = volume^(10/6))" {
     s.setVolumePanF(1.0, 0.5); // center -> pan 0, vol = 1*0.812 (MSS center cut)
     try testing.expectApproxEqAbs(@as(f32, 0.0), s.pan, 0.001);
     try testing.expectApproxEqAbs(@as(f32, 0.8123), s.volume, 0.01);
+
+    // AIL_sample_pan must still report the 0..127 pan the app set, not the
+    // internal balance-panner value (regression guard for the curve change).
+    s.setVolumePanF(1.0, 0.25);
+    try testing.expectEqual(@as(i32, 31), dg.AIL_sample_pan(s)); // 0.25*127
+    dg.AIL_set_sample_pan(s, 100);
+    try testing.expectEqual(@as(i32, 100), dg.AIL_sample_pan(s));
 }
 
 test "AIL_redbook_set_volume_level returns the previous volume (F32)" {

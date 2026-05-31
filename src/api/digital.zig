@@ -97,7 +97,8 @@ pub fn AIL_sample_volume(s_opt: ?*Sample) callconv(.winapi) i32 {
 }
 pub fn AIL_sample_pan(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    return openmiles.panToMss(s.pan);
+    // Return the 0..127 pan the app set; s.pan holds the balance-panner value.
+    return s.original_pan;
 }
 pub fn AIL_sample_playback_rate(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;

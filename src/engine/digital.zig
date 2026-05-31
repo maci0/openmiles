@@ -509,7 +509,8 @@ pub const Sample = struct {
     is_paused: bool = false, // MSS: paused samples still report SMP_PLAYING (4)
     volume: f32 = 1.0,
     original_volume: i32 = 127,
-    pan: f32 = 0.0,
+    pan: f32 = 0.0, // value handed to miniaudio's balance panner
+    original_pan: i32 = 64, // the 0..127 pan the app set (64 = center), for the getter
     pitch: f32 = 1.0,
     target_rate: ?f32 = null,
     loop_count: i32 = 1,
@@ -956,6 +957,7 @@ pub const Sample = struct {
         self.volume = 1.0;
         self.original_volume = 127;
         self.pan = 0.0;
+        self.original_pan = 64;
         self.pitch = 1.0;
         self.target_rate = null;
         self.loop_count = 1;
@@ -1052,6 +1054,7 @@ pub const Sample = struct {
     }
 
     pub fn setPan(self: *Sample, pan: i32) void {
+        self.original_pan = std.math.clamp(pan, 0, 127);
         self.pan = std.math.clamp((@as(f32, @floatFromInt(pan)) - 64.0) / 64.0, -1.0, 1.0);
         log("Sample.setPan: s={*}, i32={d}, f32={d}\n", .{ self, pan, self.pan });
         if (self.is_initialized) ma.ma_sound_set_pan(&self.sound, self.pan);
@@ -1070,6 +1073,7 @@ pub const Sample = struct {
         const v = std.math.clamp(volume, 0.0, 1.0);
         const p = std.math.clamp(pan, 0.0, 1.0);
         self.original_volume = @intFromFloat(v * 127.0);
+        self.original_pan = @intFromFloat(p * 127.0);
         // Exact MSS law (AIL_API_set_sample_volume_pan, wavefile.cpp):
         //   gain  = volume^(10/6)            (0.5 -> -10 dB)
         //   left  = gain * (1-pan)^0.3       right = gain * pan^0.3
