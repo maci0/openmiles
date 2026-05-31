@@ -1,6 +1,13 @@
-# OpenMiles API Implementation Status (MSS 6.6)
+# OpenMiles API Implementation Status
 
-This document tracks the implementation status of the Miles Sound System (MSS) 6.6 API.
+This document tracks the behavioural implementation status of the Miles Sound
+System (MSS) API across versions v3–v9.
+
+**Export-ABI parity is complete:** every `-Dmss-version` build (v3–v9) reproduces
+its reference `mss32.dll`'s decorated export table with zero missing exports, and
+every exported function is exercised by the fuzz harness plus unit/C-integration
+tests. The status below describes *behaviour* — whether a function does real work,
+has known limitations, or is a compatibility stub.
 
 ## Core System
 *(Appeared in MSS v3+)*
@@ -418,6 +425,22 @@ This document tracks the implementation status of the Miles Sound System (MSS) 6
 | `AIL_digital_handle_release` | ⚪ Stub | No-op |
 | `AIL_digital_handle_reacquire` | ⚪ Stub | Always returns 1 |
 
+## Event System & SoundBanks (v8/v9)
+*(Appeared in MSS v8; `Miles*` names are the v9 spelling)*
+| Function | Status | Notes |
+|----------|--------|-------|
+| `AIL_create_event` / `AIL_close_event` | 🟢 Implemented | Byte-faithful event-text constructor (`mssevent.cpp` encodings) |
+| `AIL_add_*_event_step` (all step types) | 🟢 Implemented | start_sound, control_sounds, ramp, set_lfo, set_blend, move_var, persist, sound_limit, apply_env, cache/uncache_sounds, enable_limit, exec_event, comment, clear_state — each encodes its fields faithfully |
+| `AIL_next_event_step` / `MilesNextEventStep` | 🟢 Implemented | Decodes every step type into `EVENT_STEP_INFO` (layout matches the SDK field-for-field); splits cache/purge sound lists into `namelist` |
+| `MilesSetVarI/F` / `MilesGetVarI/F` | 🟢 Implemented | Per-system variable store (default + named systems) |
+| `MilesStartupEventSystem` / `MilesAddEventSystem` / `MilesShutdownEventSystem` | 🟢 Implemented | Event-system lifecycle (linked list of systems) |
+| `MilesGetEventSystemState` | 🟡 Partial | Reports command-buffer size; instance/bank counts are 0 until the execution VM lands |
+| `AIL_open_soundbank` / `MilesAddSoundBank` / `*ReleaseSoundBank` | 🟢 Implemented | Loads the `BANK` format; enumerates event/sound/preset/env assets |
+| `AIL_find_event` / `MilesFindEvent` | 🟢 Implemented | Resolves a named event's step bytecode (`AIL_get_event_contents`) |
+| `MilesEnqueueEvent*` / `MilesStartSoundInstance` / `Miles*SoundInstances` | ⚪ Stub | Present and ABI-correct; the event *execution* VM (queue → instance → playback) is not yet wired, so they return empty-state |
+| `MilesGetEventLength` | ⚪ Stub | Needs the global event/sound container (execution VM) |
+| Async file I/O (`MilesAsync*`) | ⚪ Stub | Returns success/empty defaults |
+
 ## Legend
 - 🟢 Implemented — Functional
 - 🟡 Partial — Works but with known limitations
@@ -440,8 +463,29 @@ Verified end-to-end with **Europa 1400 Gold: The Guild** (TL edition) under Wine
   plugin DLLs into games. Replaced with `src/utils/dynlib.zig`: a Win32
   `LoadLibraryA`/`GetProcAddress`/`FreeLibrary` loader on Windows, delegating to
   `std.DynLib` on other targets. Plugin/addon loading is functional again.
-- Windows (`x86-windows` ReleaseSmall) and native `libmss32.so` both build clean;
-  124/124 unit tests pass. Run native tests with `-Dtarget=native-linux-musl` to
-  avoid a host-toolchain linker error (gcc 16.1.1 `crt1.o` `.sframe` relocations
-  the Zig self-linker rejects); this affects only native test-exe linking, not
-  the library or any source code.
+- Windows (`x86-windows` ReleaseSmall) and native `libmss32.so` both build clean.
+  The native test suite runs ~200 unit tests plus a multi-seed fuzz harness that
+  invokes every exported function with adversarial inputs; all pass. Run native
+  tests with `-Dtarget=x86_64-linux-musl -Dcpu=baseline` to avoid a
+  host-toolchain linker error (gcc `crt1.o` `.sframe` relocations the Zig
+  self-linker rejects); this affects only native test-exe linking, not the
+  library or any source code.
+
+## Export-ABI parity (2026-05-31)
+Every `-Dmss-version` build diffs to **zero missing exports** against its
+reference `mss32.dll` (decorated stdcall names, via `winedump -j export`):
+
+| Build | Reference | Missing |
+|-------|-----------|---------|
+| v3 | 3.6f | 0 |
+| v4 | 4.0h | 0 |
+| v5 | 5.0r | 0 |
+| v6 | 6.0i | 0 |
+| v7 | 7.0b | 0 |
+| v8 | 8.0b | 0 |
+| v9 | 9.3f | 0 |
+
+Per-version arity differences are reproduced exactly (e.g. `AIL_init_sample`
+`@4→@12→@8`, the v4/v5 5-arg `AIL_3D_sample_distances@20`, `AIL_input_open@12`,
+the v7-only `@16` DSP-stage API, `MIX_RIB_MAIN` `@8`/`@20`, and the v8-vs-v9
+`Miles*` event-API arities) via per-version export aliases.

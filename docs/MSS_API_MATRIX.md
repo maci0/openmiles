@@ -2,6 +2,10 @@
 
 This matrix tracks the availability of major API groups across different historical versions of MSS and the current implementation status in **OpenMiles**.
 
+> **Export ABI:** every `-Dmss-version` build (v3–v9) reproduces its reference
+> `mss32.dll`'s decorated export table with **zero missing exports**. The "OpenMiles"
+> column below tracks *behaviour*, not symbol presence — every symbol is present.
+
 ## Support Legend
 - 🟢 **Full:** Functionally implemented and verified.
 - 🟡 **Partial:** Implemented as a functional prototype or stub with basic logic.
@@ -62,8 +66,20 @@ This matrix tracks the availability of major API groups across different histori
 |:---|:---:|:---:|:---:|:---:|:---:|:---|
 | Redbook Audio | v3 | 🔴 | 🟢 | 🟢 | 🟡 Partial | Emulated handle tracks play/pause state; no actual CD audio (games fall back gracefully) |
 
+## 7. Event System & SoundBanks (v8/v9)
+| Function Group | Intro | MSS v6.6 | MSS v8 | MSS v9 | OpenMiles | Notes |
+|:---|:---:|:---:|:---:|:---:|:---:|:---|
+| Event text constructor/decoder | v8 | 🔴 | 🟢 | 🟢 | 🟢 Full | Byte-faithful encode + decode for every step type; `EVENT_STEP_INFO` layout matches the SDK |
+| Event variables (`MilesGet/SetVar`) | v9 | 🔴 | 🔴 | 🟢 | 🟢 Full | Per-system variable store |
+| SoundBank load + asset query | v8 | 🔴 | 🟢 | 🟢 | 🟢 Full | `BANK` loader; asset enumeration + event-bytecode lookup |
+| Event execution VM (enqueue → play) | v8 | 🔴 | 🟢 | 🟢 | ⚪ Stub | Symbols present/ABI-correct; runtime that schedules queued sounds not yet wired |
+
 ## Technical Summary
-OpenMiles provides **Tier 1 (v6.6)** compatibility. Legacy `DIG_` and `MDI_` prefix aliases are not currently exported but could be added as PE export aliases if needed for older titles.
+OpenMiles reproduces the export ABI of every MSS release from **v3 through v9**
+(zero missing decorated exports per version, including per-version arity quirks).
+Behaviourally, the digital/MIDI/3D/RIB/filter/timer/quick subsystems and the v8/v9
+event-text and soundbank-query layers are functional; the event *execution* VM is
+the main remaining gap. Legacy `DIG_` and `MDI_` prefix aliases are not currently exported but could be added as PE export aliases if needed for older titles.
 
 **Legacy Compatibility Features:**
 - `AIL_waveOutOpen`, `AIL_midiOutOpen` for games that use older waveOut-style initialization.

@@ -74,6 +74,6 @@ Shifted from a "Programmer's API" to an "Artist's API" with data-driven event sy
 ---
 
 ## Implementation Guidance for OpenMiles
-When implementing a specific game's `mss32.dll`, check the **Version String** in the original DLL's metadata. 
-- If it's **v6.x**, prioritize `AIL_open_filter` and sample management.
-- If it's **v8.x**, you will need to implement the Event System (`AIL_enqueue_event`) to be compatible.
+When implementing a specific game's `mss32.dll`, check the **Version String** in the original DLL's metadata, then build with the matching `-Dmss-version` (every value v3–v9 already reproduces that release's export table with zero missing exports).
+- If it's **v6.x**, the filter and sample-management path is fully implemented.
+- If it's **v8.x/v9.x**, the event-text constructor/decoder and soundbank query API are implemented; the event *execution* VM (running `AIL_enqueue_event` / `MilesStartSoundInstance` to actually schedule sounds) is the remaining work — those symbols are present and ABI-correct but currently return empty-state.

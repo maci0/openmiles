@@ -9,12 +9,14 @@
 <p align="center">
   <a href="https://github.com/maci0/openmiles/actions"><img src="https://github.com/maci0/openmiles/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="License: GPL-3.0"></a>
-  <a href="https://ziglang.org"><img src="https://img.shields.io/badge/built%20with-Zig%200.15.2-f7a41d.svg" alt="Built with Zig"></a>
+  <a href="https://ziglang.org"><img src="https://img.shields.io/badge/built%20with-Zig%200.16.0-f7a41d.svg" alt="Built with Zig"></a>
 </p>
 
 ---
 
-OpenMiles is a clean-room reimplementation of the **Miles Sound System (MSS) 6.6** API in [Zig](https://ziglang.org/), designed as a drop-in `mss32.dll` replacement for legacy Windows games running on modern systems and under [Wine](https://www.winehq.org/).
+OpenMiles is a clean-room reimplementation of the **Miles Sound System (MSS)** in [Zig](https://ziglang.org/), designed as a drop-in `mss32.dll` replacement for legacy Windows games running on modern systems and under [Wine](https://www.winehq.org/).
+
+One `-Dmss-version` flag selects which historical MSS release the export table mimics. Every selectable version (**v3 through v9**) reproduces its reference `mss32.dll`'s decorated stdcall export table with **zero missing exports** — verified by diffing against the real DLLs with `winedump`.
 
 It replaces the proprietary MSS audio stack with [miniaudio](https://miniaud.io/) for audio output, [TinySoundFont](https://github.com/schellingb/TinySoundFont) for MIDI synthesis, and native decoders for MP3, OGG, and WAV (replacing MSS's proprietary ASI plugins), plus FLAC as a bonus format not in the original MSS.
 
@@ -30,11 +32,14 @@ It replaces the proprietary MSS audio stack with [miniaudio](https://miniaud.io/
 - **Reverb** -- per-sample delay-based reverb
 - **Timer API** -- background timer threads with configurable frequency
 - **Quick API** -- high-level one-call playback
+- **Event system (v8/v9)** -- byte-faithful event-text constructor and decoder (`AIL_create_event` / `AIL_next_event_step`), all step types, plus the v9 `Miles*` event/variable API
+- **SoundBank query (v8/v9)** -- loads the `BANK`-format soundbank, enumerates event/sound/preset/environment assets, resolves event bytecode by name
 - **Perceptual volume curve** -- cubic attenuation matching the original MSS ~60dB dynamic range
+- **Full export-ABI parity** -- v3–v9 export tables diff to zero against the reference DLLs; every exported function is fuzzed and unit-tested
 
 ## Building
 
-Requires [Zig 0.15.2](https://ziglang.org/download/).
+Requires [Zig 0.16.0](https://ziglang.org/download/).
 
 ```bash
 # Native build (Linux/Windows -- for tests)
@@ -50,26 +55,35 @@ zig build -Dtarget=x86-windows -Doptimize=ReleaseSmall -Dmss-version=5
 
 ### Targeting an MSS version
 
-`-Dmss-version=<3|4|5|6|6.0|6.1|6.5|6.6|7|8|9>` (default `9`) gates which API
-groups are compiled and exported. The default is a superset DLL spanning every
-era (v3–v9); a lower value ABI-shapes the export table to that Miles release.
+`-Dmss-version=<3|4|5|6|6.0|6.1|6.5|6.6|7|8|9>` (default `9`) selects which Miles
+release the export table mimics. Each value reproduces that version's reference
+`mss32.dll` export table with **zero missing decorated exports** — including the
+per-version ABI quirks (functions whose stdcall arity changed across releases,
+e.g. `init_sample` `@4→@12→@8`, the v4/v5 5-arg 3D-distance variants, the v7-only
+DSP-stage API, and the v8 vs v9 `Miles*` event-API arities).
 
-| Version | Adds | Exports |
-|---------|------|---------|
-| 3 | Core, Digital, Sample, Streaming, MIDI, Redbook, Timer | 231 |
-| 4 | RIB/ASI plugin system + ASI compression, Quick, Input, Memory | 287 |
-| 5 | 3D audio | 357 |
-| 6 | Filter API | 368 |
-| 7 | Unified 2D/3D sample API, master reverb (implemented via the engine) | 438 |
-| 8 | Soundbank/event/preset system, 5.1 surround, in-memory I/O (stubbed) | 517 |
-| 9 | Environment presets, 64-bit counters, logging (stubbed) | 547 |
+| Version | Adds | Exports | Parity vs ref |
+|---------|------|---------|---------------|
+| 3 | Core, Digital, Sample, Streaming, MIDI, Redbook, Timer | 251 | 0 missing (vs 3.6f) |
+| 4 | RIB/ASI plugin system + ASI compression, Quick, Input, Memory | 347 | 0 missing (vs 4.0h) |
+| 5 | 3D audio, filters | 375 | 0 missing (vs 5.0r) |
+| 6 | Filter API maturity | 375 | 0 missing (vs 6.0i) |
+| 7 | Unified 2D/3D sample API, master/speaker reverb, DSP stages | 447 | 0 missing (vs 7.0b) |
+| 8 | Event system, soundbanks, channel levels, in-memory I/O | 542 | 0 missing (vs 8.0b) |
+| 9 | `Miles*` event/variable API, environment presets, 64-bit counters | 641 | 0 missing (vs 9.3f) |
 
-A lower-versioned DLL omits the newer groups byte-for-byte. The v7 unified API
-is implemented by reusing the engine (3D on the normal `HSAMPLE`, master/sample
-reverb, low-pass); the v8/v9 high-level subsystems (soundbanks, events) link and
-return safe defaults so those titles still run on the implemented v7 audio path.
+Each build is a *superset* of its reference: it exports every name the real DLL
+does (0 missing) plus a small set of harmless cross-era extras. The export count
+exceeds the reference count for that reason; the faithfulness metric is the
+zero-missing diff.
 
-The default DLL exports every name the real v7.0/v8.0/v9.0 `mss32.dll` do.
+The v7 unified audio API runs on the engine (3D on the normal `HSAMPLE`,
+master/sample reverb, low-pass). The v8/v9 **event system** is byte-faithful
+(text constructor + decoder for every step type) and the **soundbank** query API
+loads real `BANK` files and resolves event bytecode; the event *execution* VM
+(running events to schedule sounds) is the remaining unimplemented subsystem, so
+those high-level calls are present and ABI-correct but the runtime that plays
+queued events is not yet wired.
 
 The `.asi` plugin ABI (`RIB_INTERFACE_ENTRY` layout + ASI/RIB callback
 signatures) is stable across MSS v4–v9, so a plugin built for any v4+ release
@@ -117,18 +131,24 @@ graph TD
 
 ## API Coverage
 
-367 functions exported, covering the full MSS 6.6 API surface (legacy `waveOut`/`midiOut` compatibility included; `DIG_`/`MDI_` prefix aliases not yet exported). See [docs/API_STATUS.md](docs/API_STATUS.md) for the per-function implementation matrix.
+The default (v9) DLL exports **641** functions spanning the v3–v9 API surface
+(legacy `waveOut`/`midiOut` compatibility included; `DIG_`/`MDI_` prefix aliases
+not yet exported). Every one of the ~686 distinct exported functions is covered
+by the fuzz harness and by unit or C-integration tests. See
+[docs/API_STATUS.md](docs/API_STATUS.md) for the per-function implementation matrix.
 
 | Category | Status |
 |----------|--------|
 | Core System | Mostly implemented (some Windows/hardware-specific APIs are no-ops) |
 | Digital Audio (Samples & Streams) | Fully implemented |
-| MIDI / XMIDI | Core playback fully implemented; DLS utility and filter functions stubbed |
+| MIDI / XMIDI | Core playback fully implemented; DLS/SF2 loaded via TinySoundFont |
 | 3D Positional Audio | Fully implemented |
 | RIB / ASI Plugin System | Fully implemented |
 | Filter API | Low-pass filter implemented |
 | Timer API | Fully implemented |
 | Quick API | Fully implemented |
+| Event System (v8/v9) | Text constructor + decoder byte-faithful for all step types; execution VM not yet wired |
+| SoundBank (v8/v9) | `BANK` loader: asset enumeration + event-bytecode lookup |
 | Redbook (CD) API | Emulated (no audio -- games proceed gracefully) |
 
 ## Tested Games
