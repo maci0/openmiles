@@ -57,9 +57,13 @@ pub fn AIL_set_timer_divisor(timer_opt: ?*openmiles.Timer, divisor: u32) callcon
     _ = timer_opt;
     _ = divisor;
 }
-pub fn AIL_set_timer_user(timer_opt: ?*openmiles.Timer, user: u32) callconv(.winapi) void {
-    const t = timer_opt orelse return;
+pub fn AIL_set_timer_user(timer_opt: ?*openmiles.Timer, user: u32) callconv(.winapi) u32 {
+    // SDK (mssdig.cpp): store the new user value, return the previous one. A bad
+    // handle returns 0 (the SDK's `timer == -1` guard).
+    const t = timer_opt orelse return 0;
+    const old = t.getUserData();
     t.setUserData(user);
+    return old;
 }
 pub fn AIL_release_all_timers() callconv(.winapi) void {
     openmiles.releaseAllTimers();

@@ -311,7 +311,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_quick.AIL_quick_handles(&ps, &pd, &pm);
     _ = api_quick.AIL_quick_ms_length(hs);
     _ = api_quick.AIL_quick_ms_position(hs);
-    api_quick.AIL_quick_play(hs, ri);
+    _ = api_quick.AIL_quick_play(hs, ri);
     api_v7.AIL_quick_set_low_pass_cut_off(hs, ri, rf);
     api_quick.AIL_quick_set_ms_position(hs, ri);
     api_quick.AIL_quick_set_reverb(hs, rf, rf, rf);
@@ -522,7 +522,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_timer.AIL_set_timer_divisor(ht, ru);
     api_timer.AIL_set_timer_frequency(ht, ru);
     api_timer.AIL_set_timer_period(ht, ru);
-    api_timer.AIL_set_timer_user(ht, ru);
+    _ = api_timer.AIL_set_timer_user(ht, ru);
     api_timer.AIL_set_timer_user_data(ht, ru);
     api_v9.AIL_sleep(rand.intRangeAtMost(u32, 0, 1)); // bounded: real sleep, don't block the fuzzer
     api_v8.AIL_sound_asset_filename(null, ri);

@@ -211,7 +211,7 @@ HSAMPLE     MSS_CALLBACK AIL_quick_load(char const* filename);
 HSAMPLE     MSS_CALLBACK AIL_quick_load_mem(void const* buffer, U32 size);
 HSAMPLE     MSS_CALLBACK AIL_quick_copy(HSAMPLE S);
 void        MSS_CALLBACK AIL_quick_unload(HSAMPLE S);
-void        MSS_CALLBACK AIL_quick_play(HSAMPLE S, S32 loop_count);
+S32         MSS_CALLBACK AIL_quick_play(HSAMPLE S, S32 loop_count);
 void        MSS_CALLBACK AIL_quick_stop(HSAMPLE S);
 S32         MSS_CALLBACK AIL_quick_status(HSAMPLE S);
 void        MSS_CALLBACK AIL_quick_set_volume(HSAMPLE S, S32 volume, S32 extravol);

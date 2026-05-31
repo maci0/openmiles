@@ -1146,6 +1146,33 @@ test "AIL_quick_status returns QSTAT_* values, not the SMP_* bitmask" {
     try testing.expectEqual(@as(i32, 1), api_quick.AIL_quick_status(sample)); // QSTAT_DONE
 }
 
+test "AIL_quick_play returns S32 success (1) and 0 for a null handle" {
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const sample = try openmiles.Sample.init(driver);
+    defer sample.deinit();
+    const pcm = [_]u8{0} ** 256;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 8);
+    defer testing.allocator.free(wav);
+    try sample.loadFromMemory(wav, true);
+    try testing.expectEqual(@as(i32, 1), api_quick.AIL_quick_play(sample, 1)); // playing -> 1
+    try testing.expectEqual(@as(i32, 0), api_quick.AIL_quick_play(null, 1)); // SDK null guard
+}
+
+test "AIL_set_timer_user stores new and returns the previous value (SDK)" {
+    const api_timer = @import("api/timer.zig");
+    const t = api_timer.AIL_register_timer(noopTimerCb) orelse return error.NoTimer;
+    const tt: *openmiles.Timer = @ptrCast(@alignCast(t));
+    defer api_timer.AIL_release_timer_handle(tt);
+    // Fresh timer's user value is 0; first set returns the old 0.
+    try testing.expectEqual(@as(u32, 0), api_timer.AIL_set_timer_user(tt, 0x1234));
+    // Next set returns the previously stored value.
+    try testing.expectEqual(@as(u32, 0x1234), api_timer.AIL_set_timer_user(tt, 0xABCD));
+    try testing.expectEqual(@as(u32, 0xABCD), tt.getUserData());
+    // Null handle returns 0.
+    try testing.expectEqual(@as(u32, 0), api_timer.AIL_set_timer_user(null, 5));
+}
+
 test "AIL_file_type returns AILFILETYPE_* codes (MIDI=5, XMIDI=6)" {
     // PCM WAV: RIFF....WAVE fmt <size> <wFormatTag=1>
     var wav = [_]u8{ 'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ', 16, 0, 0, 0, 1, 0, 0, 0 };

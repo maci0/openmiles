@@ -584,7 +584,7 @@ test "fuzz AIL_quick API with garbage data and adversarial scalars" {
         const iv = adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)];
         const f1 = adv_f32[rand.intRangeLessThan(usize, 0, adv_f32.len)];
         switch (rand.intRangeAtMost(u8, 0, 6)) {
-            0 => api_quick.AIL_quick_play(s, iv),
+            0 => _ = api_quick.AIL_quick_play(s, iv),
             1 => api_quick.AIL_quick_set_volume(s, iv, 127),
             2 => api_quick.AIL_quick_set_speed(s, iv),
             3 => api_quick.AIL_quick_set_ms_position(s, iv),

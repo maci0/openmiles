@@ -104,11 +104,14 @@ pub fn AIL_quick_unload(s_opt: ?*Sample) callconv(.winapi) void {
     log("AIL_quick_unload(s={*})\n", .{s});
     s.deinit();
 }
-pub fn AIL_quick_play(s_opt: ?*Sample, loop_count: i32) callconv(.winapi) void {
-    const s = s_opt orelse return;
+pub fn AIL_quick_play(s_opt: ?*Sample, loop_count: i32) callconv(.winapi) i32 {
+    // SDK: S32 result — 0 on a null/invalid handle, non-zero once the sample is
+    // playing. A loaded quick-audio sample always starts here, so report 1.
+    const s = s_opt orelse return 0;
     log("AIL_quick_play(s={*}, loop_count={d})\n", .{ s, loop_count });
     s.setLoopCount(loop_count);
     s.start();
+    return 1;
 }
 pub fn AIL_quick_stop(s_opt: ?*Sample) callconv(.winapi) void {
     const s = s_opt orelse return;

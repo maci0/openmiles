@@ -316,7 +316,7 @@ test "coverage: quick.zig exports" {
     const n: ?*openmiles.Sample = null;
     _ = qk.AIL_quick_copy(n);
     qk.AIL_quick_unload(n);
-    qk.AIL_quick_play(n, 1);
+    _ = qk.AIL_quick_play(n, 1);
     qk.AIL_quick_stop(n);
     _ = qk.AIL_quick_status(n);
     qk.AIL_quick_set_volume(n, 64, 127);
@@ -363,7 +363,7 @@ test "coverage: timer.zig exports" {
     tm.AIL_set_timer_period(tt, 16000);
     tm.AIL_set_timer_user_data(tt, 0);
     tm.AIL_set_timer_divisor(tt, 1);
-    tm.AIL_set_timer_user(tt, 0);
+    _ = tm.AIL_set_timer_user(tt, 0);
     tm.AIL_start_timer(tt);
     tm.AIL_stop_timer(tt);
     _ = tm.AIL_get_timer_highest_delay();
