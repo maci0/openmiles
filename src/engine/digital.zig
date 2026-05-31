@@ -577,12 +577,10 @@ pub const Sample = struct {
         // loops_remaining == 1: last iteration done
         self.is_done = true;
         // Fire EOB (End Of Buffer) callback — used by double-buffer streaming games to refill buffers.
-        // Signature: void callback(HSAMPLE S, S32 buff_num, U32 buff_size, void const *buff_addr)
+        // AILSAMPLECB: void callback(HSAMPLE S) — single arg; app queries buffer state separately.
         if (self.eob_callback != 0) {
-            const buf_ptr: ?*anyopaque = if (self.owned_buffer) |b| @ptrCast(b.ptr) else null;
-            const buf_len: u32 = if (self.owned_buffer) |b| @intCast(@min(b.len, std.math.maxInt(u32))) else 0;
-            const cb: *const fn (?*anyopaque, i32, u32, ?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eob_callback);
-            cb(@ptrCast(self), self.last_loaded_buffer, buf_len, buf_ptr);
+            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eob_callback);
+            cb(@ptrCast(self));
         }
         if (self.eos_callback != 0) {
             const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eos_callback);
@@ -910,9 +908,11 @@ pub const Sample = struct {
     fn streamEobBridge(ctx: ?*anyopaque, buf_index: i32, buf_len: u32, buf_addr: ?*anyopaque) void {
         const self: *Sample = @ptrCast(@alignCast(ctx.?));
         self.last_loaded_buffer = buf_index;
+        _ = buf_len;
+        _ = buf_addr;
         if (self.eob_callback != 0) {
-            const cb: *const fn (?*anyopaque, i32, u32, ?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eob_callback);
-            cb(@ptrCast(self), buf_index, buf_len, buf_addr);
+            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eob_callback);
+            cb(@ptrCast(self));
         }
     }
 
@@ -992,10 +992,8 @@ pub const Sample = struct {
             log("Sample.start: ma_sound_start returned {d}\n", .{res});
         }
         if (self.sob_callback != 0) {
-            const buf_ptr: ?*anyopaque = if (self.owned_buffer) |b| @ptrCast(b.ptr) else null;
-            const buf_len: u32 = if (self.owned_buffer) |b| @intCast(@min(b.len, std.math.maxInt(u32))) else 0;
-            const cb: *const fn (?*anyopaque, i32, u32, ?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.sob_callback);
-            cb(@ptrCast(self), self.last_loaded_buffer, buf_len, buf_ptr);
+            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.sob_callback);
+            cb(@ptrCast(self));
         }
     }
 

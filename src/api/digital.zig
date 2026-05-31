@@ -345,10 +345,10 @@ pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: u32, data: *anyopaque, 
         s.load(data, @intCast(@min(len, @as(u32, std.math.maxInt(i32))))) catch return;
     }
     // Fire SOB (Start Of Buffer) callback now that a new buffer is accepted.
-    // Signature: void callback(HSAMPLE S, S32 buff_num, U32 buff_size, void const *buff_addr)
+    // AILSAMPLECB: void callback(HSAMPLE S) — single arg; app queries buffer state separately.
     if (s.sob_callback != 0) {
-        const cb: *const fn (?*anyopaque, i32, u32, ?*anyopaque) callconv(.winapi) void = @ptrFromInt(s.sob_callback);
-        cb(@ptrCast(s), buffer_id, len, data);
+        const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(s.sob_callback);
+        cb(@ptrCast(s));
     }
 }
 pub fn AIL_sample_buffer_ready(s_opt: ?*Sample) callconv(.winapi) i32 {

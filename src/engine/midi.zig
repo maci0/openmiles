@@ -414,16 +414,18 @@ pub const Sequence = struct {
                                     }
                                 }
                             } else if (ctrl == 112) {
-                                // XMIDI prefix event — notify game
+                                // XMIDI prefix event — notify game.
+                                // AILPREFIXCB: S32 cb(HSEQUENCE seq, S32 log, S32 data)
                                 if (self.prefix_callback != 0) {
-                                    const cb: *const fn (*Sequence, i32, i32, i32) callconv(.winapi) void = @ptrFromInt(self.prefix_callback);
-                                    cb(self, @intCast(msg.*.channel), @intFromFloat(self.time_ms), @intCast(val));
+                                    const cb: *const fn (*Sequence, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.prefix_callback);
+                                    _ = cb(self, @intCast(val), @intCast(msg.*.channel));
                                 }
                             } else if (ctrl == 119) {
-                                // XMIDI trigger marker — notify game
+                                // XMIDI trigger marker — notify game.
+                                // AILTRIGGERCB: void cb(HSEQUENCE seq, S32 log, S32 data)
                                 if (self.trigger_callback != 0) {
-                                    const cb: *const fn (*Sequence, i32, i32, i32) callconv(.winapi) void = @ptrFromInt(self.trigger_callback);
-                                    cb(self, @intCast(msg.*.channel), @intFromFloat(self.time_ms), @intCast(val));
+                                    const cb: *const fn (*Sequence, i32, i32) callconv(.winapi) void = @ptrFromInt(self.trigger_callback);
+                                    cb(self, @intCast(val), @intCast(msg.*.channel));
                                 }
                             } else {
                                 // Track bank select (CC0) for timbre_callback bank reporting
@@ -535,8 +537,9 @@ pub const Sequence = struct {
         if (self.ms_per_beat <= 0) return;
         var budget: u32 = 16; // cap iterations to prevent infinite loop on corrupted tempo
         while (self.time_ms >= self.next_beat_ms and budget > 0) : (budget -= 1) {
-            const cb: *const fn (*Sequence, i32, i32) callconv(.winapi) void = @ptrFromInt(self.beat_callback);
-            cb(self, self.current_beat_in_measure, self.current_measure);
+            // AILBEATCB: void cb(HMDIDRIVER hmi, HSEQUENCE seq, S32 beat, S32 measure)
+            const cb: *const fn (?*anyopaque, *Sequence, i32, i32) callconv(.winapi) void = @ptrFromInt(self.beat_callback);
+            cb(@ptrCast(self.driver), self, self.current_beat_in_measure, self.current_measure);
             self.next_beat_ms += self.ms_per_beat;
             self.current_beat_in_measure += 1;
             if (self.current_beat_in_measure > self.beats_per_measure) {
