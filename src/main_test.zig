@@ -1529,6 +1529,36 @@ test "playback rate and rate_factor compose into the pitch (not overwrite)" {
     try testing.expectEqual(@as(f32, 2.0), api_v8.AIL_sample_playback_rate_factor(s));
 }
 
+test "loop_block setter: -2 keeps current offset, start>end swaps (SDK)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [4096]u8 align(2) = [_]u8{0} ** 4096;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16); // mono 16-bit, bpf=2
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+
+    var ls: i32 = 0;
+    var le: i32 = 0;
+    dg.AIL_set_sample_loop_block(s, 100, 200);
+    _ = api_v8b.AIL_sample_loop_block(s, &ls, &le);
+    try testing.expectEqual(@as(i32, 100), ls);
+    try testing.expectEqual(@as(i32, 200), le);
+
+    // -2 start keeps the current start (100); end updates to 400.
+    dg.AIL_set_sample_loop_block(s, -2, 400);
+    _ = api_v8b.AIL_sample_loop_block(s, &ls, &le);
+    try testing.expectEqual(@as(i32, 100), ls);
+    try testing.expectEqual(@as(i32, 400), le);
+
+    // start > end -> swapped.
+    dg.AIL_set_sample_loop_block(s, 600, 300);
+    _ = api_v8b.AIL_sample_loop_block(s, &ls, &le);
+    try testing.expectEqual(@as(i32, 300), ls);
+    try testing.expectEqual(@as(i32, 600), le);
+}
+
 test "AIL_sample_playback_rate defaults to the file's native rate" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

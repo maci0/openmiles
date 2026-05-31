@@ -306,7 +306,20 @@ pub fn AIL_set_sample_reverb(s_opt: ?*Sample, room_type: f32, level: f32, reflec
 }
 pub fn AIL_set_sample_loop_block(s_opt: ?*Sample, loop_start: i32, loop_end: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    s.setLoopBlock(loop_start, loop_end);
+    // SDK (AIL_API_set_sample_loop_block): both -2 is a no-op; a -2 offset means
+    // "keep the current one"; if start > end (unsigned) the two are swapped.
+    if (loop_start == -2 and loop_end == -2) return;
+    const bpf: u64 = s.bytesPerFrame();
+    var start = loop_start;
+    var end = loop_end;
+    if (start == -2) start = @intCast(@min(s.loop_start_frame *| bpf, @as(u64, std.math.maxInt(i32))));
+    if (end == -2) end = if (s.loop_end_frame > 0) @intCast(@min(s.loop_end_frame *| bpf, @as(u64, std.math.maxInt(i32)))) else 0;
+    if (@as(u32, @bitCast(start)) > @as(u32, @bitCast(end))) {
+        const t = start;
+        start = end;
+        end = t;
+    }
+    s.setLoopBlock(start, end);
 }
 pub fn AIL_set_sample_adpcm_block_size(s_opt: ?*Sample, block_size: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
