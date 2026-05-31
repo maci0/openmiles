@@ -554,6 +554,11 @@ pub const Sample = struct {
     v51_fb_pan: f32 = 0.5,
     v51_center_level: f32 = 1.0,
     v51_sub_level: f32 = 1.0,
+    // MSS low-pass cutoff is normalized 0..1 (1.0 = fully open / no filtering),
+    // not Hz. Stored so the getter round-trips even with no filter attached;
+    // applied to the attached filter as cutoff*Nyquist Hz. Default 1.0 matches
+    // MSS (S->low_pass_cutoff defaults to 1.0F, wavefile.cpp).
+    low_pass_cutoff_norm: f32 = 1.0,
     pitch: f32 = 1.0,
     target_rate: ?f32 = null,
     loop_count: i32 = 1,
@@ -1238,6 +1243,25 @@ pub const Sample = struct {
         } else {
             log("Sample.setPlaybackRate: s={*}, rate={d} (deferred)\n", .{ self, rate });
         }
+    }
+
+    /// Set the low-pass cutoff using MSS's normalized 0..1 convention (1.0 =
+    /// fully open). Stored for round-tripping; converted to the attached
+    /// filter's Hz domain as cutoff*Nyquist when a filter is present.
+    pub fn setLowPassNormalized(self: *Sample, norm: f32) void {
+        // MSS (update_low_pass_coef): cutoff < 0 or >= 0.999 means fully open
+        // (stored back as 1.0); otherwise the value is kept as-is.
+        const eff: f32 = if (!(norm >= 0.0) or norm >= 0.999) 1.0 else norm;
+        self.low_pass_cutoff_norm = eff;
+        const f = self.attached_filter orelse return;
+        const rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
+        const nyquist = @as(f64, @floatFromInt(rate)) / 2.0;
+        f.setCutoff(@as(f64, eff) * nyquist);
+    }
+
+    /// Return the normalized 0..1 low-pass cutoff the app set (MSS default 1.0).
+    pub fn getLowPassNormalized(self: *const Sample) f32 {
+        return self.low_pass_cutoff_norm;
     }
 
     pub fn setLoopCount(self: *Sample, count: i32) void {

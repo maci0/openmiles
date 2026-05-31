@@ -162,13 +162,13 @@ pub fn AIL_sample_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32) callcon
 pub fn AIL_set_sample_low_pass_cut_off(s_opt: ?*Sample, channel: i32, cut_off: f32) callconv(.winapi) void {
     _ = channel;
     const s = s_opt orelse return;
-    if (s.attached_filter) |f| f.setCutoff(@floatCast(cut_off));
+    // cut_off is MSS's normalized 0..1 cutoff (not Hz); the engine converts.
+    s.setLowPassNormalized(cut_off);
 }
 pub fn AIL_sample_low_pass_cut_off(s_opt: ?*Sample, channel: i32) callconv(.winapi) f32 {
     _ = channel;
     const s = s_opt orelse return 0;
-    if (s.attached_filter) |f| return @floatCast(f.getCutoff());
-    return 0;
+    return s.getLowPassNormalized();
 }
 pub fn AIL_set_sample_reverb_levels(s_opt: ?*Sample, dry_level: f32, wet_level: f32) callconv(.winapi) void {
     const s = s_opt orelse return;

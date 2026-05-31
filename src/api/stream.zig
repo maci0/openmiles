@@ -297,10 +297,9 @@ pub fn AIL_stream_reverb_levels(s_opt: ?*Sample, dry_level: ?*f32, wet_level: ?*
 // Low-pass cutoff (no-channel form, like the 6.5-7.x sample variant).
 pub fn AIL_set_stream_low_pass_cut_off(s_opt: ?*Sample, cut_off: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    if (s.attached_filter) |f| f.setCutoff(@floatCast(cut_off));
+    s.setLowPassNormalized(cut_off); // normalized 0..1 (MSS), not Hz
 }
 pub fn AIL_stream_low_pass_cut_off(s_opt: ?*Sample) callconv(.winapi) f32 {
     const s = s_opt orelse return 0;
-    if (s.attached_filter) |f| return @floatCast(f.getCutoff());
-    return 0;
+    return s.getLowPassNormalized();
 }

@@ -2233,10 +2233,13 @@ test "6.5/6.6 stream volume/reverb/low-pass round-trip" {
     api_stream.AIL_stream_reverb_levels(s, &dry, &wet);
     try testing.expect(@abs(dry - 0.3) < 0.001 and @abs(wet - 0.6) < 0.001);
 
-    // Low-pass cutoff routes through the attached filter (like the sample form);
-    // with no filter attached it is a safe no-op returning 0.
-    api_stream.AIL_set_stream_low_pass_cut_off(s, 4000.0);
-    try testing.expectEqual(@as(f32, 0), api_stream.AIL_stream_low_pass_cut_off(s));
+    // Low-pass cutoff is MSS's normalized 0..1 (default 1.0 = fully open). It
+    // round-trips through the stored value regardless of filter attachment.
+    try testing.expectEqual(@as(f32, 1.0), api_stream.AIL_stream_low_pass_cut_off(s)); // default open
+    api_stream.AIL_set_stream_low_pass_cut_off(s, 0.5);
+    try testing.expectEqual(@as(f32, 0.5), api_stream.AIL_stream_low_pass_cut_off(s));
+    api_stream.AIL_set_stream_low_pass_cut_off(s, 4000.0); // >= 0.999 -> fully open
+    try testing.expectEqual(@as(f32, 1.0), api_stream.AIL_stream_low_pass_cut_off(s));
 }
 
 test "6.5/6.6 3D sample exclusion round-trips" {
