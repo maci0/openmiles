@@ -1488,7 +1488,7 @@ test "registerDriver fills slots and unregisterDriver frees them" {
     try testing.expect(!openmiles.isKnownDriver(@ptrCast(d2)));
 }
 
-test "Sample setPlaybackRate with 0 stores zero" {
+test "Sample setPlaybackRate ignores rate <= 0 (SDK behavior)" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
     defer driver.deinit();
@@ -1499,8 +1499,26 @@ test "Sample setPlaybackRate with 0 stores zero" {
     sample.setPlaybackRate(22050);
     try testing.expectEqual(@as(?f32, 22050.0), sample.target_rate);
 
+    // SDK (AIL_API_set_sample_playback_rate): rate <= 0 is ignored, leaving the
+    // current rate unchanged -- not stored as 0.
     sample.setPlaybackRate(0);
-    try testing.expectEqual(@as(?f32, 0.0), sample.target_rate);
+    try testing.expectEqual(@as(?f32, 22050.0), sample.target_rate);
+    sample.setPlaybackRate(-100);
+    try testing.expectEqual(@as(?f32, 22050.0), sample.target_rate);
+}
+
+test "AIL_sample_playback_rate defaults to the file's native rate" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    // No explicit rate set: the getter must report the file's 8000 Hz (like the
+    // SDK's original_playback_rate set at load), not a hardcoded 44100.
+    try testing.expectEqual(@as(i32, 8000), dg.AIL_sample_playback_rate(s));
 }
 
 test "DigitalDriver multiple samples tracked correctly" {

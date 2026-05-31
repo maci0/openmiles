@@ -102,7 +102,12 @@ pub fn AIL_sample_pan(s_opt: ?*Sample) callconv(.winapi) i32 {
 }
 pub fn AIL_sample_playback_rate(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    return openmiles.satI32(s.target_rate orelse 44100.0);
+    // SDK returns original_playback_rate, which is set to the file's native rate
+    // at load; default to the decoder's rate (not a hardcoded 44100) when the
+    // app hasn't overridden it.
+    if (s.target_rate) |tr| return openmiles.satI32(tr);
+    if (s.decoder) |d| return @intCast(d.outputSampleRate);
+    return 44100;
 }
 // SDK: AIL_set_sample_volume_pan(HSAMPLE, F32 volume, F32 pan) — floats in 0.0..1.0,
 // not the S32 0..127 of the separate set_sample_volume/set_sample_pan.

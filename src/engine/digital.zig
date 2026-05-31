@@ -1283,6 +1283,9 @@ pub const Sample = struct {
     }
 
     pub fn setPlaybackRate(self: *Sample, rate: i32) void {
+        // SDK (AIL_API_set_sample_playback_rate): a rate <= 0 is ignored, the
+        // current rate is left unchanged.
+        if (rate <= 0) return;
         const tr = @as(f32, @floatFromInt(rate));
         self.target_rate = tr;
         if (self.is_initialized) {
