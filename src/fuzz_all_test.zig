@@ -627,7 +627,20 @@ test "fuzz: invoke every export with adversarial inputs" {
         const n: i32 = @min(@max(rszi, -1), 4);
         _ = api_digital.AIL_size_processed_digital_audio(ru, ru, n, &mix);
     }
-    _ = api_digital.AIL_process_digital_audio(scp, rszi, ru, ru, rszi, scp);
+    {
+        // Valid AILMIXINFO sources pointing into the scratch with bounded lengths,
+        // a real dest buffer, and a count matching the array (the mixer trusts
+        // num_srcs and dereferences each source's data_ptr, like the SDK).
+        var src_info = info; // info.data_ptr already -> scratch
+        src_info.data_len = rand.intRangeAtMost(u32, 0, 4096);
+        src_info.format = if ((ri & 1) != 0) @as(i32, 0x0011) else 1;
+        src_info.bits = if ((ri & 2) != 0) @as(i32, 4) else 16;
+        src_info.channels = if ((ri & 4) != 0) @as(i32, 2) else 1;
+        src_info.samples = rand.intRangeAtMost(u32, 0, 4096);
+        var pmix = [_]openmiles.AILMIXINFO{ .{ .Info = src_info }, .{ .Info = src_info } };
+        var dbuf: [4096]u8 align(2) = undefined;
+        _ = api_digital.AIL_process_digital_audio(&dbuf, @intCast(dbuf.len), ru, ru, @min(@max(rszi, -1), 2), &pmix);
+    }
     _ = api_dls.AIL_DLS_get_info(hm, scp, scp);
     {
         var ds_out: ?*anyopaque = null;

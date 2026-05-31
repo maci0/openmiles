@@ -568,20 +568,137 @@ pub fn AIL_set_digital_driver_processor(driver_opt: ?*DigitalDriver, stage: i32,
     driver.driver_processors[idx] = if (processor) |p| @intFromPtr(p) else 0;
     return prev;
 }
+// One normalized mixer input: 16-bit interleaved samples plus its geometry.
+const MixSrc = struct {
+    s16: []const i16 = &[_]i16{},
+    owned: ?[]i16 = null, // freed by the caller if set
+    channels: u32 = 1,
+    points: usize = 0, // per-channel sample count
+    rate: u32 = 0,
+};
+
+// Decode one IMA-ADPCM source's raw blocks to owned interleaved 16-bit PCM via
+// the same wrap-and-decode path as AIL_decompress_ADPCM.
+fn decodeAdpcmSource(info: *const AILSOUNDINFO) ?MixSrc {
+    if (info.data_ptr == null or info.data_len == 0 or info.samples == 0) return null;
+    const adpcm: []const u8 = @as([*]const u8, @ptrCast(@alignCast(info.data_ptr.?)))[0..info.data_len];
+    const ch: u16 = @intCast(@max(1, @min(2, info.channels)));
+    const block_size: u32 = if (info.block_size > 4 * @as(u32, ch)) info.block_size else 512;
+    const wav = openmiles.wrapAdpcmInWav(openmiles.global_allocator, adpcm, block_size, ch, info.rate, info.samples) catch return null;
+    defer openmiles.global_allocator.free(wav);
+    var decoder: openmiles.ma.ma_decoder = undefined;
+    var cfg = openmiles.ma.ma_decoder_config_init(openmiles.ma.ma_format_s16, 0, 0);
+    if (openmiles.ma.ma_decoder_init_memory(wav.ptr, wav.len, &cfg, &decoder) != openmiles.ma.MA_SUCCESS) return null;
+    defer _ = openmiles.ma.ma_decoder_uninit(&decoder);
+    const dch: u32 = decoder.outputChannels;
+    var list: std.ArrayListUnmanaged(i16) = .empty;
+    errdefer list.deinit(openmiles.global_allocator);
+    var chunk: [4096 * 4]i16 = undefined; // 4096 frames × up to 4 ch (aligned i16)
+    const cap_frames: u64 = chunk.len / @max(dch, 1);
+    while (true) {
+        var fr: u64 = 0;
+        _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, &chunk, cap_frames, &fr);
+        if (fr == 0) break;
+        list.appendSlice(openmiles.global_allocator, chunk[0..@intCast(fr * dch)]) catch break;
+    }
+    const buf = list.toOwnedSlice(openmiles.global_allocator) catch return null;
+    return .{ .s16 = buf, .owned = buf, .channels = dch, .points = buf.len / @max(dch, 1), .rate = if (info.rate == 0) 22050 else info.rate };
+}
+
 // S32 AIL_process_digital_audio(void *dest, S32 dest_size, U32 dest_rate, U32 dest_format, S32 num_srcs, AILMIXINFO *src)
-// The SDK function is an offline software mixer: it mixes `num_srcs` AILMIXINFO
-// sources into `dest`. OpenMiles mixes in real time through miniaudio and has no
-// offline mixer, so this is a safe no-op reporting 0 samples processed. (The
-// previous signature misread the dest buffer as an HDIGDRIVER, which would crash
-// a correct caller.)
+// Offline software mixer (wavefile.cpp): resample each source to dest_rate, sum,
+// and write dest_format into dest, returning the byte count produced. MSS's exact
+// per-sample interpolation/mix lives in the closed mixer RIB, so — like the rest
+// of OpenMiles' DSP — we mix functionally (nearest-neighbor resample, summed with
+// clipping) rather than byte-identically. The dest_points / nbytes_written
+// contract matches the SDK.
 pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u32, dest_format: u32, num_srcs: i32, src: ?*anyopaque) callconv(.winapi) i32 {
-    _ = dest;
-    _ = dest_size;
-    _ = dest_rate;
-    _ = dest_format;
-    _ = num_srcs;
-    _ = src;
-    return 0;
+    if (dest == null or src == null or num_srcs <= 0 or dest_rate == 0 or dest_size <= 0) return 0;
+    const n: usize = @min(@as(usize, @intCast(num_srcs)), 256); // SDK caps at operations[256]
+    const srcs: [*]const openmiles.AILMIXINFO = @ptrCast(@alignCast(src.?));
+
+    var mix: [256]MixSrc = undefined;
+    var nmix: usize = 0;
+    defer for (mix[0..nmix]) |m| {
+        if (m.owned) |o| openmiles.global_allocator.free(o);
+    };
+
+    var max_points: u64 = 0;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const info = &srcs[i].Info;
+        var ms: MixSrc = .{ .channels = @intCast(@max(1, @min(2, info.channels))), .rate = if (info.rate == 0) dest_rate else info.rate };
+        if (info.data_ptr != null and info.data_len > 0) {
+            if (info.format == 0x0011 and info.bits == 4) {
+                if (decodeAdpcmSource(info)) |dec| ms = dec;
+            } else if (info.bits == 16) {
+                const p: [*]const i16 = @ptrCast(@alignCast(info.data_ptr.?));
+                const total = info.data_len / 2;
+                ms.s16 = p[0..total];
+                ms.points = total / ms.channels;
+            } else if (info.bits == 8) {
+                const u8d: [*]const u8 = @ptrCast(info.data_ptr.?);
+                const total: usize = info.data_len;
+                const buf = openmiles.global_allocator.alloc(i16, total) catch break;
+                for (0..total) |k| buf[k] = (@as(i16, u8d[k]) - 128) << 8;
+                ms.owned = buf;
+                ms.s16 = buf;
+                ms.points = total / ms.channels;
+            }
+        }
+        mix[nmix] = ms;
+        nmix += 1;
+        const pts: u64 = @as(u64, ms.points) *| dest_rate / ms.rate;
+        if (pts > max_points) max_points = pts;
+    }
+
+    const dest_chan: usize = if ((dest_format & 2) != 0) 2 else 1; // DIG_F_STEREO_MASK
+    const dest_bps: usize = if ((dest_format & 1) != 0) 2 else 1; // DIG_F_16BITS_MASK
+    const dps = dest_chan * dest_bps;
+    var dest_points: usize = @as(usize, @intCast(dest_size)) / dps;
+    if (max_points < dest_points) dest_points = @intCast(max_points);
+    if (dest_points == 0) return 0;
+
+    const out: [*]u8 = @ptrCast(dest.?);
+    var o: usize = 0;
+    var j: usize = 0;
+    while (j < dest_points) : (j += 1) {
+        var accL: i32 = 0;
+        var accR: i32 = 0;
+        for (mix[0..nmix]) |m| {
+            if (m.points == 0) continue;
+            const sp: u64 = @as(u64, j) *| m.rate / dest_rate;
+            if (sp >= m.points) continue;
+            const spi: usize = @intCast(sp);
+            if (m.channels == 2) {
+                accL += m.s16[spi * 2];
+                accR += m.s16[spi * 2 + 1];
+            } else {
+                const v: i32 = m.s16[spi];
+                accL += v;
+                accR += v;
+            }
+        }
+        const L: i32 = std.math.clamp(accL, -32768, 32767);
+        const R: i32 = std.math.clamp(accR, -32768, 32767);
+        if (dest_chan == 2) {
+            writeSample(out, &o, dest_bps, L);
+            writeSample(out, &o, dest_bps, R);
+        } else {
+            writeSample(out, &o, dest_bps, std.math.clamp(@divTrunc(accL + accR, 2), -32768, 32767));
+        }
+    }
+    return @intCast(o);
+}
+
+fn writeSample(out: [*]u8, o: *usize, dest_bps: usize, v: i32) void {
+    if (dest_bps == 2) {
+        std.mem.writeInt(i16, out[o.*..][0..2], @intCast(v), .little);
+        o.* += 2;
+    } else {
+        out[o.*] = @intCast((@divTrunc(v, 256)) + 128); // 16-bit -> 8-bit unsigned
+        o.* += 1;
+    }
 }
 // Real MSS: S32 AIL_size_processed_digital_audio(U32 dest_rate, U32 dest_format,
 // S32 num_srcs, AILMIXINFO const* src) @16 — return the byte size that

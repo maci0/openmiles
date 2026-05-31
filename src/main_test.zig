@@ -1768,6 +1768,36 @@ test "AIL_size_processed_digital_audio counts points from data_len (SDK)" {
     try testing.expectEqual(@as(i32, 3456), dg.AIL_size_processed_digital_audio(8000, 3, 1, &info));
 }
 
+test "AIL_process_digital_audio mixes PCM sources into the dest buffer" {
+    // Two mono 16-bit sources at 8000 Hz; dest mono 16-bit @ 8000 (no resample).
+    var a = [_]i16{ 100, 200, 300, 400 };
+    var b = [_]i16{ 10, 20, 30, 40 };
+    var srcs = [_]openmiles.AILMIXINFO{ .{}, .{} };
+    srcs[0].Info = .{ .format = 1, .bits = 16, .channels = 1, .rate = 8000, .data_len = a.len * 2, .data_ptr = @ptrCast(&a) };
+    srcs[1].Info = .{ .format = 1, .bits = 16, .channels = 1, .rate = 8000, .data_len = b.len * 2, .data_ptr = @ptrCast(&b) };
+    var dest: [4]i16 = .{ 0, 0, 0, 0 };
+    const n = dg.AIL_process_digital_audio(@ptrCast(&dest), @intCast(dest.len * 2), 8000, 1, 2, @ptrCast(&srcs));
+    // 4 mono 16-bit points -> 8 bytes.
+    try testing.expectEqual(@as(i32, 8), n);
+    // Each dest sample is the (clamped) sum of the two sources.
+    try testing.expectEqual(@as(i16, 110), dest[0]);
+    try testing.expectEqual(@as(i16, 220), dest[1]);
+    try testing.expectEqual(@as(i16, 330), dest[2]);
+    try testing.expectEqual(@as(i16, 440), dest[3]);
+
+    // Output is bounded by dest_size: a 2-point dest takes only the first 2.
+    var small: [2]i16 = .{ 0, 0 };
+    const n2 = dg.AIL_process_digital_audio(@ptrCast(&small), 4, 8000, 1, 2, @ptrCast(&srcs));
+    try testing.expectEqual(@as(i32, 4), n2);
+    try testing.expectEqual(@as(i16, 110), small[0]);
+    try testing.expectEqual(@as(i16, 220), small[1]);
+
+    // Guards: null dest / null src / zero sources / zero rate all return 0.
+    try testing.expectEqual(@as(i32, 0), dg.AIL_process_digital_audio(null, 8, 8000, 1, 2, @ptrCast(&srcs)));
+    try testing.expectEqual(@as(i32, 0), dg.AIL_process_digital_audio(@ptrCast(&dest), 8, 8000, 1, 0, @ptrCast(&srcs)));
+    try testing.expectEqual(@as(i32, 0), dg.AIL_process_digital_audio(@ptrCast(&dest), 8, 0, 1, 2, @ptrCast(&srcs)));
+}
+
 test "AIL_size_processed_digital_audio takes the max over multiple sources (SDK)" {
     // Two AILMIXINFO sources; the function sizes for the largest after resampling.
     var srcs = [_]openmiles.AILMIXINFO{ .{}, .{} };
