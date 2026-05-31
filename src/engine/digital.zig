@@ -509,11 +509,17 @@ pub const DigitalDriver = struct {
     }
 
     pub fn setListenerDirection(self: *DigitalDriver, fx: f32, fy: f32, fz: f32) void {
-        ma.ma_engine_listener_set_direction(&self.engine, 0, fx, fy, -fz);
+        // SDK (m3d.cpp) normalizes the listener face on orientation set, so the
+        // getter round-trips a unit vector regardless of the input magnitude.
+        var v = [3]f32{ fx, fy, fz };
+        normalize3(&v);
+        ma.ma_engine_listener_set_direction(&self.engine, 0, v[0], v[1], -v[2]);
     }
 
     pub fn setListenerWorldUp(self: *DigitalDriver, ux: f32, uy: f32, uz: f32) void {
-        ma.ma_engine_listener_set_world_up(&self.engine, 0, ux, uy, -uz);
+        var v = [3]f32{ ux, uy, uz }; // SDK normalizes the listener up vector too
+        normalize3(&v);
+        ma.ma_engine_listener_set_world_up(&self.engine, 0, v[0], v[1], -v[2]);
     }
 
     pub fn getListenerPosition(self: *DigitalDriver) ma.ma_vec3f {

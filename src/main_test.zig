@@ -2476,6 +2476,22 @@ test "DigitalDriver listener world-up roundtrip" {
     try testing.expectEqual(@as(f32, 0.0), up.z);
 }
 
+test "listener 3D orientation normalizes face & up like the SDK" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    // Non-unit face (0,0,5)->(0,0,1) and non-axis up (0,3,4)->(0,0.6,0.8).
+    api_3d.AIL_set_listener_3D_orientation(drv, 0, 0, 5, 0, 3, 4);
+    var fx: f32 = 0;
+    var fy: f32 = 0;
+    var fz: f32 = 0;
+    var ux: f32 = 0;
+    var uy: f32 = 0;
+    var uz: f32 = 0;
+    api_v7.AIL_listener_3D_orientation(drv, &fx, &fy, &fz, &ux, &uy, &uz);
+    try testing.expect(@abs(fx) < 0.001 and @abs(fy) < 0.001 and @abs(fz - 1) < 0.001);
+    try testing.expect(@abs(ux) < 0.001 and @abs(uy - 0.6) < 0.001 and @abs(uz - 0.8) < 0.001);
+}
+
 test "Sample3D loadFromMemory and start stop lifecycle" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
