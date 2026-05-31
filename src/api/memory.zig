@@ -33,11 +33,17 @@ pub fn AIL_mem_free_lock(ptr: *anyopaque) callconv(.winapi) void {
     log("AIL_mem_free_lock(ptr={*})\n", .{ptr});
     std.c.free(ptr);
 }
-pub fn AIL_mem_use_malloc(malloc_fn: ?*anyopaque) callconv(.winapi) void {
+pub fn AIL_mem_use_malloc(malloc_fn: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    // SDK (genericmss.cpp): return the previous allocator, then install the new
+    // one (null reverts to the platform default, modelled here as null).
+    const old = stored_malloc_fn;
     stored_malloc_fn = malloc_fn;
+    return old;
 }
-pub fn AIL_mem_use_free(free_fn: ?*anyopaque) callconv(.winapi) void {
+pub fn AIL_mem_use_free(free_fn: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    const old = stored_free_fn;
     stored_free_fn = free_fn;
+    return old;
 }
 pub fn AIL_set_mem_callbacks(malloc_fn: ?*anyopaque, free_fn: ?*anyopaque) callconv(.winapi) void {
     stored_malloc_fn = malloc_fn;

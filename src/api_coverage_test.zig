@@ -165,8 +165,8 @@ test "coverage: digital.zig exports" {
     // Allocators / misc.
     const m = mem.AIL_mem_alloc_lock(16);
     if (m) |mp| mem.AIL_mem_free_lock(mp);
-    mem.AIL_mem_use_malloc(null);
-    mem.AIL_mem_use_free(null);
+    _ = mem.AIL_mem_use_malloc(null);
+    _ = mem.AIL_mem_use_free(null);
     mem.AIL_set_mem_callbacks(null, null);
     _ = dg.AIL_allocate_file_sample(drv, @ptrCast(wav.ptr), 0);
 

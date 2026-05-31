@@ -72,11 +72,16 @@ pub fn AIL_apply_raw_sound_preset(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.wi
     _ = a1;
     return 0;
 }
-pub fn AIL_configure_logging(a0: ?*anyopaque, a1: i32, a2: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-
+var g_trace_cb: ?*anyopaque = null;
+pub fn AIL_configure_logging(filename: ?*anyopaque, cb: ?*anyopaque, level: i32) callconv(.winapi) ?*anyopaque {
+    // SDK: returns the previous trace callback after installing the new one. We
+    // don't emit a log file, so filename/level are accepted but unused; the
+    // callback contract (store + return old) is honored so callers can restore.
+    _ = filename;
+    _ = level;
+    const old = g_trace_cb;
+    g_trace_cb = cb;
+    return old;
 }
 pub fn AIL_file_callbacks(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque) callconv(.winapi) void {
     _ = a0;

@@ -171,7 +171,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_digital.AIL_compress_ADPCM(&info, &ppnn, &uo);
     _ = api_rib.AIL_compress_ASI(&info, rstr, &pp, &uo, null);
     _ = api_dls.AIL_compress_DLS(null, rstr, &pp, &uo, null);
-    api_v9.AIL_configure_logging(null, ri, ri);
+    _ = api_v9.AIL_configure_logging(scp, scp, ri);
     _ = api_midi.AIL_controller_value(hq, ri, ri);
     _ = api_v8.AIL_create_event();
     api_v8.AIL_debug(null);
@@ -285,7 +285,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_v8.AIL_mem_read(null, null, ri);
     _ = api_v8.AIL_mem_seek(null, ri);
     _ = api_v8.AIL_mem_size(null);
-    api_memory.AIL_mem_use_malloc(null);
+    _ = api_memory.AIL_mem_use_malloc(null);
     _ = api_v8.AIL_mem_write(null, null, ri);
     _ = api_dls.AIL_merge_DLS_with_XMI(null, null, &pp, &uo);
     _ = api_midi.AIL_midiOutOpen(scp, &ppnn, ri);
@@ -354,7 +354,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_digital.AIL_register_SOB_callback(hs, null);
     _ = api_midi.AIL_register_beat_callback(hq, null);
     _ = api_midi.AIL_register_event_callback(hm, null);
-    api_v8.AIL_register_falloff_function_callback(null, ri);
+    _ = api_v8.AIL_register_falloff_function_callback(hs, scp);
     _ = api_midi.AIL_register_prefix_callback(hq, null);
     _ = api_midi.AIL_register_sequence_callback(hq, null);
     _ = api_stream.AIL_register_stream_callback(hs, null);
@@ -704,7 +704,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     if (api_quick.AIL_quick_copy(hs)) |qc| qc.deinit();
     if (api_digital.AIL_allocate_file_sample(hd, scp, rsz)) |fsamp| fsamp.deinit();
     if (api_v8.AIL_mem_create()) |m| api_v8.AIL_mem_close(m, null, null);
-    api_memory.AIL_mem_use_free(null);
+    _ = api_memory.AIL_mem_use_free(null);
     // allocate/release lifecycle on throwaway handles (exercises C-ABI wrappers
     // without tearing down the shared hd/hm/hs handles the loop reuses)
     if (api_digital.AIL_allocate_sample_handle(hd)) |ts| api_digital.AIL_release_sample_handle(ts);

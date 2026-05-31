@@ -545,10 +545,13 @@ pub fn AIL_platform_property(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque, a3: ?*an
     _ = a4;
     return 0;
 }
-pub fn AIL_register_falloff_function_callback(a0: ?*anyopaque, a1: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub fn AIL_register_falloff_function_callback(s_opt: ?*Sample, falloff_cb: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    // SDK (m3d.cpp): return the sample's previous falloff callback, then install
+    // the new one (null reverts to the engine default). Null sample returns 0.
+    const s = s_opt orelse return null;
+    const old = s.falloff_cb;
+    s.falloff_cb = falloff_cb;
+    return old;
 }
 pub fn AIL_register_trace_callback(a0: ?*anyopaque) callconv(.winapi) void {
     _ = a0;

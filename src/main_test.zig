@@ -1159,6 +1159,43 @@ test "AIL_quick_play returns S32 success (1) and 0 for a null handle" {
     try testing.expectEqual(@as(i32, 0), api_quick.AIL_quick_play(null, 1)); // SDK null guard
 }
 
+test "AIL_register_falloff_function_callback returns the sample's prior callback" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    const cb1: *anyopaque = @ptrFromInt(0xBEEF);
+    const cb2: *anyopaque = @ptrFromInt(0xCAFE);
+    // Fresh sample: no callback installed -> first call returns null.
+    try testing.expectEqual(@as(?*anyopaque, null), api_v8b.AIL_register_falloff_function_callback(s, cb1));
+    try testing.expectEqual(@as(?*anyopaque, cb1), api_v8b.AIL_register_falloff_function_callback(s, cb2));
+    try testing.expectEqual(@as(?*anyopaque, cb2), api_v8b.AIL_register_falloff_function_callback(s, null));
+    // Null sample returns 0 (SDK guard).
+    try testing.expectEqual(@as(?*anyopaque, null), api_v8b.AIL_register_falloff_function_callback(null, cb1));
+}
+
+test "AIL_configure_logging returns the previous trace callback (SDK)" {
+    const cb1: *anyopaque = @ptrFromInt(0x111);
+    const cb2: *anyopaque = @ptrFromInt(0x222);
+    // Establish a baseline, then each call returns the prior trace callback.
+    _ = api_v9.AIL_configure_logging(null, cb1, 0);
+    try testing.expectEqual(@as(?*anyopaque, cb1), api_v9.AIL_configure_logging(null, cb2, 1));
+    try testing.expectEqual(@as(?*anyopaque, cb2), api_v9.AIL_configure_logging(null, null, 0));
+}
+
+test "AIL_mem_use_malloc/free return the previously installed callback (SDK)" {
+    const mem = @import("api/memory.zig");
+    const a: *anyopaque = @ptrFromInt(0x1000);
+    const b: *anyopaque = @ptrFromInt(0x2000);
+    // Establish a known baseline (A), then each set returns the prior callback.
+    _ = mem.AIL_mem_use_malloc(a);
+    try testing.expectEqual(@as(?*anyopaque, a), mem.AIL_mem_use_malloc(b));
+    try testing.expectEqual(@as(?*anyopaque, b), mem.AIL_mem_use_malloc(null)); // null reverts to default
+    _ = mem.AIL_mem_use_free(a);
+    try testing.expectEqual(@as(?*anyopaque, a), mem.AIL_mem_use_free(b));
+    try testing.expectEqual(@as(?*anyopaque, b), mem.AIL_mem_use_free(null));
+}
+
 test "AIL_set_timer_user stores new and returns the previous value (SDK)" {
     const api_timer = @import("api/timer.zig");
     const t = api_timer.AIL_register_timer(noopTimerCb) orelse return error.NoTimer;
