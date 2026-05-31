@@ -7,6 +7,10 @@ const io = root.io;
 
 const deg2rad = root.deg2rad;
 const buildWavFromPcm = root.buildWavFromPcm;
+
+/// MSS SPEED_OF_SOUND from wavefile.cpp (0.355 m/ms) — used so miniaudio's
+/// Doppler scale matches Miles for the same raw game velocities.
+const mss_speed_of_sound: f32 = 0.355;
 const StreamSource = @import("stream_buffer.zig").StreamSource;
 
 /// Saturating f32 -> u64 (NaN/negative -> 0, overflow -> clamped). Guards the
@@ -264,6 +268,17 @@ pub const DigitalDriver = struct {
             log("ma_engine_init success. Backend: {s}\n", .{ma.ma_get_backend_name(self.engine.pDevice.*.pContext.*.backend)});
         } else {
             log("ma_engine_init success. (No Device)\n", .{});
+        }
+
+        // MSS computes Doppler with SPEED_OF_SOUND = 0.355 m/ms (wavefile.cpp),
+        // comparing it directly to the raw game-supplied velocities (distance_
+        // factor / doppler_factor both default to 1). miniaudio defaults to
+        // 343.3 m/s, so the SAME velocity would yield a ~1000x weaker pitch
+        // shift. Match MSS's constant so Doppler is at the right scale (first
+        // order it then equals MSS's c/(c+v); the OpenAL form diverges only
+        // near the speed of sound, where both clamp).
+        if (ma.ma_engine_get_listener_count(&self.engine) > 0) {
+            ma.ma_spatializer_listener_set_speed_of_sound(&self.engine.listeners[0], mss_speed_of_sound);
         }
 
         // Install an onProcess callback so AIL_process_digital_audio can

@@ -2279,6 +2279,15 @@ test "v9 system-state push/pop tracks depth and restores volume" {
     try testing.expect(@abs(drv.getMasterVolume() - 1.0) < 0.001);
 }
 
+test "Doppler uses MSS speed of sound (0.355), not miniaudio's 343.3 default" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    // MSS games supply raw velocities compared against SPEED_OF_SOUND=0.355;
+    // miniaudio's 343.3 default would make the same velocity ~1000x weaker.
+    const c = openmiles.ma.ma_spatializer_listener_get_speed_of_sound(&drv.engine.listeners[0]);
+    try testing.expect(@abs(c - 0.355) < 0.0001);
+}
+
 test "Sample3D.getLength saturates on an overflowing frame count (no panic)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
