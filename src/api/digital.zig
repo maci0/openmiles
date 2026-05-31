@@ -433,15 +433,16 @@ pub fn AIL_primary_digital_driver(new_primary: ?*DigitalDriver) callconv(.winapi
     if (new_primary) |d| openmiles.last_digital_driver = d;
     return openmiles.last_digital_driver;
 }
-pub fn AIL_digital_CPU_percent(driver_opt: ?*DigitalDriver) callconv(.winapi) f32 {
-    const driver = driver_opt orelse return 0.0;
+pub fn AIL_digital_CPU_percent(driver_opt: ?*DigitalDriver) callconv(.winapi) i32 {
+    const driver = driver_opt orelse return 0;
     // Estimate CPU load from the ratio of active sounds to a nominal budget.
     // miniaudio doesn't expose CPU usage directly; this approximation is
     // sufficient for games that throttle sound spawning based on this value.
+    // SDK returns S32 (integer percent in EAX), not F32.
     const active: f32 = @floatFromInt(driver.getActiveSampleCount() + driver.get3DActiveSampleCount());
     const nominal_budget: f32 = 32.0;
     const pct = (active / nominal_budget) * 100.0;
-    return @min(pct, 100.0);
+    return @intFromFloat(@min(pct, 100.0));
 }
 pub fn AIL_digital_latency(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
     const driver = driver_opt orelse return 0;

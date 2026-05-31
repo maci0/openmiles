@@ -318,7 +318,8 @@ pub fn AIL_find_filter(name: [*:0]const u8, ret: ?*?*openmiles.Provider) callcon
     return if (openmiles.startup_provider != null) 1 else 0;
 }
 
-pub fn AIL_background_CPU_percent() callconv(.winapi) f32 {
+// SDK returns S32 (integer percent in EAX), not F32.
+pub fn AIL_background_CPU_percent() callconv(.winapi) i32 {
     return 0;
 }
 
