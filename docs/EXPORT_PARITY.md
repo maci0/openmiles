@@ -16,31 +16,26 @@ Reference DLLs in-tree:
 - v6: `references/MSS-6.1/Tools/win/mss32.dll` (355; matches Examples/win)
 - v7: `references/MSS-7.x/ragnarok-online-redist/mss32.dll` (332)
 
-## Status (v6 vs 6.1)
+## Status
 
-Missing went 103 → 24 after lowering the version floor on 79 spatial/sample/
-filter functions that 6.1 shipped but were over-gated to v7/v8. Remaining v6
-gaps:
+**v6 MISSING: 0 / v7 MISSING: 0** (v5: 2). Every function in the real 6.1 and
+7.x export tables is now reproduced with matching stdcall decoration. Resolved
+across several passes:
 
-### Truly unimplemented in 6.1 (10) — need function bodies
-- `AIL_close_library@4`, `AIL_open_library@8`, `AIL_library_resource_filename@16`
-- `AIL_load_sample_attributes@8`, `AIL_save_sample_attributes@8`
-- `AIL_quick_load_named_mem@12`, `AIL_quick_set_low_pass_cut_off@12`
-- `AIL_ftoa@4`, `AIL_register_trace_callback@8`, `MSSDisableThreadLibraryCalls@4`
-
-### Arity mismatch — my signature differs from 6.1 (7), needs v6-specific variant
-- `AIL_room_type` real `@4` vs mine `@8`; `AIL_set_room_type` real `@8` vs `@12`
-- `AIL_digital_master_reverb` real `@16` vs `@20`; `AIL_set_digital_master_reverb` `@16` vs `@20`
-- `AIL_digital_master_reverb_levels` real `@12` vs `@16`; `AIL_set_…` `@12` vs `@16`
-- `MIX_RIB_MAIN` real `@8` vs `@20`
-
-### Version-split, deferred from the floor-lowering batch (7)
-Functions whose v7 variant differs in arity from the v8+ variant; the correct v6
-arity must be confirmed against 6.1 before lowering:
-`AIL_request_EOB_ASI_reset`, `AIL_set_sample_low_pass_cut_off`,
-`AIL_sample_low_pass_cut_off`, `AIL_sample_channel_levels`,
-`AIL_set_sample_channel_levels`, `AIL_set_speaker_reverb_levels`,
-`AIL_calculate_3D_channel_levels`.
+1. 79 spatial/sample/filter functions were implemented with correct decoration
+   but over-gated to `.ver=70/80`; floors lowered to `.ver=60`.
+2. Reverb/room-type/MIX_RIB_MAIN no-bus variants extended down to v6.
+3. 7 version-split functions (arity dips in v7) given v6-specific `.ver=60
+   .ver_max=69` entries reusing the large default impl.
+4. 4 already-implemented functions (`AIL_ftoa`, `AIL_register_trace_callback`,
+   `MSSDisableThreadLibraryCalls`, `AIL_quick_set_low_pass_cut_off`) re-gated to
+   their true version ranges (verified against the v5/v6/v7 DLLs).
+5. 6 genuinely-missing functions implemented in `src/api/legacy.zig` +
+   `AIL_quick_load_named_mem` in `quick.zig`: the 6.x-only embedded-library and
+   sample-attribute exports (`AIL_open_library`, `AIL_close_library`,
+   `AIL_library_resource_filename`, `AIL_load_sample_attributes`,
+   `AIL_save_sample_attributes`). All ABI-faithful stubs with safe defaults,
+   fuzzed in `fuzz_all_test.zig`.
 
 ## Decoration mismatch (23, all versions)
 

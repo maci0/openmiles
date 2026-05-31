@@ -22,6 +22,7 @@ comptime {
     _ = @import("api/rib.zig");
     _ = @import("api/timer.zig");
     _ = @import("api/quick.zig");
+    _ = @import("api/legacy.zig");
     _ = @import("api/digital.zig");
     _ = @import("api/filter.zig");
     _ = @import("api/memory.zig");

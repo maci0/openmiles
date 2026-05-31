@@ -17,6 +17,7 @@ const api_digital = @import("api/digital.zig");
 const api_3d = @import("api/3d.zig");
 const api_stream = @import("api/stream.zig");
 const api_quick = @import("api/quick.zig");
+const api_legacy = @import("api/legacy.zig");
 const api_redbook = @import("api/redbook.zig");
 const api_timer = @import("api/timer.zig");
 const api_file = @import("api/file.zig");
@@ -318,6 +319,12 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_quick.AIL_quick_set_speed(hs, ri);
     api_quick.AIL_quick_set_volume(hs, ri, ri);
     _ = api_quick.AIL_quick_status(hs);
+    if (api_quick.AIL_quick_load_named_mem(scp, rstr, rsz)) |qs| qs.deinit();
+    // 6.x-only legacy exports
+    if (api_legacy.AIL_open_library(rstr, ru)) |lib| api_legacy.AIL_close_library(lib);
+    _ = api_legacy.AIL_library_resource_filename(null, ri, scp, ri);
+    _ = api_legacy.AIL_load_sample_attributes(hs, scp);
+    _ = api_legacy.AIL_save_sample_attributes(hs, scp);
     api_quick.AIL_quick_stop(hs);
     _ = api_quick.AIL_quick_type(hs);
     _ = api_redbook.AIL_redbook_eject(hr);

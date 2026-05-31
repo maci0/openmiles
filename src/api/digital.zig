@@ -1104,7 +1104,8 @@ comptime {
             // v4-v6 and v7/v8 do not export MSS_alloc_info/MSS_free_info at all.
             .{ .name = "MIX_RIB_MAIN", .stack_size = 20, .ver = 90 },
             .{ .name = "MIX_RIB_MAIN", .stack_size = 8, .ver = 60, .ver_max = 80, .symbol = "MIX_RIB_MAIN_v7" },
-            .{ .name = "MSSDisableThreadLibraryCalls", .stack_size = 4, .ver = 80, .ver_max = 80 },
+            // 6.x-only: present in 6.1, gone by 7.0 (absent from the v5 and v7 DLLs).
+            .{ .name = "MSSDisableThreadLibraryCalls", .stack_size = 4, .ver = 60, .ver_max = 69 },
             .{ .name = "MSS_alloc_info", .stack_size = 16, .ver = 90 },
             .{ .name = "MSS_free_info", .stack_size = 16, .ver = 90 },
             .{ .name = "RIB_provider_system_data", .stack_size = 8, .ver = 40 },
@@ -1243,8 +1244,11 @@ comptime {
             .{ .name = "AIL_room_type", .stack_size = 4, .ver = 60, .ver_max = 80, .symbol = "AIL_room_type_v7" },
             .{ .name = "AIL_redbook_set_volume_level", .stack_size = 8, .ver = 60 },
             .{ .name = "AIL_redbook_volume_level", .stack_size = 4, .ver = 60 },
-            // quick_set_low_pass_cut_off exists only in v7 (dropped in v8+).
+            // Arity dips in v7: 6.x and 8.x+ take (HAUDIO, S32 channel, F32) @12;
+            // 7.x drops the channel arg to (HAUDIO, F32) @8.
+            .{ .name = "AIL_quick_set_low_pass_cut_off", .stack_size = 12, .ver = 60, .ver_max = 69 },
             .{ .name = "AIL_quick_set_low_pass_cut_off", .stack_size = 8, .ver = 70, .ver_max = 70, .symbol = "AIL_quick_set_low_pass_cut_off_v7" },
+            .{ .name = "AIL_quick_set_low_pass_cut_off", .stack_size = 12, .ver = 80 },
             .{ .name = "AIL_quick_set_reverb_levels", .stack_size = 12, .ver = 60 },
             .{ .name = "AIL_stream_sample_handle", .stack_size = 4, .ver = 60 },
             .{ .name = "AIL_DLS_sample_handle", .stack_size = 4, .ver = 60 },
@@ -1318,7 +1322,8 @@ comptime {
             .{ .name = "AIL_filter_property", .stack_size = 20, .ver = 60 },
             .{ .name = "AIL_find_marker_in_list", .stack_size = 12, .ver = 90 },
             .{ .name = "AIL_find_marker_in_list", .stack_size = 8, .ver = 80, .ver_max = 80, .symbol = "AIL_find_marker_in_list_v8" },
-            .{ .name = "AIL_ftoa", .stack_size = 4, .ver = 80, .ver_max = 80, .symbol = "AIL_ftoa_v8" },
+            // @4 (single F32) form spans 6.x-8.x (confirmed in the 6.1 and 7.x DLLs).
+            .{ .name = "AIL_ftoa", .stack_size = 4, .ver = 60, .ver_max = 80, .symbol = "AIL_ftoa_v8" },
             .{ .name = "AIL_get_event_contents", .stack_size = 12, .ver = 80 },
             .{ .name = "AIL_get_marker_list", .stack_size = 8, .ver = 80 },
             .{ .name = "AIL_get_soundbank_filename", .stack_size = 4, .ver = 80 },
@@ -1343,7 +1348,8 @@ comptime {
             .{ .name = "AIL_output_filter_driver_property", .stack_size = 20, .ver = 60 },
             .{ .name = "AIL_platform_property", .stack_size = 20, .ver = 60 },
             .{ .name = "AIL_register_falloff_function_callback", .stack_size = 8, .ver = 60 },
-            .{ .name = "AIL_register_trace_callback", .stack_size = 8, .ver = 80, .ver_max = 80, .symbol = "AIL_register_trace_callback_v8" },
+            // @8 (2-arg) form spans 6.x-8.x (confirmed in the 6.1 and 7.x DLLs).
+            .{ .name = "AIL_register_trace_callback", .stack_size = 8, .ver = 60, .ver_max = 80, .symbol = "AIL_register_trace_callback_v8" },
             .{ .name = "AIL_sample_51_volume_levels", .stack_size = 28, .ver = 60 },
             .{ .name = "AIL_sample_51_volume_pan", .stack_size = 24, .ver = 60 },
             .{ .name = "AIL_sample_buffer_available", .stack_size = 4, .ver = 60 },
@@ -1496,6 +1502,14 @@ comptime {
             .{ .name = "MilesAsyncFileStatus", .stack_size = 8, .ver = 90 },
             .{ .name = "MilesAsyncSetPaused", .stack_size = 4, .ver = 90 },
             .{ .name = "MilesRequeueAsyncs", .stack_size = 0, .ver = 90 },
+            // Quick-API mem loader with a filename format hint (6.x onward).
+            .{ .name = "AIL_quick_load_named_mem", .stack_size = 12, .ver = 60 },
+            // 6.x-only embedded-library + sample-attribute exports (gone by 7.0).
+            .{ .name = "AIL_open_library", .stack_size = 8, .ver = 60, .ver_max = 69 },
+            .{ .name = "AIL_close_library", .stack_size = 4, .ver = 60, .ver_max = 69 },
+            .{ .name = "AIL_library_resource_filename", .stack_size = 16, .ver = 60, .ver_max = 69 },
+            .{ .name = "AIL_load_sample_attributes", .stack_size = 8, .ver = 60, .ver_max = 69 },
+            .{ .name = "AIL_save_sample_attributes", .stack_size = 8, .ver = 60, .ver_max = 69 },
         };
         // Emit one PE export per active target, as the MSVC-decorated stdcall
         // name `_NAME@stack`, via @export rather than `export fn`. A bare
@@ -1512,7 +1526,7 @@ comptime {
             @import("file.zig"),      @import("input.zig"),  @import("midi.zig"),
             @import("dls.zig"),       @import("rib.zig"),    @import("filter.zig"),
             @import("memory.zig"),    @import("v7.zig"),     @import("v8.zig"),
-            @import("v9.zig"),         @import("miles.zig"),
+            @import("v9.zig"),         @import("miles.zig"),  @import("legacy.zig"),
         };
         for (targets) |t| {
             if (openmiles.mss_version < t.ver or openmiles.mss_version > t.ver_max) continue;
