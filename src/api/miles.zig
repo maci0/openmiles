@@ -82,6 +82,42 @@ const SoundInstance = struct {
 var g_instances: std.ArrayListUnmanaged(*SoundInstance) = .empty;
 var g_next_id: u64 = 1;
 
+// Sounds cached into memory by cache_sounds event steps (deduped); reported as
+// MILESEVENTSTATE.LoadedSoundCount and removed by purge_sounds steps.
+var g_cached: std.ArrayListUnmanaged([:0]u8) = .empty;
+
+fn cacheIndexOf(name: []const u8) ?usize {
+    for (g_cached.items, 0..) |n, i| {
+        if (std.mem.eql(u8, n, name)) return i;
+    }
+    return null;
+}
+fn cacheAdd(name: []const u8) void {
+    if (name.len == 0 or cacheIndexOf(name) != null) return;
+    const dup = openmiles.global_allocator.dupeZ(u8, name) catch return;
+    g_cached.append(openmiles.global_allocator, dup) catch openmiles.global_allocator.free(dup);
+}
+fn cacheRemove(name: []const u8) void {
+    if (cacheIndexOf(name)) |i| {
+        openmiles.global_allocator.free(g_cached.swapRemove(i));
+    }
+}
+fn cacheClear() void {
+    for (g_cached.items) |n| openmiles.global_allocator.free(n);
+    g_cached.clearRetainingCapacity();
+}
+// Apply a cache/purge step's namelist (built by the decoder) to the cache set.
+fn applyCacheStep(load: anytype, add: bool) void {
+    const list = load.namelist orelse return;
+    const n: usize = @intCast(@max(load.namecount, 0));
+    var k: usize = 0;
+    while (k < n) : (k += 1) {
+        const p = list[k] orelse continue;
+        const name = std.mem.span(@as([*:0]const u8, @ptrCast(p)));
+        if (add) cacheAdd(name) else cacheRemove(name);
+    }
+}
+
 fn nextId() u64 {
     const id = g_next_id;
     g_next_id += 1;
@@ -144,6 +180,10 @@ fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: 
             if (step.type == @intFromEnum(openmiles.event.StepType.start_sound)) {
                 const sn = step.u.start.soundname;
                 if (sn.str) |sp| createInstance(qid, sp[0..@intCast(@max(sn.len, 0))], user_buffer, ubl);
+            } else if (step.type == @intFromEnum(openmiles.event.StepType.cache_sounds)) {
+                applyCacheStep(step.u.load, true);
+            } else if (step.type == @intFromEnum(openmiles.event.StepType.purge_sounds)) {
+                applyCacheStep(step.u.load, false);
             }
             cur = next;
         }
@@ -264,6 +304,7 @@ pub fn MilesAddEventSystem(driver: ?*anyopaque) callconv(.winapi) ?*anyopaque {
 pub fn MilesShutdownEventSystem() callconv(.winapi) void {
     for (g_instances.items) |inst| destroyInstance(inst);
     g_instances.clearRetainingCapacity();
+    cacheClear();
     var s = g_root;
     while (s) |sys| {
         const nxt = sys.next;
@@ -277,6 +318,7 @@ pub fn MilesGetEventSystemState(system: ?*anyopaque, state: ?*MILESEVENTSTATE) c
     const o = state orelse return;
     o.* = std.mem.zeroes(MILESEVENTSTATE);
     o.LoadedBankCount = @intCast(openmiles.soundbank.loadedCount());
+    o.LoadedSoundCount = @intCast(g_cached.items.len);
     updateInstances();
     for (g_instances.items) |inst| {
         if (inst.status == STATUS_PLAYING) o.PlayingSoundCount += 1;

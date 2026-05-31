@@ -2786,3 +2786,39 @@ test "Miles sound instance lifecycle: enqueue, enumerate, process, stop" {
     nx = @ptrFromInt(std.math.maxInt(usize));
     try testing.expectEqual(@as(i32, 0), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, null, 0, @ptrCast(&info)));
 }
+
+test "cache_sounds/purge_sounds events update LoadedSoundCount" {
+    _ = api_miles_t.MilesStopSoundInstances(null, 0);
+    api_miles_t.MilesClearEventQueue();
+    api_miles_t.MilesShutdownEventSystem(); // clears the cache set
+
+    var state: api_miles_t.MILESEVENTSTATE = undefined;
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    const base = state.LoadedSoundCount;
+
+    // Cache three sounds.
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v8b.AIL_add_cache_sounds_event_step(ev, cstr("lib"), cstr("a:bee:cee"));
+    const e1 = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    _ = api_miles_t.MilesEnqueueEvent(@ptrCast(e1), null, 0, 0x2, 0);
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(base + 3, state.LoadedSoundCount);
+
+    // Duplicate cache is deduped.
+    const ev2 = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v8b.AIL_add_cache_sounds_event_step(ev2, cstr("lib"), cstr("a:bee"));
+    const e2 = api_v8b.AIL_close_event(ev2) orelse return error.NoStr;
+    _ = api_miles_t.MilesEnqueueEvent(@ptrCast(e2), null, 0, 0x2, 0);
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(base + 3, state.LoadedSoundCount);
+
+    // Purge two.
+    const ev3 = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v8b.AIL_add_uncache_sounds_event_step(ev3, cstr("lib"), cstr("a:cee"));
+    const e3 = api_v8b.AIL_close_event(ev3) orelse return error.NoStr;
+    _ = api_miles_t.MilesEnqueueEvent(@ptrCast(e3), null, 0, 0x2, 0);
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(base + 1, state.LoadedSoundCount);
+
+    api_miles_t.MilesShutdownEventSystem();
+}
