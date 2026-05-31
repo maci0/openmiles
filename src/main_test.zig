@@ -1122,6 +1122,18 @@ test "AIL_file_type returns AILFILETYPE_* codes (MIDI=5, XMIDI=6)" {
     try testing.expectEqual(@as(i32, 0), api_file.AIL_file_type(&junk, junk.len)); // UNKNOWN
 }
 
+test "AIL_redbook_status returns REDBOOK_* codes (STOPPED=3, ERROR=0)" {
+    // SDK: REDBOOK_ERROR=0, REDBOOK_PLAYING=1, REDBOOK_PAUSED=2, REDBOOK_STOPPED=3.
+    try testing.expectEqual(@as(u32, 1), @intFromEnum(openmiles.RedbookStatus.playing));
+    try testing.expectEqual(@as(u32, 2), @intFromEnum(openmiles.RedbookStatus.paused));
+    try testing.expectEqual(@as(u32, 3), @intFromEnum(openmiles.RedbookStatus.stopped));
+    const allocator = testing.allocator;
+    const rb = try openmiles.Redbook.init(allocator, 0);
+    defer rb.deinit();
+    try testing.expectEqual(@as(u32, 3), api_redbook.AIL_redbook_status(rb)); // STOPPED, not 0
+    try testing.expectEqual(@as(u32, 0), api_redbook.AIL_redbook_status(null)); // ERROR (null handle)
+}
+
 test "Redbook init deinit and default state" {
     const allocator = testing.allocator;
     const rb = try openmiles.Redbook.init(allocator, 0);
@@ -1901,6 +1913,7 @@ const api_v9 = @import("api/v9.zig");
 const dg = @import("api/digital.zig");
 const api_file = @import("api/file.zig");
 const api_quick = @import("api/quick.zig");
+const api_redbook = @import("api/redbook.zig");
 
 test "v8 AIL_mem in-memory stream round-trips" {
     const m = api_v8.AIL_mem_create() orelse return error.NoMem;

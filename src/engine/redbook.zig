@@ -8,10 +8,12 @@ fn nowMs() i64 {
     return @intCast(@divTrunc(ts.nanoseconds, std.time.ns_per_ms));
 }
 
+// SDK REDBOOK constants: ERROR=0, PLAYING=1, PAUSED=2, STOPPED=3. The 0 slot is
+// ERROR (returned for a null handle), NOT stopped.
 pub const RedbookStatus = enum(u32) {
-    stopped = 0,
     playing = 1,
     paused = 2,
+    stopped = 3,
 };
 
 /// Software Redbook (CD audio) emulation.
