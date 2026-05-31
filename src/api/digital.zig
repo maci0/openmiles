@@ -1103,7 +1103,7 @@ comptime {
             // v9-only: v7/v8 export MIX_RIB_MAIN@8 (a different ASI entry arity);
             // v4-v6 and v7/v8 do not export MSS_alloc_info/MSS_free_info at all.
             .{ .name = "MIX_RIB_MAIN", .stack_size = 20, .ver = 90 },
-            .{ .name = "MIX_RIB_MAIN", .stack_size = 8, .ver = 70, .ver_max = 80, .symbol = "MIX_RIB_MAIN_v7" },
+            .{ .name = "MIX_RIB_MAIN", .stack_size = 8, .ver = 60, .ver_max = 80, .symbol = "MIX_RIB_MAIN_v7" },
             .{ .name = "MSSDisableThreadLibraryCalls", .stack_size = 4, .ver = 80, .ver_max = 80 },
             .{ .name = "MSS_alloc_info", .stack_size = 16, .ver = 90 },
             .{ .name = "MSS_free_info", .stack_size = 16, .ver = 90 },
@@ -1168,6 +1168,7 @@ comptime {
             .{ .name = "AIL_waveOutClose", .stack_size = 4 },
             // EOB ASI reset: v7 @8 (HSAMPLE, buff_num); v8+ added new_stream_position.
             .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 12, .ver = 80 },
+            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 12, .ver = 60, .ver_max = 69 },
             .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 8, .ver = 70, .ver_max = 70, .symbol = "AIL_request_EOB_ASI_reset_v7" },
             // DLS utilities
             .{ .name = "AIL_compress_DLS", .stack_size = 20 },
@@ -1207,8 +1208,10 @@ comptime {
             // low-pass cutoff: v7 was per-sample only (narrow); v8 added the
             // channel parameter (wide @8/@12), kept through v9.
             .{ .name = "AIL_set_sample_low_pass_cut_off", .stack_size = 12, .ver = 80 },
+            .{ .name = "AIL_set_sample_low_pass_cut_off", .stack_size = 12, .ver = 60, .ver_max = 69 },
             .{ .name = "AIL_set_sample_low_pass_cut_off", .stack_size = 8, .ver = 70, .ver_max = 70, .symbol = "AIL_set_sample_low_pass_cut_off_v7" },
             .{ .name = "AIL_sample_low_pass_cut_off", .stack_size = 8, .ver = 80 },
+            .{ .name = "AIL_sample_low_pass_cut_off", .stack_size = 8, .ver = 60, .ver_max = 69 },
             .{ .name = "AIL_sample_low_pass_cut_off", .stack_size = 4, .ver = 70, .ver_max = 70, .symbol = "AIL_sample_low_pass_cut_off_v7" },
             .{ .name = "AIL_set_sample_reverb_levels", .stack_size = 12, .ver = 60 },
             .{ .name = "AIL_sample_reverb_levels", .stack_size = 12, .ver = 60 },
@@ -1227,17 +1230,17 @@ comptime {
             .{ .name = "AIL_digital_master_volume_level", .stack_size = 4, .ver = 60 },
             .{ .name = "AIL_set_digital_master_volume_level", .stack_size = 8, .ver = 60 },
             .{ .name = "AIL_set_digital_master_reverb", .stack_size = 20, .ver = 90 },
-            .{ .name = "AIL_set_digital_master_reverb", .stack_size = 16, .ver = 70, .ver_max = 80, .symbol = "AIL_set_digital_master_reverb_v7" },
+            .{ .name = "AIL_set_digital_master_reverb", .stack_size = 16, .ver = 60, .ver_max = 80, .symbol = "AIL_set_digital_master_reverb_v7" },
             .{ .name = "AIL_digital_master_reverb", .stack_size = 20, .ver = 90 },
-            .{ .name = "AIL_digital_master_reverb", .stack_size = 16, .ver = 70, .ver_max = 80, .symbol = "AIL_digital_master_reverb_v7" },
+            .{ .name = "AIL_digital_master_reverb", .stack_size = 16, .ver = 60, .ver_max = 80, .symbol = "AIL_digital_master_reverb_v7" },
             .{ .name = "AIL_set_digital_master_reverb_levels", .stack_size = 16, .ver = 90 },
-            .{ .name = "AIL_set_digital_master_reverb_levels", .stack_size = 12, .ver = 70, .ver_max = 80, .symbol = "AIL_set_digital_master_reverb_levels_v7" },
+            .{ .name = "AIL_set_digital_master_reverb_levels", .stack_size = 12, .ver = 60, .ver_max = 80, .symbol = "AIL_set_digital_master_reverb_levels_v7" },
             .{ .name = "AIL_digital_master_reverb_levels", .stack_size = 16, .ver = 90 },
-            .{ .name = "AIL_digital_master_reverb_levels", .stack_size = 12, .ver = 70, .ver_max = 80, .symbol = "AIL_digital_master_reverb_levels_v7" },
+            .{ .name = "AIL_digital_master_reverb_levels", .stack_size = 12, .ver = 60, .ver_max = 80, .symbol = "AIL_digital_master_reverb_levels_v7" },
             .{ .name = "AIL_set_room_type", .stack_size = 12, .ver = 90 },
-            .{ .name = "AIL_set_room_type", .stack_size = 8, .ver = 70, .ver_max = 80, .symbol = "AIL_set_room_type_v7" },
+            .{ .name = "AIL_set_room_type", .stack_size = 8, .ver = 60, .ver_max = 80, .symbol = "AIL_set_room_type_v7" },
             .{ .name = "AIL_room_type", .stack_size = 8, .ver = 90 },
-            .{ .name = "AIL_room_type", .stack_size = 4, .ver = 70, .ver_max = 80, .symbol = "AIL_room_type_v7" },
+            .{ .name = "AIL_room_type", .stack_size = 4, .ver = 60, .ver_max = 80, .symbol = "AIL_room_type_v7" },
             .{ .name = "AIL_redbook_set_volume_level", .stack_size = 8, .ver = 60 },
             .{ .name = "AIL_redbook_volume_level", .stack_size = 4, .ver = 60 },
             // quick_set_low_pass_cut_off exists only in v7 (dropped in v8+).
@@ -1255,8 +1258,10 @@ comptime {
             .{ .name = "AIL_enumerate_sample_stage_attributes", .stack_size = 16, .ver = 70, .ver_max = 70, .symbol = "AIL_enumerate_sample_stage_attributes_v7" },
             // channel levels: v7 @8/@12 lacked the src/dst matrices v8 added (@20).
             .{ .name = "AIL_sample_channel_levels", .stack_size = 20, .ver = 80 },
+            .{ .name = "AIL_sample_channel_levels", .stack_size = 20, .ver = 60, .ver_max = 69 },
             .{ .name = "AIL_sample_channel_levels", .stack_size = 8, .ver = 70, .ver_max = 70, .symbol = "AIL_sample_channel_levels_v7" },
             .{ .name = "AIL_set_sample_channel_levels", .stack_size = 20, .ver = 80 },
+            .{ .name = "AIL_set_sample_channel_levels", .stack_size = 20, .ver = 60, .ver_max = 69 },
             .{ .name = "AIL_set_sample_channel_levels", .stack_size = 12, .ver = 70, .ver_max = 70, .symbol = "AIL_set_sample_channel_levels_v7" },
             .{ .name = "AIL_listener_relative_receiver_array", .stack_size = 8, .ver = 60 },
             .{ .name = "AIL_set_listener_relative_receiver_array", .stack_size = 12, .ver = 60 },
@@ -1265,9 +1270,11 @@ comptime {
             .{ .name = "AIL_speaker_reverb_levels", .stack_size = 16, .ver = 60 },
             // speaker reverb levels: v7 @16 lacked the per-speaker index array (v8 @20).
             .{ .name = "AIL_set_speaker_reverb_levels", .stack_size = 20, .ver = 80 },
+            .{ .name = "AIL_set_speaker_reverb_levels", .stack_size = 20, .ver = 60, .ver_max = 69 },
             .{ .name = "AIL_set_speaker_reverb_levels", .stack_size = 16, .ver = 70, .ver_max = 70, .symbol = "AIL_set_speaker_reverb_levels_v7" },
             .{ .name = "AIL_calculate_3D_channel_levels", .stack_size = 56, .ver = 70, .ver_max = 70, .symbol = "AIL_calculate_3D_channel_levels_v7" },
             .{ .name = "AIL_calculate_3D_channel_levels", .stack_size = 68, .ver = 80 },
+            .{ .name = "AIL_calculate_3D_channel_levels", .stack_size = 68, .ver = 60, .ver_max = 69 },
             .{ .name = "AIL_digital_output_filter", .stack_size = 4, .ver = 60 },
             .{ .name = "AIL_output_filter_driver_attribute", .stack_size = 12, .ver = 70 },
             .{ .name = "AIL_set_output_filter_driver_preference", .stack_size = 12, .ver = 70 },
