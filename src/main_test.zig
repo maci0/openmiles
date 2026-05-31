@@ -2683,6 +2683,36 @@ test "v9 set_sample_3D_volume_falloff maps graph range to distance attenuation" 
     api_v9.AIL_set_sample_3D_volume_falloff(s, &graph, 2);
     try testing.expect(@abs(openmiles.ma.ma_sound_get_min_distance(&s.sound) - 2.0) < 0.01);
     try testing.expect(@abs(openmiles.ma.ma_sound_get_max_distance(&s.sound) - 50.0) < 0.01);
+    // The graph is stored verbatim on the sample (mirrors HSAMPLE.S3D).
+    try testing.expectEqual(@as(u8, 2), s.falloff_count[@intFromEnum(openmiles.FalloffKind.volume)]);
+}
+
+test "v9 falloff setters store all four graphs and honor the SDK pointcount guard" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    const zero: openmiles.FalloffGraphPoint = .{ .x = 0, .y = 0, .itx = 0, .ity = 0, .otx = 0, .oty = 0, .itype = 0, .otype = 0 };
+    var graph = [_]api_v9.MSSGraphPoint{zero} ** 5;
+    graph[0].x = 1.0;
+    graph[2].x = 9.0;
+    // exclusion / lowpass / spread all store the count and points.
+    api_v9.AIL_set_sample_3D_exclusion_falloff(s, &graph, 3);
+    api_v9.AIL_set_sample_3D_lowpass_falloff(s, &graph, 4);
+    api_v9.AIL_set_sample_3D_spread_falloff(s, &graph, 5);
+    try testing.expectEqual(@as(u8, 3), s.falloff_count[@intFromEnum(openmiles.FalloffKind.exclusion)]);
+    try testing.expectEqual(@as(u8, 4), s.falloff_count[@intFromEnum(openmiles.FalloffKind.lowpass)]);
+    try testing.expectEqual(@as(u8, 5), s.falloff_count[@intFromEnum(openmiles.FalloffKind.spread)]);
+    try testing.expect(s.falloff_graph[@intFromEnum(openmiles.FalloffKind.lowpass)][2].x == 9.0);
+    // pointcount > MILES_MAX_FALLOFF_GRAPH_POINTS (5) is rejected: count unchanged.
+    api_v9.AIL_set_sample_3D_lowpass_falloff(s, &graph, 6);
+    try testing.expectEqual(@as(u8, 4), s.falloff_count[@intFromEnum(openmiles.FalloffKind.lowpass)]);
+    // pointcount 0 clears the graph.
+    api_v9.AIL_set_sample_3D_spread_falloff(s, &graph, 0);
+    try testing.expectEqual(@as(u8, 0), s.falloff_count[@intFromEnum(openmiles.FalloffKind.spread)]);
+    // A null graph with a positive count is a safe no-op (count cleared, no crash).
+    api_v9.AIL_set_sample_3D_exclusion_falloff(s, null, 2);
+    try testing.expectEqual(@as(u8, 0), s.falloff_count[@intFromEnum(openmiles.FalloffKind.exclusion)]);
 }
 
 test "v9 bus mixer allocates, routes samples, and frees" {

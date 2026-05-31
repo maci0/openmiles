@@ -349,34 +349,37 @@ pub fn AIL_end_sample_group(dig: ?*DigitalDriver, end_id: i32) callconv(.winapi)
 // MSSGRAPHPOINT: { F32 X, Y, ITX, ITY, OTX, OTY; S32 IType, OType; } — X is the
 // distance, Y the value. The graph's first/last X give the falloff's near/far
 // distance, which we map onto miniaudio's distance attenuation.
-pub const MSSGraphPoint = extern struct { x: f32, y: f32, itx: f32, ity: f32, otx: f32, oty: f32, itype: i32, otype: i32 };
+pub const MSSGraphPoint = openmiles.FalloffGraphPoint;
+fn falloffPtr(graph: ?*anyopaque) ?[*]const MSSGraphPoint {
+    return @ptrCast(@alignCast(graph orelse return null));
+}
 pub fn AIL_set_sample_3D_volume_falloff(s_opt: ?*Sample, graph: ?*anyopaque, pointcount: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    const g = graph orelse return;
-    if (pointcount < 1 or pointcount > 4096) return; // sane bound (real graphs are tiny)
-    const pts: [*]const MSSGraphPoint = @ptrCast(@alignCast(g));
-    const n: usize = @intCast(pointcount);
-    const near = pts[0].x;
-    const far = pts[n - 1].x;
-    if (s.is_initialized and far > near and !std.math.isNan(near) and !std.math.isNan(far)) {
-        openmiles.ma.ma_sound_set_min_distance(&s.sound, near);
-        openmiles.ma.ma_sound_set_max_distance(&s.sound, far);
+    // SDK rejects pointcount > MILES_MAX_FALLOFF_GRAPH_POINTS (5); store verbatim.
+    s.setFalloff(.volume, falloffPtr(graph), pointcount);
+    // Adaptation: map the graph's first/last distance onto ma's min/max distance.
+    const n = s.falloff_count[@intFromEnum(openmiles.FalloffKind.volume)];
+    if (n >= 1 and s.is_initialized) {
+        const pts = &s.falloff_graph[@intFromEnum(openmiles.FalloffKind.volume)];
+        const near = pts[0].x;
+        const far = pts[n - 1].x;
+        if (far > near and !std.math.isNan(near) and !std.math.isNan(far)) {
+            openmiles.ma.ma_sound_set_min_distance(&s.sound, near);
+            openmiles.ma.ma_sound_set_max_distance(&s.sound, far);
+        }
     }
 }
 pub fn AIL_set_sample_3D_exclusion_falloff(s_opt: ?*Sample, graph: ?*anyopaque, pointcount: i32) callconv(.winapi) void {
-    _ = s_opt;
-    _ = graph;
-    _ = pointcount;
+    const s = s_opt orelse return;
+    s.setFalloff(.exclusion, falloffPtr(graph), pointcount);
 }
 pub fn AIL_set_sample_3D_lowpass_falloff(s_opt: ?*Sample, graph: ?*anyopaque, pointcount: i32) callconv(.winapi) void {
-    _ = s_opt;
-    _ = graph;
-    _ = pointcount;
+    const s = s_opt orelse return;
+    s.setFalloff(.lowpass, falloffPtr(graph), pointcount);
 }
 pub fn AIL_set_sample_3D_spread_falloff(s_opt: ?*Sample, graph: ?*anyopaque, pointcount: i32) callconv(.winapi) void {
-    _ = s_opt;
-    _ = graph;
-    _ = pointcount;
+    const s = s_opt orelse return;
+    s.setFalloff(.spread, falloffPtr(graph), pointcount);
 }
 pub fn AIL_set_sample_3D_position_segments(s_opt: ?*Sample, segments: ?*anyopaque, count: i32) callconv(.winapi) void {
     _ = s_opt;

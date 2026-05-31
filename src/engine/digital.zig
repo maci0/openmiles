@@ -13,6 +13,15 @@ const buildWavFromPcm = root.buildWavFromPcm;
 const mss_speed_of_sound: f32 = 0.355;
 const StreamSource = @import("stream_buffer.zig").StreamSource;
 
+/// MSS S3D falloff graph point (MSSGRAPHPOINT in mss.h): a distance/value point
+/// plus in/out tangents. Layout must stay identical to the SDK struct so a
+/// caller's `MSSGRAPHPOINT*` can be `@memcpy`'d in verbatim.
+pub const FalloffGraphPoint = extern struct { x: f32, y: f32, itx: f32, ity: f32, otx: f32, oty: f32, itype: i32, otype: i32 };
+/// MILES_MAX_FALLOFF_GRAPH_POINTS (mss.h). A pointcount above this is rejected.
+pub const max_falloff_points: usize = 5;
+/// The four S3D falloff graphs a sample carries: volume, exclusion, lowpass, spread.
+pub const FalloffKind = enum(usize) { volume = 0, exclusion = 1, lowpass = 2, spread = 3 };
+
 /// Saturating f32 -> u64 (NaN/negative -> 0, overflow -> clamped). Guards the
 /// `@intFromFloat` panic when external callers pass negative/huge positions.
 fn satU64(v: f32) u64 {
@@ -623,6 +632,10 @@ pub const Sample = struct {
     v9_bus: i32 = 0,
     v9_level_mask: u8 = 0xFF,
     v9_spread: f32 = 0.0,
+    // S3D falloff graphs (volume, exclusion, lowpass, spread). Stored verbatim
+    // per AIL_set_sample_3D_*_falloff; count 0 = no graph. Mirrors HSAMPLE.S3D.
+    falloff_count: [4]u8 = [_]u8{0} ** 4,
+    falloff_graph: [4][max_falloff_points]FalloffGraphPoint = undefined,
     v9_schedule_time: u64 = 0,
     v9_playback_delay: i32 = 0, // ms before playback starts (AIL_set_sample_playback_delay)
     // 5.1 per-speaker volume levels: FL, FR, FC, LFE, BL, BR.
@@ -1046,8 +1059,26 @@ pub const Sample = struct {
         self.pcm_format = null;
         self.channel_mask = ~@as(u32, 0);
         self.n_buffers = 0;
+        self.falloff_count = [_]u8{0} ** 4;
         self.last_loaded_buffer = 0;
         self.user_data = [_]u32{0} ** 8;
+    }
+
+    /// Store an S3D falloff graph (AIL_set_sample_3D_*_falloff). Mirrors the SDK:
+    /// pointcount above MILES_MAX_FALLOFF_GRAPH_POINTS is rejected (no change);
+    /// 0 clears the graph; otherwise the points are copied in verbatim.
+    pub fn setFalloff(self: *Sample, kind: FalloffKind, graph: ?[*]const FalloffGraphPoint, pointcount: i32) void {
+        if (pointcount < 0 or pointcount > max_falloff_points) return;
+        const idx = @intFromEnum(kind);
+        const n: u8 = @intCast(pointcount);
+        self.falloff_count[idx] = n;
+        if (n > 0) {
+            const pts = graph orelse {
+                self.falloff_count[idx] = 0; // null graph with a positive count = no graph
+                return;
+            };
+            @memcpy(self.falloff_graph[idx][0..n], pts[0..n]);
+        }
     }
 
     pub fn start(self: *Sample) void {
