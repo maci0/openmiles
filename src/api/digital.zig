@@ -897,6 +897,8 @@ comptime {
             .{ .name = "AIL_sample_loop_count", .stack_size = 4 },
             .{ .name = "AIL_register_EOS_callback", .stack_size = 8 },
             .{ .name = "AIL_open_stream", .stack_size = 12 },
+            // Undocumented internal that leaked into the 6.1a export table only.
+            .{ .name = "AIL_open_stream_by_sample", .stack_size = 16, .ver = 61, .ver_max = 61 },
             .{ .name = "AIL_close_stream", .stack_size = 4 },
             .{ .name = "AIL_start_stream", .stack_size = 4 },
             .{ .name = "AIL_pause_stream", .stack_size = 8 },
@@ -1339,8 +1341,9 @@ comptime {
             .{ .name = "AIL_stream_reverb_levels", .stack_size = 12, .ver = 65, .ver_max = 66 },
             .{ .name = "AIL_set_stream_low_pass_cut_off", .stack_size = 8, .ver = 65, .ver_max = 66 },
             .{ .name = "AIL_stream_low_pass_cut_off", .stack_size = 4, .ver = 65, .ver_max = 66 },
-            .{ .name = "AIL_set_3D_sample_exclusion", .stack_size = 8, .ver = 65, .ver_max = 66 },
-            .{ .name = "AIL_3D_sample_exclusion", .stack_size = 4, .ver = 65, .ver_max = 66 },
+            // First appeared in the 6.1d patch (absent in 6.1a/6.1c), present through 6.6.
+            .{ .name = "AIL_set_3D_sample_exclusion", .stack_size = 8, .ver = 61, .ver_max = 66 },
+            .{ .name = "AIL_3D_sample_exclusion", .stack_size = 4, .ver = 61, .ver_max = 66 },
             .{ .name = "AIL_DLS_set_reverb_levels", .stack_size = 12, .ver = 65, .ver_max = 66 },
             .{ .name = "AIL_DLS_get_reverb_levels", .stack_size = 12, .ver = 65, .ver_max = 66 },
             .{ .name = "AIL_set_digital_master_room_type", .stack_size = 8, .ver = 65, .ver_max = 66 },
@@ -1658,13 +1661,18 @@ comptime {
             asm (".section .drectve\n .ascii \" /EXPORT:AIL_debug_printf=AIL_debug_printf\"\n .text\n");
         }
         // `stream_background`: an undocumented internal symbol that leaked into
-        // the 6.1-6.6 export tables. Its decoration varies by sub-version
-        // (fastcall `@stream_background@0` in 6.1/6.5, undecorated
-        // `stream_background` in 6.6), confirming it is an accidental export,
-        // not an API. We back it with a no-op C stub and emit the version's
-        // exact export name purely to byte-match the reference export table.
-        if (openmiles.mss_version == 61 or openmiles.mss_version == 65) {
+        // the 6.1-6.6 export tables. Its decoration varies *within* a minor
+        // version: fastcall `@stream_background@0` in 6.1 and 6.5a-c, but
+        // undecorated `stream_background` from 6.5d onward (and all of 6.6),
+        // confirming it is an accidental export, not an API. We can't tell sub-
+        // patches apart at build time (both are version 65), so for 6.5 we emit
+        // *both* names — the extra one is a harmless EXTRA export in whichever
+        // sub-patch lacks it. Each form is backed by the same no-op C stub.
+        if (openmiles.mss_version == 61) {
             asm (".section .drectve\n .ascii \" /EXPORT:@stream_background@0=mss_stream_background_stub\"\n .text\n");
+        } else if (openmiles.mss_version == 65) {
+            asm (".section .drectve\n .ascii \" /EXPORT:@stream_background@0=mss_stream_background_stub\"\n .text\n");
+            asm (".section .drectve\n .ascii \" /EXPORT:stream_background=mss_stream_background_stub\"\n .text\n");
         } else if (openmiles.mss_version == 66) {
             asm (".section .drectve\n .ascii \" /EXPORT:stream_background=mss_stream_background_stub\"\n .text\n");
         }

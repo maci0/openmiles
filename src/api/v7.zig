@@ -36,9 +36,9 @@ pub fn AIL_set_sample_3D_position(obj: ?*Sample, x: f32, y: f32, z: f32) callcon
     if (s.is_initialized) ma.ma_sound_set_position(&s.sound, x, y, -z);
 }
 pub fn AIL_set_sample_3D_velocity(obj: ?*Sample, dx: f32, dy: f32, dz: f32, magnitude: f32) callconv(.winapi) void {
-    _ = magnitude;
-    const s = obj orelse return;
-    if (s.is_initialized) ma.ma_sound_set_velocity(&s.sound, dx, dy, -dz);
+    // SDK (m3d.cpp): scale the (unit-ish) direction by magnitude, then defer to
+    // the vector form. Dropping magnitude left every such call at unit speed.
+    AIL_set_sample_3D_velocity_vector(obj, dx * magnitude, dy * magnitude, dz * magnitude);
 }
 pub fn AIL_set_sample_3D_velocity_vector(obj: ?*Sample, dx: f32, dy: f32, dz: f32) callconv(.winapi) void {
     const s = obj orelse return;

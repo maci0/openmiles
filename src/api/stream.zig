@@ -11,6 +11,19 @@ pub fn AIL_open_stream_ex(driver_opt: ?*DigitalDriver, filename_opt: ?[*:0]const
     _ = flags;
     return AIL_open_stream(driver_opt, filename_opt, stream_mem);
 }
+// `_AIL_open_stream_by_sample@16`: an undocumented internal that leaked into
+// the 6.1a export table only (gone again by 6.1c, never in any header). Like
+// `stream_background`, it is an accidental export, not a public API, so there
+// is no documented signature or behavior to reproduce. We export the exact
+// decorated name (@16 = four stdcall args) backed by a safe stub that reports
+// failure (null HSTREAM), purely so the 6.1a export table byte-matches.
+pub fn AIL_open_stream_by_sample(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32) callconv(.winapi) ?*Sample {
+    _ = a0;
+    _ = a1;
+    _ = a2;
+    _ = a3;
+    return null;
+}
 pub fn AIL_open_stream(driver_opt: ?*DigitalDriver, filename_opt: ?[*:0]const u8, stream_mem: i32) callconv(.winapi) ?*Sample {
     const driver = driver_opt orelse return null;
     const file_str = if (filename_opt) |ptr| std.mem.span(ptr) else "<null>";

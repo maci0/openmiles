@@ -2387,6 +2387,15 @@ const api_3d = @import("api/3d.zig");
 const api_dls = @import("api/dls.zig");
 const api_midi = @import("api/midi.zig");
 
+test "AIL_open_stream_by_sample (6.1a leaked internal) is a safe null stub" {
+    // Undocumented, never in any header; no behavior to reproduce. The contract
+    // we hold is that it links and returns a defined failure (null) for any args.
+    try testing.expectEqual(@as(?*openmiles.Sample, null), api_stream.AIL_open_stream_by_sample(null, null, null, 0));
+    var scratch: [4]u8 = .{ 1, 2, 3, 4 };
+    const p: *anyopaque = @ptrCast(&scratch);
+    try testing.expectEqual(@as(?*openmiles.Sample, null), api_stream.AIL_open_stream_by_sample(p, p, p, -1));
+}
+
 test "AIL_lock_channel/release_channel take the MIDI driver handle (SDK)" {
     const driver = try openmiles.MidiDriver.init(testing.allocator);
     defer driver.deinit();
@@ -2407,7 +2416,7 @@ test "v9 update_sample_3D_position dead-reckons by velocity" {
     defer s.deinit();
     try s.loadFromMemory(wav, false);
     api_v7.AIL_set_sample_3D_position(s, 0, 0, 0);
-    api_v7.AIL_set_sample_3D_velocity(s, 10, 0, 0, 0); // 10 units/sec on +x
+    api_v7.AIL_set_sample_3D_velocity(s, 10, 0, 0, 1); // 10 units/sec on +x (magnitude 1)
     api_v7.AIL_update_sample_3D_position(s, 1000); // advance 1 second
     const p = openmiles.ma.ma_sound_get_position(&s.sound);
     try testing.expect(p.x > 9.0 and p.x < 11.0); // ~10
@@ -2415,6 +2424,28 @@ test "v9 update_sample_3D_position dead-reckons by velocity" {
     api_v7.AIL_update_sample_3D_position(s, std.math.nan(f32));
     const p2 = openmiles.ma.ma_sound_get_position(&s.sound);
     try testing.expect(p2.x > 9.0 and p2.x < 11.0);
+}
+
+test "v7 set_sample_3D_velocity scales the direction by magnitude" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    // SDK multiplies each component by magnitude before storing. Unit +x dir × 7.
+    api_v7.AIL_set_sample_3D_velocity(s, 1, 0, 0, 7);
+    var vx: f32 = 0;
+    var vy: f32 = 0;
+    var vz: f32 = 0;
+    api_v7.AIL_sample_3D_velocity(s, &vx, &vy, &vz);
+    try testing.expect(@abs(vx - 7) < 0.001 and @abs(vy) < 0.001 and @abs(vz) < 0.001);
+    // magnitude 0 yields a zero velocity vector (not the old "ignored" behavior).
+    api_v7.AIL_set_sample_3D_velocity(s, 3, 4, 5, 0);
+    api_v7.AIL_sample_3D_velocity(s, &vx, &vy, &vz);
+    try testing.expect(@abs(vx) < 0.001 and @abs(vy) < 0.001 and @abs(vz) < 0.001);
 }
 
 test "v7 unified 3D pos/vel/orient round-trip in MSS left-handed space" {
@@ -2437,8 +2468,8 @@ test "v7 unified 3D pos/vel/orient round-trip in MSS left-handed space" {
     // miniaudio stores Z negated (right-handed boundary).
     try testing.expect(@abs(openmiles.ma.ma_sound_get_position(&s.sound).z - (-3)) < 0.001);
 
-    // Velocity round-trips with Z preserved in MSS space.
-    api_v7.AIL_set_sample_3D_velocity(s, 4, 5, 6, 0);
+    // Velocity round-trips with Z preserved in MSS space (magnitude 1 = no scale).
+    api_v7.AIL_set_sample_3D_velocity(s, 4, 5, 6, 1);
     var vx: f32 = 0;
     var vy: f32 = 0;
     var vz: f32 = 0;

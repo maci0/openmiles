@@ -738,6 +738,7 @@ test "fuzz: invoke every export with adversarial inputs" {
         api_stream.AIL_close_stream(st);
     }
     if (api_stream.AIL_open_stream_ex(hd, rstr, ri, ri)) |st| api_stream.AIL_close_stream(st);
+    if (api_stream.AIL_open_stream_by_sample(hd, hs, scp, ri)) |st| api_stream.AIL_close_stream(st);
     api_digital.AIL_start_sample_at(hs, ru);
     // input device open/close
     if (api_input.AIL_open_input(scp)) |inp| api_input.AIL_close_input(inp);
