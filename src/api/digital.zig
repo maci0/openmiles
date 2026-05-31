@@ -159,11 +159,15 @@ pub fn AIL_serve() callconv(.winapi) void {}
 pub fn AIL_set_digital_master_volume(driver_opt: ?*DigitalDriver, master_volume: i32) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     log("AIL_set_digital_master_volume(driver={*}, volume={d})\n", .{ driver, master_volume });
-    driver.setMasterVolume(openmiles.mssVolumeToGain(master_volume));
+    // The master volume is a LINEAR final gain (the F32 AIL_set_digital_master_
+    // volume_level sets dig->master_volume directly with no curve, per
+    // wavefile.cpp), unlike the perceptual ^(10/6) sample-volume curve.
+    const clamped: f32 = @floatFromInt(std.math.clamp(master_volume, 0, 127));
+    driver.setMasterVolume(clamped / 127.0);
 }
 pub fn AIL_digital_master_volume(driver_opt: ?*DigitalDriver) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
-    return openmiles.gainToMssVolume(driver.getMasterVolume());
+    return openmiles.satI32(@round(driver.getMasterVolume() * 127.0));
 }
 pub fn AIL_allocate_sample_handle(driver_opt: ?*DigitalDriver) callconv(.winapi) ?*Sample {
     const driver = driver_opt orelse return null;

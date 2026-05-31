@@ -3180,6 +3180,18 @@ test "volume/pan match the exact MSS curve (gain = volume^(10/6))" {
     try testing.expectApproxEqAbs(@as(f32, 0.25), gp, 0.02);
 }
 
+test "digital master volume is linear (vol/127), not the sample-volume curve" {
+    // The master volume is a linear final gain (F32 master sets dig->master_volume
+    // directly), unlike the perceptual ^(10/6) sample-volume curve.
+    const hd = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer hd.deinit();
+    dg.AIL_set_digital_master_volume(hd, 64);
+    try testing.expectApproxEqAbs(@as(f32, 0.504), hd.getMasterVolume(), 0.01); // 64/127, not ~0.319
+    try testing.expectEqual(@as(i32, 64), dg.AIL_digital_master_volume(hd)); // round-trip
+    dg.AIL_set_digital_master_volume(hd, 127);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), hd.getMasterVolume(), 0.001);
+}
+
 test "AIL_redbook_set_volume_level returns the previous volume (F32)" {
     const rb = try openmiles.Redbook.init(testing.allocator, 0);
     defer rb.deinit();
