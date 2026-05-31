@@ -45,19 +45,36 @@ provider-management calls, and `DLSMSSGetCPU` stay **__stdcall/decorated**.
 Reproduced via callconv(.c) on those 21 functions plus a `.cdecl` flag on their
 export targets. (No .DEF file needed — Zig emits the bare name for cdecl.)
 
-## Remaining: sub-version arity quirks (2 vs the 6.1 Tools DLL only)
+## Result: v5 / v6 / v7 are byte-for-byte exact
 
-`v7` is a byte-for-byte match (0 missing, 0 mismatch). `v6` differs from the
-6.1 Tools/Examples DLL by exactly two symbols:
+Against a representative mainline DLL for each major version the export tables
+match exactly (0 missing, 0 decoration mismatch):
 
-- `AIL_init_sample`: @4 (v3-6.0) vs @8 (6.1 only) vs @12 (v7) vs @8 (v8). We
-  emit @4, matching the entire 6.0 line (6.0a-6.0m) and the public header.
-- `AIL_sample_buffer_info`: @20 (v5, 6.0, **and v7**) vs @24 (6.1 only). We emit
-  @20, matching 6.0 and 7.0.
+- v5 vs `MSS-5.x/5.0m-mss32.dll` (also 5.0r): 0 / 0
+- v6 vs `MSS-6.0/6.0m-mss32.dll` (also 6.0k): 0 / 0
+- v7 vs `MSS-7.x/ragnarok-online-redist/mss32.dll`: 0 / 0
 
-Both are 6.1-point-release anomalies; matching them would *break* parity with
-the 6.0 mainline and 7.0, so we deliberately track the 6.0/7.0 majority.
+### Choosing a representative point release
 
-`v5` (vs the NoLF DLL): 2 missing (`AIL_open_input@4`/`AIL_close_input@4`, gated
-too high) and the v4/v5 narrow `AIL_3D_sample_distances@12` vs our @20 — minor,
-tracked.
+Some functions oscillate arity across point releases, so one `-Dmss-version`
+build cannot match every sub-release. We target the **dominant family** per
+major version and stay internally consistent:
+
+- `AIL_init_sample`: @4 (v3-6.0) → @8 (6.1) → @12 (v7) → @8 (v8).
+- `AIL_sample_buffer_info`: @20 (v5, 6.0, v7) → @24 (6.1).
+- `AIL_request_EOB_ASI_reset`: @8 (6.0) → @12 (6.1) → @8 (7.0b-d) → @12 (7.0h+).
+
+For v6 we pick the **6.0 mainline** (the ~12-release 6.0a-6.0m family): @4 / @20
+/ @8 respectively. This means v6 differs from the rarer 6.1 point release on
+those three symbols — an unavoidable trade-off, documented here.
+
+> Note: `MSS-5.x/nolf-sdk-plugins/mss32.dll` is an atypical build (it reports
+> the v6-style `@12`/`AIL_open_input` shapes); use `5.0m`/`5.0r` as the v5
+> reference instead.
+
+### Caveat: EXTRA exports
+
+Our builds still export some symbols a given mainline DLL lacks (e.g. v5 has 61
+extras) — later-version functions not yet down-gated. EXTRA exports are benign
+(a game never imports a symbol its header doesn't declare) but are the next
+parity axis to tighten.

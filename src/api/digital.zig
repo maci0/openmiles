@@ -1173,9 +1173,11 @@ comptime {
             .{ .name = "AIL_destroy_wave_synthesizer", .stack_size = 4 },
             .{ .name = "AIL_waveOutClose", .stack_size = 4 },
             // EOB ASI reset: v7 @8 (HSAMPLE, buff_num); v8+ added new_stream_position.
-            // @12 (3-arg) across 6.x, 7.0h+, and 8.x. Only the earliest 7.0
-            // builds (7.0b-d) used a 2-arg @8 form, which we don't target.
-            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 12, .ver = 60 },
+            // Arity oscillates across point releases: 6.0 @8, 6.1 @12, 7.0b-d
+            // @8, 7.0h+/8.x @12. We target the dominant families — the 6.0
+            // mainline (@8) for v6, and 7.0h+ (@12) for v7+.
+            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 8, .ver = 60, .ver_max = 69, .symbol = "AIL_request_EOB_ASI_reset_v7" },
+            .{ .name = "AIL_request_EOB_ASI_reset", .stack_size = 12, .ver = 70 },
             // DLS utilities
             .{ .name = "AIL_compress_DLS", .stack_size = 20 },
             .{ .name = "AIL_extract_DLS", .stack_size = 28 },
