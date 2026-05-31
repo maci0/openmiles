@@ -693,6 +693,11 @@ test "Sample3D setMinMaxDistance" {
     s.setMinMaxDistance(5.0, 200.0);
     try testing.expectEqual(@as(f32, 5.0), s.min_distance);
     try testing.expectEqual(@as(f32, 200.0), s.max_distance);
+
+    // SDK swaps when min > max so the stored pair is always ordered.
+    s.setMinMaxDistance(300.0, 10.0);
+    try testing.expectEqual(@as(f32, 10.0), s.min_distance);
+    try testing.expectEqual(@as(f32, 300.0), s.max_distance);
 }
 
 test "Sample3D setVolume uses cubic curve" {
@@ -2694,6 +2699,26 @@ test "AIL_DLS_load_memory rejects an implausibly-large header size (no panic)" {
     const dls_drv = api_dls.AIL_DLS_open(md, drv, null, 0, 44100, 16, 2);
     try testing.expect(dls_drv != null);
     if (dls_drv) |d| api_dls.AIL_DLS_close(d, 0);
+}
+
+test "v7 set_sample_3D_distances orders the min/max pair (SDK swap)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    api_v7.AIL_set_sample_3D_position(s, 0, 0, 0);
+    // Normal order (max=100, min=3) is preserved.
+    api_v7.AIL_set_sample_3D_distances(s, 100.0, 3.0, 0);
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_min_distance(&s.sound) - 3.0) < 0.01);
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_max_distance(&s.sound) - 100.0) < 0.01);
+    // Reversed args (max=5, min=80) get swapped so min <= max holds.
+    api_v7.AIL_set_sample_3D_distances(s, 5.0, 80.0, 0);
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_min_distance(&s.sound) - 5.0) < 0.01);
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_max_distance(&s.sound) - 80.0) < 0.01);
 }
 
 test "v9 set_sample_3D_volume_falloff maps graph range to distance attenuation" {

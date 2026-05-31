@@ -1952,11 +1952,20 @@ pub const Sample3D = struct {
     }
 
     pub fn setMinMaxDistance(self: *Sample3D, min_dist: f32, max_dist: f32) void {
-        self.min_distance = min_dist;
-        self.max_distance = max_dist;
+        // Match the SDK (m3d.cpp): swap so min <= max. miniaudio's distance
+        // attenuation is undefined when min_distance > max_distance.
+        var lo = min_dist;
+        var hi = max_dist;
+        if (lo > hi) {
+            const tmp = lo;
+            lo = hi;
+            hi = tmp;
+        }
+        self.min_distance = lo;
+        self.max_distance = hi;
         if (self.is_initialized) {
-            ma.ma_sound_set_min_distance(&self.sound, min_dist);
-            ma.ma_sound_set_max_distance(&self.sound, max_dist);
+            ma.ma_sound_set_min_distance(&self.sound, lo);
+            ma.ma_sound_set_max_distance(&self.sound, hi);
         }
     }
 

@@ -67,9 +67,18 @@ pub fn AIL_set_sample_3D_cone(obj: ?*Sample, inner_angle: f32, outer_angle: f32,
 pub fn AIL_set_sample_3D_distances(obj: ?*Sample, max_dist: f32, min_dist: f32, auto_3D_wet_atten: i32) callconv(.winapi) void {
     _ = auto_3D_wet_atten;
     const s = obj orelse return;
+    // SDK (m3d.cpp) swaps the pair when min > max so min_dist <= max_dist always
+    // holds; miniaudio's attenuation is undefined for min > max, so this matters.
+    var lo = min_dist;
+    var hi = max_dist;
+    if (lo > hi) {
+        const tmp = lo;
+        lo = hi;
+        hi = tmp;
+    }
     if (s.is_initialized) {
-        ma.ma_sound_set_min_distance(&s.sound, min_dist);
-        ma.ma_sound_set_max_distance(&s.sound, max_dist);
+        ma.ma_sound_set_min_distance(&s.sound, lo);
+        ma.ma_sound_set_max_distance(&s.sound, hi);
     }
 }
 pub fn AIL_update_sample_3D_position(obj: ?*Sample, dt_ms: f32) callconv(.winapi) void {
