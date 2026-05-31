@@ -434,11 +434,16 @@ has known limitations, or is a compatibility stub.
 | `AIL_next_event_step` / `MilesNextEventStep` | 🟢 Implemented | Decodes every step type into `EVENT_STEP_INFO` (layout matches the SDK field-for-field); splits cache/purge sound lists into `namelist` |
 | `MilesSetVarI/F` / `MilesGetVarI/F` | 🟢 Implemented | Per-system variable store (default + named systems) |
 | `MilesStartupEventSystem` / `MilesAddEventSystem` / `MilesShutdownEventSystem` | 🟢 Implemented | Event-system lifecycle (linked list of systems) |
-| `MilesGetEventSystemState` | 🟡 Partial | Reports command-buffer size; instance/bank counts are 0 until the execution VM lands |
-| `AIL_open_soundbank` / `MilesAddSoundBank` / `*ReleaseSoundBank` | 🟢 Implemented | Loads the `BANK` format; enumerates event/sound/preset/env assets |
-| `AIL_find_event` / `MilesFindEvent` | 🟢 Implemented | Resolves a named event's step bytecode (`AIL_get_event_contents`) |
-| `MilesEnqueueEvent*` / `MilesStartSoundInstance` / `Miles*SoundInstances` | ⚪ Stub | Present and ABI-correct; the event *execution* VM (queue → instance → playback) is not yet wired, so they return empty-state |
-| `MilesGetEventLength` | ⚪ Stub | Needs the global event/sound container (execution VM) |
+| `MilesGetEventSystemState` | 🟢 Implemented | Reports live command-buffer size, loaded-bank / loaded-sound / playing-sound / persist counts (memory stats remain 0) |
+| `AIL_open_soundbank` / `MilesAddSoundBank` / `*ReleaseSoundBank` | 🟢 Implemented | Loads the `BANK` format; registers in the global container; enumerates event/sound/preset/env assets |
+| `AIL_find_event` / `MilesFindEvent` / `AIL_get_event_contents` | 🟢 Implemented | Resolves a named event's step bytecode (`hlbank.cpp`) |
+| `AIL_sound_asset_filename` / `AIL_sound_asset_info` | 🟢 Implemented | Formats `*<bank><sound>` path and fills `MILESBANKSOUNDINFO` from the `Sound` struct |
+| `MilesEnqueueEvent*` / `MilesEnqueueEventByName` / `MilesStartSoundInstance` | 🟢 Implemented | Parse the event bytecode and create tracked sound instances per start_sound step (durations resolved via the bank container) |
+| `Miles*SoundInstances` (Enumerate/Stop/Pause/Resume) | 🟢 Implemented | Full instance lifecycle (PENDING→PLAYING→COMPLETE, duration-driven) with status-bitmask + label-query (token/glob) filtering and per-label concurrent caps |
+| `MilesBegin/Complete/ClearEventQueueProcessing` | 🟢 Implemented | Process-cycle state transitions and reaping |
+| `MilesGetEventLength` | 🟢 Implemented | `Container_GetEvent` → first start_sound → `Container_GetSound.DurationMs` |
+| `MilesSetSoundLabelLimits` / `MilesEnumeratePresetPersists` / `MilesTextDumpEventSystem` | 🟢 Implemented | Per-label caps; persisted-preset list; diagnostic dump |
+| Audio output for event-driven sounds | ⚪ Not wired | Instances are duration-tracked, **not** routed through the miniaudio mixer (blocked on the bank's embedded-audio data format); ramp/blend/LFO are not yet applied to live volume/pitch |
 | Async file I/O (`MilesAsync*`) | ⚪ Stub | Returns success/empty defaults |
 
 ## Legend
@@ -464,7 +469,7 @@ Verified end-to-end with **Europa 1400 Gold: The Guild** (TL edition) under Wine
   `LoadLibraryA`/`GetProcAddress`/`FreeLibrary` loader on Windows, delegating to
   `std.DynLib` on other targets. Plugin/addon loading is functional again.
 - Windows (`x86-windows` ReleaseSmall) and native `libmss32.so` both build clean.
-  The native test suite runs ~200 unit tests plus a multi-seed fuzz harness that
+  The native test suite runs 216 unit tests plus a multi-seed fuzz harness that
   invokes every exported function with adversarial inputs; all pass. Run native
   tests with `-Dtarget=x86_64-linux-musl -Dcpu=baseline` to avoid a
   host-toolchain linker error (gcc `crt1.o` `.sframe` relocations the Zig

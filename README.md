@@ -32,8 +32,8 @@ It replaces the proprietary MSS audio stack with [miniaudio](https://miniaud.io/
 - **Reverb** -- per-sample delay-based reverb
 - **Timer API** -- background timer threads with configurable frequency
 - **Quick API** -- high-level one-call playback
-- **Event system (v8/v9)** -- byte-faithful event-text constructor and decoder (`AIL_create_event` / `AIL_next_event_step`), all step types, plus the v9 `Miles*` event/variable API
-- **SoundBank query (v8/v9)** -- loads the `BANK`-format soundbank, enumerates event/sound/preset/environment assets, resolves event bytecode by name
+- **Event system (v8/v9)** -- byte-faithful event-text codec (`AIL_create_event` / `AIL_next_event_step`, all step types) plus the v9 `Miles*` API: variables, event enqueue, and a sound-instance lifecycle (durations, label filtering, per-label caps, state reporting)
+- **SoundBank (v8/v9)** -- loads the `BANK`-format soundbank into a global container, enumerates event/sound/preset/environment assets, resolves event bytecode + sound info/duration by name
 - **Perceptual volume curve** -- cubic attenuation matching the original MSS ~60dB dynamic range
 - **Full export-ABI parity** -- v3–v9 export tables diff to zero against the reference DLLs; every exported function is fuzzed and unit-tested
 
@@ -79,11 +79,14 @@ zero-missing diff.
 
 The v7 unified audio API runs on the engine (3D on the normal `HSAMPLE`,
 master/sample reverb, low-pass). The v8/v9 **event system** is byte-faithful
-(text constructor + decoder for every step type) and the **soundbank** query API
-loads real `BANK` files and resolves event bytecode; the event *execution* VM
-(running events to schedule sounds) is the remaining unimplemented subsystem, so
-those high-level calls are present and ABI-correct but the runtime that plays
-queued events is not yet wired.
+(text constructor + decoder for every step type), the **soundbank** loader reads
+real `BANK` files into a global container, and the **event execution VM** parses
+enqueued events into tracked sound instances with a full PENDING→PLAYING→COMPLETE
+lifecycle (durations resolved from the bank, label-query filtering, per-label
+concurrent caps, event-length, cache/persist accounting). The remaining gap is
+routing those instances through the miniaudio mixer for actual audio output
+(blocked on the bank's embedded-audio data format) — until then event-driven
+sounds are tracked and queryable but silent.
 
 The `.asi` plugin ABI (`RIB_INTERFACE_ENTRY` layout + ASI/RIB callback
 signatures) is stable across MSS v4–v9, so a plugin built for any v4+ release
@@ -147,8 +150,8 @@ by the fuzz harness and by unit or C-integration tests. See
 | Filter API | Low-pass filter implemented |
 | Timer API | Fully implemented |
 | Quick API | Fully implemented |
-| Event System (v8/v9) | Text constructor + decoder byte-faithful for all step types; execution VM not yet wired |
-| SoundBank (v8/v9) | `BANK` loader: asset enumeration + event-bytecode lookup |
+| Event System (v8/v9) | Byte-faithful text codec; execution VM tracks sound instances (lifecycle, durations, label filtering/caps, state counts) — audio output not yet wired |
+| SoundBank (v8/v9) | `BANK` loader + global container: asset enumeration, event-bytecode + sound-info/duration lookup |
 | Redbook (CD) API | Emulated (no audio -- games proceed gracefully) |
 
 ## Tested Games

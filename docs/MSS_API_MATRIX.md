@@ -72,14 +72,18 @@ This matrix tracks the availability of major API groups across different histori
 | Event text constructor/decoder | v8 | 🔴 | 🟢 | 🟢 | 🟢 Full | Byte-faithful encode + decode for every step type; `EVENT_STEP_INFO` layout matches the SDK |
 | Event variables (`MilesGet/SetVar`) | v9 | 🔴 | 🔴 | 🟢 | 🟢 Full | Per-system variable store |
 | SoundBank load + asset query | v8 | 🔴 | 🟢 | 🟢 | 🟢 Full | `BANK` loader; asset enumeration + event-bytecode lookup |
-| Event execution VM (enqueue → play) | v8 | 🔴 | 🟢 | 🟢 | ⚪ Stub | Symbols present/ABI-correct; runtime that schedules queued sounds not yet wired |
+| Event execution VM (enqueue → instance bookkeeping) | v8 | 🔴 | 🟢 | 🟢 | 🟡 Partial | Events parse into tracked sound instances (lifecycle, durations, label filtering/caps, event-length, cache/persist counts); **audio output** of those instances is not yet routed through the mixer |
 
 ## Technical Summary
 OpenMiles reproduces the export ABI of every MSS release from **v3 through v9**
 (zero missing decorated exports per version, including per-version arity quirks).
-Behaviourally, the digital/MIDI/3D/RIB/filter/timer/quick subsystems and the v8/v9
-event-text and soundbank-query layers are functional; the event *execution* VM is
-the main remaining gap. Legacy `DIG_` and `MDI_` prefix aliases are not currently exported but could be added as PE export aliases if needed for older titles.
+Behaviourally, the digital/MIDI/3D/RIB/filter/timer/quick subsystems, the v8/v9
+event-text and soundbank layers, and the event execution VM's *bookkeeping*
+(enqueue → tracked sound instances with durations, label filtering, per-label
+caps, event-length, cache/persist accounting) are functional. The main remaining
+gap is routing event-driven sound instances through the miniaudio mixer (actual
+audio output) and applying ramp/blend/LFO to live volume/pitch. Legacy `DIG_` and
+`MDI_` prefix aliases are not currently exported but could be added as PE export aliases if needed for older titles.
 
 **Legacy Compatibility Features:**
 - `AIL_waveOutOpen`, `AIL_midiOutOpen` for games that use older waveOut-style initialization.
