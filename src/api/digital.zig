@@ -340,6 +340,11 @@ pub fn AIL_minimum_sample_buffer_size(driver_opt: ?*DigitalDriver, rate: i32, fo
     _ = driver;
     _ = rate;
     _ = format;
+    // The SDK derives this from the driver's hardware_buffer_size, DMA_rate, and
+    // bytes_per_channel (wavefile.cpp) -- values our miniaudio backend doesn't
+    // expose. Return a conservative constant: it is used as a "minimum
+    // sufficient" streaming-buffer hint, so over-estimating is safe whereas a
+    // guessed formula could under-estimate and glitch playback.
     return 2048;
 }
 pub fn AIL_allocate_file_sample(driver_opt: ?*DigitalDriver, data: *anyopaque, flags: u32) callconv(.winapi) ?*Sample {

@@ -1418,8 +1418,11 @@ pub const Sample = struct {
         if (self.is_initialized and self.decoder != null) {
             var cursor: u64 = 0;
             _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
-            const rate = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
-            const ms_per_frame = 1000.0 / rate;
+            // ms uses the effective playback rate (rate*factor), matching the SDK's
+            // datarate and AIL_set_sample_ms_position, so the round-trip holds.
+            const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
+            const effective = (self.target_rate orelse native) * self.v7_rate_factor;
+            const ms_per_frame: f32 = if (effective > 0) 1000.0 / effective else 0;
             pos.current = satI32(@as(f32, @floatFromInt(cursor)) * ms_per_frame);
             pos.total = satI32(@as(f32, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
         }
@@ -1428,9 +1431,13 @@ pub const Sample = struct {
 
     pub fn setMsPosition(self: *Sample, ms: i32) void {
         if (self.is_initialized and self.decoder != null) {
-            const rate = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
+            // SDK uses effective_rate = original_playback_rate * playback_rate_
+            // factor (wavefile.cpp), not the native rate, so an explicitly-set
+            // playback rate/factor maps ms onto the source position correctly.
+            const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
+            const effective = (self.target_rate orelse native) * self.v7_rate_factor;
             // Negative positions clamp to the start (satU64 maps <0/NaN to 0).
-            const frame = satU64(@as(f32, @floatFromInt(ms)) * rate / 1000.0);
+            const frame = satU64(@as(f32, @floatFromInt(ms)) * effective / 1000.0);
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
         }
     }

@@ -1221,6 +1221,26 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
+test "ms_position uses the effective playback rate (rate*factor) round-trip" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm = [_]u8{0} ** 32000; // 16000 mono-16 frames
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16); // native 8000
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+
+    // Play at 2x native (16000 Hz). 500 ms of output -> 8000 source frames.
+    dg.AIL_set_sample_playback_rate(s, 16000);
+    s.setMsPosition(500);
+    const p = s.getMsPosition();
+    try testing.expect(@abs(p.current - 500) <= 2); // round-trips at the effective rate
+    var cursor: u64 = 0;
+    _ = openmiles.ma.ma_sound_get_cursor_in_pcm_frames(&s.sound, &cursor);
+    try testing.expect(cursor >= 7990 and cursor <= 8010); // ~8000 source frames
+}
+
 test "AIL_set_sample_position rounds to the granularity boundary (SDK)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
