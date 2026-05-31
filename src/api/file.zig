@@ -101,19 +101,29 @@ pub fn AIL_file_size(filename: [*:0]const u8) callconv(.winapi) u32 {
     if (file_len == 0) return 0;
     return @intCast(@min(file_len, std.math.maxInt(u32)));
 }
+// Returns an AILFILETYPE_* code: UNKNOWN=0, PCM_WAV=1, ADPCM_WAV=2, MIDI=5,
+// XMIDI=6 (consistent across MSS 3.x-9.x). These are NOT sequential 1/2/3.
 pub fn AIL_file_type(data: *anyopaque, len: u32) callconv(.winapi) i32 {
-    if (len < 4) return 0;
+    if (len < 4) return 0; // AILFILETYPE_UNKNOWN
     const raw: [*]const u8 = @ptrCast(@alignCast(data));
-    if (raw[0] == 'R' and raw[1] == 'I' and raw[2] == 'F' and raw[3] == 'F') return 1;
-    if (raw[0] == 'M' and raw[1] == 'T' and raw[2] == 'h' and raw[3] == 'd') return 2;
+    if (raw[0] == 'R' and raw[1] == 'I' and raw[2] == 'F' and raw[3] == 'F') {
+        // Distinguish ADPCM from PCM via the fmt-chunk wFormatTag (WAVE_FORMAT_
+        // IMA_ADPCM = 0x0011), when the "fmt " chunk is first (the common case).
+        if (len >= 22 and raw[12] == 'f' and raw[13] == 'm' and raw[14] == 't' and raw[15] == ' ') {
+            const tag: u16 = @as(u16, raw[20]) | (@as(u16, raw[21]) << 8);
+            if (tag == 0x0011) return 2; // AILFILETYPE_ADPCM_WAV
+        }
+        return 1; // AILFILETYPE_PCM_WAV
+    }
+    if (raw[0] == 'M' and raw[1] == 'T' and raw[2] == 'h' and raw[3] == 'd') return 5; // AILFILETYPE_MIDI
     if (raw[0] == 'F' and raw[1] == 'O' and raw[2] == 'R' and raw[3] == 'M' and len >= 12) {
         if ((raw[8] == 'X' and raw[9] == 'D' and raw[10] == 'I' and raw[11] == 'R') or
             (raw[8] == 'X' and raw[9] == 'M' and raw[10] == 'I' and raw[11] == 'D'))
         {
-            return 3;
+            return 6; // AILFILETYPE_XMIDI
         }
     }
-    return 0;
+    return 0; // AILFILETYPE_UNKNOWN
 }
 pub fn AIL_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32) callconv(.winapi) i32 {
     const path = std.mem.span(filename);

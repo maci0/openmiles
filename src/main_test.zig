@@ -1105,6 +1105,23 @@ test "AIL_quick_status returns QSTAT_* values, not the SMP_* bitmask" {
     try testing.expectEqual(@as(i32, 1), api_quick.AIL_quick_status(sample)); // QSTAT_DONE
 }
 
+test "AIL_file_type returns AILFILETYPE_* codes (MIDI=5, XMIDI=6)" {
+    // PCM WAV: RIFF....WAVE fmt <size> <wFormatTag=1>
+    var wav = [_]u8{ 'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E', 'f', 'm', 't', ' ', 16, 0, 0, 0, 1, 0, 0, 0 };
+    try testing.expectEqual(@as(i32, 1), api_file.AIL_file_type(&wav, wav.len)); // PCM_WAV
+    wav[20] = 0x11; // WAVE_FORMAT_IMA_ADPCM
+    try testing.expectEqual(@as(i32, 2), api_file.AIL_file_type(&wav, wav.len)); // ADPCM_WAV
+
+    var midi = [_]u8{ 'M', 'T', 'h', 'd', 0, 0, 0, 6 };
+    try testing.expectEqual(@as(i32, 5), api_file.AIL_file_type(&midi, midi.len)); // MIDI, not 2
+
+    var xmidi = [_]u8{ 'F', 'O', 'R', 'M', 0, 0, 0, 0, 'X', 'M', 'I', 'D' };
+    try testing.expectEqual(@as(i32, 6), api_file.AIL_file_type(&xmidi, xmidi.len)); // XMIDI, not 3
+
+    var junk = [_]u8{ 'J', 'U', 'N', 'K' };
+    try testing.expectEqual(@as(i32, 0), api_file.AIL_file_type(&junk, junk.len)); // UNKNOWN
+}
+
 test "Redbook init deinit and default state" {
     const allocator = testing.allocator;
     const rb = try openmiles.Redbook.init(allocator, 0);
