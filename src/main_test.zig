@@ -1189,17 +1189,27 @@ test "AILSOUNDINFO layout: channel_mask present only for v9+" {
     try testing.expect(@offsetOf(T, "samples") < @offsetOf(T, "block_size"));
 }
 
-test "AIL_WAV_info DIG_F_* format codes (PCM and ADPCM mask)" {
+test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     const allocator = testing.allocator;
-    // PCM stereo 16-bit -> DIG_F_STEREO_16 (bit1|bit0) = 3.
+    // PCM stereo 16-bit -> format is the WAVE tag WAVE_FORMAT_PCM = 1 (NOT DIG_F_).
     const pcm = [_]u8{0} ** 64;
     const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 2, 44100, 16);
     defer allocator.free(wav);
     var info: openmiles.AILSOUNDINFO = .{};
     try testing.expect(dg.AIL_WAV_info(@ptrCast(wav.ptr), &info) != 0);
-    try testing.expectEqual(@as(i32, 3), info.format);
+    try testing.expectEqual(@as(i32, 1), info.format); // WAVE_FORMAT_PCM
+    try testing.expectEqual(@as(i32, 16), info.bits);
+    try testing.expectEqual(@as(i32, 2), info.channels);
+    try testing.expectEqual(@as(u32, 44100), info.rate);
+    // samples = (data_len*8)/bits = total interleaved samples (64B -> 32).
+    try testing.expectEqual(@as(u32, 32), info.samples);
+    try testing.expect(info.data_ptr != null);
+    try testing.expect(info.initial_ptr != null); // SDK: always data_ptr, not null
+    if (@hasField(openmiles.AILSOUNDINFO, "channel_mask")) {
+        try testing.expectEqual(~@as(u32, 0), info.channel_mask);
+    }
 
-    // IMA ADPCM (wFormatTag=0x11) stereo -> DIG_F_ADPCM_STEREO_16 = 4|2|1 = 7.
+    // IMA ADPCM (wFormatTag=0x11) stereo -> format is the WAVE tag 0x11 (17).
     var adpcm = [_]u8{
         'R', 'I', 'F', 'F', 44, 0, 0, 0, 'W', 'A', 'V', 'E',
         'f', 'm', 't', ' ', 16, 0, 0, 0,
@@ -1208,7 +1218,7 @@ test "AIL_WAV_info DIG_F_* format codes (PCM and ADPCM mask)" {
     };
     var info2: openmiles.AILSOUNDINFO = .{};
     try testing.expect(dg.AIL_WAV_info(&adpcm, &info2) != 0);
-    try testing.expectEqual(@as(i32, 7), info2.format);
+    try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
 test "Redbook init deinit and default state" {

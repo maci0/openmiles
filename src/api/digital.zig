@@ -610,6 +610,7 @@ pub fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
     var block_align: u16 = 2;
     var data_ptr: ?*const anyopaque = null;
     var data_len: u32 = 0;
+    var fact_samples: ?u32 = null;
     while (offset + 8 <= file_end) {
         const tag = raw[offset .. offset + 4];
         const chunk_size = std.mem.readInt(u32, raw[offset + 4 .. offset + 8][0..4], .little);
@@ -620,9 +621,13 @@ pub fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
             sample_rate = std.mem.readInt(u32, raw[offset + 4 .. offset + 8][0..4], .little);
             block_align = std.mem.readInt(u16, raw[offset + 12 .. offset + 14][0..2], .little);
             bits_per_sample = std.mem.readInt(u16, raw[offset + 14 .. offset + 16][0..2], .little);
+        } else if (std.mem.eql(u8, tag, "fact") and chunk_size >= 4 and offset + 4 <= file_end) {
+            fact_samples = std.mem.readInt(u32, raw[offset .. offset + 4][0..4], .little);
         } else if (std.mem.eql(u8, tag, "data")) {
             data_ptr = raw + offset;
             data_len = chunk_size;
+            // Keep walking for a fact chunk only if we haven't seen one (data is
+            // usually last, so break here matches the SDK's data-found exit).
             break;
         }
         const next = offset +| chunk_size +| (chunk_size & 1); // pad to even (saturating)
@@ -630,33 +635,35 @@ pub fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
         offset = next;
     }
     if (data_ptr == null) return 0;
-    // For PCM (format 1): bytes_per_frame = channels * (bits/8)
-    // For ADPCM (format 2) and others: block_align from fmt chunk is used
-    // Note: out.samples is left 0 for non-PCM formats (ADPCM etc.) because per-sample counting requires decompression.
-    // AILSOUNDINFO.format is a DIG_F_* code: bit0=16BITS, bit1=STEREO, bit2=ADPCM
-    // (per wavefile.cpp). ADPCM always decodes to 16-bit, so DIG_F_ADPCM_*_16 set
-    // both the ADPCM (4) and 16BITS (1) masks. IMA ADPCM = 0x11, MS ADPCM = 0x02.
-    const is_adpcm = (audio_format == 0x0011 or audio_format == 0x0002);
-    const fmt: i32 = if (is_adpcm)
-        (4 | 1 | (if (num_channels >= 2) @as(i32, 2) else 0)) // DIG_F_ADPCM_{MONO,STEREO}_16
-    else switch (num_channels) {
-        1 => if (bits_per_sample <= 8) 0 else 1, // DIG_F_MONO_8 / DIG_F_MONO_16
-        else => if (bits_per_sample <= 8) 2 else 3, // DIG_F_STEREO_8 / DIG_F_STEREO_16
-    };
-    const bytes_per_frame: u32 = if (audio_format == 1 and bits_per_sample > 0)
-        @as(u32, num_channels) * (@as(u32, bits_per_sample) / 8)
-    else
-        @as(u32, block_align);
-    out.format = fmt;
+    // Per AIL_API_WAV_info (wavefile.cpp): info->format is the WAVE format_tag
+    // (1=PCM, 0x11=IMA ADPCM, 0x02=MS ADPCM), NOT a DIG_F_ code; channel_mask is
+    // ~0U; initial_ptr is always data_ptr; and `samples` is the total interleaved
+    // sample count: (data_len*8)/bits for PCM, block-derived for IMA ADPCM.
+    out.format = audio_format;
     out.data_ptr = data_ptr;
     out.data_len = data_len;
     out.rate = sample_rate;
     out.bits = bits_per_sample;
     out.channels = num_channels;
-    out.samples = if (bytes_per_frame > 0 and audio_format == 1) data_len / bytes_per_frame else 0;
     out.block_size = block_align;
-    // initial_ptr: set to data_ptr for compressed formats (no separate codec header in our implementation)
-    out.initial_ptr = if (audio_format != 1) data_ptr else null;
+    out.initial_ptr = data_ptr;
+    if (@hasField(AILSOUNDINFO, "channel_mask")) out.channel_mask = ~@as(u32, 0);
+    if (audio_format == 0x0011 and bits_per_sample == 4) {
+        // IMA ADPCM: use the fact chunk's sample count if present, else derive
+        // from the block size (SDK formula).
+        if (fact_samples) |fs| {
+            out.samples = fs;
+        } else if (block_align > 0 and num_channels > 0) {
+            const spb0: u32 = @as(u32, 4) << @intCast(@min(num_channels / 2, 16));
+            if (block_align > spb0) {
+                const samples_per_block: u32 = 1 + (@as(u32, block_align) - spb0) * 8 / spb0;
+                const blocks: u32 = (data_len +| (block_align - 1)) / block_align;
+                out.samples = blocks *| samples_per_block;
+            } else out.samples = 0;
+        } else out.samples = 0;
+    } else if (bits_per_sample > 0) {
+        out.samples = @intCast(@min((@as(u64, data_len) * 8) / bits_per_sample, std.math.maxInt(u32)));
+    } else out.samples = 0;
     return 1;
 }
 pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, rate: i32, bits: i32) callconv(.winapi) i32 {
