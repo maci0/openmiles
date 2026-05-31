@@ -176,10 +176,17 @@ gap that the single-DLL check had masked:
   added, gated ver 65-66 (a stream handle is a Sample, so the stream forms
   mirror the sample ones).
 
-This took 6.5/6.6 from 16 discrepancies to **1**. v3-v6.0 and v7-v9 remain 0.
+This took 6.5/6.6 from 16 discrepancies to **1**, then **0** (see below).
 
-**The one remaining MISSING (6.1/6.5/6.6):** `@stream_background@0` — an
-undocumented `__fastcall` internal thunk (note the `@name@bytes` fastcall
-decoration and the leading `@`). It is in no SDK header and no game links it by
-name; reproducing it would require fragile linker-directive hackery for an
-internal symbol with zero functional value, so it is left as a documented gap.
+**`stream_background` — resolved.** An undocumented internal symbol leaked into
+the 6.1-6.6 export tables with sub-version-varying decoration: `__fastcall`
+`@stream_background@0` in 6.1/6.5, undecorated `stream_background` in 6.6,
+absent in 6.0 and 8.x+ (and present as `stream_background` in some 7.x). The
+inconsistent decoration confirms it is an accidental export, not an API — no
+SDK header declares it and no game links it by name. Rather than leave it as a
+gap, it is reproduced exactly: a no-op C stub (`mss_stream_background_stub`)
+backs a version-gated `/EXPORT:` drectve that emits the reference's exact export
+name (`@stream_background@0` for ver 61/65, `stream_background` for ver 66). The
+export *name* is just a string in the table, so a single cdecl stub serves both
+forms. **All of v3-v9 are now 0 MISSING / 0 DECORATION MISMATCH against their
+canonical reference DLL.**

@@ -1602,5 +1602,16 @@ comptime {
         if (openmiles.mss_version <= 80) {
             asm (".section .drectve\n .ascii \" /EXPORT:AIL_debug_printf=AIL_debug_printf\"\n .text\n");
         }
+        // `stream_background`: an undocumented internal symbol that leaked into
+        // the 6.1-6.6 export tables. Its decoration varies by sub-version
+        // (fastcall `@stream_background@0` in 6.1/6.5, undecorated
+        // `stream_background` in 6.6), confirming it is an accidental export,
+        // not an API. We back it with a no-op C stub and emit the version's
+        // exact export name purely to byte-match the reference export table.
+        if (openmiles.mss_version == 61 or openmiles.mss_version == 65) {
+            asm (".section .drectve\n .ascii \" /EXPORT:@stream_background@0=mss_stream_background_stub\"\n .text\n");
+        } else if (openmiles.mss_version == 66) {
+            asm (".section .drectve\n .ascii \" /EXPORT:stream_background=mss_stream_background_stub\"\n .text\n");
+        }
     }
 }
