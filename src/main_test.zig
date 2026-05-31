@@ -1055,6 +1055,36 @@ test "Sample loadFromMemory then start and stop lifecycle" {
     try testing.expectEqual(openmiles.SampleStatus.done, sample.status());
 }
 
+test "paused 2D sample reports SMP_PLAYING, paused 3D reports SMP_STOPPED" {
+    // MSS quirk: a paused 2D sample keeps reporting SMP_PLAYING (4), but a
+    // paused 3D sample reports SMP_STOPPED (8). Games poll these to decide
+    // whether to restart a voice, so the divergence must be preserved exactly.
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const pcm = [_]u8{0} ** 4410;
+    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    defer allocator.free(wav);
+
+    const s2 = try openmiles.Sample.init(driver);
+    defer s2.deinit();
+    try s2.loadFromMemory(wav, true);
+    s2.start();
+    try testing.expectEqual(openmiles.SampleStatus.playing, s2.status());
+    s2.pause();
+    try testing.expectEqual(openmiles.SampleStatus.playing, s2.status()); // still PLAYING
+    s2.resumePlayback();
+    try testing.expectEqual(openmiles.SampleStatus.playing, s2.status());
+
+    const s3 = try openmiles.Sample3D.init(driver);
+    defer s3.deinit();
+    try s3.loadFromMemory(wav, true);
+    s3.start();
+    try testing.expectEqual(openmiles.SampleStatus.playing, s3.status());
+    s3.pause();
+    try testing.expectEqual(openmiles.SampleStatus.stopped, s3.status()); // STOPPED, not PLAYING
+}
+
 test "Redbook init deinit and default state" {
     const allocator = testing.allocator;
     const rb = try openmiles.Redbook.init(allocator, 0);
