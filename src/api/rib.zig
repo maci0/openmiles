@@ -363,11 +363,13 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
 
     var all_pcm: std.ArrayListUnmanaged(u8) = .empty;
     defer all_pcm.deinit(openmiles.global_allocator);
-    // align(2): miniaudio writes ma_int16 PCM here, which needs 2-byte alignment.
-    var chunk_buf: [4096 * 4]u8 align(2) = undefined; // 4096 frames x 4 bytes (s16 stereo)
+    // Heap scratch (16-byte aligned): a stack buffer trips a layout-dependent
+    // misaligned ma_int16 write inside miniaudio's decoder under the UBSan build.
+    const chunk_buf = openmiles.global_allocator.alignedAlloc(u8, .@"16", 4096 * 4) catch return 0;
+    defer openmiles.global_allocator.free(chunk_buf);
     while (true) {
         var fr: u64 = 0;
-        _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, &chunk_buf, 4096, &fr);
+        _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk_buf.ptr, 4096, &fr);
         if (fr == 0) break;
         all_pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..@intCast(fr * 4)]) catch break;
     }

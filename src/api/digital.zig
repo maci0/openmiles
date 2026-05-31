@@ -604,11 +604,14 @@ fn decodeAdpcmSource(info: *const AILSOUNDINFO) ?MixSrc {
     const dch: u32 = decoder.outputChannels;
     var list: std.ArrayListUnmanaged(i16) = .empty;
     errdefer list.deinit(openmiles.global_allocator);
-    var chunk: [4096 * 4]i16 = undefined; // 4096 frames × up to 4 ch (aligned i16)
+    // Heap scratch (16-byte aligned) — avoids the stack-layout-dependent
+    // misaligned ma_int16 write inside miniaudio's IMA decoder (see decompress).
+    const chunk = openmiles.global_allocator.alignedAlloc(i16, .@"16", 4096 * 4) catch return null;
+    defer openmiles.global_allocator.free(chunk);
     const cap_frames: u64 = chunk.len / @max(dch, 1);
     while (true) {
         var fr: u64 = 0;
-        _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, &chunk, cap_frames, &fr);
+        _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk.ptr, cap_frames, &fr);
         if (fr == 0) break;
         list.appendSlice(openmiles.global_allocator, chunk[0..@intCast(fr * dch)]) catch break;
     }
