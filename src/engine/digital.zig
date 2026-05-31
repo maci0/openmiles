@@ -1314,7 +1314,7 @@ pub const Sample3D = struct {
     pos_y: f32 = 0.0,
     pos_z: f32 = 0.0,
     min_distance: f32 = 1.0,
-    max_distance: f32 = 100.0,
+    max_distance: f32 = 200.0, // MSS default (wavefile.cpp: min_dist=1, max_dist=200)
     cone_inner_rad: f32 = 360.0 * deg2rad,
     cone_outer_rad: f32 = 360.0 * deg2rad,
     cone_outer_volume: f32 = 1.0,
