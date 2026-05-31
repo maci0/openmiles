@@ -117,7 +117,13 @@ pub fn AIL_quick_stop(s_opt: ?*Sample) callconv(.winapi) void {
 }
 pub fn AIL_quick_status(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    return @intCast(@intFromEnum(s.status()));
+    // The Quick API uses its own QSTAT_* enum (DONE=1, LOADED=2, PLAYING=3),
+    // NOT the SMP_* sample-status bitmask (FREE=1/DONE=2/PLAYING=4/STOPPED=8).
+    return switch (s.status()) {
+        .playing, .playing_but_released => 3, // QSTAT_PLAYING
+        .done => 1, // QSTAT_DONE
+        .free, .stopped => 2, // QSTAT_LOADED (loaded, ready to (re)play)
+    };
 }
 // v3-v6: S32 volume/extravol on the legacy 0..127 scale.
 pub fn AIL_quick_set_volume(s_opt: ?*Sample, volume: i32, extravol: i32) callconv(.winapi) void {

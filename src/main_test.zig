@@ -1085,6 +1085,26 @@ test "paused 2D sample reports SMP_PLAYING, paused 3D reports SMP_STOPPED" {
     try testing.expectEqual(openmiles.SampleStatus.stopped, s3.status()); // STOPPED, not PLAYING
 }
 
+test "AIL_quick_status returns QSTAT_* values, not the SMP_* bitmask" {
+    // The Quick API has its own status enum: QSTAT_DONE=1, QSTAT_LOADED=2,
+    // QSTAT_PLAYING=3 — distinct from SMP_FREE=1/DONE=2/PLAYING=4/STOPPED=8.
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const sample = try openmiles.Sample.init(driver);
+    defer sample.deinit();
+    const pcm = [_]u8{0} ** 4410;
+    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    defer allocator.free(wav);
+    try sample.loadFromMemory(wav, true);
+
+    try testing.expectEqual(@as(i32, 2), api_quick.AIL_quick_status(sample)); // QSTAT_LOADED
+    sample.start();
+    try testing.expectEqual(@as(i32, 3), api_quick.AIL_quick_status(sample)); // QSTAT_PLAYING
+    sample.end();
+    try testing.expectEqual(@as(i32, 1), api_quick.AIL_quick_status(sample)); // QSTAT_DONE
+}
+
 test "Redbook init deinit and default state" {
     const allocator = testing.allocator;
     const rb = try openmiles.Redbook.init(allocator, 0);
@@ -1863,6 +1883,7 @@ const api_v8 = @import("api/v8.zig");
 const api_v9 = @import("api/v9.zig");
 const dg = @import("api/digital.zig");
 const api_file = @import("api/file.zig");
+const api_quick = @import("api/quick.zig");
 
 test "v8 AIL_mem in-memory stream round-trips" {
     const m = api_v8.AIL_mem_create() orelse return error.NoMem;
