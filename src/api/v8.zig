@@ -623,12 +623,21 @@ pub fn AIL_sample_playback_rate_factor(s_opt: ?*Sample) callconv(.winapi) f32 {
     const s = s_opt orelse return 1.0;
     return if (s.v7_rate_factor > 0) s.v7_rate_factor else 1.0;
 }
-pub fn AIL_sample_speaker_scale_factors(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-
+pub fn AIL_sample_speaker_scale_factors(s_opt: ?*Sample, dest_speaker_indexes: ?[*]const i32, levels: ?[*]f32, n_levels: i32) callconv(.winapi) void {
+    // Inverse of the setter (wavefile.cpp): read each mapped speaker's stored
+    // level back out. Guards on null args / n_levels == 0.
+    const s = s_opt orelse return;
+    const dest = dest_speaker_indexes orelse return;
+    const lv = levels orelse return;
+    if (n_levels <= 0) return;
+    const row = speakerRow(s);
+    var i: usize = 0;
+    while (i < @as(usize, @intCast(n_levels))) : (i += 1) {
+        const spk = dest[i];
+        if (spk < 0 or spk > SPK_MAX_INDEX) continue;
+        const chan = row[@intCast(spk)];
+        if (chan != SPK_X) lv[i] = s.speaker_levels[@intCast(chan)];
+    }
 }
 pub fn AIL_sample_stage_property(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque, a3: i32, a4: ?*anyopaque, a5: ?*anyopaque, a6: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
@@ -792,12 +801,42 @@ pub fn AIL_set_sample_playback_rate_factor(s_opt: ?*Sample, factor: f32) callcon
     s.v7_rate_factor = factor;
     s.applyEffectivePitch();
 }
-pub fn AIL_set_sample_speaker_scale_factors(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-
+// output_speaker_index[logical_channels][MSS_SPEAKER] -> driver channel, or -1
+// (wavefile.cpp). MSS_SPEAKER enum: FL=0,FR=1,FC=2,LFE=3,BL=4,BR=5,FLC=6,FRC=7,
+// BC=8,SL=9,SR=10,TC=11,TFL=12,TFC=13,TFR=14,TBL=15,TBC=16,TBR=17 (MAX_INDEX=17).
+const SPK_MAX_INDEX: usize = 17;
+const SPK_X: i8 = -1;
+const output_speaker_index = [10][SPK_MAX_INDEX + 1]i8{
+    .{ SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 0: invalid
+    .{ 0, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 1: mono
+    .{ 0, 1, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 2: stereo
+    .{ 0, 1, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, 2, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 3: Dolby ProLogic
+    .{ 0, 1, SPK_X, SPK_X, 2, 3, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 4: quad
+    .{ 0, 1, 2, SPK_X, 3, 4, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 5: 5.0
+    .{ 0, 1, 2, 3, 4, 5, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 6: 5.1
+    .{ 0, 1, 2, 3, 4, 5, SPK_X, SPK_X, 6, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 7: 6.1
+    .{ 0, 1, 2, 3, 4, 5, SPK_X, SPK_X, SPK_X, 6, 7, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 8: 7.1
+    .{ 0, 1, 2, 3, 4, 5, SPK_X, SPK_X, 6, 7, 8, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X, SPK_X }, // 9: 8.1
+};
+fn speakerRow(s: *Sample) *const [SPK_MAX_INDEX + 1]i8 {
+    const logical = @min(@as(usize, ma.ma_engine_get_channels(&s.driver.engine)), 9);
+    return &output_speaker_index[logical];
+}
+pub fn AIL_set_sample_speaker_scale_factors(s_opt: ?*Sample, dest_speaker_indexes: ?[*]const i32, levels: ?[*]const f32, n_levels: i32) callconv(.winapi) void {
+    // SDK (wavefile.cpp): map each MSS_SPEAKER to a driver channel and store the
+    // level there; skip unmapped speakers. Guards on null args / n_levels == 0.
+    const s = s_opt orelse return;
+    const dest = dest_speaker_indexes orelse return;
+    const lv = levels orelse return;
+    if (n_levels <= 0) return;
+    const row = speakerRow(s);
+    var i: usize = 0;
+    while (i < @as(usize, @intCast(n_levels))) : (i += 1) {
+        const spk = dest[i];
+        if (spk < 0 or spk > SPK_MAX_INDEX) continue;
+        const chan = row[@intCast(spk)];
+        if (chan != SPK_X) s.speaker_levels[@intCast(chan)] = lv[i];
+    }
 }
 pub fn AIL_sound_asset_filename(a0: ?*anyopaque, a1: i32) callconv(.winapi) void {
     _ = a0;

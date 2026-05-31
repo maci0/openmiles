@@ -665,6 +665,9 @@ pub const Sample = struct {
     v9_playback_delay: i32 = 0, // ms before playback starts (AIL_set_sample_playback_delay)
     // 5.1 per-speaker volume levels: FL, FR, FC, LFE, BL, BR.
     v51_levels: [6]f32 = [_]f32{1.0} ** 6,
+    // Per-driver-channel speaker scale factors (HSAMPLE.speaker_levels), indexed
+    // by output channel 0..MAX_SPEAKERS-1. Set/read by AIL_*_sample_speaker_scale_factors.
+    speaker_levels: [9]f32 = [_]f32{1.0} ** 9,
 
     fn eosCallbackBridge(pUserData: ?*anyopaque, pSound: ?*ma.ma_sound) callconv(.c) void {
         _ = pSound;
@@ -1085,6 +1088,7 @@ pub const Sample = struct {
         self.channel_mask = ~@as(u32, 0);
         self.n_buffers = 2; // AIL_init_sample sets the ring count to 2 (mssdig.cpp)
         self.stream_head = 0;
+        self.speaker_levels = [_]f32{1.0} ** 9;
         self.falloff_count = [_]u8{0} ** 4;
         self.s3d_face = .{ 1, 0, 0 };
         self.s3d_up = .{ 0, 1, 0 };

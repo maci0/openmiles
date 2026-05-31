@@ -1187,6 +1187,29 @@ test "AIL_speaker_configuration returns the default stereo speaker array (SDK)" 
     try testing.expectEqual(@as(?*api_v7.MSSVECTOR3D, null), api_v7.AIL_speaker_configuration(null, &n_phys, &n_log, &falloff, null));
 }
 
+test "AIL_set/sample_speaker_scale_factors round-trip via the channel map (SDK)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2); // stereo
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    // Stereo map: FRONT_LEFT(0)->ch0, FRONT_RIGHT(1)->ch1, others unmapped.
+    const idx = [_]i32{ 0, 1, 4 }; // FL, FR, BACK_LEFT(unmapped in stereo)
+    const set_lv = [_]f32{ 0.25, 0.75, 0.9 };
+    api_v8b.AIL_set_sample_speaker_scale_factors(s, &idx, &set_lv, 3);
+    // The mapped channels store their levels; the unmapped one is dropped.
+    try testing.expect(@abs(s.speaker_levels[0] - 0.25) < 0.0001);
+    try testing.expect(@abs(s.speaker_levels[1] - 0.75) < 0.0001);
+    // Read back via the inverse mapping.
+    var out = [_]f32{ -1, -1, -1 };
+    api_v8b.AIL_sample_speaker_scale_factors(s, &idx, &out, 3);
+    try testing.expect(@abs(out[0] - 0.25) < 0.0001 and @abs(out[1] - 0.75) < 0.0001);
+    try testing.expectEqual(@as(f32, -1), out[2]); // BACK_LEFT unmapped -> left untouched
+    // Null/zero guards: no crash, no change.
+    api_v8b.AIL_set_sample_speaker_scale_factors(null, &idx, &set_lv, 3);
+    api_v8b.AIL_set_sample_speaker_scale_factors(s, null, &set_lv, 3);
+    api_v8b.AIL_set_sample_speaker_scale_factors(s, &idx, &set_lv, 0);
+}
+
 test "AIL_speaker_reverb_levels and AIL_get_marker_list report empty (SDK)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

@@ -495,6 +495,14 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_digital.AIL_set_sample_reverb(hs, rf, rf, rf);
     api_v7.AIL_set_sample_reverb_levels(hs, rf, rf);
     api_v8.AIL_set_sample_speaker_scale_factors(null, null, null, ri);
+    {
+        // Exercise the real mapping path with bounded, valid arrays.
+        const idxs = [_]i32{ 0, 1, 2, 3, 4, 5 };
+        const lvls = [_]f32{ rf, rf, rf, rf, rf, rf };
+        api_v8.AIL_set_sample_speaker_scale_factors(hs, &idxs, &lvls, 6);
+        var outl = [_]f32{0} ** 6;
+        api_v8.AIL_sample_speaker_scale_factors(hs, &idxs, &outl, 6);
+    }
     api_v7.AIL_set_sample_stage_preference(hs, rstr, scp);
     api_digital.AIL_set_sample_type(hs, ru, ru);
     api_digital.AIL_set_sample_user_data(hs, ri, ru);
