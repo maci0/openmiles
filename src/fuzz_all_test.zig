@@ -378,7 +378,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_v8.AIL_sample_51_volume_pan(null, null, null, null, null, null);
     _ = api_v8.AIL_sample_buffer_available(null);
     _ = api_v8.AIL_sample_buffer_count(null);
-    _ = api_digital.AIL_sample_buffer_info(hs, ri, &uo, &uo, &uo, &uo);
+    _ = api_digital.AIL_sample_buffer_info(hs, ri, &uo, &uo, &io, &io);
     _ = api_digital.AIL_sample_buffer_ready(hs);
     _ = api_v8.AIL_sample_channel_count(null, null);
     api_v7.AIL_sample_channel_levels(hs, null, null, &fo, rszi);

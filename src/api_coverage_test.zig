@@ -131,7 +131,7 @@ test "coverage: digital.zig exports" {
     dg.AIL_set_sample_loop_block(s, 0, -1);
     dg.AIL_set_sample_adpcm_block_size(s, 512);
     _ = dg.AIL_sample_buffer_ready(s);
-    _ = dg.AIL_sample_buffer_info(s, 0, &u32o, &u32o, &u32o, &u32o);
+    _ = dg.AIL_sample_buffer_info(s, 0, &u32o, &u32o, &i32o, &i32o);
     _ = dg.AIL_register_EOB_callback(s, null);
     _ = dg.AIL_register_SOB_callback(s, null);
     _ = dg.AIL_register_EOS_callback(s, null);

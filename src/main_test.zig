@@ -1711,6 +1711,35 @@ test "AIL_load_sample_buffer returns the resolved slot (-1 on bad input) (SDK)" 
     try testing.expectEqual(@as(i32, -1), api_digital.AIL_load_sample_buffer(null, 0, p, 64));
 }
 
+test "AIL_sample_buffer_info: null -> head/tail -1, return is starved not success (SDK)" {
+    var pos: u32 = 99;
+    var len: u32 = 99;
+    var head: i32 = 99;
+    var tail: i32 = 99;
+    // Null sample: pos/len 0, head/tail -1, return 0.
+    try testing.expectEqual(@as(i32, 0), dg.AIL_sample_buffer_info(null, 0, &pos, &len, &head, &tail));
+    try testing.expectEqual(@as(u32, 0), pos);
+    try testing.expectEqual(@as(u32, 0), len);
+    try testing.expectEqual(@as(i32, -1), head);
+    try testing.expectEqual(@as(i32, -1), tail);
+
+    // A loaded (whole-buffer) sample isn't starved -> returns 0, reports len.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    const pcm = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    try s.loadFromMemory(wav, false);
+    head = 99;
+    tail = 99;
+    // Not streaming and not starved -> return 0; head/tail report the ring pointer (0).
+    try testing.expectEqual(@as(i32, 0), dg.AIL_sample_buffer_info(s, 0, &pos, &len, &head, &tail));
+    try testing.expectEqual(@as(i32, 0), head);
+    try testing.expectEqual(@as(i32, 0), tail);
+}
+
 test "AIL_set/sample_buffer_count validates [2,8] and round-trips" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

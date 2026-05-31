@@ -446,12 +446,19 @@ pub fn AIL_sample_buffer_info_old(s_opt: ?*Sample, pos0: ?*u32, len0: ?*u32, pos
 // v8+ form: S32 AIL_sample_buffer_info(HSAMPLE S, S32 buff_num, U32 *pos,
 // U32 *len, U32 *used, U32 *free) @24 — report play position/length and the
 // used/free buffer counts for the requested double-buffer slot.
-pub fn AIL_sample_buffer_info(s_opt: ?*Sample, buff_num: i32, pos: ?*u32, len: ?*u32, used: ?*u32, free_count: ?*u32) callconv(.winapi) i32 {
-    if (pos) |p| p.* = 0;
-    if (len) |p| p.* = 0;
-    if (used) |p| p.* = 0;
-    if (free_count) |p| p.* = 0;
-    const s = s_opt orelse return 0;
+// SDK (wavefile.cpp): pos/len of buffer buff_num, the ring head/tail indices,
+// and the return is S->starved (0 when healthy) — NOT a success flag. A null
+// sample yields pos/len 0 and head/tail -1.
+pub fn AIL_sample_buffer_info(s_opt: ?*Sample, buff_num: i32, pos: ?*u32, len: ?*u32, head: ?*i32, tail: ?*i32) callconv(.winapi) i32 {
+    const s = s_opt orelse {
+        if (pos) |p| p.* = 0;
+        if (len) |p| p.* = 0;
+        if (head) |p| p.* = -1;
+        if (tail) |p| p.* = -1;
+        return 0;
+    };
+    if (head) |p| p.* = s.stream_head;
+    if (tail) |p| p.* = s.stream_head; // single ring pointer in our ping-pong model
     if (s.stream_active) {
         var p0: u32 = 0;
         var l0: u32 = 0;
@@ -461,12 +468,10 @@ pub fn AIL_sample_buffer_info(s_opt: ?*Sample, buff_num: i32, pos: ?*u32, len: ?
         const even = @mod(buff_num, 2) == 0;
         if (pos) |p| p.* = if (even) p0 else p1;
         if (len) |p| p.* = if (even) l0 else l1;
-        return 1;
+        return if (s.stream_src.starved) 1 else 0; // return S->starved
     }
-    if (s.owned_buffer) |buf| {
-        if (len) |p| p.* = @intCast(buf.len);
-        return 1;
-    }
+    if (pos) |p| p.* = 0;
+    if (len) |p| p.* = if (s.owned_buffer) |buf| @intCast(@min(buf.len, std.math.maxInt(u32))) else 0;
     return 0;
 }
 pub fn AIL_register_EOB_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
