@@ -584,7 +584,8 @@ pub fn AIL_sample_loop_block(s_opt: ?*Sample, loop_start: ?*i32, loop_end: ?*i32
     const sat = std.math.maxInt(i32);
     if (loop_start) |p| p.* = @intCast(@min(s.loop_start_frame *| bpf, sat));
     if (loop_end) |p| p.* = @intCast(@min(s.loop_end_frame *| bpf, sat));
-    return if (s.loop_end_frame > 0) 1 else 0;
+    // SDK (AIL_API_sample_loop_block) returns orig_loop_count, not a found-flag.
+    return s.loop_count;
 }
 pub fn AIL_sample_output_levels(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: i32) callconv(.winapi) f32 {
     _ = a0;

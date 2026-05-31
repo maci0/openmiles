@@ -2486,10 +2486,18 @@ test "v8 sample channel_count and loop_block report real state" {
     var mask: u32 = 0;
     try testing.expectEqual(@as(i32, 1), api_v8b.AIL_sample_channel_count(s, &mask)); // mono
     try testing.expectEqual(@as(u32, 0x4), mask); // FC
-    // No loop set yet.
+    // No loop block set: offsets are 0, and the return is the loop count
+    // (orig_loop_count, default 1 -- the SDK returns the count, not a found-flag).
     var ls: i32 = -1;
     var le: i32 = -1;
-    try testing.expectEqual(@as(i32, 0), api_v8b.AIL_sample_loop_block(s, &ls, &le));
+    try testing.expectEqual(@as(i32, 1), api_v8b.AIL_sample_loop_block(s, &ls, &le));
+    try testing.expectEqual(@as(i32, 0), ls);
+    try testing.expectEqual(@as(i32, 0), le);
+    // After AIL_set_sample_loop_count(3), loop_block returns the original 3,
+    // while AIL_sample_loop_count returns the (pre-play) remaining, also 3.
+    dg.AIL_set_sample_loop_count(s, 3);
+    try testing.expectEqual(@as(i32, 3), api_v8b.AIL_sample_loop_block(s, null, null));
+    try testing.expectEqual(@as(i32, 3), dg.AIL_sample_loop_count(s));
 }
 
 test "v8 5.1 volume levels round-trip and volume_pan channel order" {

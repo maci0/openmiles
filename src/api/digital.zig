@@ -142,7 +142,10 @@ pub fn AIL_set_sample_position(s_opt: ?*Sample, pos: u32) callconv(.winapi) void
 }
 pub fn AIL_sample_loop_count(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    return s.loop_count;
+    // SDK returns S->loop_count, which decrements during playback (remaining
+    // loops), while orig_loop_count (AIL_sample_loop_block) holds the original.
+    // Our loops_remaining tracks the same value (reset to loop_count on start).
+    return s.loops_remaining;
 }
 pub fn AIL_register_EOS_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
