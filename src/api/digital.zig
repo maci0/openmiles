@@ -1339,8 +1339,8 @@ comptime {
             .{ .name = "AIL_enumerate_sound_presets", .stack_size = 16, .ver = 80 },
             .{ .name = "AIL_file_type_named", .stack_size = 12, .ver = 60 },
             .{ .name = "AIL_filter_property", .stack_size = 20, .ver = 60 },
-            .{ .name = "AIL_find_marker_in_list", .stack_size = 12, .ver = 90 },
-            .{ .name = "AIL_find_marker_in_list", .stack_size = 8, .ver = 80, .ver_max = 80, .symbol = "AIL_find_marker_in_list_v8" },
+            // @8 (2-arg) across all of v8 and v9.
+            .{ .name = "AIL_find_marker_in_list", .stack_size = 8, .ver = 80, .symbol = "AIL_find_marker_in_list_v8" },
             // @4 (single F32) form spans 6.x-8.x (confirmed in the 6.1 and 7.x DLLs).
             .{ .name = "AIL_ftoa", .stack_size = 4, .ver = 60, .ver_max = 80, .symbol = "AIL_ftoa_v8" },
             .{ .name = "AIL_get_event_contents", .stack_size = 12, .ver = 80 },
