@@ -1404,7 +1404,9 @@ pub const Sample = struct {
     pub fn setPosition(self: *Sample, pos: u32) void {
         if (self.is_initialized) {
             const bpf = self.bytesPerFrame();
-            const frame: u64 = if (bpf > 0) pos / bpf else 0;
+            // SDK (AIL_API_set_sample_position) rounds the byte offset to the
+            // nearest granularity (= bytes-per-frame here) boundary, not floors.
+            const frame: u64 = if (bpf > 0) (@as(u64, pos) + bpf / 2) / bpf else 0;
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
         }
     }

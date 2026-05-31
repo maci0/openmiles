@@ -1221,6 +1221,23 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
+test "AIL_set_sample_position rounds to the granularity boundary (SDK)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [4096]u8 align(2) = [_]u8{0} ** 4096;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 2, 44100, 16); // stereo16, bpf=4
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    // 102 rounds to the nearest 4-byte boundary -> 104 (frame 26), not 100.
+    dg.AIL_set_sample_position(s, 102);
+    try testing.expectEqual(@as(u32, 104), dg.AIL_sample_position(s));
+    // An aligned offset is unchanged.
+    dg.AIL_set_sample_position(s, 200);
+    try testing.expectEqual(@as(u32, 200), dg.AIL_sample_position(s));
+}
+
 test "AIL_sample_granularity returns bytes-per-frame (SDK SS_granularity)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
