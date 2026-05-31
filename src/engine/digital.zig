@@ -1213,6 +1213,13 @@ pub const Sample = struct {
         if (self.is_initialized) ma.ma_sound_set_volume(&self.sound, self.volume);
     }
 
+    // NOTE: the legacy 0..127 setPan uses a linear balance ((pan-64)/64), whereas
+    // the v7 float AIL_set_sample_volume_pan uses MSS's 0.3-power constant-power
+    // law (verified against wavefile.cpp). The pan law lives in the mixer
+    // (left/right_volume = gain*pow(ratio,0.3)), so the integer path arguably
+    // should use the same curve — but the pre-v7 source isn't in the SDK dump to
+    // confirm, and changing this core path on inference is risky. Left as linear
+    // pending old-MSS source; do not "fix" without it.
     pub fn setPan(self: *Sample, pan: i32) void {
         self.original_pan = std.math.clamp(pan, 0, 127);
         self.save_pan_f = @as(f32, @floatFromInt(self.original_pan)) / 127.0;

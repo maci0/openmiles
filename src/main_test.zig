@@ -2750,6 +2750,20 @@ test "set_sample_volume_pan applies the 4+ channel front/back factor (SDK)" {
     defer ms.deinit();
     ms.setVolumePanF(1.0, 0.5);
     try testing.expect(@abs(ms.v51_levels[0] - (0.812252196 * 0.812252196)) < 0.0005);
+
+    // Same via the public API path (AIL_set_sample_volume_pan -> volume_levels).
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const ms2 = try openmiles.Sample.init(mc);
+    defer ms2.deinit();
+    try ms2.loadFromMemory(wav, false);
+    dg.AIL_set_sample_volume_pan(ms2, 1.0, 0.5);
+    var l: f32 = 0;
+    var r: f32 = 0;
+    api_v7.AIL_sample_volume_levels(ms2, &l, &r);
+    try testing.expect(@abs(l - (0.812252196 * 0.812252196)) < 0.0005);
+    try testing.expect(@abs(r - (0.812252196 * 0.812252196)) < 0.0005);
 }
 
 test "v7 master reverb decay/predelay/damping all round-trip" {
