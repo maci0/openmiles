@@ -729,16 +729,17 @@ pub fn AIL_set_sample_51_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32, fb_p
         left = sv * front;
         right = sv * back;
     }
-    // Store in the SDK's channel order (f_left, f_right, b_left, b_right,
-    // center, sub) so AIL_sample_51_volume_levels reports them correctly.
+    // Drive the stereo engine first (setVolumePanF also writes v51_levels[0..1]
+    // as the 2D pair) -- then store the full 5.1 channel set so it isn't
+    // clobbered.
+    s.setVolumePanF(volume, pan);
+    // SDK channel order (f_left, f_right, b_left, b_right, center, sub).
     s.v51_levels[0] = left * front; // f_left
     s.v51_levels[1] = right * front; // f_right
     s.v51_levels[2] = left * back; // b_left
     s.v51_levels[3] = right * back; // b_right
     s.v51_levels[4] = sv * center_level; // center
     s.v51_levels[5] = sv * sub_level; // sub
-    // Drive the actual (stereo) engine output with the exact 2D law.
-    s.setVolumePanF(volume, pan);
 }
 pub fn AIL_set_sample_buffer_count(a0: ?*anyopaque, a1: i32) callconv(.winapi) i32 {
     _ = a0;

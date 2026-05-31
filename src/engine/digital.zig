@@ -1152,6 +1152,11 @@ pub const Sample = struct {
         } else {
             if (lr_right > 0.0) pan_bal = 1.0 - (lr_left / lr_right); // in [0, 1]
         }
+        // Keep the per-channel scalars in sync (MSS's set_hardware_volume sets
+        // left_volume/right_volume = gain*pan-ratio); AIL_sample_volume_levels
+        // reports these, so a volume_pan->levels query stays consistent.
+        self.v51_levels[0] = gain * lr_left;
+        self.v51_levels[1] = gain * lr_right;
         self.volume = vol;
         self.pan = pan_bal;
         if (self.is_initialized) {

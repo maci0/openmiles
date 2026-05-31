@@ -2182,7 +2182,7 @@ test "v7 unified 3D pos/vel/orient round-trip in MSS left-handed space" {
     try testing.expect(@abs(ux) < 0.001 and @abs(uy - 1) < 0.001 and @abs(uz) < 0.001);
 }
 
-test "v7 sample_volume_levels reconstructs asymmetric L/R from volume+pan" {
+test "v7 sample_volume_levels returns the L/R scalars verbatim (SDK)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
     const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
@@ -2192,20 +2192,20 @@ test "v7 sample_volume_levels reconstructs asymmetric L/R from volume+pan" {
     defer s.deinit();
     try s.loadFromMemory(wav, false);
 
-    // Asymmetric: left louder than right.
+    // The SDK stores left_volume/right_volume verbatim and the getter returns
+    // them exactly -- no quantization through volume+pan.
     api_v7.AIL_set_sample_volume_levels(s, 0.8, 0.2);
     var l: f32 = 0;
     var r: f32 = 0;
     api_v7.AIL_sample_volume_levels(s, &l, &r);
-    // vol=max=0.8 (rounds via 0..127), R/(L+R)=0.2 -> recover ~0.8/0.2.
-    try testing.expect(l > r); // imbalance preserved, not symmetric
-    try testing.expect(@abs(l - 0.8) < 0.02);
-    try testing.expect(@abs(r - 0.2) < 0.02);
+    try testing.expectEqual(@as(f32, 0.8), l);
+    try testing.expectEqual(@as(f32, 0.2), r);
 
-    // Symmetric stays symmetric.
-    api_v7.AIL_set_sample_volume_levels(s, 0.5, 0.5);
+    // Setting via volume_pan also updates the reported L/R scalars
+    // (left=gain*0.812..., right=gain*0.812... for centre, vol=1).
+    dg.AIL_set_sample_volume_pan(s, 1.0, 0.5);
     api_v7.AIL_sample_volume_levels(s, &l, &r);
-    try testing.expect(@abs(l - r) < 0.02);
+    try testing.expect(@abs(l - 0.812252196) < 0.001 and @abs(r - 0.812252196) < 0.001);
 }
 
 test "v7 master reverb decay/predelay/damping all round-trip" {
