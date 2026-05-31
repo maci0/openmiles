@@ -340,22 +340,22 @@ pub fn AIL_merge_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyopaque, ou
     if (out_len) |p| p.* = @intCast(total);
     return 1;
 }
-pub fn DLSClose(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
+pub fn DLSClose(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.c) void {
     AIL_DLS_unload(driver_opt, bank);
 }
-pub fn DLSCompactMemory(driver_opt: ?*MidiDriver) callconv(.winapi) void {
+pub fn DLSCompactMemory(driver_opt: ?*MidiDriver) callconv(.c) void {
     AIL_DLS_compact(driver_opt);
 }
-pub fn DLSGetInfo(driver_opt: ?*MidiDriver, bank: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
+pub fn DLSGetInfo(driver_opt: ?*MidiDriver, bank: *anyopaque, info: *anyopaque) callconv(.c) i32 {
     return AIL_DLS_get_info(driver_opt, bank, info);
 }
-pub fn DLSLoadFile(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flags: u32) callconv(.winapi) ?*anyopaque {
+pub fn DLSLoadFile(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flags: u32) callconv(.c) ?*anyopaque {
     return AIL_DLS_load_file(driver_opt, filename, flags);
 }
-pub fn DLSLoadMemFile(driver_opt: ?*MidiDriver, mem: *anyopaque, flags: u32) callconv(.winapi) ?*anyopaque {
+pub fn DLSLoadMemFile(driver_opt: ?*MidiDriver, mem: *anyopaque, flags: u32) callconv(.c) ?*anyopaque {
     return AIL_DLS_load_memory(driver_opt, mem, flags);
 }
-pub fn DLSMSSOpen(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, freq: u32, bits: i32, channels: i32, flags: u32) callconv(.winapi) ?*openmiles.MidiDriver {
+pub fn DLSMSSOpen(dig_opt: ?*DigitalDriver, seq: ?*Sequence, dls: ?*anyopaque, freq: u32, bits: i32, channels: i32, flags: u32) callconv(.c) ?*openmiles.MidiDriver {
     return AIL_DLS_open(dig_opt, seq, dls, freq, bits, channels, flags);
 }
 pub fn DLSMSSGetCPU(driver_opt: ?*MidiDriver) callconv(.winapi) f32 {
@@ -367,7 +367,7 @@ pub fn DLSMSSGetCPU(driver_opt: ?*MidiDriver) callconv(.winapi) f32 {
     }
     return 0.0;
 }
-pub fn DLSSetAttribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
+pub fn DLSSetAttribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.c) void {
     const driver = driver_opt orelse return;
     const name_slice = std.mem.span(name);
     const v: *const f32 = @ptrCast(@alignCast(val));
@@ -377,7 +377,7 @@ pub fn DLSSetAttribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyo
         driver.dls_filter_pref_compression = v.*;
     }
 }
-pub fn DLSUnloadAll(driver_opt: ?*MidiDriver) callconv(.winapi) void {
+pub fn DLSUnloadAll(driver_opt: ?*MidiDriver) callconv(.c) void {
     const driver = driver_opt orelse return;
     if (driver.soundfont) |sf| {
         if (driver.owns_soundfont) openmiles.tsf.tsf_close(sf);
@@ -386,6 +386,6 @@ pub fn DLSUnloadAll(driver_opt: ?*MidiDriver) callconv(.winapi) void {
         driver.soundfont_size_bytes = 0;
     }
 }
-pub fn DLSUnloadFile(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
+pub fn DLSUnloadFile(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.c) void {
     AIL_DLS_unload(driver_opt, bank);
 }

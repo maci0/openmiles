@@ -7,26 +7,26 @@ const io = openmiles.io;
 const Sample = openmiles.Sample;
 const Provider = openmiles.Provider;
 
-pub fn RIB_alloc_provider_handle(module: *anyopaque) callconv(.winapi) ?*Provider {
+pub fn RIB_alloc_provider_handle(module: *anyopaque) callconv(.c) ?*Provider {
     log("RIB_alloc_provider_handle(module={*})\n", .{module});
     return Provider.init(openmiles.global_allocator, module) catch |err| {
         log("Error: {any}\n", .{err});
         return null;
     };
 }
-pub fn RIB_free_provider_handle(provider_opt: ?*Provider) callconv(.winapi) void {
+pub fn RIB_free_provider_handle(provider_opt: ?*Provider) callconv(.c) void {
     const provider = provider_opt orelse return;
     log("RIB_free_provider_handle(provider={*})\n", .{provider});
     provider.deinit();
 }
-pub fn RIB_register_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) void {
+pub fn RIB_register_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.c) void {
     const provider = provider_opt orelse return;
     log("RIB_register_interface(provider={*}, name={s}, count={d}, entries={*})\n", .{ provider, name, count, entries });
     provider.registerInterface(std.mem.span(name), count, entries) catch |err| {
         log("RIB_register_interface: failed: {any}\n", .{err});
     };
 }
-pub fn RIB_unregister_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) void {
+pub fn RIB_unregister_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.c) void {
     const provider = provider_opt orelse return;
     log("RIB_unregister_interface(provider={*}, name={s}, count={d}, entries={*})\n", .{ provider, name, count, entries });
     provider.unregisterInterface(std.mem.span(name));
@@ -76,7 +76,7 @@ pub fn RIB_enumerate_providers(name: [*:0]const u8, next: ?*?*anyopaque, handle:
     if (handle) |h| h.* = null;
     return 0;
 }
-pub fn RIB_request_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.winapi) i32 {
+pub fn RIB_request_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.c) i32 {
     const provider = provider_opt orelse return 0;
     log("RIB_request_interface(provider={*}, name={s}, count={d}, entries={*})\n", .{ provider, name, count, entries });
     const iface_name = std.mem.span(name);
@@ -176,27 +176,27 @@ pub fn AIL_ASI_provider_attribute(provider_opt: ?*Provider, name: [*:0]const u8)
     }
     return null;
 }
-pub fn RIB_error() callconv(.winapi) [*:0]const u8 {
+pub fn RIB_error() callconv(.c) [*:0]const u8 {
     return "No error";
 }
-pub fn RIB_find_file_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8) callconv(.winapi) ?*Provider {
+pub fn RIB_find_file_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8) callconv(.c) ?*Provider {
     log("RIB_find_file_provider(name='{s}', property='{s}', filename='{s}')\n", .{ std.mem.span(name), std.mem.span(property), std.mem.span(filename) });
     var handle: ?*Provider = null;
     _ = RIB_enumerate_providers(name, null, &handle);
     return handle;
 }
-pub fn RIB_load_provider_library(path: [*:0]const u8) callconv(.winapi) ?*Provider {
+pub fn RIB_load_provider_library(path: [*:0]const u8) callconv(.c) ?*Provider {
     const p = openmiles.Provider.load(openmiles.global_allocator, std.mem.span(path)) catch |err| {
         log("Error: {any}\n", .{err});
         return null;
     };
     return p;
 }
-pub fn RIB_free_provider_library(provider_opt: ?*Provider) callconv(.winapi) void {
+pub fn RIB_free_provider_library(provider_opt: ?*Provider) callconv(.c) void {
     const provider = provider_opt orelse return;
     provider.deinit();
 }
-pub fn RIB_request_interface_entry(provider_opt: ?*Provider, name: [*:0]const u8, entry_type: u32, entry_name: [*:0]const u8, token: ?*usize) callconv(.winapi) i32 {
+pub fn RIB_request_interface_entry(provider_opt: ?*Provider, name: [*:0]const u8, entry_type: u32, entry_name: [*:0]const u8, token: ?*usize) callconv(.c) i32 {
     _ = entry_type; // RIB_FUNCTION/RIB_PROPERTY filter; we match by name alone
     const provider = provider_opt orelse return 0;
     for (provider.interfaces.items) |iface| {
@@ -212,7 +212,7 @@ pub fn RIB_request_interface_entry(provider_opt: ?*Provider, name: [*:0]const u8
 // RIB_enumerate_interface(HPROVIDER provider, C8 *interface_name,
 //                         RIB_ENTRY_TYPE type, HINTENUM *next, RIB_INTERFACE_ENTRY *dest)
 // Iterates the named interface's entries, filling `dest` with each entry.
-pub fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const u8, entry_type: u32, next: *?*anyopaque, dest: *openmiles.RIB_INTERFACE_ENTRY) callconv(.winapi) i32 {
+pub fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const u8, entry_type: u32, next: *?*anyopaque, dest: *openmiles.RIB_INTERFACE_ENTRY) callconv(.c) i32 {
     const provider = provider_opt orelse return 0;
     const iface_name = std.mem.span(name);
     for (provider.interfaces.items) |iface| {
@@ -244,7 +244,7 @@ pub fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const u8, en
 // RIB_DEC=1, RIB_HEX=2, RIB_FLOAT=3, RIB_PERCENT=4, RIB_BOOL=5, RIB_STRING=6;
 // RIB_READONLY=0x80000000 is a flag stripped before the switch.
 var type_string_buf: [256]u8 = undefined;
-pub fn RIB_type_string(data: ?*const anyopaque, subtype: u32) callconv(.winapi) [*:0]const u8 {
+pub fn RIB_type_string(data: ?*const anyopaque, subtype: u32) callconv(.c) [*:0]const u8 {
     const d = data orelse return "";
     const st = subtype & ~@as(u32, 0x80000000);
     const slice: []const u8 = switch (st) {

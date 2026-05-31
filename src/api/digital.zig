@@ -769,6 +769,11 @@ comptime {
             // Optional COFF symbol to alias when it differs from `name` (e.g. a
             // renamed export sharing another function's implementation).
             symbol: ?[]const u8 = null,
+            // The real DLL exports the public RIB-interface and DLS APIs under
+            // __cdecl (undecorated: no leading `_`, no `@N`), while the AIL_*
+            // surface and the RIB provider-management calls stay __stdcall. When
+            // set, emit the bare name and the backing fn must be callconv(.c).
+            cdecl: bool = false,
         };
         const targets = [_]Target{
             .{ .name = "AIL_startup", .stack_size = 0 },
@@ -854,14 +859,14 @@ comptime {
             .{ .name = "AIL_stream_pan", .stack_size = 4 },
             .{ .name = "AIL_stream_loop_count", .stack_size = 4 },
             .{ .name = "AIL_stream_ms_position", .stack_size = 12 },
-            .{ .name = "RIB_alloc_provider_handle", .stack_size = 4, .ver = 40 },
-            .{ .name = "RIB_free_provider_handle", .stack_size = 4, .ver = 40 },
-            .{ .name = "RIB_register_interface", .stack_size = 16, .ver = 40 },
-            .{ .name = "RIB_unregister_interface", .stack_size = 16, .ver = 40 },
+            .{ .name = "RIB_alloc_provider_handle", .stack_size = 4, .ver = 40, .cdecl = true },
+            .{ .name = "RIB_free_provider_handle", .stack_size = 4, .ver = 40, .cdecl = true },
+            .{ .name = "RIB_register_interface", .stack_size = 16, .ver = 40, .cdecl = true },
+            .{ .name = "RIB_unregister_interface", .stack_size = 16, .ver = 40, .cdecl = true },
             .{ .name = "RIB_provider_library_handle", .stack_size = 0, .ver = 40 },
             .{ .name = "RIB_load_application_providers", .stack_size = 4, .ver = 40 },
             .{ .name = "RIB_enumerate_providers", .stack_size = 12, .ver = 40 },
-            .{ .name = "RIB_request_interface", .stack_size = 16, .ver = 40 },
+            .{ .name = "RIB_request_interface", .stack_size = 16, .ver = 40, .cdecl = true },
             .{ .name = "RIB_find_files_provider", .stack_size = 20, .ver = 40 },
             .{ .name = "AIL_open_filter", .stack_size = 8, .ver = 40 },
             .{ .name = "AIL_close_filter", .stack_size = 4, .ver = 40 },
@@ -1093,13 +1098,13 @@ comptime {
             .{ .name = "AIL_redbook_set_volume", .stack_size = 8 },
             .{ .name = "AIL_redbook_volume", .stack_size = 4 },
             // RIB extras
-            .{ .name = "RIB_error", .stack_size = 0, .ver = 40 },
-            .{ .name = "RIB_find_file_provider", .stack_size = 12, .ver = 40 },
-            .{ .name = "RIB_load_provider_library", .stack_size = 4, .ver = 40 },
-            .{ .name = "RIB_free_provider_library", .stack_size = 4, .ver = 40 },
-            .{ .name = "RIB_request_interface_entry", .stack_size = 20, .ver = 40 },
-            .{ .name = "RIB_enumerate_interface", .stack_size = 20, .ver = 40 },
-            .{ .name = "RIB_type_string", .stack_size = 8, .ver = 40 },
+            .{ .name = "RIB_error", .stack_size = 0, .ver = 40, .cdecl = true },
+            .{ .name = "RIB_find_file_provider", .stack_size = 12, .ver = 40, .cdecl = true },
+            .{ .name = "RIB_load_provider_library", .stack_size = 4, .ver = 40, .cdecl = true },
+            .{ .name = "RIB_free_provider_library", .stack_size = 4, .ver = 40, .cdecl = true },
+            .{ .name = "RIB_request_interface_entry", .stack_size = 20, .ver = 40, .cdecl = true },
+            .{ .name = "RIB_enumerate_interface", .stack_size = 20, .ver = 40, .cdecl = true },
+            .{ .name = "RIB_type_string", .stack_size = 8, .ver = 40, .cdecl = true },
             // v9-only: v7/v8 export MIX_RIB_MAIN@8 (a different ASI entry arity);
             // v4-v6 and v7/v8 do not export MSS_alloc_info/MSS_free_info at all.
             .{ .name = "MIX_RIB_MAIN", .stack_size = 20, .ver = 90 },
@@ -1179,16 +1184,16 @@ comptime {
             .{ .name = "AIL_list_MIDI", .stack_size = 20 },
             .{ .name = "AIL_merge_DLS_with_XMI", .stack_size = 16 },
             // Legacy DLS* functions (no AIL_ prefix)
-            .{ .name = "DLSClose", .stack_size = 8 },
-            .{ .name = "DLSCompactMemory", .stack_size = 4 },
-            .{ .name = "DLSGetInfo", .stack_size = 12 },
-            .{ .name = "DLSLoadFile", .stack_size = 12 },
-            .{ .name = "DLSLoadMemFile", .stack_size = 12 },
+            .{ .name = "DLSClose", .stack_size = 8, .cdecl = true },
+            .{ .name = "DLSCompactMemory", .stack_size = 4, .cdecl = true },
+            .{ .name = "DLSGetInfo", .stack_size = 12, .cdecl = true },
+            .{ .name = "DLSLoadFile", .stack_size = 12, .cdecl = true },
+            .{ .name = "DLSLoadMemFile", .stack_size = 12, .cdecl = true },
             .{ .name = "DLSMSSGetCPU", .stack_size = 4 },
-            .{ .name = "DLSMSSOpen", .stack_size = 28 },
-            .{ .name = "DLSSetAttribute", .stack_size = 12 },
-            .{ .name = "DLSUnloadAll", .stack_size = 4 },
-            .{ .name = "DLSUnloadFile", .stack_size = 8 },
+            .{ .name = "DLSMSSOpen", .stack_size = 28, .cdecl = true },
+            .{ .name = "DLSSetAttribute", .stack_size = 12, .cdecl = true },
+            .{ .name = "DLSUnloadAll", .stack_size = 4, .cdecl = true },
+            .{ .name = "DLSUnloadFile", .stack_size = 8, .cdecl = true },
             // DLL entry point
             .{ .name = "DllMain", .stack_size = 12 },
             .{ .name = "AIL_set_sample_3D_position", .stack_size = 16, .ver = 60 },
@@ -1531,9 +1536,10 @@ comptime {
         for (targets) |t| {
             if (openmiles.mss_version < t.ver or openmiles.mss_version > t.ver_max) continue;
             const fname = t.symbol orelse t.name;
+            const exp_name = if (t.cdecl) t.name else "_" ++ t.name;
             for (mods) |m| {
                 if (@hasDecl(m, fname)) {
-                    @export(&@field(m, fname), .{ .name = "_" ++ t.name, .linkage = .strong });
+                    @export(&@field(m, fname), .{ .name = exp_name, .linkage = .strong });
                     break;
                 }
             }
