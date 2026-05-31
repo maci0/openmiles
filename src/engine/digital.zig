@@ -1783,3 +1783,71 @@ pub const Sample3D = struct {
         }
     }
 };
+
+// --- Callback ABI regression tests -------------------------------------------
+// These register REAL stdcall callbacks (not null) and drive the bridges that
+// invoke them, asserting the single-arg HSAMPLE signature that the SDK mandates
+// (AILSAMPLECB = void(HSAMPLE)). A wrong arity here corrupts the mixer-thread
+// stack at runtime, a class of bug synthetic null-callback fuzzing cannot see.
+const CbProbe = struct {
+    var eob_hs: ?*anyopaque = null;
+    var eos_hs: ?*anyopaque = null;
+    var sob_hs: ?*anyopaque = null;
+    var eob_calls: u32 = 0;
+    var eos_calls: u32 = 0;
+    var sob_calls: u32 = 0;
+    fn reset() void {
+        eob_hs = null;
+        eos_hs = null;
+        sob_hs = null;
+        eob_calls = 0;
+        eos_calls = 0;
+        sob_calls = 0;
+    }
+    fn onEob(s: ?*anyopaque) callconv(.winapi) void {
+        eob_hs = s;
+        eob_calls += 1;
+    }
+    fn onEos(s: ?*anyopaque) callconv(.winapi) void {
+        eos_hs = s;
+        eos_calls += 1;
+    }
+    fn onSob(s: ?*anyopaque) callconv(.winapi) void {
+        sob_hs = s;
+        sob_calls += 1;
+    }
+};
+
+test "EOB/EOS callbacks fire with single HSAMPLE arg" {
+    const s = try std.testing.allocator.create(Sample);
+    defer std.testing.allocator.destroy(s);
+    s.* = undefined;
+    s.loops_remaining = 1;
+    s.is_done = false;
+    s.eob_callback = @intFromPtr(&CbProbe.onEob);
+    s.eos_callback = @intFromPtr(&CbProbe.onEos);
+    s.sob_callback = 0;
+    CbProbe.reset();
+    // Final-loop completion path: must fire EOB then EOS, each with HSAMPLE only.
+    Sample.eosCallbackBridge(s, null);
+    try std.testing.expect(s.is_done);
+    try std.testing.expectEqual(@as(u32, 1), CbProbe.eob_calls);
+    try std.testing.expectEqual(@as(u32, 1), CbProbe.eos_calls);
+    try std.testing.expectEqual(@as(?*anyopaque, @ptrCast(s)), CbProbe.eob_hs);
+    try std.testing.expectEqual(@as(?*anyopaque, @ptrCast(s)), CbProbe.eos_hs);
+}
+
+test "EOB stream bridge fires with single HSAMPLE arg" {
+    const s = try std.testing.allocator.create(Sample);
+    defer std.testing.allocator.destroy(s);
+    s.* = undefined;
+    s.eob_callback = @intFromPtr(&CbProbe.onEob);
+    s.last_loaded_buffer = 0;
+    CbProbe.reset();
+    // Buffer-drain bridge passes through buf_index/len/addr but the app callback
+    // receives only HSAMPLE.
+    Sample.streamEobBridge(@ptrCast(s), 1, 4096, null);
+    try std.testing.expectEqual(@as(i32, 1), s.last_loaded_buffer);
+    try std.testing.expectEqual(@as(u32, 1), CbProbe.eob_calls);
+    try std.testing.expectEqual(@as(?*anyopaque, @ptrCast(s)), CbProbe.eob_hs);
+}

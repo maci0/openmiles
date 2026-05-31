@@ -173,6 +173,43 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
 
+    // Engine-internal unit tests: run the `test` blocks that live inside the
+    // openmiles module itself (e.g. callback-ABI regression tests sitting next
+    // to the private bridges they exercise). A file may belong to only one
+    // module, so these cannot be pulled into test_root — they get their own
+    // test artifact rooted at the same source as the openmiles module.
+    const engine_c_impl = b.addObject(.{
+        .name = "engine_c_impl",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+    });
+    engine_c_impl.root_module.addIncludePath(b.path("deps"));
+    engine_c_impl.root_module.addCSourceFile(.{
+        .file = b.path("src/bindings/c_impl.c"),
+        .flags = &.{"-std=c99"},
+    });
+    const engine_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/engine_test_root.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "ma_c", .module = ma_mod },
+                .{ .name = "tsf_c", .module = tsf_mod },
+                .{ .name = "build_options", .module = build_opts_mod },
+            },
+        }),
+    });
+    engine_tests.root_module.addIncludePath(b.path("deps"));
+    engine_tests.root_module.addIncludePath(b.path("src"));
+    engine_tests.root_module.addObject(engine_c_impl);
+    const run_engine_tests = b.addRunArtifact(engine_tests);
+    test_step.dependOn(&run_engine_tests.step);
+
     // C test executables
     const c_tests = [_]struct { name: []const u8, source: []const u8 }{
         .{ .name = "play_test", .source = "tests/play_test.c" },
