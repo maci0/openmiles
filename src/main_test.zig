@@ -2906,3 +2906,24 @@ test "MilesSetSoundLabelLimits caps concurrent sounds per label (evicts oldest)"
     while (api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("sfx"), 0, @ptrCast(&info)) == 1) sfx += 1;
     try testing.expectEqual(@as(i32, 1), sfx);
 }
+
+test "container resolves bank-prefixed sound names (Container_GetSound)" {
+    var img: [200]u8 = undefined;
+    @memset(&img, 0);
+    const sb = openmiles.soundbank;
+    std.mem.writeInt(u32, img[0..4], sb.BANK_TAG, .little);
+    std.mem.writeInt(i32, img[4..8], 8, .little);
+    std.mem.writeInt(u32, img[32..36], 60, .little);
+    std.mem.writeInt(u32, img[52..56], 1, .little);
+    std.mem.writeInt(u32, img[60..64], 76, .little);
+    std.mem.writeInt(u32, img[64..68], 80, .little);
+    @memcpy(img[76..81], "boom\x00");
+    std.mem.writeInt(u32, img[116..120], 4500, .little); // DurationMs at Sound+36
+    std.mem.writeInt(i32, img[8..12], 120, .little);
+    const bank = try openmiles.soundbank.loadFromMemory(openmiles.global_allocator, "fx.mbnk", img[0..120]);
+    defer bank.deinit();
+    // "<bank>/<sound>" and the bare name both resolve; an unknown name does not.
+    try testing.expectEqual(@as(?u32, 4500), openmiles.soundbank.containerSoundDurationMs("fx/boom"));
+    try testing.expectEqual(@as(?u32, 4500), openmiles.soundbank.containerSoundDurationMs("boom"));
+    try testing.expectEqual(@as(?u32, null), openmiles.soundbank.containerSoundDurationMs("nope"));
+}

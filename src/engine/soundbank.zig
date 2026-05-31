@@ -64,13 +64,21 @@ pub fn containerFindEvent(event_name: []const u8) ?[*]const u8 {
     return null;
 }
 
+// Sound references in events are formatted "<bank>/<sound>"; the asset table is
+// keyed by the bare sound name, so drop any leading "<bank>/" path (Container_GetSound).
+fn bareSoundName(name: []const u8) []const u8 {
+    if (std.mem.lastIndexOfScalar(u8, name, '/')) |slash| return name[slash + 1 ..];
+    return name;
+}
+
 /// Resolve a named sound's playback duration (ms) across all loaded banks
 /// (Container_GetSound -> MILESBANKSOUNDINFO.DurationMs).
 pub fn containerSoundDurationMs(sound_name: []const u8) ?u32 {
+    const bare = bareSoundName(sound_name);
     regLock();
     defer regUnlock();
     for (g_registry.items) |b| {
-        if (b.soundDurationMs(sound_name)) |ms| return ms;
+        if (b.soundDurationMs(bare)) |ms| return ms;
     }
     return null;
 }
