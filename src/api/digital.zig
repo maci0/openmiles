@@ -325,10 +325,15 @@ pub fn AIL_set_sample_adpcm_block_size(s_opt: ?*Sample, block_size: u32) callcon
     const s = s_opt orelse return;
     s.adpcm_block_size = block_size;
 }
-pub fn AIL_sample_granularity(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
-    const driver = driver_opt orelse return 0;
-    _ = driver;
-    return 512;
+// SDK: AIL_sample_granularity(HSAMPLE S) -- the seek granularity in bytes:
+// the ADPCM block size for ADPCM samples, else bytes-per-frame (SS_granularity:
+// 1 for mono-8, 2 for mono-16/stereo-8, 4 for stereo-16). NOT a driver-level
+// constant.
+pub fn AIL_sample_granularity(s_opt: ?*Sample) callconv(.winapi) u32 {
+    const s = s_opt orelse return 0;
+    if (s.adpcm_block_size > 0) return s.adpcm_block_size;
+    const bpf = s.bytesPerFrame();
+    return if (bpf == 0) 1 else bpf;
 }
 pub fn AIL_minimum_sample_buffer_size(driver_opt: ?*DigitalDriver, rate: i32, format: i32) callconv(.winapi) u32 {
     const driver = driver_opt orelse return 0;

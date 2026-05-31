@@ -97,7 +97,7 @@ test "coverage: digital.zig exports" {
     _ = dg.AIL_digital_master_volume(drv);
     dg.AIL_set_digital_master_volume(drv, 64);
     _ = dg.AIL_active_sample_count(drv);
-    _ = dg.AIL_sample_granularity(drv);
+    _ = dg.AIL_sample_granularity(s);
     _ = dg.AIL_minimum_sample_buffer_size(drv, 44100, 0);
     dg.AIL_get_DirectSound_info(null, null, null);
     dg.AIL_set_DirectSound_HWND(drv, sc());

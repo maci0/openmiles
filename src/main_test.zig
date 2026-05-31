@@ -1221,6 +1221,28 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
+test "AIL_sample_granularity returns bytes-per-frame (SDK SS_granularity)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [128]u8 align(2) = [_]u8{0} ** 128;
+    // Stereo 16-bit -> granularity 4 (DIG_F_STEREO_16).
+    const wav_st = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 2, 44100, 16);
+    defer testing.allocator.free(wav_st);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav_st, false);
+    try testing.expectEqual(@as(u32, 4), dg.AIL_sample_granularity(s));
+    // Mono 16-bit -> granularity 2.
+    const wav_mono = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav_mono);
+    const s2 = try openmiles.Sample.init(drv);
+    defer s2.deinit();
+    try s2.loadFromMemory(wav_mono, false);
+    try testing.expectEqual(@as(u32, 2), dg.AIL_sample_granularity(s2));
+    // Null handle -> 0.
+    try testing.expectEqual(@as(u32, 0), dg.AIL_sample_granularity(null));
+}
+
 test "AIL_set_sample_info channel_mask round-trips via channel_count" {
     if (!@hasField(openmiles.AILSOUNDINFO, "channel_mask")) return; // v9 field only
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
