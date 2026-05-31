@@ -446,6 +446,10 @@ test "Sample3D init deinit and default properties" {
     try testing.expectEqual(@as(f32, 1.0), s.volume);
     try testing.expectEqual(@as(f32, 1.0), s.min_distance);
     try testing.expectEqual(@as(f32, 200.0), s.max_distance); // MSS default (wavefile.cpp)
+    // MSS default orientation: face = +X, up = +Y.
+    try testing.expectEqual(@as(f32, 1.0), s.orient_fx);
+    try testing.expectEqual(@as(f32, 0.0), s.orient_fz);
+    try testing.expectEqual(@as(f32, 1.0), s.orient_uy);
     try testing.expect(!s.is_initialized);
 
     s.deinit();

@@ -1318,9 +1318,10 @@ pub const Sample3D = struct {
     cone_inner_rad: f32 = 360.0 * deg2rad,
     cone_outer_rad: f32 = 360.0 * deg2rad,
     cone_outer_volume: f32 = 1.0,
-    orient_fx: f32 = 0.0,
+    // MSS default orientation (wavefile.cpp): face = +X (1,0,0), up = +Y (0,1,0).
+    orient_fx: f32 = 1.0,
     orient_fy: f32 = 0.0,
-    orient_fz: f32 = 1.0,
+    orient_fz: f32 = 0.0,
     orient_ux: f32 = 0.0,
     orient_uy: f32 = 1.0,
     orient_uz: f32 = 0.0,
