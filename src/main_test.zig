@@ -2927,3 +2927,15 @@ test "container resolves bank-prefixed sound names (Container_GetSound)" {
     try testing.expectEqual(@as(?u32, 4500), openmiles.soundbank.containerSoundDurationMs("boom"));
     try testing.expectEqual(@as(?u32, null), openmiles.soundbank.containerSoundDurationMs("nope"));
 }
+
+test "MilesTextDumpEventSystem reports system/instance/persist counts" {
+    api_miles_t.MilesShutdownEventSystem();
+    defer api_miles_t.MilesShutdownEventSystem();
+    _ = api_miles_t.MilesStartupEventSystem(null, 0, null, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("a"), 0, 0, cstr2(""), null, 0, 0);
+    const dump = api_miles_t.MilesTextDumpEventSystem() orelse return error.NoDump;
+    defer std.c.free(dump);
+    const text = std.mem.span(@as([*:0]const u8, @ptrCast(dump)));
+    try testing.expect(std.mem.indexOf(u8, text, "Event System Count: 1") != null);
+    try testing.expect(std.mem.indexOf(u8, text, "Sound Instance Count: 1") != null);
+}

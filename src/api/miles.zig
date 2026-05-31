@@ -680,8 +680,25 @@ pub fn MilesGetEventLength(event_name: ?[*:0]const u8) callconv(.winapi) i32 {
     }
     return 0;
 }
+// Human-readable diagnostic dump (mss.h AIL_text_dump_event_system). Mirrors the
+// SDK's header lines; the returned buffer is malloc'd for the caller to free.
 pub fn MilesTextDumpEventSystem() callconv(.winapi) ?[*:0]u8 {
-    return null;
+    var sys_count: i32 = 0;
+    var s = g_root;
+    while (s) |sys| : (s = sys.next) sys_count += 1;
+    updateInstances();
+    var buf: [512]u8 = undefined;
+    const text = std.fmt.bufPrint(&buf, "Event System Count: {d}\nSystem #1\nSound Source Count: {d}\nSound Instance Count: {d}\nPersistent Preset Count: {d}\nLoaded Bank Count: {d}\n", .{
+        sys_count,
+        g_cached.items.len,
+        g_instances.items.len,
+        g_persists.items.len,
+        openmiles.soundbank.loadedCount(),
+    }) catch return null;
+    const out: [*]u8 = @ptrCast(std.c.malloc(text.len + 1) orelse return null);
+    @memcpy(out[0..text.len], text);
+    out[text.len] = 0;
+    return @ptrCast(out);
 }
 
 // --- callbacks / config (stored or no-op) ------------------------------------

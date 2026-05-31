@@ -836,7 +836,7 @@ test "fuzz: invoke every export with adversarial inputs" {
         _ = api_miles.MilesReleaseSoundBank(null);
         _ = api_miles.MilesFindEvent(null, rstr);
         _ = api_miles.MilesGetEventLength(rstr);
-        _ = api_miles.MilesTextDumpEventSystem();
+        if (api_miles.MilesTextDumpEventSystem()) |dump| std.c.free(dump);
         api_miles.MilesRegisterRand(scp);
         api_miles.MilesSetEventErrorCallback(scp);
         api_miles.MilesEventSetAuditionFunctions(scp);
