@@ -1758,6 +1758,17 @@ pub const Sample3D = struct {
         }
     }
 
+    // KNOWN ISSUE (3D coordinate handedness): MSS is LEFT-handed (forward=+Z,
+    // up=+Y, right = up x forward = +X; confirmed by the SDK defaults
+    // listen_face=(0,0,1), listen_up=(0,1,0), listen_cross=(1,0,0) in
+    // genericdig.cpp). miniaudio is RIGHT-handed (forward=-Z). We currently pass
+    // positions/directions/velocities straight through, so both front/back AND
+    // left/right are mirrored vs MSS for a given world coordinate. The correct
+    // fix is to negate Z on every coordinate crossing the miniaudio boundary
+    // (sample + listener; position/velocity/direction; set and the listener
+    // getters), keeping stored values in MSS space. Deferred as a single atomic,
+    // round-trip-tested change since a partial conversion is worse than the
+    // current uniform one.
     pub fn setPosition(self: *Sample3D, x: f32, y: f32, z: f32) void {
         self.pos_x = x;
         self.pos_y = y;
