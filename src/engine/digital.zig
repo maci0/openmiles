@@ -30,6 +30,17 @@ fn satU64(v: f32) u64 {
     return @intFromFloat(v);
 }
 
+/// Normalize a 3-vector in place, matching MSS RAD_vector_normalize (m3d.cpp):
+/// a vector shorter than 1e-4 is left unchanged (avoids divide-by-zero).
+fn normalize3(v: *[3]f32) void {
+    const len = @sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (len > 0.0001) {
+        v[0] /= len;
+        v[1] /= len;
+        v[2] /= len;
+    }
+}
+
 /// Saturating f32 -> i32 (NaN -> 0, out-of-range -> clamped).
 fn satI32(v: f32) i32 {
     if (std.math.isNan(v)) return 0;
@@ -627,6 +638,11 @@ pub const Sample = struct {
     v7_occlusion: f32 = 0.0,
     v7_exclusion: f32 = 0.0,
     v7_rate_factor: f32 = 1.0,
+    // v7 unified-API 3D orientation (HSAMPLE). The SDK (m3d.cpp) normalizes both
+    // face and up on set and returns the stored vectors; default face = +X,
+    // up = +Y (wavefile.cpp). Stored here so the getter round-trips faithfully.
+    s3d_face: [3]f32 = .{ 1, 0, 0 },
+    s3d_up: [3]f32 = .{ 0, 1, 0 },
     // v9 sample attributes (synchronized control / buses / system levels).
     v9_id: i32 = 0,
     v9_bus: i32 = 0,
@@ -1060,6 +1076,8 @@ pub const Sample = struct {
         self.channel_mask = ~@as(u32, 0);
         self.n_buffers = 0;
         self.falloff_count = [_]u8{0} ** 4;
+        self.s3d_face = .{ 1, 0, 0 };
+        self.s3d_up = .{ 0, 1, 0 };
         self.last_loaded_buffer = 0;
         self.user_data = [_]u32{0} ** 8;
     }
@@ -1078,6 +1096,20 @@ pub const Sample = struct {
                 return;
             };
             @memcpy(self.falloff_graph[idx][0..n], pts[0..n]);
+        }
+    }
+
+    /// Set the unified-API (HSAMPLE) 3D orientation. Normalizes face and up like
+    /// the SDK and stores them; also pushes the (z-negated) face direction to
+    /// miniaudio for cone attenuation. The up vector has no miniaudio analogue
+    /// for a sound, but is retained so the getter round-trips faithfully.
+    pub fn setOrientation(self: *Sample, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) void {
+        self.s3d_face = .{ fx, fy, fz };
+        self.s3d_up = .{ ux, uy, uz };
+        normalize3(&self.s3d_face);
+        normalize3(&self.s3d_up);
+        if (self.is_initialized) {
+            ma.ma_sound_set_direction(&self.sound, self.s3d_face[0], self.s3d_face[1], -self.s3d_face[2]);
         }
     }
 

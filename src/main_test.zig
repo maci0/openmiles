@@ -2494,6 +2494,32 @@ test "v7 unified 3D pos/vel/orient round-trip in MSS left-handed space" {
     try testing.expect(@abs(ux) < 0.001 and @abs(uy - 1) < 0.001 and @abs(uz) < 0.001);
 }
 
+test "v7 set_sample_3D_orientation normalizes face & up and round-trips both" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    // Non-unit face (0,0,5) -> (0,0,1); non-unit, non-axis up (0,3,4) -> (0,0.6,0.8).
+    api_v7.AIL_set_sample_3D_orientation(s, 0, 0, 5, 0, 3, 4);
+    var fx: f32 = 0;
+    var fy: f32 = 0;
+    var fz: f32 = 0;
+    var ux: f32 = 0;
+    var uy: f32 = 0;
+    var uz: f32 = 0;
+    api_v7.AIL_sample_3D_orientation(s, &fx, &fy, &fz, &ux, &uy, &uz);
+    try testing.expect(@abs(fx) < 0.001 and @abs(fy) < 0.001 and @abs(fz - 1) < 0.001);
+    try testing.expect(@abs(ux) < 0.001 and @abs(uy - 0.6) < 0.001 and @abs(uz - 0.8) < 0.001);
+    // A zero-length vector is left unchanged (SDK guards len > 1e-4): up stays (0,0,0).
+    api_v7.AIL_set_sample_3D_orientation(s, 1, 0, 0, 0, 0, 0);
+    api_v7.AIL_sample_3D_orientation(s, &fx, &fy, &fz, &ux, &uy, &uz);
+    try testing.expect(@abs(ux) < 0.001 and @abs(uy) < 0.001 and @abs(uz) < 0.001);
+}
+
 test "v7 sample_volume_levels returns the L/R scalars verbatim (SDK)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

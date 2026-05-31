@@ -45,11 +45,10 @@ pub fn AIL_set_sample_3D_velocity_vector(obj: ?*Sample, dx: f32, dy: f32, dz: f3
     if (s.is_initialized) ma.ma_sound_set_velocity(&s.sound, dx, dy, -dz);
 }
 pub fn AIL_set_sample_3D_orientation(obj: ?*Sample, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) callconv(.winapi) void {
-    _ = ux; // a sound has only a direction in miniaudio (no up vector)
-    _ = uy;
-    _ = uz;
     const s = obj orelse return;
-    if (s.is_initialized) ma.ma_sound_set_direction(&s.sound, fx, fy, -fz);
+    // SDK (m3d.cpp) normalizes both face and up and stores them; the up vector
+    // has no miniaudio analogue but is retained for a faithful getter round-trip.
+    s.setOrientation(fx, fy, fz, ux, uy, uz);
 }
 pub fn AIL_set_sample_3D_cone(obj: ?*Sample, inner_angle: f32, outer_angle: f32, outer_volume_level: f32) callconv(.winapi) void {
     const s = obj orelse return;
@@ -107,13 +106,13 @@ pub fn AIL_sample_3D_velocity(obj: ?*Sample, dx: ?*f32, dy: ?*f32, dz: ?*f32) ca
 }
 pub fn AIL_sample_3D_orientation(obj: ?*Sample, fx: ?*f32, fy: ?*f32, fz: ?*f32, ux: ?*f32, uy: ?*f32, uz: ?*f32) callconv(.winapi) void {
     const s = obj orelse return;
-    const d = if (s.is_initialized) ma.ma_sound_get_direction(&s.sound) else ma.ma_vec3f{ .x = 1, .y = 0, .z = 0 };
-    if (fx) |p| p.* = d.x;
-    if (fy) |p| p.* = d.y;
-    if (fz) |p| p.* = -d.z;
-    if (ux) |p| p.* = 0;
-    if (uy) |p| p.* = 1;
-    if (uz) |p| p.* = 0;
+    // Return the stored, normalized face & up exactly as the SDK does.
+    if (fx) |p| p.* = s.s3d_face[0];
+    if (fy) |p| p.* = s.s3d_face[1];
+    if (fz) |p| p.* = s.s3d_face[2];
+    if (ux) |p| p.* = s.s3d_up[0];
+    if (uy) |p| p.* = s.s3d_up[1];
+    if (uz) |p| p.* = s.s3d_up[2];
 }
 pub fn AIL_sample_3D_cone(obj: ?*Sample, inner_angle: ?*f32, outer_angle: ?*f32, outer_volume_level: ?*f32) callconv(.winapi) void {
     const s = obj orelse return;
