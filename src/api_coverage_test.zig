@@ -99,10 +99,10 @@ test "coverage: digital.zig exports" {
     _ = dg.AIL_active_sample_count(drv);
     _ = dg.AIL_sample_granularity(drv);
     _ = dg.AIL_minimum_sample_buffer_size(drv, 44100, 0);
-    _ = dg.AIL_get_DirectSound_info(drv, sc(), 0);
+    dg.AIL_get_DirectSound_info(null, null, null);
     dg.AIL_set_DirectSound_HWND(drv, sc());
     _ = dg.AIL_set_digital_driver_processor(drv, 0, null);
-    _ = dg.AIL_process_digital_audio(drv, sc(), 0, null, 0, 0);
+    _ = dg.AIL_process_digital_audio(sc(), 0, 0, 0, 0, null);
     _ = dg.AIL_size_processed_digital_audio(44100, 1, 1, sc());
     _ = dg.AIL_digital_handle_release(drv);
     _ = dg.AIL_digital_handle_reacquire(drv);

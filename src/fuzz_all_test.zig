@@ -612,9 +612,13 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_3d.AIL_set_3D_sample_info(@as(?*anyopaque, @ptrCast(h3)), @as(?*anyopaque, &info));
     api_digital.AIL_load_sample_buffer(hs, ru, scp, rsz);
     _ = api_digital.AIL_size_processed_digital_audio(ru, ru, rszi, &info);
-    _ = api_digital.AIL_process_digital_audio(hd, scp, rsz, scp, rsz, ru);
+    _ = api_digital.AIL_process_digital_audio(scp, rszi, ru, ru, rszi, scp);
     _ = api_dls.AIL_DLS_get_info(hm, scp, scp);
-    _ = api_digital.AIL_get_DirectSound_info(hd, scp, rsz);
+    {
+        var ds_out: ?*anyopaque = null;
+        var dsb_out: ?*anyopaque = null;
+        api_digital.AIL_get_DirectSound_info(hs, &ds_out, &dsb_out);
+    }
     api_v7.AIL_speaker_reverb_levels(hd, &pfo, &pfo, &pco);
     _ = api_file.AIL_file_read(rstr, scp);
     _ = api_file.AIL_file_write(rstr, scp, rsz);

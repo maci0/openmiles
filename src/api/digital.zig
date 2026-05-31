@@ -487,12 +487,13 @@ pub fn AIL_start_sample_at(s_opt: ?*Sample, offset: u32) callconv(.winapi) void 
     s.setPosition(offset);
     s.start();
 }
-pub fn AIL_get_DirectSound_info(driver_opt: ?*DigitalDriver, info: *anyopaque, size: u32) callconv(.winapi) i32 {
-    const driver = driver_opt orelse return 0;
-    _ = driver;
-    _ = info;
-    _ = size;
-    return 0;
+// void AIL_get_DirectSound_info(HSAMPLE S, AILLPDIRECTSOUND *lplpDS, AILLPDIRECTSOUNDBUFFER *lplpDSB)
+// OpenMiles renders through miniaudio/WASAPI, not DirectSound, so report that no
+// DirectSound object/buffer is available by nulling the out-pointers.
+pub fn AIL_get_DirectSound_info(s_opt: ?*Sample, lplpDS: ?*?*anyopaque, lplpDSB: ?*?*anyopaque) callconv(.winapi) void {
+    _ = s_opt;
+    if (lplpDS) |p| p.* = null;
+    if (lplpDSB) |p| p.* = null;
 }
 pub fn AIL_set_DirectSound_HWND(driver_opt: ?*DigitalDriver, hwnd: *anyopaque) callconv(.winapi) void {
     const driver = driver_opt orelse return;
@@ -506,31 +507,20 @@ pub fn AIL_set_digital_driver_processor(driver_opt: ?*DigitalDriver, stage: i32,
     driver.driver_processors[idx] = if (processor) |p| @intFromPtr(p) else 0;
     return prev;
 }
-pub fn AIL_process_digital_audio(driver_opt: ?*DigitalDriver, dest: ?*anyopaque, count: u32, mono_dest: ?*anyopaque, mono_count: u32, flags: u32) callconv(.winapi) i32 {
-    const driver = driver_opt orelse return 0;
-    _ = flags;
-    driver.enableCapture();
-    if (dest) |d| {
-        const bytes = driver.readCaptured(@ptrCast(@alignCast(d)), @as(usize, count));
-        if (bytes == 0) return 0;
-    }
-    // Mono down-mix: average L+R if both buffers provided
-    if (mono_dest) |md| {
-        if (dest) |d| {
-            const channels = openmiles.ma.ma_engine_get_channels(&driver.engine);
-            if (channels >= 2) {
-                const stereo: [*]const i16 = @ptrCast(@alignCast(d));
-                const mono: [*]i16 = @ptrCast(@alignCast(md));
-                const frames = @min(count / 4, mono_count / 2);
-                for (0..frames) |i| {
-                    const l: i32 = stereo[i * 2];
-                    const r: i32 = stereo[i * 2 + 1];
-                    mono[i] = @intCast(@divTrunc(l + r, 2));
-                }
-            }
-        }
-    }
-    return 1;
+// S32 AIL_process_digital_audio(void *dest, S32 dest_size, U32 dest_rate, U32 dest_format, S32 num_srcs, AILMIXINFO *src)
+// The SDK function is an offline software mixer: it mixes `num_srcs` AILMIXINFO
+// sources into `dest`. OpenMiles mixes in real time through miniaudio and has no
+// offline mixer, so this is a safe no-op reporting 0 samples processed. (The
+// previous signature misread the dest buffer as an HDIGDRIVER, which would crash
+// a correct caller.)
+pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u32, dest_format: u32, num_srcs: i32, src: ?*anyopaque) callconv(.winapi) i32 {
+    _ = dest;
+    _ = dest_size;
+    _ = dest_rate;
+    _ = dest_format;
+    _ = num_srcs;
+    _ = src;
+    return 0;
 }
 // Real MSS: S32 AIL_size_processed_digital_audio(U32 dest_rate, U32 dest_format,
 // S32 num_srcs, AILMIXINFO const* src) @16 — return the byte size that
