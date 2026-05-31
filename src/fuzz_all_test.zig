@@ -252,7 +252,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_v8.AIL_ftoa(rf, null);
     _ = api_v8.AIL_get_event_contents(null, null, null);
     _ = api_input.AIL_input_info(null);
-    api_v8.AIL_get_marker_list(null, null);
+    _ = api_v8.AIL_get_marker_list(null, null);
     _ = api_digital.AIL_get_preference(ru);
     _ = api_v8.AIL_get_soundbank_filename(null);
     _ = api_v8.AIL_get_soundbank_mem_usage(null);
@@ -527,7 +527,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_v9.AIL_sleep(rand.intRangeAtMost(u32, 0, 1)); // bounded: real sleep, don't block the fuzzer
     api_v8.AIL_sound_asset_filename(null, ri);
     _ = api_v9.AIL_sound_asset_info(null, null, null, null);
-    api_v7.AIL_speaker_configuration(hd, &io, &io, &fo, null);
+    _ = api_v7.AIL_speaker_configuration(hd, &io, &io, &fo, null);
     api_3d.AIL_start_3D_sample(@as(?*anyopaque, @ptrCast(h3)));
     api_timer.AIL_start_all_timers();
     api_digital.AIL_start_sample(hs);
@@ -619,7 +619,7 @@ test "fuzz: invoke every export with adversarial inputs" {
         var dsb_out: ?*anyopaque = null;
         api_digital.AIL_get_DirectSound_info(hs, &ds_out, &dsb_out);
     }
-    api_v7.AIL_speaker_reverb_levels(hd, &pfo, &pfo, &pco);
+    _ = api_v7.AIL_speaker_reverb_levels(hd, &pfo, &pfo, &pco);
     _ = api_file.AIL_file_read(rstr, scp);
     _ = api_file.AIL_file_write(rstr, scp, rsz);
     _ = api_digital.AIL_WAV_file_write(rstr, scp, rsz, ri, ri);

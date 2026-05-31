@@ -353,10 +353,13 @@ pub fn AIL_get_event_contents(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque)
     out.* = null;
     return 0;
 }
-pub fn AIL_get_marker_list(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) void {
-    _ = a0;
-    _ = a1;
-
+pub fn AIL_get_marker_list(bank: ?*anyopaque, sound_name: ?*anyopaque) callconv(.winapi) isize {
+    _ = bank;
+    _ = sound_name;
+    // SDK returns SINTa = a handle to the named sound's marker list, or 0 when
+    // there is none. The soundbank marker subsystem is not modelled, so report
+    // 0 (no marker list) — the documented "no markers" result.
+    return 0;
 }
 pub fn AIL_get_soundbank_filename(bank: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return null));

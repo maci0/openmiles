@@ -1159,6 +1159,38 @@ test "AIL_quick_play returns S32 success (1) and 0 for a null handle" {
     try testing.expectEqual(@as(i32, 0), api_quick.AIL_quick_play(null, 1)); // SDK null guard
 }
 
+test "AIL_speaker_configuration returns the default stereo speaker array (SDK)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    var n_phys: i32 = 0;
+    var n_log: i32 = 0;
+    var falloff: f32 = 0;
+    const pos_one = api_v7.AIL_speaker_configuration(drv, &n_phys, &n_log, &falloff, null) orelse return error.NullArray;
+    const pos: [*]api_v7.MSSVECTOR3D = @ptrCast(pos_one);
+    try testing.expectEqual(@as(i32, 2), n_phys);
+    try testing.expectEqual(@as(i32, 2), n_log);
+    // Default stereo: ±45° in the left-handed frame -> x=∓1/√2, z=1/√2.
+    const r: f32 = 0.707106781;
+    try testing.expect(@abs(pos[0].x + r) < 0.0001 and @abs(pos[0].z - r) < 0.0001);
+    try testing.expect(@abs(pos[1].x - r) < 0.0001 and @abs(pos[1].z - r) < 0.0001);
+    // Null driver returns NULL.
+    try testing.expectEqual(@as(?*api_v7.MSSVECTOR3D, null), api_v7.AIL_speaker_configuration(null, &n_phys, &n_log, &falloff, null));
+}
+
+test "AIL_speaker_reverb_levels and AIL_get_marker_list report empty (SDK)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    var wet: ?*f32 = @ptrFromInt(0x1000);
+    var dry: ?*f32 = @ptrFromInt(0x1000);
+    var idx: ?*const anyopaque = @ptrFromInt(0x1000);
+    // No per-speaker reverb levels: returns 0 and nulls the out-arrays.
+    try testing.expectEqual(@as(i32, 0), api_v7.AIL_speaker_reverb_levels(drv, &wet, &dry, &idx));
+    try testing.expectEqual(@as(?*f32, null), wet);
+    try testing.expectEqual(@as(?*f32, null), dry);
+    // No marker list modelled: returns 0 (null handle).
+    try testing.expectEqual(@as(isize, 0), api_v8b.AIL_get_marker_list(null, null));
+}
+
 test "AIL_register_falloff_function_callback returns the sample's prior callback" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
