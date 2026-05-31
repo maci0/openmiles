@@ -2279,6 +2279,21 @@ test "v9 system-state push/pop tracks depth and restores volume" {
     try testing.expect(@abs(drv.getMasterVolume() - 1.0) < 0.001);
 }
 
+test "Sample3D.getLength saturates on an overflowing frame count (no panic)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample3D.init(drv);
+    defer s.deinit();
+    // A malformed file could make the decoder report an absurd frame count;
+    // length_in_bytes = frames * bytesPerFrame must saturate, not overflow u64
+    // (which would panic in a safe build) nor wrap.
+    s.is_initialized = true; // exercise the arithmetic path (noDevice leaves it false)
+    s.cached_length_frames = std.math.maxInt(u64);
+    const len = s.getLength();
+    s.is_initialized = false; // restore so deinit doesn't touch the half-init sound
+    try testing.expectEqual(@as(u32, std.math.maxInt(u32)), len);
+}
+
 test "AIL_DLS_load_memory rejects an implausibly-large header size (no panic)" {
     const md = try openmiles.MidiDriver.init(testing.allocator);
     defer md.deinit();
