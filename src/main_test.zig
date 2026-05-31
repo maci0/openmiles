@@ -2269,7 +2269,7 @@ const api_dls_t = @import("api/dls.zig");
 const api_timer_t = @import("api/timer.zig");
 
 test "DLS unload C-ABI variants free a loaded soundfont" {
-    const hm = openmiles.MidiDriver.init(testing.allocator) catch return;
+    const hm = try openmiles.MidiDriver.init(testing.allocator);
     defer hm.deinit();
     // Each unload variant frees the bank, so reload a fresh one before the next.
     inline for (.{
@@ -2278,7 +2278,7 @@ test "DLS unload C-ABI variants free a loaded soundfont" {
         api_dls_t.DLSClose,
         api_dls_t.DLSUnloadFile,
     }) |unloadFn| {
-        const bank = api_dls_t.AIL_DLS_load_file(hm, "test_media/test.sf2", 0) orelse return;
+        const bank = api_dls_t.AIL_DLS_load_file(hm, "test_media/test.sf2", 0) orelse return error.SoundfontFixtureMissing;
         try testing.expect(hm.soundfont != null);
         unloadFn(hm, bank);
         try testing.expect(hm.soundfont == null);
@@ -2981,4 +2981,25 @@ test "MilesEnqueueEventByName resolves the event from the container and enqueues
     var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
     try testing.expectEqual(@as(i32, 1), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("ambient"), 0, @ptrCast(&info)));
     try testing.expectEqualStrings("boom", std.mem.span(info.UsedSound.?));
+}
+
+test "cache_sounds namelist handles a trailing colon without a wild slot" {
+    const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    // Trailing-colon list: counts 3 entries but writes only "a","b".
+    _ = api_v8b.AIL_add_cache_sounds_event_step(ev, cstr("lib"), cstr("a:b:"));
+    const str = api_v8b.AIL_close_event(ev) orelse return error.NoStr;
+    defer std.c.free(str);
+    var buf: [512]u8 align(8) = undefined;
+    var sp: ?*openmiles.event.EVENT_STEP_INFO = null;
+    var cur: ?*const anyopaque = @ptrCast(str);
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.cache_sounds), sp.?.type);
+    const ld = sp.?.u.load;
+    const list = ld.namelist.?;
+    try testing.expectEqualStrings("a", std.mem.span(@as([*:0]const u8, @ptrCast(list[0].?))));
+    try testing.expectEqualStrings("b", std.mem.span(@as([*:0]const u8, @ptrCast(list[1].?))));
+    // The over-counted trailing slot must be null (not uninitialized scratch).
+    if (ld.namecount >= 3) try testing.expect(list[2] == null);
+    cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
+    try testing.expect(cur == null);
 }

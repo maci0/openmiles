@@ -451,28 +451,59 @@ const Decoder = struct {
         self.wp[0] = 0;
         self.wp += 1;
     }
-    fn copyDigit(self: *Decoder, x: anytype) void {
+    // Consume the ';' separator after a fixed-width field; flag overflow (so
+    // nextStep bails) at a premature NUL rather than stepping past the string end.
+    fn eatSep(self: *Decoder) void {
+        if (self.p[0] == ';') {
+            self.p += 1;
+        } else if (self.p[0] == 0) {
+            self.overflow = true;
+        } else {
+            self.p += 1; // tolerate a stray byte, as the original did
+        }
+    }
+    // Read one hex nibble at the cursor and advance; stop (flag overflow) at NUL.
+    fn nibble(self: *Decoder) ?u8 {
+        if (self.p[0] == 0) {
+            self.overflow = true;
+            return null;
+        }
         const w = hexDigit(self.p[0]);
-        self.p += 2; // digit + ';'
+        self.p += 1;
+        return w;
+    }
+    fn copyDigit(self: *Decoder, x: anytype) void {
+        const w = self.nibble() orelse {
+            x.* = 0;
+            return;
+        };
         x.* = @intCast(w);
+        self.eatSep();
     }
     fn copyUChar(self: *Decoder, x: *u8) void {
-        const w1 = hexDigit(self.p[0]);
-        self.p += 1;
-        const w2 = hexDigit(self.p[0]);
-        self.p += 2; // second digit + ';'
+        const w1 = self.nibble() orelse {
+            x.* = 0;
+            return;
+        };
+        const w2 = self.nibble() orelse {
+            x.* = w1;
+            return;
+        };
         x.* = w1 *% 16 +% w2;
+        self.eatSep();
     }
     fn copyUShort(self: *Decoder, x: *u16) void {
-        const d1 = hexDigit(self.p[0]);
-        self.p += 1;
-        const d2 = hexDigit(self.p[0]);
-        self.p += 1;
-        const d3 = hexDigit(self.p[0]);
-        self.p += 1;
-        const d4 = hexDigit(self.p[0]);
-        self.p += 2; // fourth digit + ';'
-        x.* = @as(u16, d1) *% 4096 +% @as(u16, d2) *% 256 +% @as(u16, d3) *% 16 +% d4;
+        var v: u16 = 0;
+        var i: u8 = 0;
+        while (i < 4) : (i += 1) {
+            const d = self.nibble() orelse {
+                x.* = v;
+                return;
+            };
+            v = v *% 16 +% d;
+        }
+        x.* = v;
+        self.eatSep();
     }
     fn copyFloat(self: *Decoder, x: *f32) void {
         var len: usize = 0;
@@ -510,6 +541,10 @@ const Decoder = struct {
             return;
         }
         const namelist: [*]?[*]const u8 = @ptrFromInt(w);
+        // Null the reserved slots first: a trailing-colon list (e.g. "a:b:") counts
+        // one more entry than it writes, so the last slot would otherwise hold
+        // uninitialized scratch memory that a consumer could deref as a wild pointer.
+        for (0..ncount) |z| namelist[z] = null;
         load.namecount = count;
         load.namelist = @ptrCast(namelist);
         const str_dst: [*]u8 = @ptrFromInt(w + list_bytes);

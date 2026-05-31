@@ -147,9 +147,13 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_v8.AIL_add_sound_limit_event_step(null, null, null);
     _ = api_v8.AIL_add_start_sound_event_step(null, null, null, ri, null, null, null, null, null, null, ru, ri, ri, ri, ri, ri, null, rf, rf, rf, rf, rf, ri, ri);
     _ = api_v8.AIL_add_uncache_sounds_event_step(null, null, null);
-    _ = api_3d.AIL_allocate_3D_sample_handle(hd);
-    _ = api_digital.AIL_allocate_sample_handle(hd);
-    _ = api_midi.AIL_allocate_sequence_handle(hm);
+    // Release immediately: Sample/Sequence.init append to the driver's lists, so
+    // discarding the handle here would leak ~2000 live objects across the sweep
+    // and skew every later count/scan. (The full alloc->release lifecycle is also
+    // exercised on throwaway handles further down.)
+    if (api_3d.AIL_allocate_3D_sample_handle(hd)) |h| api_3d.AIL_release_3D_sample_handle(h);
+    if (api_digital.AIL_allocate_sample_handle(hd)) |h| api_digital.AIL_release_sample_handle(h);
+    if (api_midi.AIL_allocate_sequence_handle(hm)) |h| api_midi.AIL_release_sequence_handle(h);
     _ = api_v8.AIL_apply_environment_preset(null, null, null);
     _ = api_v9.AIL_apply_raw_environment_preset(null, null);
     _ = api_v9.AIL_apply_raw_sound_preset(null, null);
