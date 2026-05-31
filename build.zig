@@ -19,6 +19,8 @@ fn parseMssVersion(s: []const u8) ?u16 {
 const OpenmilesModule = struct {
     mod: *std.Build.Module,
     c_impl: *std.Build.Step.Compile,
+    ma: *std.Build.Module,
+    tsf: *std.Build.Module,
 };
 
 /// Build an (anonymous) openmiles module plus its c_impl object for a given
@@ -51,7 +53,7 @@ fn addOpenmilesModule(
     ci.root_module.addIncludePath(b.path("deps"));
     ci.root_module.addCSourceFile(.{ .file = b.path("src/bindings/c_impl.c"), .flags = &.{"-std=c99"} });
 
-    return .{ .mod = m, .c_impl = ci };
+    return .{ .mod = m, .c_impl = ci, .ma = ma, .tsf = tsf };
 }
 
 pub fn build(b: *std.Build) void {
@@ -148,26 +150,35 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib);
 
-    // Tests
+    // Tests. The Zig test runners are real executables that link libc, so on a
+    // glibc host they would pull the host crt1.o whose .sframe relocations the
+    // linker can't process. Build them against the musl test_target instead
+    // (same rationale as the C test exes / native_rib_test above), which needs
+    // an openmiles module + translate-C + c_impl resolved for that target.
+    const tb = if (host_is_glibc_linux)
+        addOpenmilesModule(b, test_target, optimize, build_opts_mod)
+    else
+        OpenmilesModule{ .mod = mod, .c_impl = c_impl, .ma = ma_mod, .tsf = tsf_mod };
+
     const mod_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/test_root.zig"),
-            .target = target,
+            .target = test_target,
             .optimize = optimize,
             .link_libc = true,
             .imports = &.{
-                .{ .name = "ma_c", .module = ma_mod },
-                .{ .name = "tsf_c", .module = tsf_mod },
+                .{ .name = "ma_c", .module = tb.ma },
+                .{ .name = "tsf_c", .module = tb.tsf },
                 // Share the same openmiles module the api wrappers import, so
                 // test code and AIL_* exports exchange identical types.
-                .{ .name = "openmiles", .module = mod },
+                .{ .name = "openmiles", .module = tb.mod },
                 .{ .name = "build_options", .module = build_opts_mod },
             },
         }),
     });
     mod_tests.root_module.addIncludePath(b.path("deps"));
     mod_tests.root_module.addIncludePath(b.path("src"));
-    mod_tests.root_module.addObject(c_impl);
+    mod_tests.root_module.addObject(tb.c_impl);
 
     const run_mod_tests = b.addRunArtifact(mod_tests);
     const test_step = b.step("test", "Run tests");
@@ -181,7 +192,7 @@ pub fn build(b: *std.Build) void {
     const engine_c_impl = b.addObject(.{
         .name = "engine_c_impl",
         .root_module = b.createModule(.{
-            .target = target,
+            .target = test_target,
             .optimize = optimize,
             .link_libc = true,
         }),
@@ -194,12 +205,12 @@ pub fn build(b: *std.Build) void {
     const engine_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/engine_test_root.zig"),
-            .target = target,
+            .target = test_target,
             .optimize = optimize,
             .link_libc = true,
             .imports = &.{
-                .{ .name = "ma_c", .module = ma_mod },
-                .{ .name = "tsf_c", .module = tsf_mod },
+                .{ .name = "ma_c", .module = tb.ma },
+                .{ .name = "tsf_c", .module = tb.tsf },
                 .{ .name = "build_options", .module = build_opts_mod },
             },
         }),
@@ -267,13 +278,8 @@ pub fn build(b: *std.Build) void {
     });
     b.getInstallStep().dependOn(&install_mock.step);
 
-    // Native RIB test. On a glibc host this builds against musl (test_target)
-    // to avoid the crt1.o .sframe relocation the linker can't handle, so it
-    // needs an openmiles module + c_impl resolved for that same target.
-    const nrt = if (host_is_glibc_linux)
-        addOpenmilesModule(b, test_target, optimize, build_opts_mod)
-    else
-        OpenmilesModule{ .mod = mod, .c_impl = c_impl };
+    // Native RIB test. Reuses the musl-resolved test bundle (tb) so on a glibc
+    // host it avoids the crt1.o .sframe relocation the linker can't handle.
     const native_rib_test = b.addExecutable(.{
         .name = "native_rib_test",
         .root_module = b.createModule(.{
@@ -282,13 +288,13 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .link_libc = true,
             .imports = &.{
-                .{ .name = "openmiles", .module = nrt.mod },
+                .{ .name = "openmiles", .module = tb.mod },
             },
         }),
     });
     native_rib_test.root_module.addIncludePath(b.path("deps"));
     native_rib_test.root_module.addIncludePath(b.path("src"));
-    native_rib_test.root_module.addObject(nrt.c_impl);
+    native_rib_test.root_module.addObject(tb.c_impl);
     b.installArtifact(native_rib_test);
 
     // Install the test media (WAV/MIDI/SoundFont) next to the test exes so the
