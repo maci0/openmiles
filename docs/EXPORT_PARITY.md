@@ -87,9 +87,31 @@ those three symbols — an unavoidable trade-off, documented here.
 > the v6-style `@12`/`AIL_open_input` shapes); use `5.0m`/`5.0r` as the v5
 > reference instead.
 
-### Caveat: EXTRA exports
+### Next frontier: EXTRA exports
 
-Our builds still export some symbols a given mainline DLL lacks (e.g. v5 has 61
-extras) — later-version functions not yet down-gated. EXTRA exports are benign
-(a game never imports a symbol its header doesn't declare) but are the next
-parity axis to tighten.
+`MISSING` and `DECORATION MISMATCH` are both 0 for v5-v9, so every function a
+game *calls* resolves with the correct name and stdcall byte-count. The
+remaining axis is EXTRA exports — symbols we export that a given version's DLL
+did not have:
+
+| ver | ours | reference | EXTRA |
+|-----|------|-----------|-------|
+| v4  | 348  | 313       | 35    |
+| v5  | 376  | 315       | 61    |
+| v6  | 479  | 341       | 138   |
+| v7  | 480  | 332       | 148   |
+| v8  | 566  | 323       | 243   |
+| v9  | 635  | 355       | 280   |
+
+These are later-version functions leaking into earlier builds because their
+target `.ver` floor is too low (often the default 30/40). Confirmed real, not a
+comparison artifact: e.g. v5 has no `AIL_open_digital_driver` (5.x opens the
+digital driver via `AIL_waveOutOpen`); that function is a v6 addition we
+currently export in v5.
+
+EXTRA exports are benign for **name-based** imports (a game never looks up a
+symbol absent from its header) but shift **ordinal** numbering, which a handful
+of old titles import by. Fixing requires raising each function's floor to its
+true first-appearance version — determinable from the per-version reference
+DLLs (`check_exports.py` against each), but it must be done carefully and
+re-verified so the byte-exact MISSING/MISMATCH parity above is preserved.
