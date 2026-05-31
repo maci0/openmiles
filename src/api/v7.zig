@@ -461,16 +461,40 @@ pub fn AIL_set_sample_channel_levels(s_opt: ?*Sample, src: ?*const anyopaque, ds
     }
 }
 pub fn AIL_listener_relative_receiver_array(dig_opt: ?*DigitalDriver, n_receivers: ?*i32) callconv(.winapi) ?*anyopaque {
-    _ = dig_opt;
-    if (n_receivers) |p| p.* = 0;
-    return null;
+    _ = dig_opt orelse {
+        if (n_receivers) |p| p.* = 0;
+        return null;
+    };
+    if (n_receivers) |p| p.* = g_n_receiver_specs;
+    return @ptrCast(&g_receiver_specs[0]); // SDK returns dig->D3D.receiver_specifications
 }
 pub fn AIL_set_listener_relative_receiver_array(dig_opt: ?*DigitalDriver, array: ?*anyopaque, n_receivers: i32) callconv(.winapi) void {
-    _ = dig_opt;
-    _ = array;
-    _ = n_receivers;
+    // SDK (wavefile.cpp): clamp to MAX_RECEIVER_SPECS, store the count, and copy
+    // the receiver specs in. A null driver is a no-op.
+    _ = dig_opt orelse return;
+    const n: i32 = @min(@max(n_receivers, 0), MAX_RECEIVER_SPECS);
+    g_n_receiver_specs = n;
+    if (n > 0) {
+        if (array) |a| {
+            const src: [*]const MSS_RECEIVER_LIST = @ptrCast(@alignCast(a));
+            @memcpy(g_receiver_specs[0..@intCast(n)], src[0..@intCast(n)]);
+        } else {
+            g_n_receiver_specs = 0; // null array with a positive count = nothing stored
+        }
+    }
 }
 pub const MSSVECTOR3D = extern struct { x: f32, y: f32, z: f32 };
+// MSS_RECEIVER_LIST (mss.h): one listener-relative receiver direction. No
+// pointer fields, so its 88-byte layout is identical on 32- and 64-bit.
+pub const MSS_RECEIVER_LIST = extern struct {
+    direction: MSSVECTOR3D = .{ .x = 0, .y = 0, .z = 0 },
+    speaker_index: [9]i32 = [_]i32{0} ** 9, // MAX_SPEAKERS
+    speaker_level: [9]f32 = [_]f32{0} ** 9,
+    n_speakers_affected: i32 = 0,
+};
+const MAX_RECEIVER_SPECS: i32 = 32;
+var g_receiver_specs = [_]MSS_RECEIVER_LIST{.{}} ** 32; // dig->D3D.receiver_specifications
+var g_n_receiver_specs: i32 = 0;
 // Default stereo speaker layout (mssdig.cpp): left-handed frame (face=+Z,
 // right=+X, up=+Y), speakers at ±45° -> x=∓1/√2, z=1/√2. Mutable storage so the
 // returned pointer matches the SDK's driver-owned (writable) array.

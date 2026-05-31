@@ -470,6 +470,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_3d.AIL_set_listener_3D_velocity(hd, rf, rf, rf, rf);
     api_v7.AIL_set_listener_3D_velocity_vector(hd, rf, rf, rf);
     api_v7.AIL_set_listener_relative_receiver_array(hd, null, ri);
+    api_v7.AIL_set_listener_relative_receiver_array(hd, scp, @min(@max(ri, 0), 32)); // memcpy path, bounded count
     api_memory.AIL_set_mem_callbacks(null, null);
     api_v7.AIL_set_output_filter_driver_preference(null, rstr, scp);
     _ = api_digital.AIL_set_preference(ru, ri);

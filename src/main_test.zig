@@ -1169,6 +1169,37 @@ test "AIL_startup returns an incrementing use count (SDK refcount)" {
     try testing.expectEqual(c1 + 1, c2);
 }
 
+test "AIL_set/listener_relative_receiver_array round-trips the spec list (SDK)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    // Default: empty.
+    var nr: i32 = -1;
+    _ = api_v7.AIL_listener_relative_receiver_array(drv, &nr);
+    try testing.expectEqual(@as(i32, 0), nr);
+    // Store two receiver specs.
+    var specs = [_]api_v7.MSS_RECEIVER_LIST{ .{}, .{} };
+    specs[0].direction = .{ .x = 1, .y = 0, .z = 0 };
+    specs[0].n_speakers_affected = 3;
+    specs[1].direction = .{ .x = 0, .y = 0, .z = -1 };
+    specs[1].speaker_level[0] = 0.75;
+    api_v7.AIL_set_listener_relative_receiver_array(drv, &specs, 2);
+    const got = api_v7.AIL_listener_relative_receiver_array(drv, &nr) orelse return error.NullArray;
+    try testing.expectEqual(@as(i32, 2), nr);
+    const arr: [*]api_v7.MSS_RECEIVER_LIST = @ptrCast(@alignCast(got));
+    try testing.expectEqual(@as(f32, 1.0), arr[0].direction.x);
+    try testing.expectEqual(@as(i32, 3), arr[0].n_speakers_affected);
+    try testing.expectEqual(@as(f32, -1.0), arr[1].direction.z);
+    try testing.expectEqual(@as(f32, 0.75), arr[1].speaker_level[0]);
+    // n_receivers is clamped to MAX_RECEIVER_SPECS (32).
+    api_v7.AIL_set_listener_relative_receiver_array(drv, &specs, 9999);
+    _ = api_v7.AIL_listener_relative_receiver_array(drv, &nr);
+    try testing.expectEqual(@as(i32, 32), nr);
+    // Null driver: getter reports 0 / null.
+    api_v7.AIL_set_listener_relative_receiver_array(drv, &specs, 2);
+    try testing.expectEqual(@as(?*anyopaque, null), api_v7.AIL_listener_relative_receiver_array(null, &nr));
+    try testing.expectEqual(@as(i32, 0), nr);
+}
+
 test "AIL_speaker_configuration returns the default stereo speaker array (SDK)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
