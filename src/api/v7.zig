@@ -66,8 +66,8 @@ pub fn AIL_set_sample_3D_cone(obj: ?*Sample, inner_angle: f32, outer_angle: f32,
     if (s.is_initialized) ma.ma_sound_set_cone(&s.sound, inner_angle * openmiles.deg2rad, outer_angle * openmiles.deg2rad, std.math.clamp(outer_volume_level, 0.0, 1.0));
 }
 pub fn AIL_set_sample_3D_distances(obj: ?*Sample, max_dist: f32, min_dist: f32, auto_3D_wet_atten: i32) callconv(.winapi) void {
-    _ = auto_3D_wet_atten;
     const s = obj orelse return;
+    s.s3d_auto_atten = auto_3D_wet_atten; // SDK stores S3D.auto_3D_atten verbatim
     // SDK (m3d.cpp) swaps the pair when min > max so min_dist <= max_dist always
     // holds; miniaudio's attenuation is undefined for min > max, so this matters.
     var lo = min_dist;
@@ -131,7 +131,8 @@ pub fn AIL_sample_3D_distances(obj: ?*Sample, max_dist: ?*f32, min_dist: ?*f32, 
     const s = obj orelse return;
     if (max_dist) |p| p.* = if (s.is_initialized) ma.ma_sound_get_max_distance(&s.sound) else 0;
     if (min_dist) |p| p.* = if (s.is_initialized) ma.ma_sound_get_min_distance(&s.sound) else 0;
-    if (auto_3D_wet_atten) |p| p.* = 0;
+    if (auto_3D_wet_atten) |p| p.* = s.s3d_auto_atten; // SDK returns S3D.auto_3D_atten
+
 }
 
 // --- Unified sample volume / pan / reverb / low-pass (reuse v6 engine) --------

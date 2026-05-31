@@ -649,6 +649,9 @@ pub const Sample = struct {
     // HSAMPLE.is_3D: set TRUE when a 3D position/segment is specified, cleared on
     // re-init. AIL_sample_3D_position and AIL_set_sample_is_3D return it (S32).
     is_3D: i32 = 0,
+    // HSAMPLE.S3D.auto_3D_atten: stored by AIL_set_sample_3D_distances, returned
+    // by AIL_sample_3D_distances.
+    s3d_auto_atten: i32 = 0,
     // HSAMPLE.S3D.falloff_function: per-sample 3D falloff callback. Stored and
     // returned by AIL_register_falloff_function_callback (null = engine default).
     falloff_cb: ?*anyopaque = null,
@@ -1099,6 +1102,7 @@ pub const Sample = struct {
         self.s3d_face = .{ 1, 0, 0 };
         self.s3d_up = .{ 0, 1, 0 };
         self.is_3D = 0; // AIL_init_sample clears 3D state (mssdig.cpp)
+        self.s3d_auto_atten = 0;
         self.falloff_cb = null;
         self.last_loaded_buffer = 0;
         self.user_data = [_]u32{0} ** 8;

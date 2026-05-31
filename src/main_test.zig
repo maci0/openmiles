@@ -3319,6 +3319,18 @@ test "v7 set_sample_3D_distances orders the min/max pair (SDK swap)" {
     api_v7.AIL_set_sample_3D_distances(s, 5.0, 80.0, 0);
     try testing.expect(@abs(openmiles.ma.ma_sound_get_min_distance(&s.sound) - 5.0) < 0.01);
     try testing.expect(@abs(openmiles.ma.ma_sound_get_max_distance(&s.sound) - 80.0) < 0.01);
+
+    // auto_3D_wet_atten round-trips through the getter (SDK S3D.auto_3D_atten).
+    api_v7.AIL_set_sample_3D_distances(s, 100.0, 10.0, 1);
+    var mx: f32 = 0;
+    var mn: f32 = 0;
+    var atten: i32 = -1;
+    api_v7.AIL_sample_3D_distances(s, &mx, &mn, &atten);
+    try testing.expectEqual(@as(i32, 1), atten);
+    try testing.expect(@abs(mx - 100.0) < 0.01 and @abs(mn - 10.0) < 0.01);
+    api_v7.AIL_set_sample_3D_distances(s, 100.0, 10.0, 0);
+    api_v7.AIL_sample_3D_distances(s, &mx, &mn, &atten);
+    try testing.expectEqual(@as(i32, 0), atten);
 }
 
 test "v9 set_sample_3D_volume_falloff maps graph range to distance attenuation" {
