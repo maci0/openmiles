@@ -1185,6 +1185,23 @@ test "AIL_speaker_configuration returns the default stereo speaker array (SDK)" 
     try testing.expect(@abs(pos[1].x - r) < 0.0001 and @abs(pos[1].z - r) < 0.0001);
     // Null driver returns NULL.
     try testing.expectEqual(@as(?*api_v7.MSSVECTOR3D, null), api_v7.AIL_speaker_configuration(null, &n_phys, &n_log, &falloff, null));
+
+    // AIL_set_speaker_configuration round-trips falloff_power and the positions.
+    var newpos = [_]api_v7.MSSVECTOR3D{ .{ .x = 1, .y = 2, .z = 3 }, .{ .x = -1, .y = -2, .z = -3 } };
+    api_v7.AIL_set_speaker_configuration(drv, &newpos, 2, 0.65);
+    const pos2: [*]api_v7.MSSVECTOR3D = @ptrCast(api_v7.AIL_speaker_configuration(drv, &n_phys, &n_log, &falloff, null).?);
+    try testing.expect(@abs(falloff - 0.65) < 0.0001);
+    try testing.expect(pos2[0].x == 1 and pos2[0].y == 2 and pos2[0].z == 3);
+    try testing.expect(pos2[1].x == -1 and pos2[1].z == -3);
+    // Null array / 0 channels changes only the falloff power (positions retained).
+    api_v7.AIL_set_speaker_configuration(drv, null, 0, 0.9);
+    _ = api_v7.AIL_speaker_configuration(drv, &n_phys, &n_log, &falloff, null);
+    try testing.expect(@abs(falloff - 0.9) < 0.0001);
+    try testing.expect(pos2[0].x == 1); // unchanged
+    // Null driver is a no-op (doesn't touch state).
+    api_v7.AIL_set_speaker_configuration(null, &newpos, 2, 0.1);
+    _ = api_v7.AIL_speaker_configuration(drv, &n_phys, &n_log, &falloff, null);
+    try testing.expect(@abs(falloff - 0.9) < 0.0001); // still 0.9, not 0.1
 }
 
 test "AIL_set/sample_speaker_scale_factors round-trip via the channel map (SDK)" {

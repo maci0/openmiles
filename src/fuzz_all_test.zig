@@ -517,6 +517,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_midi.AIL_set_sequence_user_data(hq, ri, ru);
     api_midi.AIL_set_sequence_volume(hq, ri, ri);
     api_v7.AIL_set_speaker_configuration(hd, null, ri, rf);
+    api_v7.AIL_set_speaker_configuration(hd, scp, @min(@max(ri, 0), 9), rf); // array-copy path, bounded count
     api_v7.AIL_set_speaker_reverb_levels(hd, &fo, &fo, null, rszi);
     api_stream.AIL_set_stream_loop_block(hs, ri, ri);
     api_stream.AIL_set_stream_loop_count(hs, rszi);

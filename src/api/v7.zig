@@ -416,23 +416,33 @@ pub const MSSVECTOR3D = extern struct { x: f32, y: f32, z: f32 };
 // right=+X, up=+Y), speakers at ±45° -> x=∓1/√2, z=1/√2. Mutable storage so the
 // returned pointer matches the SDK's driver-owned (writable) array.
 const rsqrtf: f32 = 0.707106781;
-var g_speaker_positions = [2]MSSVECTOR3D{
+// MAX_SPEAKERS positions; [0]/[1] default to the stereo ±45° layout, the rest 0.
+var g_speaker_positions = [_]MSSVECTOR3D{
     .{ .x = -rsqrtf, .y = 0.0, .z = rsqrtf }, // front-left
     .{ .x = rsqrtf, .y = 0.0, .z = rsqrtf }, // front-right
-};
+} ++ [_]MSSVECTOR3D{.{ .x = 0, .y = 0, .z = 0 }} ** 7;
+var g_falloff_power: f32 = 1.0; // D3D.falloff_power, set/queried via the pair below
 pub fn AIL_speaker_configuration(dig_opt: ?*DigitalDriver, n_physical: ?*i32, n_logical: ?*i32, falloff_power: ?*f32, channel_spec: ?*anyopaque) callconv(.winapi) ?*MSSVECTOR3D {
     _ = dig_opt orelse return null; // SDK (wavefile.cpp): NULL dig -> NULL
     _ = channel_spec;
     if (n_physical) |p| p.* = 2;
     if (n_logical) |p| p.* = 2;
-    if (falloff_power) |p| p.* = 1;
+    if (falloff_power) |p| p.* = g_falloff_power;
     return &g_speaker_positions[0]; // SDK returns dig->D3D.speaker_positions
 }
 pub fn AIL_set_speaker_configuration(dig_opt: ?*DigitalDriver, array: ?*anyopaque, n_channels: i32, falloff_power: f32) callconv(.winapi) void {
-    _ = dig_opt;
-    _ = array;
-    _ = n_channels;
-    _ = falloff_power;
+    // SDK (wavefile.cpp): store falloff_power, then copy the first n_channels
+    // speaker positions (any beyond n_channels keep their current values). A
+    // null array / 0 count changes only the falloff power.
+    _ = dig_opt orelse return;
+    g_falloff_power = falloff_power;
+    if (array) |a| {
+        if (n_channels > 0) {
+            const pos: [*]const MSSVECTOR3D = @ptrCast(@alignCast(a));
+            const n: usize = @min(@as(usize, @intCast(n_channels)), g_speaker_positions.len);
+            @memcpy(g_speaker_positions[0..n], pos[0..n]);
+        }
+    }
 }
 pub fn AIL_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array: ?*?*f32, dry_array: ?*?*f32, speaker_index_array: ?*?*const anyopaque) callconv(.winapi) i32 {
     _ = dig_opt;
