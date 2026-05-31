@@ -494,11 +494,14 @@ pub fn gainToMssVolume(gain: f32) i32 {
 }
 
 const volume_to_gain_table: [128]f32 = blk: {
+    @setEvalBranchQuota(200000);
     var table: [128]f32 = undefined;
     table[0] = 0.0;
     for (1..128) |i| {
-        const n: f32 = @as(f32, @floatFromInt(i)) / 127.0;
-        table[i] = n * n * n;
+        const n: f64 = @as(f64, @floatFromInt(i)) / 127.0;
+        // MSS volume curve: gain = volume^(10/6) (0.5 -> -10 dB), per
+        // AIL_API_set_sample_volume_pan in wavefile.cpp. (Was volume^3 = -18 dB.)
+        table[i] = @floatCast(std.math.pow(f64, n, 10.0 / 6.0));
     }
     break :blk table;
 };

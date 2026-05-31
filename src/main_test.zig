@@ -23,8 +23,8 @@ test "Sample allocation and basic properties" {
     try testing.expect(!sample.is_initialized);
 
     sample.setVolume(64);
-    // Cubic curve: gain = (64/127)^3 ≈ 0.128
-    try testing.expect(sample.volume > 0.12 and sample.volume < 0.14);
+    // MSS curve: gain = (64/127)^(10/6) ≈ 0.319 (0.5 vol -> -10 dB).
+    try testing.expect(sample.volume > 0.30 and sample.volume < 0.33);
     try testing.expectEqual(@as(i32, 64), sample.original_volume);
 
     sample.setPan(32);
@@ -545,7 +545,7 @@ test "mssVolumeToGain boundary values" {
     try testing.expectEqual(@as(f32, 1.0), openmiles.mssVolumeToGain(200));
 
     const mid_gain = openmiles.mssVolumeToGain(64);
-    try testing.expect(mid_gain > 0.12 and mid_gain < 0.14);
+    try testing.expect(mid_gain > 0.30 and mid_gain < 0.33); // MSS curve ^(10/6)
 }
 
 test "gainToMssVolume boundary values" {
@@ -926,7 +926,7 @@ test "Sample setVolumePan sets both" {
     defer sample.deinit();
 
     sample.setVolumePan(64, 32);
-    try testing.expect(sample.volume > 0.12 and sample.volume < 0.14);
+    try testing.expect(sample.volume > 0.30 and sample.volume < 0.33); // MSS curve ^(10/6)
     try testing.expectEqual(@as(f32, -0.5), sample.pan);
 }
 
@@ -3141,6 +3141,26 @@ test "set_sample_volume_pan maps F32 0..1 to the engine volume/pan scale" {
     dg.AIL_set_sample_volume_pan(s, 0.5, 1.0); // half, hard right
     try testing.expectEqual(@as(i32, 63), s.original_volume);
     try testing.expectApproxEqAbs(@as(f32, 1.0), s.pan, 0.02);
+}
+
+test "volume/pan match the exact MSS curve (gain = volume^(10/6))" {
+    // wavefile.cpp: gain = volume^(10/6) (0.5 -> -10 dB ~= 0.3162), pan law
+    // left=gain*(1-pan)^0.3, right=gain*pan^0.3, center uses 0.5^0.3=0.812252.
+    try testing.expectEqual(@as(f32, 0.0), openmiles.mssVolumeToGain(0));
+    try testing.expectEqual(@as(f32, 1.0), openmiles.mssVolumeToGain(127));
+    try testing.expectApproxEqAbs(@as(f32, 0.319), openmiles.mssVolumeToGain(64), 0.01);
+
+    const hd = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer hd.deinit();
+    const s = try openmiles.Sample.init(hd);
+    defer s.deinit();
+    s.setVolumePanF(1.0, 0.0); // hard left
+    try testing.expectApproxEqAbs(@as(f32, -1.0), s.pan, 0.001);
+    s.setVolumePanF(1.0, 1.0); // hard right
+    try testing.expectApproxEqAbs(@as(f32, 1.0), s.pan, 0.001);
+    s.setVolumePanF(1.0, 0.5); // center -> pan 0, vol = 1*0.812 (MSS center cut)
+    try testing.expectApproxEqAbs(@as(f32, 0.0), s.pan, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.8123), s.volume, 0.01);
 }
 
 test "AIL_redbook_set_volume_level returns the previous volume (F32)" {

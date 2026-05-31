@@ -1068,11 +1068,32 @@ pub const Sample = struct {
     // curve and pan handling stay consistent.
     pub fn setVolumePanF(self: *Sample, volume: f32, pan: f32) void {
         const v = std.math.clamp(volume, 0.0, 1.0);
+        const p = std.math.clamp(pan, 0.0, 1.0);
         self.original_volume = @intFromFloat(v * 127.0);
-        self.volume = root.mssVolumeToGain(self.original_volume);
-        if (self.is_initialized) ma.ma_sound_set_volume(&self.sound, self.volume);
-        self.pan = std.math.clamp((pan - 0.5) * 2.0, -1.0, 1.0);
-        if (self.is_initialized) ma.ma_sound_set_pan(&self.sound, self.pan);
+        // Exact MSS law (AIL_API_set_sample_volume_pan, wavefile.cpp):
+        //   gain  = volume^(10/6)            (0.5 -> -10 dB)
+        //   left  = gain * (1-pan)^0.3       right = gain * pan^0.3
+        //   (pan==0.5 center uses 0.5^0.3 = 0.812252196)
+        const gain = std.math.pow(f32, v, 10.0 / 6.0);
+        // Per-channel pan ratios (gain-independent, so the pan position survives
+        // even at zero volume, as MSS keeps save_pan separate from the gains).
+        const lr_left: f32 = if (p == 0.5) 0.812252196 else std.math.pow(f32, 1.0 - p, 0.3);
+        const lr_right: f32 = if (p == 0.5) 0.812252196 else std.math.pow(f32, p, 0.3);
+        // Reproduce gain*lr_left / gain*lr_right through miniaudio's balance panner
+        // (out_left = vol*(pan<=0?1:1-pan), out_right = vol*(pan>=0?1:1+pan)).
+        const vol = gain * @max(lr_left, lr_right);
+        var pan_bal: f32 = 0.0;
+        if (lr_left >= lr_right) {
+            if (lr_left > 0.0) pan_bal = (lr_right / lr_left) - 1.0; // in [-1, 0]
+        } else {
+            if (lr_right > 0.0) pan_bal = 1.0 - (lr_left / lr_right); // in [0, 1]
+        }
+        self.volume = vol;
+        self.pan = pan_bal;
+        if (self.is_initialized) {
+            ma.ma_sound_set_volume(&self.sound, vol);
+            ma.ma_sound_set_pan(&self.sound, pan_bal);
+        }
     }
 
     /// Set reverb parameters for this sample. Creates or updates a ma_delay_node
