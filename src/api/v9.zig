@@ -151,12 +151,14 @@ pub fn AIL_sample_ms_lookup(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque) callconv(
 pub fn AIL_sleep(ms: u32) callconv(.winapi) void {
     openmiles.io.sleep(std.Io.Duration.fromNanoseconds(@as(u64, ms) *| std.time.ns_per_ms), .awake) catch {};
 }
+// AIL_sound_asset_info(SoundBank* bank, char const* name, char* out_filename,
+// MILESBANKSOUNDINFO* out_info) @16 — fills info + path, returns buffer requirement.
 pub fn AIL_sound_asset_info(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    return 0;
+    const b: *openmiles.Bank = @ptrCast(@alignCast(a0 orelse return 0));
+    const nm = std.mem.span(@as([*:0]const u8, @ptrCast(a1 orelse return 0)));
+    const out_fn: ?[*]u8 = if (a2) |p| @ptrCast(p) else null;
+    const out_info: ?[*]u8 = if (a3) |p| @ptrCast(@alignCast(p)) else null;
+    return b.soundAssetInfo(nm, out_fn, out_info);
 }
 pub fn AIL_stream_filled_percent(a0: ?*anyopaque) callconv(.winapi) f32 {
     _ = a0;

@@ -160,6 +160,55 @@ pub const Bank = struct {
         return -1;
     }
 
+    // MILESBANKSOUNDINFO is 11 x 4-byte fields (mss.h _MILESBANKSOUNDINFO).
+    const sound_info_size = 44;
+
+    /// AIL_sound_asset_info: optionally copy the sound's MILESBANKSOUNDINFO into
+    /// `out_info`, optionally format its path into `out_filename`, and return the
+    /// filename-buffer requirement (`2 + bankNameLen + soundNameLen`), or 0 if not
+    /// found. Mirrors hlbank.cpp.
+    pub fn soundAssetInfo(self: *const Bank, sound_name: []const u8, out_filename: ?[*]u8, out_info: ?[*]u8) i32 {
+        const count = self.countFor(.sounds);
+        var i: u32 = 0;
+        while (i < count) : (i += 1) {
+            const entry = @as(usize, self.tableOff(.sounds)) + @as(usize, i) * asset_entry_size;
+            const name_off = self.rdU32(entry);
+            if (name_off == 0 or name_off >= self.meta.len) continue;
+            const nm = std.mem.sliceTo(self.meta[name_off..], 0);
+            if (!std.ascii.eqlIgnoreCase(nm, sound_name)) continue;
+            const data_off = self.rdU32(entry + 4);
+            if (data_off == 0 or data_off + 8 > self.meta.len) {
+                if (out_filename) |o| o[0] = 0;
+                return 0;
+            }
+            if (out_info) |oi| {
+                if (data_off + 12 + sound_info_size <= self.meta.len) {
+                    @memcpy(oi[0..sound_info_size], self.meta[data_off + 12 ..][0..sound_info_size]);
+                }
+            }
+            const fn_abs = data_off + self.rdU32(data_off + 4);
+            if (fn_abs >= self.meta.len) {
+                if (out_filename) |o| o[0] = 0;
+                return 0;
+            }
+            const sfn = std.mem.sliceTo(self.meta[fn_abs..], 0);
+            const req: i32 = @intCast(2 + self.filename.len + sfn.len);
+            if (out_filename) |o| {
+                var w: usize = 0;
+                o[w] = '*';
+                w += 1;
+                @memcpy(o[w .. w + self.filename.len], self.filename);
+                w += self.filename.len;
+                @memcpy(o[w .. w + sfn.len], sfn);
+                w += sfn.len;
+                o[w] = 0;
+            }
+            return req;
+        }
+        if (out_filename) |o| o[0] = 0;
+        return 0;
+    }
+
     pub fn deinit(self: *Bank) void {
         _ = @atomicRmw(u32, &g_loaded_count, .Sub, 1, .seq_cst);
         self.allocator.free(self.meta);

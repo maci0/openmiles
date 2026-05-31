@@ -2666,3 +2666,39 @@ test "AIL_sound_asset_filename formats *<bank><sound> and returns DataLen" {
     try testing.expectEqualStrings("*guns.mbnkshot.wav", std.mem.span(@as([*:0]const u8, @ptrCast(&out))));
     try testing.expectEqual(@as(i32, -1), api_v8b.AIL_sound_asset_filename_v8(@ptrCast(bank), cstr("nope"), @ptrCast(&out)));
 }
+
+test "AIL_sound_asset_info copies MILESBANKSOUNDINFO and returns buffer requirement" {
+    var img: [200]u8 = undefined;
+    @memset(&img, 0);
+    const sb = openmiles.soundbank;
+    std.mem.writeInt(u32, img[0..4], sb.BANK_TAG, .little);
+    std.mem.writeInt(i32, img[4..8], 8, .little);
+    std.mem.writeInt(u32, img[32..36], 60, .little);
+    std.mem.writeInt(u32, img[52..56], 1, .little);
+    @memcpy(img[56..60], "g\x00\x00\x00");
+    std.mem.writeInt(u32, img[60..64], 68, .little);
+    std.mem.writeInt(u32, img[64..68], 80, .little);
+    @memcpy(img[68..73], "shot\x00");
+    // Sound struct at 80. Info occupies 92..136, so the filename goes after it.
+    std.mem.writeInt(u32, img[84..88], 56, .little); // FileNameOffset (Sound+4) -> 80+56=136
+    // Info at Sound+12 = 92: ChannelCount=2, Rate=44100 (Info+8), DataLen=12345 (Info+12)
+    std.mem.writeInt(i32, img[92..96], 2, .little);
+    std.mem.writeInt(i32, img[100..104], 44100, .little);
+    std.mem.writeInt(i32, img[104..108], 12345, .little);
+    @memcpy(img[136..145], "shot.wav\x00");
+    const total: i32 = 145;
+    std.mem.writeInt(i32, img[8..12], total, .little);
+
+    const bank = try openmiles.soundbank.loadFromMemory(openmiles.global_allocator, "guns.mbnk", img[0..@intCast(total)]);
+    defer bank.deinit();
+    var fnbuf: [128]u8 = undefined;
+    var info: [44]u8 = undefined;
+    const req = api_v9.AIL_sound_asset_info(@ptrCast(bank), cstr("shot"), @ptrCast(&fnbuf), @ptrCast(&info));
+    try testing.expectEqual(@as(i32, 2 + 9 + 8), req);
+    try testing.expectEqualStrings("*guns.mbnkshot.wav", std.mem.span(@as([*:0]const u8, @ptrCast(&fnbuf))));
+    try testing.expectEqual(@as(i32, 2), std.mem.readInt(i32, info[0..4], .little)); // ChannelCount
+    try testing.expectEqual(@as(i32, 44100), std.mem.readInt(i32, info[8..12], .little)); // Rate
+    try testing.expectEqual(@as(i32, 12345), std.mem.readInt(i32, info[12..16], .little)); // DataLen
+    // querying with null output buffers still returns the requirement
+    try testing.expectEqual(@as(i32, 19), api_v9.AIL_sound_asset_info(@ptrCast(bank), cstr("shot"), null, null));
+}
