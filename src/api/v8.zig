@@ -556,9 +556,9 @@ pub fn AIL_sample_51_volume_levels(s_opt: ?*Sample, f_left: ?*f32, f_right: ?*f3
 pub fn AIL_sample_51_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32, fb_pan: ?*f32, center_level: ?*f32, lfe_level: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     // Return the params the app set verbatim (the SDK getter returns save_*),
-    // not values derived from the channel levels.
-    if (volume) |p| p.* = @as(f32, @floatFromInt(s.original_volume)) / 127.0;
-    if (pan) |p| p.* = @as(f32, @floatFromInt(s.original_pan)) / 127.0;
+    // not values derived from the channel levels. Exact floats, not quantized.
+    if (volume) |p| p.* = s.save_vol_f;
+    if (pan) |p| p.* = s.save_pan_f;
     if (fb_pan) |p| p.* = s.v51_fb_pan;
     if (center_level) |p| p.* = s.v51_center_level;
     if (lfe_level) |p| p.* = s.v51_sub_level;

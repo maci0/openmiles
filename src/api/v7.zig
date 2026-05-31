@@ -154,10 +154,11 @@ pub fn AIL_sample_volume_levels(s_opt: ?*Sample, left_level: ?*f32, right_level:
 }
 pub fn AIL_sample_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    // Return the original 0..1 volume/pan the app set (the SDK getter inverts
-    // the gain curve and returns save_pan), NOT the internal balance-pan value.
-    if (volume) |p| p.* = @as(f32, @floatFromInt(s.original_volume)) / 127.0;
-    if (pan) |p| p.* = @as(f32, @floatFromInt(s.original_pan)) / 127.0;
+    // Return the exact 0..1 volume/pan the app set (the SDK getter inverts the
+    // gain curve to recover it and returns save_pan), NOT the internal
+    // balance-pan value -- and not quantized through the i32 0..127 fields.
+    if (volume) |p| p.* = s.save_vol_f;
+    if (pan) |p| p.* = s.save_pan_f;
 }
 pub fn AIL_set_sample_low_pass_cut_off(s_opt: ?*Sample, channel: i32, cut_off: f32) callconv(.winapi) void {
     _ = channel;

@@ -549,6 +549,11 @@ pub const Sample = struct {
     original_volume: i32 = 127,
     pan: f32 = 0.0, // value handed to miniaudio's balance panner
     original_pan: i32 = 64, // the 0..127 pan the app set (64 = center), for the getter
+    // Exact float volume/pan (0..1) the app set via the F32 API (SDK keeps
+    // save_volume/save_pan as floats). The F32 getters return these so the
+    // round-trip is exact, not quantized through the i32 0..127 fields.
+    save_vol_f: f32 = 1.0,
+    save_pan_f: f32 = 0.5,
     // 5.1 volume/pan params the app set (AIL_set_sample_51_volume_pan), returned
     // verbatim by its getter. Defaults per wavefile.cpp (save_fb_pan/center/low).
     v51_fb_pan: f32 = 0.5,
@@ -1005,8 +1010,10 @@ pub const Sample = struct {
         self.cleanupPlaybackState();
         self.volume = 1.0;
         self.original_volume = 127;
+        self.save_vol_f = 1.0;
         self.pan = 0.0;
         self.original_pan = 64;
+        self.save_pan_f = 0.5;
         self.pitch = 1.0;
         self.target_rate = null;
         self.loop_count = 1;
@@ -1097,6 +1104,7 @@ pub const Sample = struct {
 
     pub fn setVolume(self: *Sample, volume: i32) void {
         self.original_volume = volume;
+        self.save_vol_f = @as(f32, @floatFromInt(std.math.clamp(volume, 0, 127))) / 127.0;
         self.volume = root.mssVolumeToGain(volume);
         log("Sample.setVolume: s={*}, i32={d}, gain={d}\n", .{ self, volume, self.volume });
         if (self.is_initialized) ma.ma_sound_set_volume(&self.sound, self.volume);
@@ -1104,6 +1112,7 @@ pub const Sample = struct {
 
     pub fn setPan(self: *Sample, pan: i32) void {
         self.original_pan = std.math.clamp(pan, 0, 127);
+        self.save_pan_f = @as(f32, @floatFromInt(self.original_pan)) / 127.0;
         self.pan = std.math.clamp((@as(f32, @floatFromInt(pan)) - 64.0) / 64.0, -1.0, 1.0);
         log("Sample.setPan: s={*}, i32={d}, f32={d}\n", .{ self, pan, self.pan });
         if (self.is_initialized) ma.ma_sound_set_pan(&self.sound, self.pan);
@@ -1123,6 +1132,8 @@ pub const Sample = struct {
         const p = std.math.clamp(pan, 0.0, 1.0);
         self.original_volume = @intFromFloat(v * 127.0);
         self.original_pan = @intFromFloat(p * 127.0);
+        self.save_vol_f = v; // exact float for the F32 getter (no i32 quantization)
+        self.save_pan_f = p;
         // Exact MSS law (AIL_API_set_sample_volume_pan, wavefile.cpp):
         //   gain  = volume^(10/6)            (0.5 -> -10 dB)
         //   left  = gain * (1-pan)^0.3       right = gain * pan^0.3

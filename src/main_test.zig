@@ -3460,8 +3460,9 @@ test "volume/pan match the exact MSS curve (gain = volume^(10/6))" {
     var gv: f32 = 0;
     var gp: f32 = 0;
     api_v7.AIL_sample_volume_pan(s, &gv, &gp);
-    try testing.expectApproxEqAbs(@as(f32, 0.8), gv, 0.02);
-    try testing.expectApproxEqAbs(@as(f32, 0.25), gp, 0.02);
+    // Exact float round-trip (no i32 0..127 quantization).
+    try testing.expectApproxEqAbs(@as(f32, 0.8), gv, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0.25), gp, 0.0001);
 }
 
 test "AIL_set/sample_51_volume_pan round-trips the params verbatim" {

@@ -280,8 +280,8 @@ pub fn AIL_stream_volume_levels(s_opt: ?*Sample, left_level: ?*f32, right_level:
 // Combined volume/pan getter (the setter, AIL_set_stream_volume_pan, is above).
 pub fn AIL_stream_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    if (volume) |p| p.* = @as(f32, @floatFromInt(s.original_volume)) / 127.0;
-    if (pan) |p| p.* = @as(f32, @floatFromInt(s.original_pan)) / 127.0;
+    if (volume) |p| p.* = s.save_vol_f; // exact float (not i32-quantized)
+    if (pan) |p| p.* = s.save_pan_f;
 }
 // Reverb dry/wet levels (stored independently). Matches AIL_sample_reverb_levels.
 pub fn AIL_set_stream_reverb_levels(s_opt: ?*Sample, dry_level: f32, wet_level: f32) callconv(.winapi) void {
