@@ -1578,6 +1578,11 @@ comptime {
         // DLL export table contains the bare name (AIL_debug_printf) rather than _AIL_debug_printf.
         // The linker automatically prepends `_` to the symbol reference in /EXPORT:name=symbol,
         // so we use the bare name (without leading underscore) as the symbol.
-        asm (".section .drectve\n .ascii \" /EXPORT:AIL_debug_printf=AIL_debug_printf /EXPORT:AIL_sprintf=AIL_sprintf\"\n .text\n");
+        // AIL_sprintf spans every version (v3-v10); AIL_debug_printf was dropped
+        // after v8, so only emit its export for builds at or below v8.
+        asm (".section .drectve\n .ascii \" /EXPORT:AIL_sprintf=AIL_sprintf\"\n .text\n");
+        if (openmiles.mss_version <= 80) {
+            asm (".section .drectve\n .ascii \" /EXPORT:AIL_debug_printf=AIL_debug_printf\"\n .text\n");
+        }
     }
 }
