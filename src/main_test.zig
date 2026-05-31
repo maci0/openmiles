@@ -2279,6 +2279,22 @@ test "v9 system-state push/pop tracks depth and restores volume" {
     try testing.expect(@abs(drv.getMasterVolume() - 1.0) < 0.001);
 }
 
+test "distance_factor folds into the per-sample Doppler factor (matches MSS)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample3D.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    // MSS: velocity *= distance_factor * doppler_factor. ma's per-sound doppler
+    // factor must therefore carry the product, not just doppler_factor.
+    api_3d.AIL_set_3D_doppler_factor(drv, 2.0);
+    api_3d.AIL_set_3D_distance_factor(drv, 3.0);
+    try testing.expect(@abs(openmiles.ma.ma_sound_get_doppler_factor(&s.sound) - 6.0) < 0.001);
+}
+
 test "Doppler uses MSS speed of sound (0.355), not miniaudio's 343.3 default" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

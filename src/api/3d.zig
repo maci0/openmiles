@@ -450,6 +450,12 @@ pub fn AIL_set_3D_velocity_vector(s: ?*anyopaque, x: f32, y: f32, z: f32) callco
 pub fn AIL_set_3D_distance_factor(dig_opt: ?*DigitalDriver, factor: f32) callconv(.winapi) void {
     const dig = dig_opt orelse return;
     dig.distance_factor = factor;
+    // MSS folds distance_factor into the Doppler velocity scale; push the
+    // combined factor to every live sample's miniaudio doppler factor.
+    const eff = dig.effectiveDoppler();
+    for (dig.samples_3d.items) |s| {
+        if (s.is_initialized) openmiles.ma.ma_sound_set_doppler_factor(&s.sound, eff);
+    }
 }
 pub fn AIL_3D_distance_factor(dig_opt: ?*DigitalDriver) callconv(.winapi) f32 {
     const dig = dig_opt orelse return 1.0;
@@ -458,8 +464,11 @@ pub fn AIL_3D_distance_factor(dig_opt: ?*DigitalDriver) callconv(.winapi) f32 {
 pub fn AIL_set_3D_doppler_factor(dig_opt: ?*DigitalDriver, factor: f32) callconv(.winapi) void {
     const dig = dig_opt orelse return;
     dig.doppler_factor = factor;
+    // ma's doppler factor multiplies velocity, matching MSS's combined
+    // distance_factor * doppler_factor scaling.
+    const eff = dig.effectiveDoppler();
     for (dig.samples_3d.items) |s| {
-        if (s.is_initialized) openmiles.ma.ma_sound_set_doppler_factor(&s.sound, factor);
+        if (s.is_initialized) openmiles.ma.ma_sound_set_doppler_factor(&s.sound, eff);
     }
 }
 pub fn AIL_3D_doppler_factor(dig_opt: ?*DigitalDriver) callconv(.winapi) f32 {
@@ -551,15 +560,14 @@ pub fn AIL_3D_provider_attribute(provider: *anyopaque, name: [*:0]const u8, val:
 pub fn AIL_set_3D_provider_preference(provider: *anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const dig: *DigitalDriver = @ptrCast(@alignCast(provider));
     const n = std.mem.span(name);
+    // Delegate to the dedicated setters so these also propagate to live samples
+    // (ma rolloff / doppler), exactly like the AIL_set_3D_*_factor entry points.
     if (std.mem.eql(u8, n, "Rolloff factor")) {
-        const v: *const f32 = @ptrCast(@alignCast(val));
-        dig.rolloff_factor = v.*;
+        AIL_set_3D_rolloff_factor(dig, @as(*const f32, @ptrCast(@alignCast(val))).*);
     } else if (std.mem.eql(u8, n, "Doppler factor")) {
-        const v: *const f32 = @ptrCast(@alignCast(val));
-        dig.doppler_factor = v.*;
+        AIL_set_3D_doppler_factor(dig, @as(*const f32, @ptrCast(@alignCast(val))).*);
     } else if (std.mem.eql(u8, n, "Distance factor")) {
-        const v: *const f32 = @ptrCast(@alignCast(val));
-        dig.distance_factor = v.*;
+        AIL_set_3D_distance_factor(dig, @as(*const f32, @ptrCast(@alignCast(val))).*);
     }
 }
 pub fn AIL_enumerate_3D_provider_attributes(provider: *anyopaque, next: *?*anyopaque, name: *[*:0]const u8) callconv(.winapi) i32 {

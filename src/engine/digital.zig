@@ -403,6 +403,14 @@ pub const DigitalDriver = struct {
         return ma.ma_engine_get_volume(&self.engine);
     }
 
+    /// MSS scales the Doppler velocity by distance_factor * doppler_factor
+    /// (wavefile.cpp: `velocity *= D3D->distance_factor * D3D->doppler_factor`).
+    /// miniaudio's per-sound doppler factor multiplies the velocity the same
+    /// way, so feeding it the product reproduces both knobs.
+    pub fn effectiveDoppler(self: *const DigitalDriver) f32 {
+        return self.distance_factor * self.doppler_factor;
+    }
+
     pub fn getActiveSampleCount(self: *DigitalDriver) u32 {
         var count: u32 = 0;
         for (self.samples.items) |s| {
@@ -1541,7 +1549,7 @@ pub const Sample3D = struct {
         ma.ma_sound_set_looping(&self.sound, 0);
         _ = ma.ma_sound_set_end_callback(&self.sound, Sample3D.eosCallbackBridge, self);
         if (self.driver.rolloff_factor != 1.0) ma.ma_sound_set_rolloff(&self.sound, self.driver.rolloff_factor);
-        if (self.driver.doppler_factor != 1.0) ma.ma_sound_set_doppler_factor(&self.sound, self.driver.doppler_factor);
+        if (self.driver.effectiveDoppler() != 1.0) ma.ma_sound_set_doppler_factor(&self.sound, self.driver.effectiveDoppler());
         // Re-apply stored spatial settings (may have been set before audio loaded)
         ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
         ma.ma_sound_set_velocity(&self.sound, self.velocity_x, self.velocity_y, -self.velocity_z);
@@ -1592,7 +1600,7 @@ pub const Sample3D = struct {
         ma.ma_sound_set_looping(&self.sound, 0);
         _ = ma.ma_sound_set_end_callback(&self.sound, Sample3D.eosCallbackBridge, self);
         if (self.driver.rolloff_factor != 1.0) ma.ma_sound_set_rolloff(&self.sound, self.driver.rolloff_factor);
-        if (self.driver.doppler_factor != 1.0) ma.ma_sound_set_doppler_factor(&self.sound, self.driver.doppler_factor);
+        if (self.driver.effectiveDoppler() != 1.0) ma.ma_sound_set_doppler_factor(&self.sound, self.driver.effectiveDoppler());
         ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
         ma.ma_sound_set_velocity(&self.sound, self.velocity_x, self.velocity_y, -self.velocity_z);
         ma.ma_sound_set_min_distance(&self.sound, self.min_distance);
