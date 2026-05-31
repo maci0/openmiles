@@ -1092,6 +1092,11 @@ pub const Sample = struct {
     }
 
     pub fn status(self: *Sample) SampleStatus {
+        // NOTE: the SDK initializes a sample to SMP_DONE and reserves SMP_STOPPED
+        // for after an explicit AIL_stop_sample; a freshly loaded-but-unplayed
+        // sample is SMP_DONE there, whereas we derive status from ma state and
+        // report .stopped. Matching it needs an explicit status field (a broader
+        // change); tracked as a known deviation.
         if (self.is_done) return .done;
         if (self.is_paused) return .playing; // MSS: paused samples report SMP_PLAYING
         if (self.is_initialized) {
