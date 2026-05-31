@@ -138,9 +138,19 @@ pub fn AIL_resolve_raw_sound_preset(a0: ?*anyopaque, a1: ?*anyopaque, a2: i32) c
     _ = a2;
     return 0;
 }
-pub fn AIL_sample_loaded_len(a0: ?*anyopaque) callconv(.winapi) i32 {
-    _ = a0;
-    return 0;
+// SDK (AIL_API_sample_loaded_len): the amount of loaded-but-unconsumed sample
+// data in bytes (sum of buf[t].len - buf[t].pos across the buffer ring). Our
+// model holds the whole sample in memory, so that is the remaining unplayed
+// span = (total_frames - cursor) * bytes-per-frame.
+pub fn AIL_sample_loaded_len(s_opt: ?*Sample) callconv(.winapi) i32 {
+    const s = s_opt orelse return 0;
+    if (!s.is_initialized) return 0;
+    var cursor: u64 = 0;
+    _ = openmiles.ma.ma_sound_get_cursor_in_pcm_frames(&s.sound, &cursor);
+    const total = s.cached_length_frames;
+    const remaining: u64 = if (cursor < total) total - cursor else 0;
+    const bpf: u64 = s.bytesPerFrame();
+    return @intCast(@min(remaining *| bpf, @as(u64, std.math.maxInt(i32))));
 }
 // SDK (AIL_API_sample_ms_lookup, wavefile.cpp): convert a ms position to the
 // source byte position. datarate = effective_rate * bytes-per-frame, datapos =
