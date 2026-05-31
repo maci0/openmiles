@@ -2734,6 +2734,24 @@ test "v7 sample_volume_levels returns the L/R scalars verbatim (SDK)" {
     try testing.expect(@abs(l - 0.812252196) < 0.001 and @abs(r - 0.812252196) < 0.001);
 }
 
+test "set_sample_volume_pan applies the 4+ channel front/back factor (SDK)" {
+    // Stereo (<4 ch): centre vol=1 -> L/R = 0.812252196 (no extra factor).
+    const st = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer st.deinit();
+    const ss = try openmiles.Sample.init(st);
+    defer ss.deinit();
+    ss.setVolumePanF(1.0, 0.5);
+    try testing.expect(@abs(ss.v51_levels[0] - 0.812252196) < 0.0005);
+    // 5.1 (>=4 ch): the SDK multiplies the front L/R by an extra 0.812252196.
+    const mc = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 6);
+    defer mc.deinit();
+    try testing.expect(openmiles.ma.ma_engine_get_channels(&mc.engine) >= 4); // 6ch honored (noDevice)
+    const ms = try openmiles.Sample.init(mc);
+    defer ms.deinit();
+    ms.setVolumePanF(1.0, 0.5);
+    try testing.expect(@abs(ms.v51_levels[0] - (0.812252196 * 0.812252196)) < 0.0005);
+}
+
 test "v7 master reverb decay/predelay/damping all round-trip" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

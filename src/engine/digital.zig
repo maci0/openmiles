@@ -1246,9 +1246,12 @@ pub const Sample = struct {
         // even at zero volume, as MSS keeps save_pan separate from the gains).
         const lr_left: f32 = if (p == 0.5) 0.812252196 else std.math.pow(f32, 1.0 - p, 0.3);
         const lr_right: f32 = if (p == 0.5) 0.812252196 else std.math.pow(f32, p, 0.3);
+        // SDK: a 4+ channel output applies an extra 0.812252196 front/back balance
+        // factor to the front L/R gains (wavefile.cpp); a stereo output does not.
+        const fb: f32 = if (ma.ma_engine_get_channels(&self.driver.engine) >= 4) 0.812252196 else 1.0;
         // Reproduce gain*lr_left / gain*lr_right through miniaudio's balance panner
         // (out_left = vol*(pan<=0?1:1-pan), out_right = vol*(pan>=0?1:1+pan)).
-        const vol = gain * @max(lr_left, lr_right);
+        const vol = gain * @max(lr_left, lr_right) * fb;
         var pan_bal: f32 = 0.0;
         if (lr_left >= lr_right) {
             if (lr_left > 0.0) pan_bal = (lr_right / lr_left) - 1.0; // in [-1, 0]
@@ -1256,12 +1259,11 @@ pub const Sample = struct {
             if (lr_right > 0.0) pan_bal = 1.0 - (lr_left / lr_right); // in [0, 1]
         }
         // Mirror AIL_API_set_sample_volume_pan's channel bookkeeping (wavefile.cpp)
-        // so the volume_pan/levels getters report consistent values. For a stereo
-        // output (logical_channels_per_sample < 4) the extra front/back 0.8122 is
-        // NOT applied. left_volume/right_volume = gain*pan-ratio; back mirrors
-        // front; center = (L+R)/2; low = center; fb_pan/center/low save = neutral.
-        const lvol = gain * lr_left;
-        const rvol = gain * lr_right;
+        // so the volume_pan/levels getters report consistent values.
+        // left_volume/right_volume = gain*pan-ratio*fb; back mirrors front;
+        // center = (L+R)/2; low = center; fb_pan/center/low save = neutral.
+        const lvol = gain * lr_left * fb;
+        const rvol = gain * lr_right * fb;
         self.v51_levels[0] = lvol; // f_left
         self.v51_levels[1] = rvol; // f_right
         self.v51_levels[2] = lvol; // b_left = left
