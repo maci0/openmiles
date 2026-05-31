@@ -643,6 +643,9 @@ pub const Sample = struct {
     // up = +Y (wavefile.cpp). Stored here so the getter round-trips faithfully.
     s3d_face: [3]f32 = .{ 1, 0, 0 },
     s3d_up: [3]f32 = .{ 0, 1, 0 },
+    // HSAMPLE.is_3D: set TRUE when a 3D position/segment is specified, cleared on
+    // re-init. AIL_sample_3D_position and AIL_set_sample_is_3D return it (S32).
+    is_3D: i32 = 0,
     // v9 sample attributes (synchronized control / buses / system levels).
     v9_id: i32 = 0,
     v9_bus: i32 = 0,
@@ -1078,6 +1081,7 @@ pub const Sample = struct {
         self.falloff_count = [_]u8{0} ** 4;
         self.s3d_face = .{ 1, 0, 0 };
         self.s3d_up = .{ 0, 1, 0 };
+        self.is_3D = 0; // AIL_init_sample clears 3D state (mssdig.cpp)
         self.last_loaded_buffer = 0;
         self.user_data = [_]u32{0} ** 8;
     }

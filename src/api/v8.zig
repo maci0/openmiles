@@ -765,9 +765,13 @@ pub fn AIL_set_sample_buffer_count(s_opt: ?*Sample, n_buffers: i32) callconv(.wi
     s.n_buffers = n_buffers;
     return 1;
 }
-pub fn AIL_set_sample_is_3D(s_opt: ?*Sample, is_3D: i32) callconv(.winapi) void {
-    const s = s_opt orelse return;
+pub fn AIL_set_sample_is_3D(s_opt: ?*Sample, is_3D: i32) callconv(.winapi) i32 {
+    const s = s_opt orelse return 0;
+    // SDK (wavefile.cpp): store onoff verbatim, return the previous value.
+    const old = s.is_3D;
+    s.is_3D = is_3D;
     if (s.is_initialized) ma.ma_sound_set_spatialization_enabled(&s.sound, if (is_3D != 0) ma.MA_TRUE else ma.MA_FALSE);
+    return old;
 }
 pub fn AIL_set_sample_playback_delay(s_opt: ?*Sample, delay_ms: i32) callconv(.winapi) void {
     const s = s_opt orelse return;

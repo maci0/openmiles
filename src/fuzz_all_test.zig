@@ -371,7 +371,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_v7.AIL_sample_3D_cone(hs, &fo, &fo, &fo);
     api_v7.AIL_sample_3D_distances(hs, &fo, &fo, &io);
     api_v7.AIL_sample_3D_orientation(hs, &fo, &fo, &fo, &fo, &fo, &fo);
-    api_v7.AIL_sample_3D_position(hs, &fo, &fo, &fo);
+    _ = api_v7.AIL_sample_3D_position(hs, &fo, &fo, &fo);
     api_v7.AIL_sample_3D_velocity(hs, &fo, &fo, &fo);
     api_v8.AIL_sample_51_volume_levels(null, null, null, null, null, null, null);
     api_v8.AIL_sample_51_volume_pan(null, null, null, null, null, null);
@@ -479,7 +479,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_v8.AIL_set_sample_buffer_count(null, ri);
     api_v7.AIL_set_sample_channel_levels(hs, null, null, &fo, rszi);
     api_v7.AIL_set_sample_exclusion(hs, rf);
-    api_v8.AIL_set_sample_is_3D(hs, ri);
+    _ = api_v8.AIL_set_sample_is_3D(hs, ri);
     api_digital.AIL_set_sample_loop_block(hs, ri, ri);
     api_digital.AIL_set_sample_loop_count(hs, rszi);
     api_v7.AIL_set_sample_low_pass_cut_off(hs, ri, rf);

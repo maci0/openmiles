@@ -2468,7 +2468,7 @@ test "v7 unified 3D pos/vel/orient round-trip in MSS left-handed space" {
     var px: f32 = 0;
     var py: f32 = 0;
     var pz: f32 = 0;
-    api_v7.AIL_sample_3D_position(s, &px, &py, &pz);
+    try testing.expectEqual(@as(i32, 1), api_v7.AIL_sample_3D_position(s, &px, &py, &pz)); // is_3D now set
     try testing.expect(@abs(px - 1) < 0.001 and @abs(py - 2) < 0.001 and @abs(pz - 3) < 0.001);
     // miniaudio stores Z negated (right-handed boundary).
     try testing.expect(@abs(openmiles.ma.ma_sound_get_position(&s.sound).z - (-3)) < 0.001);
@@ -2492,6 +2492,31 @@ test "v7 unified 3D pos/vel/orient round-trip in MSS left-handed space" {
     api_v7.AIL_sample_3D_orientation(s, &fx, &fy, &fz, &ux, &uy, &uz);
     try testing.expect(@abs(fx) < 0.001 and @abs(fy) < 0.001 and @abs(fz - 1) < 0.001);
     try testing.expect(@abs(ux) < 0.001 and @abs(uy - 1) < 0.001 and @abs(uz) < 0.001);
+}
+
+test "v7/v8 is_3D: position enables it, getter & set_sample_is_3D return it (SDK)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    var a: f32 = 0;
+    // Fresh sample is not yet 3D: getter returns 0.
+    try testing.expectEqual(@as(i32, 0), api_v7.AIL_sample_3D_position(s, &a, &a, &a));
+    // Specifying a 3D position enables 3D (stays set).
+    api_v7.AIL_set_sample_3D_position(s, 1, 2, 3);
+    try testing.expectEqual(@as(i32, 1), api_v7.AIL_sample_3D_position(s, &a, &a, &a));
+    // AIL_set_sample_is_3D stores onoff verbatim and returns the previous value.
+    try testing.expectEqual(@as(i32, 1), api_v8.AIL_set_sample_is_3D(s, 0)); // old was 1
+    try testing.expectEqual(@as(i32, 0), api_v7.AIL_sample_3D_position(s, &a, &a, &a));
+    try testing.expectEqual(@as(i32, 0), api_v8.AIL_set_sample_is_3D(s, 7)); // old was 0
+    try testing.expectEqual(@as(i32, 7), api_v7.AIL_sample_3D_position(s, &a, &a, &a)); // verbatim store
+    // Re-init clears 3D state.
+    s.reset();
+    try testing.expectEqual(@as(i32, 0), api_v7.AIL_sample_3D_position(s, &a, &a, &a));
 }
 
 test "v7 set_sample_3D_orientation normalizes face & up and round-trips both" {

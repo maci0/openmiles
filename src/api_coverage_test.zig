@@ -611,7 +611,7 @@ test "coverage: v7.zig unified exports" {
     v7.AIL_set_sample_3D_cone(s, 0, 360, 0.5);
     v7.AIL_set_sample_3D_distances(s, 100, 1, 0);
     v7.AIL_update_sample_3D_position(s, 0.016);
-    v7.AIL_sample_3D_position(s, &f32o, &f32o, &f32o);
+    _ = v7.AIL_sample_3D_position(s, &f32o, &f32o, &f32o);
     v7.AIL_sample_3D_velocity(s, &f32o, &f32o, &f32o);
     v7.AIL_sample_3D_orientation(s, &f32o, &f32o, &f32o, &f32o, &f32o, &f32o);
     v7.AIL_sample_3D_cone(s, &f32o, &f32o, &f32o);

@@ -382,9 +382,12 @@ pub fn AIL_set_sample_3D_spread_falloff(s_opt: ?*Sample, graph: ?*anyopaque, poi
     s.setFalloff(.spread, falloffPtr(graph), pointcount);
 }
 pub fn AIL_set_sample_3D_position_segments(s_opt: ?*Sample, segments: ?*anyopaque, count: i32) callconv(.winapi) void {
-    _ = s_opt;
     _ = segments;
     _ = count;
+    // SDK (m3d.cpp) stores the position-segment graph (no engine consumer yet)
+    // and marks the sample 3D; reflect at least the observable is_3D state.
+    const s = s_opt orelse return;
+    s.is_3D = 1;
 }
 
 // --- Event command queue (audition/remote-control build API) ---

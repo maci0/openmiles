@@ -24,6 +24,7 @@ const AILSOUNDINFO = openmiles.AILSOUNDINFO;
 // --- Unified 3D on HSAMPLE (reuses the sample's miniaudio spatial state) -----
 
 fn enable3D(s: *Sample) void {
+    s.is_3D = 1; // SDK: specifying a 3D position enables 3D until re-init (m3d.cpp)
     if (s.is_initialized) ma.ma_sound_set_spatialization_enabled(&s.sound, ma.MA_TRUE);
 }
 
@@ -90,12 +91,13 @@ pub fn AIL_update_sample_3D_position(obj: ?*Sample, dt_ms: f32) callconv(.winapi
     ma.ma_sound_set_position(&s.sound, p.x + v.x * dt_s, p.y + v.y * dt_s, p.z + v.z * dt_s);
 }
 
-pub fn AIL_sample_3D_position(obj: ?*Sample, x: ?*f32, y: ?*f32, z: ?*f32) callconv(.winapi) void {
-    const s = obj orelse return;
+pub fn AIL_sample_3D_position(obj: ?*Sample, x: ?*f32, y: ?*f32, z: ?*f32) callconv(.winapi) i32 {
+    const s = obj orelse return 0;
     const v = if (s.is_initialized) ma.ma_sound_get_position(&s.sound) else ma.ma_vec3f{ .x = 0, .y = 0, .z = 0 };
     if (x) |p| p.* = v.x;
     if (y) |p| p.* = v.y;
     if (z) |p| p.* = -v.z;
+    return s.is_3D; // SDK returns S->is_3D
 }
 pub fn AIL_sample_3D_velocity(obj: ?*Sample, dx: ?*f32, dy: ?*f32, dz: ?*f32) callconv(.winapi) void {
     const s = obj orelse return;
