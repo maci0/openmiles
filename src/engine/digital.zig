@@ -450,36 +450,48 @@ pub const DigitalDriver = struct {
         return @intCast(out_samples * 2);
     }
 
+    // MSS is left-handed (forward=+Z); miniaudio is right-handed (forward=-Z).
+    // We negate Z crossing the miniaudio boundary so the spatializer reproduces
+    // MSS geometry, while stored/returned values stay in MSS space. See the note
+    // at Sample3D.setPosition.
     pub fn setListenerPosition(self: *DigitalDriver, x: f32, y: f32, z: f32) void {
-        ma.ma_engine_listener_set_position(&self.engine, 0, x, y, z);
+        ma.ma_engine_listener_set_position(&self.engine, 0, x, y, -z);
     }
 
     pub fn setListenerVelocity(self: *DigitalDriver, x: f32, y: f32, z: f32) void {
-        ma.ma_engine_listener_set_velocity(&self.engine, 0, x, y, z);
+        ma.ma_engine_listener_set_velocity(&self.engine, 0, x, y, -z);
     }
 
     pub fn setListenerDirection(self: *DigitalDriver, fx: f32, fy: f32, fz: f32) void {
-        ma.ma_engine_listener_set_direction(&self.engine, 0, fx, fy, fz);
+        ma.ma_engine_listener_set_direction(&self.engine, 0, fx, fy, -fz);
     }
 
     pub fn setListenerWorldUp(self: *DigitalDriver, ux: f32, uy: f32, uz: f32) void {
-        ma.ma_engine_listener_set_world_up(&self.engine, 0, ux, uy, uz);
+        ma.ma_engine_listener_set_world_up(&self.engine, 0, ux, uy, -uz);
     }
 
     pub fn getListenerPosition(self: *DigitalDriver) ma.ma_vec3f {
-        return ma.ma_engine_listener_get_position(&self.engine, 0);
+        var v = ma.ma_engine_listener_get_position(&self.engine, 0);
+        v.z = -v.z;
+        return v;
     }
 
     pub fn getListenerVelocity(self: *DigitalDriver) ma.ma_vec3f {
-        return ma.ma_engine_listener_get_velocity(&self.engine, 0);
+        var v = ma.ma_engine_listener_get_velocity(&self.engine, 0);
+        v.z = -v.z;
+        return v;
     }
 
     pub fn getListenerDirection(self: *DigitalDriver) ma.ma_vec3f {
-        return ma.ma_engine_listener_get_direction(&self.engine, 0);
+        var v = ma.ma_engine_listener_get_direction(&self.engine, 0);
+        v.z = -v.z;
+        return v;
     }
 
     pub fn getListenerWorldUp(self: *DigitalDriver) ma.ma_vec3f {
-        return ma.ma_engine_listener_get_world_up(&self.engine, 0);
+        var v = ma.ma_engine_listener_get_world_up(&self.engine, 0);
+        v.z = -v.z;
+        return v;
     }
 
     pub fn getDevice(self: *DigitalDriver) ?*ma.ma_device {
@@ -1506,12 +1518,12 @@ pub const Sample3D = struct {
         if (self.driver.rolloff_factor != 1.0) ma.ma_sound_set_rolloff(&self.sound, self.driver.rolloff_factor);
         if (self.driver.doppler_factor != 1.0) ma.ma_sound_set_doppler_factor(&self.sound, self.driver.doppler_factor);
         // Re-apply stored spatial settings (may have been set before audio loaded)
-        ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, self.pos_z);
-        ma.ma_sound_set_velocity(&self.sound, self.velocity_x, self.velocity_y, self.velocity_z);
+        ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
+        ma.ma_sound_set_velocity(&self.sound, self.velocity_x, self.velocity_y, -self.velocity_z);
         ma.ma_sound_set_min_distance(&self.sound, self.min_distance);
         ma.ma_sound_set_max_distance(&self.sound, self.max_distance);
         self.applyCone();
-        ma.ma_sound_set_direction(&self.sound, self.orient_fx, self.orient_fy, self.orient_fz);
+        ma.ma_sound_set_direction(&self.sound, self.orient_fx, self.orient_fy, -self.orient_fz);
         if (self.loop_end_frame > 0) {
             _ = ma.ma_data_source_set_range_in_pcm_frames(decoder, 0, self.loop_end_frame);
         }
@@ -1556,12 +1568,12 @@ pub const Sample3D = struct {
         _ = ma.ma_sound_set_end_callback(&self.sound, Sample3D.eosCallbackBridge, self);
         if (self.driver.rolloff_factor != 1.0) ma.ma_sound_set_rolloff(&self.sound, self.driver.rolloff_factor);
         if (self.driver.doppler_factor != 1.0) ma.ma_sound_set_doppler_factor(&self.sound, self.driver.doppler_factor);
-        ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, self.pos_z);
-        ma.ma_sound_set_velocity(&self.sound, self.velocity_x, self.velocity_y, self.velocity_z);
+        ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
+        ma.ma_sound_set_velocity(&self.sound, self.velocity_x, self.velocity_y, -self.velocity_z);
         ma.ma_sound_set_min_distance(&self.sound, self.min_distance);
         ma.ma_sound_set_max_distance(&self.sound, self.max_distance);
         self.applyCone();
-        ma.ma_sound_set_direction(&self.sound, self.orient_fx, self.orient_fy, self.orient_fz);
+        ma.ma_sound_set_direction(&self.sound, self.orient_fx, self.orient_fy, -self.orient_fz);
         if (self.loop_end_frame > 0) {
             _ = ma.ma_data_source_set_range_in_pcm_frames(decoder, 0, self.loop_end_frame);
         }
@@ -1758,23 +1770,19 @@ pub const Sample3D = struct {
         }
     }
 
-    // KNOWN ISSUE (3D coordinate handedness): MSS is LEFT-handed (forward=+Z,
-    // up=+Y, right = up x forward = +X; confirmed by the SDK defaults
-    // listen_face=(0,0,1), listen_up=(0,1,0), listen_cross=(1,0,0) in
-    // genericdig.cpp). miniaudio is RIGHT-handed (forward=-Z). We currently pass
-    // positions/directions/velocities straight through, so both front/back AND
-    // left/right are mirrored vs MSS for a given world coordinate. The correct
-    // fix is to negate Z on every coordinate crossing the miniaudio boundary
-    // (sample + listener; position/velocity/direction; set and the listener
-    // getters), keeping stored values in MSS space. Deferred as a single atomic,
-    // round-trip-tested change since a partial conversion is worse than the
-    // current uniform one.
+    // 3D coordinate handedness: MSS is LEFT-handed (forward=+Z, up=+Y, right =
+    // up x forward = +X; confirmed by the SDK defaults listen_face=(0,0,1),
+    // listen_up=(0,1,0), listen_cross=(1,0,0) in genericdig.cpp). miniaudio is
+    // RIGHT-handed (forward=-Z). We negate Z on every coordinate crossing the
+    // miniaudio boundary (sample + listener; position/velocity/direction; set,
+    // and the listener getters) so the spatializer reproduces MSS geometry,
+    // while stored values and getters stay in MSS space.
     pub fn setPosition(self: *Sample3D, x: f32, y: f32, z: f32) void {
         self.pos_x = x;
         self.pos_y = y;
         self.pos_z = z;
         if (self.is_initialized) {
-            ma.ma_sound_set_position(&self.sound, x, y, z);
+            ma.ma_sound_set_position(&self.sound, x, y, -z);
         }
     }
 
@@ -1788,7 +1796,7 @@ pub const Sample3D = struct {
         self.pos_y += self.velocity_y * dt_s;
         self.pos_z += self.velocity_z * dt_s;
         if (self.is_initialized) {
-            ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, self.pos_z);
+            ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
         }
     }
     pub fn setVelocity(self: *Sample3D, x: f32, y: f32, z: f32) void {
@@ -1796,7 +1804,7 @@ pub const Sample3D = struct {
         self.velocity_y = y;
         self.velocity_z = z;
         if (self.is_initialized) {
-            ma.ma_sound_set_velocity(&self.sound, x, y, z);
+            ma.ma_sound_set_velocity(&self.sound, x, y, -z);
         }
     }
 
@@ -1806,7 +1814,7 @@ pub const Sample3D = struct {
         self.pos_x += self.velocity_x * dt_s;
         self.pos_y += self.velocity_y * dt_s;
         self.pos_z += self.velocity_z * dt_s;
-        ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, self.pos_z);
+        ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
     }
     pub fn setOrientation(self: *Sample3D, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) void {
         self.orient_fx = fx;
@@ -1816,7 +1824,7 @@ pub const Sample3D = struct {
         self.orient_uy = uy;
         self.orient_uz = uz;
         if (self.is_initialized) {
-            ma.ma_sound_set_direction(&self.sound, fx, fy, fz);
+            ma.ma_sound_set_direction(&self.sound, fx, fy, -fz);
         }
     }
 };

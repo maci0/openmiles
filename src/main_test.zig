@@ -1567,6 +1567,19 @@ test "DigitalDriver listener position roundtrip" {
     try testing.expectEqual(@as(f32, 3.0), pos.z);
 }
 
+test "3D coords negated at the miniaudio boundary (MSS left-handed -> ma right-handed)" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+    driver.setListenerPosition(1.0, 2.0, 3.0);
+    // MSS-space getter returns +Z unchanged...
+    try testing.expectEqual(@as(f32, 3.0), driver.getListenerPosition().z);
+    // ...but miniaudio stores the negated Z (the handedness conversion).
+    const raw = openmiles.ma.ma_engine_listener_get_position(&driver.engine, 0);
+    try testing.expectEqual(@as(f32, -3.0), raw.z);
+    try testing.expectEqual(@as(f32, 1.0), raw.x); // X/Y unchanged
+}
+
 test "DigitalDriver listener velocity roundtrip" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
