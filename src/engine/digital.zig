@@ -559,7 +559,8 @@ pub const Sample = struct {
     cached_length_frames: u64 = 0,
     reverb_node: ?*ma.ma_delay_node = null,
     reverb_room_type: f32 = 0.0,
-    reverb_level: f32 = 0.0,
+    reverb_level: f32 = 0.0, // wet level
+    reverb_dry_level: f32 = 1.0, // dry level (independent of wet; SDK default 1.0)
     reverb_reflect_time: f32 = 0.0,
     // MSS v7 unified-API attenuation hints (stored; queried back).
     v7_obstruction: f32 = 0.0,

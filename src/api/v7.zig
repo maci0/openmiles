@@ -147,12 +147,13 @@ pub fn AIL_sample_low_pass_cut_off(s_opt: ?*Sample, channel: i32) callconv(.wina
 }
 pub fn AIL_set_sample_reverb_levels(s_opt: ?*Sample, dry_level: f32, wet_level: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    _ = dry_level;
+    // The SDK stores dry and wet independently (they need not sum to 1).
+    s.reverb_dry_level = dry_level;
     s.setReverb(s.reverb_room_type, std.math.clamp(wet_level, 0.0, 1.0), if (s.reverb_reflect_time > 0) s.reverb_reflect_time else 0.05);
 }
 pub fn AIL_sample_reverb_levels(s_opt: ?*Sample, dry_level: ?*f32, wet_level: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    if (dry_level) |p| p.* = 1.0 - s.reverb_level;
+    if (dry_level) |p| p.* = s.reverb_dry_level;
     if (wet_level) |p| p.* = s.reverb_level;
 }
 pub fn AIL_set_sample_info(s_opt: ?*Sample, info: *const AILSOUNDINFO) callconv(.winapi) void {

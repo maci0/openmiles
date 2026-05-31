@@ -3218,6 +3218,20 @@ test "AIL_set/sample_51_volume_pan round-trips the params verbatim" {
     try testing.expectApproxEqAbs(@as(f32, 0.9), sub, 0.001);
 }
 
+test "AIL_set/sample_reverb_levels round-trips dry and wet independently" {
+    const hd = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer hd.deinit();
+    const s = try openmiles.Sample.init(hd);
+    defer s.deinit();
+    // dry and wet are independent in MSS (they need not sum to 1).
+    api_v7.AIL_set_sample_reverb_levels(s, 0.5, 0.3);
+    var dry: f32 = 0;
+    var wet: f32 = 0;
+    api_v7.AIL_sample_reverb_levels(s, &dry, &wet);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), dry, 0.001); // not 1-0.3
+    try testing.expectApproxEqAbs(@as(f32, 0.3), wet, 0.001);
+}
+
 test "digital master volume is linear (vol/127), not the sample-volume curve" {
     // The master volume is a linear final gain (F32 master sets dig->master_volume
     // directly), unlike the perceptual ^(10/6) sample-volume curve.
