@@ -127,33 +127,7 @@ pub fn AIL_sample_3D_distances(obj: ?*Sample, max_dist: ?*f32, min_dist: ?*f32, 
 
 pub fn AIL_set_sample_volume_levels(s_opt: ?*Sample, left_level: f32, right_level: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    // Per AIL_API_set_sample_volume_levels (wavefile.cpp): store the linear L/R
-    // scalars verbatim (left_volume/right_volume) and reconstruct save_pan/
-    // save_volume for the volume_pan getter. left_volume/right_volume share the
-    // front pair of v51_levels (and back/center/low mirror them, as the SDK does).
-    var save_pan: f32 = 0.5;
-    var save_volume: f32 = 0;
-    if (left_level > 0.0001) {
-        const ratio = std.math.pow(f32, right_level / left_level, 10.0 / 3.0);
-        save_pan = ratio / (ratio + 1);
-        save_volume = if (save_pan < 0.0001) left_level else right_level * std.math.pow(f32, save_pan, -0.3);
-    } else if (right_level > 0.0001) {
-        save_pan = 1.0;
-        save_volume = right_level;
-    } else {
-        save_pan = 0.5;
-        save_volume = 0;
-    }
-    s.v51_levels = .{ left_level, right_level, left_level, right_level, save_volume, save_volume };
-    s.v51_fb_pan = 0.5;
-    // Drive the stereo engine from the linear L/R scalars.
-    const vol = std.math.clamp(@max(left_level, right_level), 0.0, 1.0);
-    s.setVolume(@intFromFloat(vol * 127.0));
-    const sum = left_level + right_level;
-    if (sum > 0.0001) s.setPan(@intFromFloat(std.math.clamp(right_level / sum, 0.0, 1.0) * 127.0));
-    // Overwrite the quantized save_* (setVolume/setPan clobbered them) with the exact reconstruction.
-    s.save_pan_f = std.math.clamp(save_pan, 0.0, 1.0);
-    s.save_vol_f = std.math.pow(f32, @max(save_volume, 0.0), 6.0 / 10.0);
+    s.setVolumeLevels(left_level, right_level);
 }
 pub fn AIL_sample_volume_levels(s_opt: ?*Sample, left_level: ?*f32, right_level: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;

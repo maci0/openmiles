@@ -258,24 +258,12 @@ pub fn AIL_set_filter_stream_preference(s_opt: ?*Sample, name: [*:0]const u8, va
 // reconstructs L/R (lossless when both were <=1). Matches AIL_sample_volume_levels.
 pub fn AIL_set_stream_volume_levels(s_opt: ?*Sample, left_level: f32, right_level: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    const vol = std.math.clamp(@max(left_level, right_level), 0.0, 1.0);
-    s.setVolume(@intFromFloat(vol * 127.0));
-    const sum = left_level + right_level;
-    if (sum > 0.0001) s.setPan(@intFromFloat(std.math.clamp(right_level / sum, 0.0, 1.0) * 127.0));
+    s.setVolumeLevels(left_level, right_level); // verbatim L/R, like the sample form
 }
 pub fn AIL_stream_volume_levels(s_opt: ?*Sample, left_level: ?*f32, right_level: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    const vol: f32 = @as(f32, @floatFromInt(s.original_volume)) / 127.0;
-    const pan: f32 = @as(f32, @floatFromInt(s.original_pan)) / 127.0;
-    var l = vol;
-    var r = vol;
-    if (pan > 0.5) {
-        l = if (pan > 0.0) vol * (1.0 - pan) / pan else 0.0;
-    } else if (pan < 0.5) {
-        r = if (pan < 1.0) vol * pan / (1.0 - pan) else 0.0;
-    }
-    if (left_level) |p| p.* = l;
-    if (right_level) |p| p.* = r;
+    if (left_level) |p| p.* = s.v51_levels[0];
+    if (right_level) |p| p.* = s.v51_levels[1];
 }
 // Combined volume/pan getter (the setter, AIL_set_stream_volume_pan, is above).
 pub fn AIL_stream_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32) callconv(.winapi) void {

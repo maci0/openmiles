@@ -1165,6 +1165,31 @@ pub const Sample = struct {
         }
     }
 
+    /// AIL_API_set_sample_volume_levels (wavefile.cpp): store the linear L/R
+    /// scalars verbatim (front pair of v51_levels), reconstruct save_pan/
+    /// save_volume for the volume_pan getter, and drive the stereo engine.
+    pub fn setVolumeLevels(self: *Sample, left: f32, right: f32) void {
+        var save_pan: f32 = 0.5;
+        var save_volume: f32 = 0;
+        if (left > 0.0001) {
+            const ratio = std.math.pow(f32, right / left, 10.0 / 3.0);
+            save_pan = ratio / (ratio + 1);
+            save_volume = if (save_pan < 0.0001) left else right * std.math.pow(f32, save_pan, -0.3);
+        } else if (right > 0.0001) {
+            save_pan = 1.0;
+            save_volume = right;
+        }
+        self.v51_levels = .{ left, right, left, right, save_volume, save_volume };
+        self.v51_fb_pan = 0.5;
+        const vol = std.math.clamp(@max(left, right), 0.0, 1.0);
+        self.setVolume(@intFromFloat(vol * 127.0));
+        const sum = left + right;
+        if (sum > 0.0001) self.setPan(@intFromFloat(std.math.clamp(right / sum, 0.0, 1.0) * 127.0));
+        // setVolume/setPan clobbered save_*; overwrite with the exact reconstruction.
+        self.save_pan_f = std.math.clamp(save_pan, 0.0, 1.0);
+        self.save_vol_f = std.math.pow(f32, @max(save_volume, 0.0), 6.0 / 10.0);
+    }
+
     /// Set reverb parameters for this sample. Creates or updates a ma_delay_node
     /// inserted between the sample's sound and the engine endpoint.
     pub fn setReverb(self: *Sample, room_type: f32, level: f32, reflect_time: f32) void {
