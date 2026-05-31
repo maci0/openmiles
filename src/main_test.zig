@@ -1015,6 +1015,22 @@ test "Sample start on uninitialized resets done flag" {
     try testing.expectEqual(openmiles.SampleStatus.done, sample.status());
 }
 
+test "AIL_set/sample_reverb param roles: (level, reflect_time, decay_time) (SDK)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    // SDK order: reverb_level, reverb_reflect_time, reverb_decay_time.
+    dg.AIL_set_sample_reverb(s, 0.5, 0.1, 0.8);
+    var level: f32 = 0;
+    var reflect: f32 = 0;
+    var decay: f32 = 0;
+    dg.AIL_sample_reverb(s, &level, &reflect, &decay);
+    try testing.expect(@abs(level - 0.5) < 0.001); // wet level round-trips in slot 1
+    try testing.expect(@abs(reflect - 0.1) < 0.001); // reflect time in slot 2
+    try testing.expect(@abs(decay - 0.8) < 0.001); // decay time in slot 3 (was misread as room_type)
+}
+
 test "Sample setReverb and getReverb roundtrip" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
