@@ -173,6 +173,7 @@ pub fn AIL_set_sample_info(s_opt: ?*Sample, info: *const AILSOUNDINFO) callconv(
     const ch: u16 = if (info.channels >= 2) 2 else 1;
     const bits: u16 = if (info.bits == 8) 8 else 16;
     s.pcm_format = .{ .channels = ch, .bits = bits };
+    if (@hasField(AILSOUNDINFO, "channel_mask")) s.channel_mask = info.channel_mask;
 }
 
 // Obstruction / occlusion / exclusion: stored attenuation hints (reuse Sample3D

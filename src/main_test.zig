@@ -1221,6 +1221,22 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 0x11), info2.format); // WAVE_FORMAT_IMA_ADPCM
 }
 
+test "AIL_set_sample_info channel_mask round-trips via channel_count" {
+    if (!@hasField(openmiles.AILSOUNDINFO, "channel_mask")) return; // v9 field only
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    var info: openmiles.AILSOUNDINFO = .{};
+    info.channels = 2;
+    info.bits = 16;
+    info.channel_mask = 0x3; // explicit FL|FR
+    api_v7.AIL_set_sample_info(s, &info);
+    var mask: u32 = 0;
+    _ = api_v8b.AIL_sample_channel_count(s, &mask);
+    try testing.expectEqual(@as(u32, 0x3), mask);
+}
+
 test "AIL_size_processed_digital_audio counts points from data_len (SDK)" {
     var info: openmiles.AILSOUNDINFO = .{};
     info.format = 1; // WAVE_FORMAT_PCM
@@ -2554,7 +2570,9 @@ test "v8 sample channel_count and loop_block report real state" {
     try s.loadFromMemory(wav, false);
     var mask: u32 = 0;
     try testing.expectEqual(@as(i32, 1), api_v8b.AIL_sample_channel_count(s, &mask)); // mono
-    try testing.expectEqual(@as(u32, 0x4), mask); // FC
+    // SDK: standard WAVs report channel_mask = ~0U ("default mapping"), not a
+    // pre-resolved speaker mask.
+    try testing.expectEqual(~@as(u32, 0), mask);
     // No loop block set: offsets are 0, and the return is the loop count
     // (orig_loop_count, default 1 -- the SDK returns the count, not a found-flag).
     var ls: i32 = -1;

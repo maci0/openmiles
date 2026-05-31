@@ -584,6 +584,10 @@ pub const Sample = struct {
     eob_callback: usize = 0,
     sob_callback: usize = 0,
     pcm_format: ?SamplePcmFormat = null,
+    // AILSOUNDINFO channel_mask: ~0U means "default mapping" (standard mono/
+    // stereo WAVs); an explicit speaker mask only comes from WAVEFORMATEXTENSIBLE
+    // or AIL_set_sample_info. AIL_sample_channel_count returns this verbatim.
+    channel_mask: u32 = ~@as(u32, 0),
     // Which buffer ID was last loaded via AIL_load_sample_buffer (for EOB callback parameter)
     last_loaded_buffer: i32 = 0,
     user_data: [8]u32 = [_]u32{0} ** 8,
@@ -1037,6 +1041,7 @@ pub const Sample = struct {
         self.eob_callback = 0;
         self.sob_callback = 0;
         self.pcm_format = null;
+        self.channel_mask = ~@as(u32, 0);
         self.last_loaded_buffer = 0;
         self.user_data = [_]u32{0} ** 8;
     }

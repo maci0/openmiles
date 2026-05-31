@@ -574,8 +574,9 @@ pub fn AIL_sample_buffer_count(s_opt: ?*Sample) callconv(.winapi) i32 {
 pub fn AIL_sample_channel_count(s_opt: ?*Sample, mask: ?*u32) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     const ch: i32 = if (s.decoder) |d| @intCast(d.outputChannels) else if (s.pcm_format) |f| @intCast(f.channels) else 2;
-    // Speaker mask: FL|FR for stereo, FC for mono (the common cases).
-    if (mask) |m| m.* = if (ch >= 2) 0x3 else 0x4;
+    // SDK returns S->channel_mask verbatim: ~0U ("default mapping") for standard
+    // mono/stereo WAVs, an explicit mask only for WAVEFORMATEXTENSIBLE / set_info.
+    if (mask) |m| m.* = s.channel_mask;
     return ch;
 }
 pub fn AIL_sample_loop_block(s_opt: ?*Sample, loop_start: ?*i32, loop_end: ?*i32) callconv(.winapi) i32 {
