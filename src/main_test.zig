@@ -3003,3 +3003,19 @@ test "cache_sounds namelist handles a trailing colon without a wild slot" {
     cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
     try testing.expect(cur == null);
 }
+
+test "set_sample_volume_pan maps F32 0..1 to the engine volume/pan scale" {
+    const hd = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer hd.deinit();
+    const s = try openmiles.Sample.init(hd);
+    defer s.deinit();
+    dg.AIL_set_sample_volume_pan(s, 1.0, 0.5); // full volume, centre pan
+    try testing.expectEqual(@as(i32, 127), s.original_volume);
+    try testing.expectApproxEqAbs(@as(f32, 0.0), s.pan, 0.02);
+    dg.AIL_set_sample_volume_pan(s, 0.0, 0.0); // silent, hard left
+    try testing.expectEqual(@as(i32, 0), s.original_volume);
+    try testing.expectApproxEqAbs(@as(f32, -1.0), s.pan, 0.02);
+    dg.AIL_set_sample_volume_pan(s, 0.5, 1.0); // half, hard right
+    try testing.expectEqual(@as(i32, 63), s.original_volume);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), s.pan, 0.02);
+}

@@ -490,7 +490,8 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_digital.AIL_set_sample_user_data(hs, ri, ru);
     api_digital.AIL_set_sample_volume(hs, ri);
     api_v7.AIL_set_sample_volume_levels(hs, rf, rf);
-    api_digital.AIL_set_sample_volume_pan(hs, ri, ri);
+    api_digital.AIL_set_sample_volume_pan(hs, rf, rf);
+    api_stream.AIL_set_stream_volume_pan(hs, rf, rf);
     api_midi.AIL_set_sequence_loop_count(hq, rszi);
     api_midi.AIL_set_sequence_ms_position(hq, ri);
     api_midi.AIL_set_sequence_tempo(hq, ri, ri);

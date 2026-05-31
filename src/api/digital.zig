@@ -103,10 +103,12 @@ pub fn AIL_sample_playback_rate(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     return openmiles.satI32(s.target_rate orelse 44100.0);
 }
-pub fn AIL_set_sample_volume_pan(s_opt: ?*Sample, volume: i32, pan: i32) callconv(.winapi) void {
+// SDK: AIL_set_sample_volume_pan(HSAMPLE, F32 volume, F32 pan) — floats in 0.0..1.0,
+// not the S32 0..127 of the separate set_sample_volume/set_sample_pan.
+pub fn AIL_set_sample_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_set_sample_volume_pan(s={*}, volume={d}, pan={d})\n", .{ s, volume, pan });
-    s.setVolumePan(volume, pan);
+    s.setVolumePanF(volume, pan);
 }
 pub fn AIL_active_sample_count(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
     const driver = driver_opt orelse return 0;
@@ -842,6 +844,9 @@ comptime {
             .{ .name = "AIL_auto_service_stream", .stack_size = 8 },
             .{ .name = "AIL_set_stream_playback_rate", .stack_size = 8 },
             .{ .name = "AIL_set_stream_pan", .stack_size = 8 },
+            // Combined F32 volume/pan stream setter — present in many v4+ builds
+            // (e.g. Midnight Club II's v6 mss32.dll) though absent from some refs.
+            .{ .name = "AIL_set_stream_volume_pan", .stack_size = 12, .ver = 40 },
             .{ .name = "AIL_set_stream_ms_position", .stack_size = 8 },
             .{ .name = "AIL_stream_status", .stack_size = 4 },
             .{ .name = "AIL_stream_playback_rate", .stack_size = 4 },

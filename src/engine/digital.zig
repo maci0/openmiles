@@ -1064,6 +1064,19 @@ pub const Sample = struct {
         self.setPan(pan);
     }
 
+    // The combined AIL_set_sample_volume_pan / AIL_set_stream_volume_pan take F32
+    // volume and pan in 0.0..1.0 (0.5 = centre), unlike the separate S32 0..127
+    // setters. Map linearly onto the same engine path so the perceptual volume
+    // curve and pan handling stay consistent.
+    pub fn setVolumePanF(self: *Sample, volume: f32, pan: f32) void {
+        const v = std.math.clamp(volume, 0.0, 1.0);
+        self.original_volume = @intFromFloat(v * 127.0);
+        self.volume = root.mssVolumeToGain(self.original_volume);
+        if (self.is_initialized) ma.ma_sound_set_volume(&self.sound, self.volume);
+        self.pan = std.math.clamp((pan - 0.5) * 2.0, -1.0, 1.0);
+        if (self.is_initialized) ma.ma_sound_set_pan(&self.sound, self.pan);
+    }
+
     /// Set reverb parameters for this sample. Creates or updates a ma_delay_node
     /// inserted between the sample's sound and the engine endpoint.
     pub fn setReverb(self: *Sample, room_type: f32, level: f32, reflect_time: f32) void {

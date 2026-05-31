@@ -115,6 +115,12 @@ pub fn AIL_set_stream_pan(s_opt: ?*Sample, pan: i32) callconv(.winapi) void {
     log("AIL_set_stream_pan(s={*}, pan={d})\n", .{ s, pan });
     s.setPan(pan);
 }
+// Combined F32 volume/pan (0.0..1.0), the form modern v6+ titles use on streams.
+pub fn AIL_set_stream_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32) callconv(.winapi) void {
+    const s = s_opt orelse return;
+    log("AIL_set_stream_volume_pan(s={*}, volume={d}, pan={d})\n", .{ s, volume, pan });
+    s.setVolumePanF(volume, pan);
+}
 pub fn AIL_set_stream_ms_position(s_opt: ?*Sample, ms: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_set_stream_ms_position(s={*}, ms={d})\n", .{ s, ms });
