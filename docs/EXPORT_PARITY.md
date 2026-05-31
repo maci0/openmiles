@@ -121,11 +121,37 @@ EXTRA breaks down into two very different groups:
    named in any header) and several back the project's own C tests, so they are
    kept deliberately.
 
-**Why not auto-raise floors:** lowering EXTRA by raising each function's `.ver`
-floor to its first-appearance is unsafe to automate. A first-appearance map
-built from the reference DLLs cannot cleanly separate 6.0 from 6.1 (different
-directories, overlapping majors), and an over-raise silently turns an EXTRA into
-a MISSING — regressing the verified byte-exact parity. The byte-exact
-MISSING/MISMATCH result (every function a game *calls* resolves with the correct
-ABI) is the load-bearing fidelity guarantee; EXTRA-trimming is deferred as
-careful, individually-verified work.
+**EXTRA bounding (done).** Using a presence map computed over *all* 148
+reference DLLs (per-function set of major versions it appears in), every target
+was bounded to `[first_appearance, last_appearance]`:
+
+- 24 floors raised (functions gated below first-appearance, e.g.
+  `AIL_open_digital_driver` leaking into v3-v5 — v5 uses `AIL_waveOutOpen`).
+- 119 `ver_max` caps (functions dropped before v9, e.g. `AIL_waveOutOpen` and
+  the pre-sample-handle `AIL_set_3D_position/velocity/orientation` family,
+  superseded by `AIL_*_sample_3D_*` in v7).
+- `AIL_debug_printf` (a `/EXPORT:`-directive variadic) gated to ≤v8.
+
+Each change was applied only where provably safe (no reference outside the new
+range exports the symbol) and re-verified: **all of v4-v9 stay byte-exact (0
+missing, 0 mismatch)**. This dropped EXTRA sharply (v7 148→46, v8 243→128,
+v9 280→159). The map's scale bug (`major` vs `major*10`) that made an early
+attempt compute *last*-appearance instead of first was found and fixed before
+any change was applied.
+
+**Remaining EXTRA is two irreducible groups:**
+
+1. *Sub-version variance* (the bulk — e.g. v6's 118, v9's 143): genuine Miles
+   functions present in some sub-version of the major but not the single
+   mainline DLL we diff against. Our build is their **union**, so it serves
+   every sub-version's games — a faithful superset, not an error. Forcing it to
+   one sub-version would reduce fidelity to the others.
+2. *16 deliberate/artifact* (per version): `DllMainCRTStartup` (a Zig/lld
+   entry-point artifact, not a real export) and 15 convenience wrappers the
+   project added (`AIL_pause_sequence`, `AIL_quick_stop`, `AIL_open_midi_driver`,
+   ...). They appear in no Miles DLL or SDK header, are harmless for real games
+   (never named in any header), and several back the project's own C tests, so
+   they are kept.
+
+The byte-exact MISSING/MISMATCH result remains the load-bearing fidelity
+guarantee; EXTRA is now at its safe floor.
