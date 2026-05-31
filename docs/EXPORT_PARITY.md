@@ -155,3 +155,31 @@ any change was applied.
 
 The byte-exact MISSING/MISMATCH result remains the load-bearing fidelity
 guarantee; EXTRA is now at its safe floor.
+
+## 6.5/6.6 sub-line audit
+
+The byte-exact claim above was originally re-verified against one mainline DLL
+per major. A later sweep that diffed the `-Dmss-version=6.5` build against the
+**6.5/6.6** references (rather than a 6.0 mainline) surfaced a real sub-line
+gap that the single-DLL check had masked:
+
+- **low-pass cutoff arity.** `AIL_set/sample/quick_set_low_pass_cut_off` first
+  appear in 6.5 in the narrow no-channel form (`set @8` / `get @4`), carried
+  through 7.x; v8 widened them with a channel parameter (`@12` / `@8`). The
+  gating exported the wide v8 form for all of 6.x. Re-gated: the `_v7`
+  no-channel variant covers ver 65-70, the wide form 80+, and 6.0/6.1 (which
+  never had it) no longer export it.
+- **12 functions present only in 6.5/6.6** (added in 6.5, dropped in 7.0) were
+  absent: per-stream `volume_levels` / `volume_pan` getter / `reverb_levels` /
+  `low_pass_cut_off`, `AIL_set/3D_sample_exclusion`,
+  `AIL_DLS_set/get_reverb_levels`, and `AIL_set_digital_master_room_type`. All
+  added, gated ver 65-66 (a stream handle is a Sample, so the stream forms
+  mirror the sample ones).
+
+This took 6.5/6.6 from 16 discrepancies to **1**. v3-v6.0 and v7-v9 remain 0.
+
+**The one remaining MISSING (6.1/6.5/6.6):** `@stream_background@0` — an
+undocumented `__fastcall` internal thunk (note the `@name@bytes` fastcall
+decoration and the leading `@`). It is in no SDK header and no game links it by
+name; reproducing it would require fragile linker-directive hackery for an
+internal symbol with zero functional value, so it is left as a documented gap.
