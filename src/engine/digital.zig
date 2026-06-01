@@ -1201,6 +1201,10 @@ pub const Sample = struct {
 
     pub fn stop(self: *Sample) void {
         log("Sample.stop: s={*}\n", .{self});
+        // SDK wavefile.cpp AIL_API_stop_sample: no-op unless the sample is
+        // currently SMP_PLAYING -- a DONE / STOPPED / never-started sample keeps
+        // its status. Only a playing sample transitions to SMP_STOPPED.
+        if (self.status() != .playing) return;
         if (self.is_initialized) {
             _ = ma.ma_sound_stop(&self.sound);
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);

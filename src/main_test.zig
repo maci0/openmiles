@@ -1031,6 +1031,29 @@ test "Sample end sets done status" {
     try testing.expectEqual(openmiles.SampleStatus.done, sample.status());
 }
 
+test "AIL_stop_sample is a no-op unless the sample is SMP_PLAYING (SDK)" {
+    // SDK wavefile.cpp AIL_API_stop_sample early-outs unless status==SMP_PLAYING,
+    // so stopping a never-played or finished sample must NOT report SMP_STOPPED.
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+
+    // Never started -> SMP_DONE; stop must leave it DONE (not STOPPED).
+    try testing.expectEqual(@as(u32, 2), dg.AIL_sample_status(s)); // SMP_DONE
+    dg.AIL_stop_sample(s);
+    try testing.expectEqual(@as(u32, 2), dg.AIL_sample_status(s)); // still SMP_DONE
+
+    // Finished sample (end -> DONE): stop is likewise a no-op.
+    s.end();
+    dg.AIL_stop_sample(s);
+    try testing.expectEqual(@as(u32, 2), dg.AIL_sample_status(s)); // still SMP_DONE
+}
+
 test "Sample start on uninitialized resets done flag" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
