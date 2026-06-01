@@ -2008,6 +2008,10 @@ test "ms_position uses the effective playback rate (rate*factor) round-trip" {
     s.setMsPosition(500);
     const p = s.getMsPosition();
     try testing.expect(@abs(p.current - 500) <= 2); // round-trips at the effective rate
+    // total is the playback DURATION at the effective rate: 16000 frames / 16000 Hz
+    // = 1000 ms (a 2-second native sample plays in 1 s at 2x), not the 2000 ms it
+    // would report at the native rate.
+    try testing.expect(@abs(p.total - 1000) <= 2);
     var cursor: u64 = 0;
     _ = openmiles.ma.ma_sound_get_cursor_in_pcm_frames(&s.sound, &cursor);
     try testing.expect(cursor >= 7990 and cursor <= 8010); // ~8000 source frames
