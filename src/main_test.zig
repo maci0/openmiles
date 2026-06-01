@@ -1185,6 +1185,42 @@ fn testSobCallback(s: ?*anyopaque) callconv(.winapi) void {
     sob_cb_fired = true;
 }
 
+var eos_cb_count: u32 = 0;
+fn testEosCallback(s: ?*anyopaque) callconv(.winapi) void {
+    _ = s;
+    eos_cb_count += 1;
+}
+
+test "AIL_end_sample fires the EOS callback once (only on the live->DONE transition)" {
+    // SDK wavefile.cpp AIL_API_end_sample sets SMP_DONE and fires EOB+EOS only if
+    // the sample was not already done -- so ending a never-played (already SMP_DONE)
+    // sample fires nothing, and a second end() does not re-fire.
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    const pcm = [_]u8{0} ** 4410;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 44100, 8);
+    defer testing.allocator.free(wav);
+    try s.loadFromMemory(wav, true);
+
+    eos_cb_count = 0;
+    _ = dg.AIL_register_EOS_callback(s, @ptrCast(@constCast(&testEosCallback)));
+
+    // Fresh sample is already SMP_DONE -> end() fires nothing.
+    dg.AIL_end_sample(s);
+    try testing.expectEqual(@as(u32, 0), eos_cb_count);
+
+    // Start (now SMP_PLAYING), then end -> one EOS firing.
+    dg.AIL_start_sample(s);
+    dg.AIL_end_sample(s);
+    try testing.expectEqual(@as(u32, 1), eos_cb_count);
+
+    // Already done again -> no re-fire.
+    dg.AIL_end_sample(s);
+    try testing.expectEqual(@as(u32, 1), eos_cb_count);
+}
+
 test "AIL_register_SOB_callback: the callback actually fires on AIL_start_sample" {
     // The registration round-trip is covered elsewhere; this checks the harder
     // property -- that a registered Start-Of-Buffer callback is genuinely invoked

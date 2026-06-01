@@ -1218,11 +1218,24 @@ pub const Sample = struct {
     }
 
     pub fn end(self: *Sample) void {
+        // SDK wavefile.cpp AIL_API_end_sample: stop the voice, mark it SMP_DONE,
+        // and -- only if it was not ALREADY done -- fire the EOB then EOS
+        // callbacks once. It does not rewind (position is left at the stop point;
+        // a later AIL_start_sample is what rewinds).
+        const already_done = self.status() == .done;
         if (self.is_initialized) {
             _ = ma.ma_sound_stop(&self.sound);
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, 0);
         }
         self.is_done = true;
+        if (already_done) return;
+        if (self.eob_callback != 0) {
+            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eob_callback);
+            cb(@ptrCast(self));
+        }
+        if (self.eos_callback != 0) {
+            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eos_callback);
+            cb(@ptrCast(self));
+        }
     }
 
     pub fn pause(self: *Sample) void {
