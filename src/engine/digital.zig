@@ -1185,10 +1185,11 @@ pub const Sample = struct {
             } else {
                 ma.ma_sound_set_looping(&self.sound, ma.MA_FALSE);
             }
-            // AIL_start_sample resumes from the current position unless the sample has reached the end.
-            if (ma.ma_sound_at_end(&self.sound) != 0) {
-                _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, 0);
-            }
+            // SDK wavefile.cpp AIL_API_start_sample rewinds to the beginning
+            // (buf[tail].pos = 0) before playing -- it does NOT resume from the
+            // current position. Continuing from where a sample was stopped is
+            // AIL_resume_sample's role (Sample.resumePlayback).
+            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, 0);
 
             const res = ma.ma_sound_start(&self.sound);
             log("Sample.start: ma_sound_start returned {d}\n", .{res});
@@ -1206,8 +1207,10 @@ pub const Sample = struct {
         // its status. Only a playing sample transitions to SMP_STOPPED.
         if (self.status() != .playing) return;
         if (self.is_initialized) {
+            // SDK stop_sample does NOT rewind -- it stops in place so that
+            // AIL_resume_sample continues from the stop point. (A subsequent
+            // AIL_start_sample is what rewinds to the beginning.)
             _ = ma.ma_sound_stop(&self.sound);
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
         }
         self.is_done = false;
         self.is_paused = false;
@@ -1903,9 +1906,9 @@ pub const Sample3D = struct {
             } else {
                 ma.ma_sound_set_looping(&self.sound, ma.MA_FALSE);
             }
-            if (ma.ma_sound_at_end(&self.sound) != 0) {
-                _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, 0);
-            }
+            // SDK AIL_API_start_3D_sample rewinds to the beginning before playing
+            // (AIL_resume_3D_sample is what continues from the current position).
+            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, 0);
             _ = ma.ma_sound_start(&self.sound);
         }
     }

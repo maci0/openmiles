@@ -2154,6 +2154,24 @@ test "AIL_set_sample_position rounds to the granularity boundary (SDK)" {
     try testing.expectEqual(@as(u32, 200), dg.AIL_sample_position(s));
 }
 
+test "AIL_start_sample rewinds to the beginning (SDK buf[tail].pos = 0)" {
+    // SDK AIL_API_start_sample resets position to 0 before playing -- it does
+    // not continue from where the sample was (that is AIL_resume_sample's job).
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [4096]u8 align(2) = [_]u8{0} ** 4096;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 2, 44100, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+
+    dg.AIL_set_sample_position(s, 200); // seek partway in
+    try testing.expectEqual(@as(u32, 200), dg.AIL_sample_position(s));
+    dg.AIL_start_sample(s); // must rewind to 0
+    try testing.expectEqual(@as(u32, 0), dg.AIL_sample_position(s));
+}
+
 test "AIL_sample_granularity returns bytes-per-frame (SDK SS_granularity)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
