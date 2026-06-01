@@ -142,6 +142,18 @@ const AILDLSINFO = extern struct {
     GMAvailable: i32 = 0,
     GMBankSize: i32 = 0,
 };
+comptime {
+    // AIL_DLS_get_info writes this struct for the caller, so its 148-byte size and
+    // mss.h field order are ABI. Lock both: a swap of the five S32 fields keeps the
+    // size but corrupts the values a game reads.
+    if (@sizeOf(AILDLSINFO) != 148) @compileError("AILDLSINFO must be 148 bytes (char[128] + 5 S32)");
+    const fields = @typeInfo(AILDLSINFO).@"struct".fields;
+    const order = [_][]const u8{ "Description", "MaxDLSMemory", "CurrentDLSMemory", "LargestSize", "GMAvailable", "GMBankSize" };
+    if (fields.len != order.len) @compileError("AILDLSINFO field count drifted");
+    for (order, 0..) |fname, i| {
+        if (!std.mem.eql(u8, fields[i].name, fname)) @compileError("AILDLSINFO field order drifted at " ++ fname);
+    }
+}
 
 // void AIL_DLS_get_info(HDLSDEVICE dls, AILDLSINFO* info, S32* PercentCPU)
 pub fn AIL_DLS_get_info(driver_opt: ?*MidiDriver, info: ?*anyopaque, percent_cpu: ?*i32) callconv(.winapi) void {
