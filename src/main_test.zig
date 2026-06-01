@@ -1589,6 +1589,29 @@ test "AIL_compress_ADPCM/decompress_ADPCM round-trip through raw-block AILSOUNDI
     try testing.expectEqual(@as(i32, 0), dg.AIL_decompress_ADPCM(&mid, &out_ptr, &out_size));
 }
 
+test "buildAdpcmWav carries the IMA step index across block headers (MSS parity)" {
+    // MSS (mssadpcm.cpp) carries the step index across blocks; each block header
+    // stores the value carried in from the prior block, not a fresh 0. With a
+    // loud, fast-adapting signal the step index saturates within the first block,
+    // so the SECOND block's header step-index byte must be non-zero -- the old
+    // per-block reset wrote 0 there, diverging from MSS from block 2 on.
+    const allocator = testing.allocator;
+    // mono @ 11025 Hz -> block_size 256, spb 505; >505 samples spans 2 blocks.
+    var pcm: [1100]i16 = undefined;
+    for (&pcm, 0..) |*s, i| s.* = if (i % 2 == 0) @as(i16, 12000) else @as(i16, -12000);
+    const wav = try openmiles.buildAdpcmWav(allocator, &pcm, pcm.len, 1, 11025);
+    defer allocator.free(wav);
+
+    // Header is 60 bytes (RIFF/fmt(20)/fact/data); block_size 256. The second
+    // block's header begins at 60 + 256; its byte +2 is the carried step index.
+    const block_size: usize = 256;
+    const second_block_stepidx = wav[60 + block_size + 2];
+    try testing.expect(second_block_stepidx != 0);
+    try testing.expect(second_block_stepidx <= 88); // valid IMA step index range
+    // First block always starts at step index 0 (MSS inits lstepi=0 once).
+    try testing.expectEqual(@as(u8, 0), wav[60 + 2]);
+}
+
 test "AIL_compress_ADPCM: SDK block alignment, 8-bit input, and validation guards" {
     // Block alignment scales with rate: 256<<(ch/2), ×(rate+5000)/11025 above 11025.
     const cases = [_]struct { ch: i32, rate: u32, blk: u32 }{

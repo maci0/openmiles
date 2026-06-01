@@ -185,6 +185,15 @@ pub fn buildAdpcmWav(alloc: std.mem.Allocator, pcm: [*]const i16, total_per_ch: 
     o += 4;
     std.mem.writeInt(u32, buf[o..][0..4], data_size, .little);
     o += 4;
+    // MSS (mssadpcm.cpp) initializes the IMA step index to 0 once and CARRIES it
+    // across every block (convert_to_adpcm reads/writes *plstepi/*prstepi), while
+    // the predictor is reset to each block's first sample. Each block header thus
+    // stores the step index carried in from the previous block, not a fresh 0.
+    // Carrying it here makes our encoded image byte-identical to MSS for multi-
+    // block audio (the per-block reset would diverge from block 2 on).
+    var sidx: i32 = 0; // mono step index, carried across blocks
+    var sl: i32 = 0; // stereo left step index, carried across blocks
+    var sr: i32 = 0; // stereo right step index, carried across blocks
     for (0..num_blocks) |blk| {
         const blk_start = blk * spb;
         const blk_out = buf[o .. o + block_size];
@@ -192,9 +201,8 @@ pub fn buildAdpcmWav(alloc: std.mem.Allocator, pcm: [*]const i16, total_per_ch: 
         if (channels == 1) {
             const init_s: i16 = if (blk_start < total_per_ch) pcm[blk_start] else 0;
             var pred: i32 = init_s;
-            var sidx: i32 = 0;
             std.mem.writeInt(i16, blk_out[0..2][0..2], init_s, .little);
-            blk_out[2] = 0;
+            blk_out[2] = @intCast(sidx); // step index carried from prior block
             blk_out[3] = 0;
             var si: usize = 1;
             var ob: usize = 4;
@@ -209,14 +217,12 @@ pub fn buildAdpcmWav(alloc: std.mem.Allocator, pcm: [*]const i16, total_per_ch: 
             const il: i16 = if (blk_start < total_per_ch) pcm[blk_start * 2] else 0;
             const ir: i16 = if (blk_start < total_per_ch) pcm[blk_start * 2 + 1] else 0;
             var pl: i32 = il;
-            var sl: i32 = 0;
             var pr: i32 = ir;
-            var sr: i32 = 0;
             std.mem.writeInt(i16, blk_out[0..2][0..2], il, .little);
-            blk_out[2] = 0;
+            blk_out[2] = @intCast(sl); // left step index carried from prior block
             blk_out[3] = 0;
             std.mem.writeInt(i16, blk_out[4..6][0..2], ir, .little);
-            blk_out[6] = 0;
+            blk_out[6] = @intCast(sr); // right step index carried from prior block
             blk_out[7] = 0;
             var grp: usize = 0;
             var ob: usize = 8;
