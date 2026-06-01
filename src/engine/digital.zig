@@ -1937,11 +1937,19 @@ pub const Sample3D = struct {
     }
 
     pub fn end(self: *Sample3D) void {
+        // SDK AIL_API_end_sample (the 3D handle is an HSAMPLE): stop, mark
+        // SMP_DONE, and fire the EOS callback once -- only if it was not already
+        // done. No rewind (a later AIL_start_3D_sample is what rewinds).
+        const already_done = self.status() == .done;
         if (self.is_initialized) {
             _ = ma.ma_sound_stop(&self.sound);
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, 0);
         }
         self.is_done = true;
+        if (already_done) return;
+        if (self.eos_callback != 0) {
+            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eos_callback);
+            cb(@ptrCast(self));
+        }
     }
 
     pub fn pause(self: *Sample3D) void {

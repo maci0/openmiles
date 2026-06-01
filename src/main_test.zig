@@ -1191,6 +1191,32 @@ fn testEosCallback(s: ?*anyopaque) callconv(.winapi) void {
     eos_cb_count += 1;
 }
 
+test "AIL_end_3D_sample fires the 3D EOS callback once (live->DONE only)" {
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample3D.init(driver);
+    defer s.deinit();
+    const pcm = [_]u8{0} ** 4410;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 44100, 8);
+    defer testing.allocator.free(wav);
+    try s.loadFromMemory(wav, true);
+    const sp: *anyopaque = @ptrCast(s);
+
+    eos_cb_count = 0;
+    _ = api_3d.AIL_register_3D_EOS_callback(sp, @ptrCast(@constCast(&testEosCallback)));
+
+    // Fresh (already SMP_DONE) -> end fires nothing.
+    api_3d.AIL_end_3D_sample(sp);
+    try testing.expectEqual(@as(u32, 0), eos_cb_count);
+    // Start -> playing, end -> one firing.
+    api_3d.AIL_start_3D_sample(sp);
+    api_3d.AIL_end_3D_sample(sp);
+    try testing.expectEqual(@as(u32, 1), eos_cb_count);
+    // Already done -> no re-fire.
+    api_3d.AIL_end_3D_sample(sp);
+    try testing.expectEqual(@as(u32, 1), eos_cb_count);
+}
+
 test "AIL_end_sample fires the EOS callback once (only on the live->DONE transition)" {
     // SDK wavefile.cpp AIL_API_end_sample sets SMP_DONE and fires EOB+EOS only if
     // the sample was not already done -- so ending a never-played (already SMP_DONE)
