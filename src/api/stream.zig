@@ -183,9 +183,12 @@ pub fn AIL_stream_ms_position(s_opt: ?*Sample, total_ms: ?*i32, current_ms: ?*i3
     if (total_ms) |t| t.* = pos.total;
     if (current_ms) |c| c.* = pos.current;
 }
-pub fn AIL_stream_position(s_opt: ?*Sample) callconv(.winapi) u32 {
-    const s = s_opt orelse return 0;
-    return s.getPosition();
+pub fn AIL_stream_position(s_opt: ?*Sample) callconv(.winapi) i32 {
+    // SDK mssstrm.cpp AIL_API_stream_position returns S32 with -1 on a null
+    // stream (for a preloaded stream the position is AIL_sample_position(samp)).
+    const s = s_opt orelse return -1;
+    const pos = s.getPosition();
+    return if (pos > std.math.maxInt(i32)) std.math.maxInt(i32) else @intCast(pos);
 }
 pub fn AIL_set_stream_position(s_opt: ?*Sample, pos: u32) callconv(.winapi) void {
     const s = s_opt orelse return;

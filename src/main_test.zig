@@ -1209,6 +1209,11 @@ test "AIL_stream_loop_count: -1 on null, remaining count otherwise (SDK preload 
     try testing.expectEqual(@as(i32, 3), api_stream.AIL_stream_loop_count(s));
     // Consistent with the sample-handle view of the same loop count.
     try testing.expectEqual(@as(i32, 3), dg.AIL_sample_loop_count(s));
+
+    // AIL_stream_position returns S32 -1 on a null stream (mssstrm.cpp), and the
+    // byte position otherwise.
+    try testing.expectEqual(@as(i32, -1), api_stream.AIL_stream_position(null));
+    try testing.expectEqual(@as(i32, 0), api_stream.AIL_stream_position(s)); // fresh: pos 0
 }
 
 test "AIL_stream_status: paused/never-started -> SMP_STOPPED, playing -> PLAYING (SDK)" {
