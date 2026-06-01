@@ -3921,31 +3921,53 @@ test "v8 WAV cue markers parse from cue/labl chunks" {
     try h.s("data");
     try h.u32le(0);
     try h.s("cue ");
-    try h.u32le(4 + 24);
-    try h.u32le(1); // count
+    try h.u32le(4 + 48); // count field + two 24-byte cue points
+    try h.u32le(2); // count
+    // cue point 0
     try h.u32le(1); // id
     try h.u32le(100); // position
     try h.s("data");
     try h.u32le(0);
     try h.u32le(0);
     try h.u32le(100); // sampleOffset
+    // cue point 1 (exercises the n*24 stride)
+    try h.u32le(2); // id
+    try h.u32le(500); // position
+    try h.s("data");
+    try h.u32le(0);
+    try h.u32le(0);
+    try h.u32le(500); // sampleOffset
     try h.s("LIST");
-    try h.u32le(4 + 8 + 4 + 6);
+    try h.u32le(4 + (8 + 10) + (8 + 8)); // adtl + labl("start") + labl("end")
     try h.s("adtl");
     try h.s("labl");
-    try h.u32le(4 + 6);
+    try h.u32le(4 + 6); // id + "start\0"
     try h.u32le(1); // cue id
     try h.s("start\x00");
+    try h.s("labl");
+    try h.u32le(4 + 4); // id + "end\0"
+    try h.u32le(2); // cue id
+    try h.s("end\x00");
     std.mem.writeInt(u32, buf.items[riff_size_pos..][0..4], @intCast(buf.items.len - 8), .little);
 
     const img: *const anyopaque = @ptrCast(buf.items.ptr);
-    try testing.expectEqual(@as(i32, 1), api_v8b.AIL_WAV_marker_count(img));
+    try testing.expectEqual(@as(i32, 2), api_v8b.AIL_WAV_marker_count(img));
     var name: ?[*:0]const u8 = null;
     try testing.expectEqual(@as(i32, 100), api_v8b.AIL_WAV_marker_by_index(img, 0, &name));
     try testing.expect(name != null);
     try testing.expectEqualStrings("start", std.mem.span(name.?));
+    // Second marker: the 24-byte stride must land on cue point 1 and its label.
+    try testing.expectEqual(@as(i32, 500), api_v8b.AIL_WAV_marker_by_index(img, 1, &name));
+    try testing.expectEqualStrings("end", std.mem.span(name.?));
+    // Out-of-range and negative indices return -1 (SDK guard).
+    try testing.expectEqual(@as(i32, -1), api_v8b.AIL_WAV_marker_by_index(img, 2, &name));
+    try testing.expectEqual(@as(i32, -1), api_v8b.AIL_WAV_marker_by_index(img, -1, &name));
     try testing.expectEqual(@as(i32, 100), api_v8b.AIL_WAV_marker_by_name(img, "start"));
+    try testing.expectEqual(@as(i32, 500), api_v8b.AIL_WAV_marker_by_name(img, "end"));
     try testing.expectEqual(@as(i32, -1), api_v8b.AIL_WAV_marker_by_name(img, "nope"));
+    // Null-image guards.
+    try testing.expectEqual(@as(i32, 0), api_v8b.AIL_WAV_marker_count(null));
+    try testing.expectEqual(@as(i32, -1), api_v8b.AIL_WAV_marker_by_name(null, "start"));
 }
 
 test "v9 bus limiter: soft-clip math + attach/detach lifecycle" {
