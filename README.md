@@ -140,6 +140,12 @@ not yet exported). Every one of the ~686 distinct exported functions is covered
 by the fuzz harness and by unit or C-integration tests. See
 [docs/API_STATUS.md](docs/API_STATUS.md) for the per-function implementation matrix.
 
+Beyond export-table parity, behaviour is cross-checked against the MSS SDK
+source: getter round-trips, null/error return sentinels, init defaults, and the
+sample/stream lifecycle state machines are verified function-by-function against
+`wavefile.cpp`/`m3d.cpp`/`mssstrm.cpp` (see the *Behavioural fidelity audit*
+section of [docs/API_STATUS.md](docs/API_STATUS.md)).
+
 | Category | Status |
 |----------|--------|
 | Core System | Mostly implemented (some Windows/hardware-specific APIs are no-ops) |

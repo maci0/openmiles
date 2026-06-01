@@ -106,7 +106,7 @@ has known limitations, or is a compatibility stub.
 | `AIL_register_SOB_callback` | 🟢 Implemented | |
 | `AIL_sample_buffer_info` | 🟢 Implemented | Returns pos/len of both stream buffers (matches MSS `pos0/len0/pos1/len1` signature) |
 | `AIL_sample_buffer_ready` | 🟢 Implemented | Returns the index (0/1) of a free stream buffer slot, or -1 if both are full (MSS semantics) |
-| `AIL_sample_granularity` | 🟢 Implemented | |
+| `AIL_sample_granularity` | 🟢 Implemented | Source-format frame size (mono-8=1, mono-16/stereo-8=2, stereo-16=4) parsed from the WAV header, or the ADPCM block size when set — matches the SDK `SS_granularity`, stable across reverb/level changes |
 | `AIL_sample_reverb` | 🟢 Implemented | Returns current room_type, level, reflect_time |
 | `AIL_sample_user_data` | 🟢 Implemented | |
 | `AIL_set_sample_adpcm_block_size` | 🟢 Implemented | Stores block size hint on Sample (miniaudio handles actual decoding) |
@@ -116,30 +116,30 @@ has known limitations, or is a compatibility stub.
 | `AIL_set_sample_user_data` | 🟢 Implemented | |
 | `AIL_allocate_sample_handle` | 🟢 Implemented | |
 | `AIL_release_sample_handle` | 🟢 Implemented | |
-| `AIL_init_sample` | 🟢 Implemented | Resets sample properties and engine state |
+| `AIL_init_sample` | 🟢 Implemented | Full SDK reset: volume/pan/loop/3D state plus reverb levels (dry 1.0 / wet 0.0), low-pass (open), per-sample volume levels (1.0), obstruction/occlusion/exclusion (0), and ADPCM block size — matching `wavefile.cpp AIL_init_sample` so a reused handle carries no stale state |
 | `AIL_set_sample_file` | 🟢 Implemented | Memory-based decoding via miniaudio |
 | `AIL_set_named_sample_file` | 🟢 Implemented | Same as `set_sample_file`; ignores file type string |
 | `AIL_set_sample_address` | 🟢 Implemented | Loads from memory via miniaudio decoder |
 | `AIL_set_sample_type` | 🟢 Implemented | Configures raw PCM format before playback |
-| `AIL_start_sample` | 🟢 Implemented | |
-| `AIL_stop_sample` | 🟢 Implemented | Stops and rewinds to start |
+| `AIL_start_sample` | 🟢 Implemented | Rewinds to the beginning before playing (SDK `buf[tail].pos = 0`), not a resume-in-place |
+| `AIL_stop_sample` | 🟢 Implemented | No-op unless currently SMP_PLAYING; stops in place (no rewind) → SMP_STOPPED, so `AIL_resume_sample` continues from the stop point |
 | `AIL_pause_sample` | 🟢 Implemented | |
-| `AIL_resume_sample` | 🟢 Implemented | |
-| `AIL_end_sample` | 🟢 Implemented | Transitions to SMP_DONE (unlike stop which goes to SMP_STOPPED) |
+| `AIL_resume_sample` | 🟢 Implemented | Continues from the current position (works from SMP_STOPPED/SMP_DONE) |
+| `AIL_end_sample` | 🟢 Implemented | Transitions to SMP_DONE (vs SMP_STOPPED for stop) and fires the EOB+EOS callbacks once, only on the live→DONE transition |
 | `AIL_sample_status` | 🟢 Implemented | Returns SMP_DONE/SMP_STOPPED/SMP_PLAYING |
 | `AIL_sample_volume` | 🟢 Implemented | Returns current volume as 0-127 |
 | `AIL_sample_pan` | 🟢 Implemented | Returns current pan as 0-127 |
-| `AIL_sample_playback_rate` | 🟢 Implemented | Returns target rate or default 44100 |
+| `AIL_sample_playback_rate` | 🟢 Implemented | Returns the set rate, else the loaded file's native rate, else the 11025 init default (per `original_playback_rate`); 0 on null |
 | `AIL_set_sample_volume` | 🟢 Implemented | Cubic perceptual curve (0-127 → ~60dB range) matching original MSS attenuation |
 | `AIL_set_sample_pan` | 🟢 Implemented | |
-| `AIL_set_sample_volume_pan` | 🟢 Implemented | Sets both volume and pan |
+| `AIL_set_sample_volume_pan` | 🟢 Implemented | Sets both volume and pan; stores them verbatim for the F32 getter (no clamp), so `AIL_sample_volume_pan` round-trips out-of-range values like the SDK |
 | `AIL_set_sample_playback_rate` | 🟢 Implemented | Adjusts pitch relative to native sample rate |
 | `AIL_set_sample_loop_count` | 🟢 Implemented | 0 = infinite, 1 = once, N = plays N times; handled via EOS callback chaining |
 | `AIL_sample_ms_position` | 🟢 Implemented | Returns total and current position in ms |
 | `AIL_set_sample_ms_position` | 🟢 Implemented | Seeks to ms position |
 | `AIL_sample_position` | 🟢 Implemented | Returns position in bytes using actual format info; falls back to 16-bit stereo |
 | `AIL_set_sample_position` | 🟢 Implemented | Seeks to byte position using actual format info; falls back to 16-bit stereo |
-| `AIL_sample_loop_count` | 🟢 Implemented | Returns current loop count |
+| `AIL_sample_loop_count` | 🟢 Implemented | Returns the remaining loop count (SDK `S->loop_count`); -1 on null |
 | `AIL_active_sample_count` | 🟢 Implemented | Returns number of currently playing samples |
 | `AIL_register_EOS_callback` | 🟢 Implemented | Stores callback; fires from miniaudio end-of-sound event |
 
@@ -148,14 +148,14 @@ has known limitations, or is a compatibility stub.
 | Function | Status | Notes |
 |----------|--------|-------|
 | `AIL_register_EOF_callback` | 🟢 Implemented | |
-| `AIL_service_stream` | ⚪ Stub | Returns 1; miniaudio handles servicing internally |
+| `AIL_service_stream` | 🟢 Implemented | Streams are fully preloaded so there is no IO to service; returns 0 bytes on a live stream, -1 on a null/finished stream (SDK sentinel) |
 | `AIL_set_stream_loop_block` | 🟢 Implemented | |
 | `AIL_set_stream_position` | 🟢 Implemented | |
 | `AIL_set_stream_processor` | 🟡 Partial | Callback stored per stage (input/output) for round-tripping; not invoked |
 | `AIL_set_stream_reverb` | 🟢 Implemented | Same ma_delay_node reverb as sample reverb |
 | `AIL_set_stream_user_data` | 🟢 Implemented | |
 | `AIL_stream_info` | 🟢 Implemented | |
-| `AIL_stream_position` | 🟢 Implemented | |
+| `AIL_stream_position` | 🟢 Implemented | S32 byte position; -1 on null (SDK) |
 | `AIL_stream_reverb` | 🟢 Implemented | |
 | `AIL_stream_user_data` | 🟢 Implemented | |
 | `AIL_open_stream` | 🟢 Implemented | File-based streaming via miniaudio; returns a Sample internally |
@@ -167,11 +167,11 @@ has known limitations, or is a compatibility stub.
 | `AIL_set_stream_playback_rate` | 🟢 Implemented | |
 | `AIL_set_stream_loop_count` | 🟢 Implemented | Same mechanism as sample loop count |
 | `AIL_set_stream_ms_position` | 🟢 Implemented | |
-| `AIL_stream_status` | 🟢 Implemented | |
+| `AIL_stream_status` | 🟢 Implemented | SDK stream mapping: paused or not-yet-started → SMP_STOPPED, playing → SMP_PLAYING, finished → SMP_DONE, -1 on null (distinct from the 2D `AIL_sample_status` view) |
 | `AIL_stream_volume` | 🟢 Implemented | |
 | `AIL_stream_pan` | 🟢 Implemented | |
 | `AIL_stream_playback_rate` | 🟢 Implemented | |
-| `AIL_stream_loop_count` | 🟢 Implemented | |
+| `AIL_stream_loop_count` | 🟢 Implemented | Remaining loop count (preload → `AIL_sample_loop_count`); -1 on null |
 | `AIL_stream_ms_position` | 🟢 Implemented | Returns total and current position in ms |
 | `AIL_register_stream_callback` | 🟢 Implemented | Stores callback; fires at end-of-stream via EOS mechanism |
 | `AIL_auto_service_stream` | ⚪ Stub | No-op; miniaudio handles servicing internally |
@@ -277,7 +277,7 @@ has known limitations, or is a compatibility stub.
 | `AIL_start_3D_sample` | 🟢 Implemented | Starts 3D sample playback |
 | `AIL_stop_3D_sample` | 🟢 Implemented | Stops 3D sample |
 | `AIL_resume_3D_sample` | 🟢 Implemented | Resumes 3D sample |
-| `AIL_end_3D_sample` | 🟢 Implemented | Transitions to SMP_DONE (unlike stop which goes to SMP_STOPPED) |
+| `AIL_end_3D_sample` | 🟢 Implemented | Transitions to SMP_DONE (vs SMP_STOPPED for stop) and fires the registered 3D EOS callback once, only on the live→DONE transition |
 | `AIL_3D_sample_status` | 🟢 Implemented | Returns SMP_DONE/SMP_STOPPED/SMP_PLAYING |
 | `AIL_3D_sample_volume` | 🟢 Implemented | |
 | `AIL_set_3D_sample_volume` | 🟢 Implemented | |
@@ -293,20 +293,21 @@ has known limitations, or is a compatibility stub.
 | `AIL_register_3D_EOS_callback` | 🟢 Implemented | |
 | `AIL_active_3D_sample_count` | 🟢 Implemented | |
 | `AIL_3D_user_data` / `AIL_set_3D_user_data` | 🟢 Implemented | |
-| `AIL_3D_sample_distances` | 🟢 Implemented | Returns current min/max distances |
-| `AIL_set_3D_sample_cone` / `AIL_3D_sample_cone` | 🟢 Implemented | Uses miniaudio sound cones |
+| `AIL_3D_sample_distances` / `AIL_set_sample_3D_distances` | 🟢 Implemented | min/max + auto-wet-atten kept in the S3D struct (defaults max 200 / min 1), so they round-trip before init; setter swaps min>max like the SDK |
+| `AIL_set_3D_sample_cone` / `AIL_3D_sample_cone` | 🟢 Implemented | Uses miniaudio sound cones; getter round-trips the source degrees + verbatim outer-volume (defaults 360/360/1.0), valid before init |
 | `AIL_set_3D_sample_effects_level` / `AIL_3D_sample_effects_level` | 🟢 Implemented | |
-| `AIL_set_3D_sample_obstruction` / `AIL_3D_sample_obstruction` | 🟢 Implemented | |
-| `AIL_set_3D_sample_occlusion` / `AIL_3D_sample_occlusion` | 🟢 Implemented | |
+| `AIL_set_3D_sample_obstruction` / `AIL_3D_sample_obstruction` | 🟢 Implemented | Stored verbatim (no clamp), per SDK; clamping only at the mix use-site |
+| `AIL_set_3D_sample_occlusion` / `AIL_3D_sample_occlusion` | 🟢 Implemented | Stored verbatim (no clamp), per SDK; clamping only at the mix use-site |
 | `AIL_3D_distance_factor` / `AIL_set_3D_distance_factor` | 🟢 Implemented | |
 | `AIL_3D_doppler_factor` / `AIL_set_3D_doppler_factor` | 🟢 Implemented | Maps to miniaudio engine doppler |
 | `AIL_3D_rolloff_factor` / `AIL_set_3D_rolloff_factor` | 🟢 Implemented | Maps to miniaudio engine rolloff |
-| `AIL_3D_room_type` / `AIL_set_3D_room_type` | 🟢 Implemented | |
+| `AIL_3D_room_type` / `AIL_set_3D_room_type` | 🟢 Implemented | EAX-provider room type (stored). The HDIGDRIVER `AIL_set_room_type` / `AIL_set_digital_master_room_type` additionally apply the 26-entry EAX `rooms[]` preset (dry 1.0 / wet=level / time / predelay / damping) to the master reverb |
 | `AIL_3D_speaker_type` / `AIL_set_3D_speaker_type` | 🟢 Implemented | |
 | `AIL_open_3D_provider` / `AIL_close_3D_provider` | 🟢 Implemented | Returns driver handle as 3D provider |
 | `AIL_open_3D_listener` / `AIL_close_3D_listener` | 🟢 Implemented | Returns provider as listener handle |
 | `AIL_open_3D_object` / `AIL_close_3D_object` | 🟢 Implemented | Allocates/frees Sample3D |
-| `AIL_3D_orientation` / `AIL_3D_position` / `AIL_3D_velocity` | 🟢 Implemented | Returns listener orientation/position/velocity |
+| `AIL_3D_orientation` / `AIL_3D_position` / `AIL_3D_velocity` | 🟢 Implemented | Returns listener/object orientation/position/velocity from the stored MSS-space S3D struct (round-trips before init; Z-handedness flip confined to the miniaudio write path) |
+| `AIL_update_sample_3D_position` / `AIL_update_listener_3D_position` | 🟢 Implemented | Advances position by velocity × dt_ms (velocity is per-millisecond, per `m3d.cpp`); early-outs below MSS_EPSILON |
 
 ## Filter API
 *(Appeared in MSS v6+)*
@@ -332,7 +333,7 @@ has known limitations, or is a compatibility stub.
 |----------|--------|-------|
 | `AIL_get_timer_highest_delay` | 🟢 Implemented | |
 | `AIL_release_all_timers` | 🟢 Implemented | |
-| `AIL_set_timer_divisor` | 🟢 Implemented | |
+| `AIL_set_timer_divisor` | 🟢 Implemented | Legacy 8254 PIT rate: period = divisor / 1193180 s (divisor 0 = 65536) |
 | `AIL_set_timer_user` | 🟢 Implemented | |
 | `AIL_register_timer` | 🟢 Implemented | Creates timer with callback thread |
 | `AIL_set_timer_frequency` | 🟢 Implemented | Sets timer period from frequency |
@@ -469,7 +470,7 @@ Verified end-to-end with **Europa 1400 Gold: The Guild** (TL edition) under Wine
   `LoadLibraryA`/`GetProcAddress`/`FreeLibrary` loader on Windows, delegating to
   `std.DynLib` on other targets. Plugin/addon loading is functional again.
 - Windows (`x86-windows` ReleaseSmall) and native `libmss32.so` both build clean.
-  The native test suite runs 216 unit tests plus a multi-seed fuzz harness that
+  The native test suite runs 300+ unit tests plus a multi-seed fuzz harness that
   invokes every exported function with adversarial inputs; all pass. Run native
   tests with `-Dtarget=x86_64-linux-musl -Dcpu=baseline` to avoid a
   host-toolchain linker error (gcc `crt1.o` `.sframe` relocations the Zig
@@ -494,3 +495,37 @@ Per-version arity differences are reproduced exactly (e.g. `AIL_init_sample`
 `@4→@12→@8`, the v4/v5 5-arg `AIL_3D_sample_distances@20`, `AIL_input_open@12`,
 the v7-only `@16` DSP-stage API, `MIX_RIB_MAIN` `@8`/`@20`, and the v8-vs-v9
 `Miles*` event-API arities) via per-version export aliases.
+
+## Behavioural fidelity audit (2026-06)
+A systematic pass cross-checking each implementation against the MSS 9.x SDK
+source (`wavefile.cpp`, `m3d.cpp`, `genericdig.cpp`, `mssstrm.cpp`,
+`genericmss.cpp`) corrected a batch of decoration-invisible divergences — bugs
+the export `@N` check cannot see (return values, defaults, state transitions,
+field reads). Each fix landed with a regression test; all 7 versions stay at
+0 MISSING / 0 DECORATION.
+
+- **Verbatim-store getters** — `set_sample_volume_pan`, the 3D
+  obstruction/occlusion/exclusion, the F32 master volume level, and the sample
+  reverb levels now store their inputs un-clamped so the F32 getters round-trip
+  out-of-range values (clamping moved to the mix use-site), matching the SDK.
+- **Struct-backed S3D getters** — `AIL_sample_3D_position`/`velocity`/`cone` and
+  `AIL_sample_3D_distances` read the stored MSS-space S3D fields instead of the
+  live miniaudio node, so they round-trip before the voice is initialized and
+  stay stable across reverb/level rebuilds; the Z-handedness flip is confined to
+  the miniaudio write path.
+- **Sample lifecycle** — `start` rewinds to 0; `stop` is a no-op unless playing
+  and stops in place (no rewind); `resume` continues from the stop point; `end`
+  fires EOB/EOS once on the live→DONE transition. Same model for the 3D handles.
+- **Stream status/getters** — `stream_status` uses the SDK stream state mapping
+  (paused/idle → SMP_STOPPED) and returns -1 on null; `stream_position`,
+  `stream_loop_count`, `service_stream`, `sample_loop_count`, and
+  `sample_buffer_available` return the SDK -1/sentinel on null.
+- **Defaults & re-init** — master reverb wet defaults to the neutral 1.0;
+  `set_room_type` applies the 26-entry EAX `rooms[]` preset to the master reverb;
+  3D cone/distance defaults match `AIL_init_sample` (360/360/1.0, 200/1); and
+  `AIL_init_sample` now fully resets reverb/low-pass/level/occlusion/ADPCM state
+  so a reused handle carries no stale values.
+- **Conversions** — `update_(sample|listener)_3D_position` advance by
+  velocity × dt_ms (per-millisecond velocity, not dt/1000); `set_timer_divisor`
+  implements the legacy 8254 PIT rate; `sample_granularity` reports the source
+  sample format (`SS_granularity`), not the decoder output.
