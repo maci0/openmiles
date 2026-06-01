@@ -261,7 +261,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_v9.AIL_get_time();
     _ = api_timer.AIL_get_timer_highest_delay();
     api_v8.AIL_indent(ri);
-    _ = api_v7.AIL_inspect_MP3(null, null, rszi);
+    api_v7.AIL_inspect_MP3(null, null, rszi);
     _ = api_digital.AIL_last_error();
     _ = api_dls.AIL_list_DLS(null, &pp, &uo, ri, rstr);
     _ = api_midi.AIL_list_MIDI(null, rsz, &pp, &uo, ri);
@@ -329,7 +329,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_legacy.AIL_save_sample_attributes(hs, scp);
     api_quick.AIL_quick_stop(hs);
     _ = api_quick.AIL_quick_type(hs);
-    _ = api_redbook.AIL_redbook_eject(hr);
+    api_redbook.AIL_redbook_eject(hr);
     _ = api_redbook.AIL_redbook_id(hr);
     _ = api_redbook.AIL_redbook_open(ru);
     _ = api_redbook.AIL_redbook_open_drive(ri);
@@ -337,7 +337,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_redbook.AIL_redbook_play(hr, ru, ru);
     _ = api_redbook.AIL_redbook_position(hr);
     _ = api_redbook.AIL_redbook_resume(hr);
-    _ = api_redbook.AIL_redbook_retract(hr);
+    api_redbook.AIL_redbook_retract(hr);
     api_redbook.AIL_redbook_set_volume(hr, ri);
     _ = api_v7.AIL_redbook_set_volume_level(hr, rf);
     _ = api_redbook.AIL_redbook_status(hr);

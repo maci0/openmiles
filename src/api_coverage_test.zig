@@ -344,8 +344,8 @@ test "coverage: redbook.zig exports" {
     _ = rb.AIL_redbook_resume(h);
     _ = rb.AIL_redbook_status(h);
     _ = rb.AIL_redbook_tracks(h);
-    _ = rb.AIL_redbook_eject(h);
-    _ = rb.AIL_redbook_retract(h);
+    rb.AIL_redbook_eject(h);
+    rb.AIL_redbook_retract(h);
     _ = rb.AIL_redbook_id(h);
     _ = rb.AIL_redbook_position(h);
     _ = rb.AIL_redbook_track(h);
@@ -683,7 +683,7 @@ test "coverage: v7.zig unified exports" {
     v7.AIL_set_output_filter_driver_preference(null, "x", sc());
     _ = v7.AIL_enumerate_output_filter_driver_attributes(null, &next, sc());
     _ = v7.AIL_enumerate_output_filter_sample_attributes(null, &next, sc());
-    _ = v7.AIL_inspect_MP3(sc(), sc(), 0);
+    v7.AIL_inspect_MP3(sc(), sc(), 0);
     _ = v7.AIL_enumerate_MP3_frames(sc());
     _ = v7.RIB_load_static_provider_library(null, "x");
     _ = v7.RIB_MAIN(null, "x");

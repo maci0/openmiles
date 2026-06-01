@@ -45,14 +45,13 @@ pub fn AIL_redbook_tracks(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
     const rb = hb orelse return 0;
     return rb.trackCount();
 }
-pub fn AIL_redbook_eject(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
-    const rb = hb orelse return 0;
+// SDK (mss.h): both declared `void AILCALL` -- no return value.
+pub fn AIL_redbook_eject(hb: ?*openmiles.Redbook) callconv(.winapi) void {
+    const rb = hb orelse return;
     rb.stop();
-    return 1;
 }
-pub fn AIL_redbook_retract(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
+pub fn AIL_redbook_retract(hb: ?*openmiles.Redbook) callconv(.winapi) void {
     _ = hb;
-    return 1;
 }
 pub fn AIL_redbook_id(hb: ?*openmiles.Redbook) callconv(.winapi) [*:0]const u8 {
     _ = hb;

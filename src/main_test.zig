@@ -4182,7 +4182,7 @@ test "MP3 inspector parses real Layer III frames" {
         img[base + 3] = 0x00;
     }
     var es: openmiles.mp3.MP3_INFO = undefined;
-    try testing.expectEqual(@as(i32, 1), api_v7b.AIL_inspect_MP3(&es, &img, img.len));
+    api_v7b.AIL_inspect_MP3(&es, &img, img.len); // void in the SDK; success is shown by enumerate below
     // First frame.
     try testing.expectEqual(@as(i32, 1), api_v7b.AIL_enumerate_MP3_frames(&es));
     try testing.expectEqual(@as(i32, 44100), es.sample_rate);
@@ -4228,7 +4228,7 @@ test "MP3 inspector: mono channel mode and 192 kbps bitrate index" {
         img[base + 3] = 0xC0;
     }
     var es: openmiles.mp3.MP3_INFO = undefined;
-    try testing.expectEqual(@as(i32, 1), api_v7b.AIL_inspect_MP3(&es, &img, img.len));
+    api_v7b.AIL_inspect_MP3(&es, &img, img.len); // void in the SDK; success is shown by enumerate below
     try testing.expectEqual(@as(i32, 1), api_v7b.AIL_enumerate_MP3_frames(&es));
     try testing.expectEqual(@as(i32, 44100), es.sample_rate);
     try testing.expectEqual(@as(i32, 192000), es.bit_rate);
@@ -4251,7 +4251,7 @@ test "MP3 inspector: MPEG-2 Layer III is 576 samples/frame at the lower rates" {
         img[base + 3] = 0x00;
     }
     var es: openmiles.mp3.MP3_INFO = undefined;
-    try testing.expectEqual(@as(i32, 1), api_v7b.AIL_inspect_MP3(&es, &img, img.len));
+    api_v7b.AIL_inspect_MP3(&es, &img, img.len); // void in the SDK; success is shown by enumerate below
     try testing.expectEqual(@as(i32, 1), api_v7b.AIL_enumerate_MP3_frames(&es));
     try testing.expectEqual(@as(i32, 22050), es.sample_rate);
     try testing.expectEqual(@as(i32, 64000), es.bit_rate);

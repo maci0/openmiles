@@ -724,18 +724,20 @@ pub fn AIL_enumerate_output_filter_sample_attributes(lib: ?*anyopaque, next: *?*
     next.* = null;
     return 0;
 }
-pub fn AIL_inspect_MP3(inspection_state: ?*anyopaque, mp3_image: ?*anyopaque, image_size: i32) callconv(.winapi) i32 {
-    const es: *openmiles.mp3.MP3_INFO = @ptrCast(@alignCast(inspection_state orelse return 0));
+// SDK (mssutil.cpp / mss.h): `void AIL_inspect_MP3(...)` -- no return. It just
+// populates the inspection state; AIL_enumerate_MP3_frames reports per-frame
+// validity. An invalid image leaves the state zeroed.
+pub fn AIL_inspect_MP3(inspection_state: ?*anyopaque, mp3_image: ?*anyopaque, image_size: i32) callconv(.winapi) void {
+    const es: *openmiles.mp3.MP3_INFO = @ptrCast(@alignCast(inspection_state orelse return));
     const img: [*]u8 = @ptrCast(mp3_image orelse {
         es.* = .{};
-        return 0;
+        return;
     });
     if (image_size <= 0) {
         es.* = .{};
-        return 0;
+        return;
     }
     openmiles.mp3.inspect(es, img, image_size);
-    return 1;
 }
 pub fn AIL_enumerate_MP3_frames(inspection_state: ?*anyopaque) callconv(.winapi) i32 {
     const es: *openmiles.mp3.MP3_INFO = @ptrCast(@alignCast(inspection_state orelse return 0));
