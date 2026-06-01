@@ -4069,6 +4069,30 @@ test "MP3 inspector parses real Layer III frames" {
     try testing.expectEqual(@as(i32, 0), api_v7b.AIL_enumerate_MP3_frames(&es));
 }
 
+test "MP3 inspector: mono channel mode and 192 kbps bitrate index" {
+    // MPEG-1 Layer III, 192 kbps, 44100 Hz, MONO. Header FF FB B0 C0:
+    //   byte2 = 1011(idx 11 -> 192k) 00(44100) 0(pad) 0  = 0xB0
+    //   byte3 = 11(mono) ...                              = 0xC0
+    // Exercises a different bitrate-table index and the mono channel mode than
+    // the stereo/128k case above. frame size = 144*192000/44100 = 626; two frames
+    // so the first is confirmed by the second's sync.
+    const frame_size = 626;
+    var img: [frame_size * 2]u8 = [_]u8{0} ** (frame_size * 2);
+    inline for (.{ 0, frame_size }) |base| {
+        img[base + 0] = 0xFF;
+        img[base + 1] = 0xFB;
+        img[base + 2] = 0xB0;
+        img[base + 3] = 0xC0;
+    }
+    var es: openmiles.mp3.MP3_INFO = undefined;
+    try testing.expectEqual(@as(i32, 1), api_v7b.AIL_inspect_MP3(&es, &img, img.len));
+    try testing.expectEqual(@as(i32, 1), api_v7b.AIL_enumerate_MP3_frames(&es));
+    try testing.expectEqual(@as(i32, 44100), es.sample_rate);
+    try testing.expectEqual(@as(i32, 192000), es.bit_rate);
+    try testing.expectEqual(@as(i32, 1), es.channels_per_sample); // mono
+    try testing.expectEqual(@as(i32, 1152), es.samples_per_frame);
+}
+
 
 test "event constructor + decoder round-trip (byte-faithful text)" {
     const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
