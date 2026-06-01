@@ -111,6 +111,9 @@ pub fn AIL_set_sample_3D_distances(obj: ?*Sample, max_dist: f32, min_dist: f32, 
         lo = hi;
         hi = tmp;
     }
+    // S3D struct is the source of truth (round-trips even before init).
+    s.s3d_min_dist = lo;
+    s.s3d_max_dist = hi;
     if (s.is_initialized) {
         ma.ma_sound_set_min_distance(&s.sound, lo);
         ma.ma_sound_set_max_distance(&s.sound, hi);
@@ -163,10 +166,11 @@ pub fn AIL_sample_3D_cone(obj: ?*Sample, inner_angle: ?*f32, outer_angle: ?*f32,
 }
 pub fn AIL_sample_3D_distances(obj: ?*Sample, max_dist: ?*f32, min_dist: ?*f32, auto_3D_wet_atten: ?*i32) callconv(.winapi) void {
     const s = obj orelse return;
-    if (max_dist) |p| p.* = if (s.is_initialized) ma.ma_sound_get_max_distance(&s.sound) else 0;
-    if (min_dist) |p| p.* = if (s.is_initialized) ma.ma_sound_get_min_distance(&s.sound) else 0;
-    if (auto_3D_wet_atten) |p| p.* = s.s3d_auto_atten; // SDK returns S3D.auto_3D_atten
-
+    // SDK returns S->S3D.max_dist/min_dist/auto_3D_atten verbatim (valid whether
+    // or not the voice has been initialized).
+    if (max_dist) |p| p.* = s.s3d_max_dist;
+    if (min_dist) |p| p.* = s.s3d_min_dist;
+    if (auto_3D_wet_atten) |p| p.* = s.s3d_auto_atten;
 }
 
 // --- Unified sample volume / pan / reverb / low-pass (reuse v6 engine) --------

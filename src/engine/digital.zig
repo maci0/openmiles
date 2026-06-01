@@ -658,6 +658,13 @@ pub const Sample = struct {
     // HSAMPLE.S3D.auto_3D_atten: stored by AIL_set_sample_3D_distances, returned
     // by AIL_sample_3D_distances.
     s3d_auto_atten: i32 = 0,
+    // HSAMPLE.S3D.max_dist / min_dist: the source of truth for the 3D distance
+    // getter (the SDK stores these in the S3D struct regardless of whether the
+    // voice is initialized; miniaudio's get_*_distance is only valid once the
+    // ma_sound exists, so a field round-trips uninitialized samples too).
+    // Defaults match wavefile.cpp AIL_init_sample: max 200.0, min 1.0.
+    s3d_max_dist: f32 = 200.0,
+    s3d_min_dist: f32 = 1.0,
     // HSAMPLE.S3D.falloff_function: per-sample 3D falloff callback. Stored and
     // returned by AIL_register_falloff_function_callback (null = engine default).
     falloff_cb: ?*anyopaque = null,
@@ -1109,6 +1116,8 @@ pub const Sample = struct {
         self.s3d_up = .{ 0, 1, 0 };
         self.is_3D = 0; // AIL_init_sample clears 3D state (mssdig.cpp)
         self.s3d_auto_atten = 0;
+        self.s3d_max_dist = 200.0; // wavefile.cpp AIL_init_sample defaults
+        self.s3d_min_dist = 1.0;
         self.falloff_cb = null;
         self.last_loaded_buffer = 0;
         self.user_data = [_]u32{0} ** 8;
