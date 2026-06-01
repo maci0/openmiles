@@ -5218,6 +5218,28 @@ test "AIL_digital_master_volume_level (F32) round-trips verbatim, null->0, defau
     api_v7.AIL_set_digital_master_volume_level(null, 0.3); // null setter: no crash
 }
 
+test "AIL_digital_configuration reports rate + DIG_F_* format, null-safe" {
+    // SDK genericdig.cpp: *rate = dig->DMA_rate; *format = dig->hw_format.
+    // Our 16-bit miniaudio backend => DIG_F_MONO_16=1 / DIG_F_STEREO_16=3.
+    var rate: i32 = -1;
+    var format: i32 = -1;
+    dg.AIL_digital_configuration(null, &rate, &format, null); // null driver: no write
+    try testing.expectEqual(@as(i32, -1), rate);
+    try testing.expectEqual(@as(i32, -1), format);
+
+    const stereo = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer stereo.deinit();
+    dg.AIL_digital_configuration(stereo, &rate, &format, null);
+    try testing.expectEqual(@as(i32, 44100), rate);
+    try testing.expectEqual(@as(i32, 3), format); // DIG_F_STEREO_16
+
+    const mono = try openmiles.DigitalDriver.init(testing.allocator, 22050, 16, 1);
+    defer mono.deinit();
+    dg.AIL_digital_configuration(mono, &rate, &format, null);
+    try testing.expectEqual(@as(i32, 22050), rate);
+    try testing.expectEqual(@as(i32, 1), format); // DIG_F_MONO_16
+}
+
 test "AIL_redbook_set_volume_level returns the previous volume (F32)" {
     const rb = try openmiles.Redbook.init(testing.allocator, 0);
     defer rb.deinit();
