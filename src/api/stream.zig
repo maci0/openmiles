@@ -170,8 +170,12 @@ pub fn AIL_stream_pan(s_opt: ?*Sample) callconv(.winapi) i32 {
     return s.original_pan;
 }
 pub fn AIL_stream_loop_count(s_opt: ?*Sample) callconv(.winapi) i32 {
-    const s = s_opt orelse return 0;
-    return s.loop_count;
+    // SDK mssstrm.cpp AIL_API_stream_loop_count: returns -1 on a null stream, and
+    // for a preloaded stream delegates to AIL_sample_loop_count -- which returns
+    // the REMAINING loop count (S->loop_count), not the original. Our streams are
+    // preloaded, so mirror AIL_sample_loop_count exactly (loops_remaining).
+    const s = s_opt orelse return -1;
+    return s.loops_remaining;
 }
 pub fn AIL_stream_ms_position(s_opt: ?*Sample, total_ms: ?*i32, current_ms: ?*i32) callconv(.winapi) void {
     const s = s_opt orelse return;

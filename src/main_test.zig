@@ -1191,6 +1191,26 @@ fn testEosCallback(s: ?*anyopaque) callconv(.winapi) void {
     eos_cb_count += 1;
 }
 
+test "AIL_stream_loop_count: -1 on null, remaining count otherwise (SDK preload path)" {
+    // SDK mssstrm.cpp returns -1 for a null stream and, for a preloaded stream,
+    // delegates to AIL_sample_loop_count (the remaining loop count).
+    try testing.expectEqual(@as(i32, -1), api_stream.AIL_stream_loop_count(null));
+
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    const pcm = [_]u8{0} ** 4410;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 44100, 8);
+    defer testing.allocator.free(wav);
+    try s.loadFromMemory(wav, false);
+
+    api_stream.AIL_set_stream_loop_count(s, 3);
+    try testing.expectEqual(@as(i32, 3), api_stream.AIL_stream_loop_count(s));
+    // Consistent with the sample-handle view of the same loop count.
+    try testing.expectEqual(@as(i32, 3), dg.AIL_sample_loop_count(s));
+}
+
 test "AIL_stream_status: paused/never-started -> SMP_STOPPED, playing -> PLAYING (SDK)" {
     // SDK mssstrm.cpp: a stream's status differs from a plain sample's -- a
     // paused or not-yet-started stream is SMP_STOPPED (a paused 2D sample would
