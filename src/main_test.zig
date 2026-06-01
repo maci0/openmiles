@@ -1579,7 +1579,11 @@ test "AIL_compress_ADPCM/decompress_ADPCM round-trip through raw-block AILSOUNDI
     try testing.expectEqual(@as(i32, 16), outi.bits);
     try testing.expectEqual(@as(i32, 1), outi.channels);
     try testing.expectEqual(@as(u32, 22050), outi.rate);
-    try testing.expect(outi.samples >= 1800 and outi.samples <= 2200); // ~2000, block-rounded
+    // The SDK sizes the decoded output to exactly info->samples frames
+    // (samples*ch*16/8); the IMA block padding is trimmed, so the frame count is
+    // the declared sample count exactly -- not the block-rounded total.
+    try testing.expectEqual(mid.samples, outi.samples);
+    try testing.expectEqual(@as(u32, 2000), outi.samples);
 
     // SDK validation guards: non-IMA format and zero samples both return 0.
     mid.format = 1;

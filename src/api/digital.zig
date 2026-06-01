@@ -997,6 +997,22 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
     }
     if (pcm.items.len == 0) return 0;
 
+    // SDK (miscutil.cpp): the output is sized to exactly info->samples frames
+    // (size = samples*channels*16/8). IMA block padding makes the decoder emit up
+    // to spb-1 extra frames in the final block, so clamp the decoded PCM to the
+    // declared sample count to match MSS byte-for-byte. A short decode is zero-
+    // extended to the same declared size (MSS allocates `size` and leaves the
+    // unfilled tail; we use deterministic silence instead of its uninitialized
+    // bytes).
+    if (info.samples != 0) {
+        const target_bytes: usize = @intCast(@min(@as(u64, info.samples) *| @as(u64, channels) *| 2, std.math.maxInt(usize)));
+        if (pcm.items.len > target_bytes) {
+            pcm.items.len = target_bytes;
+        } else if (pcm.items.len < target_bytes) {
+            pcm.appendNTimes(openmiles.global_allocator, 0, target_bytes - pcm.items.len) catch {};
+        }
+    }
+
     const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, pcm.items, @intCast(channels), rate, 16) catch |err| {
         log("Error: {any}\n", .{err});
         return 0;
