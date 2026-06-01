@@ -54,7 +54,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     // Sweep several PRNG seeds so the adversarial input space is explored more
     // broadly than a single fixed sequence would. Driver/timer handles above
     // are set up once and reused across all rounds.
-    const seeds = [_]u64{ 0xF0F0F0F0, 0x12345678, 0xDEADBEEF, 0xCAFEBABE, 0x00000000, 0xFFFFFFFFFFFFFFFF, 0x9E3779B9, 0x1, 0x5555AAAA, 0xC0FFEE };
+    const seeds = [_]u64{ 0xF0F0F0F0, 0x12345678, 0xDEADBEEF, 0xCAFEBABE, 0x00000000, 0xFFFFFFFFFFFFFFFF, 0x9E3779B9, 0x1, 0x5555AAAA, 0xC0FFEE, 0x0123456789ABCDEF, 0xA5A5A5A5A5A5A5A5, 0x7FFFFFFFFFFFFFFF, 0x8000000000000000, 0xB16B00B5, 0xD1CE5EED };
     for (seeds) |sd| {
         prng = std.Random.DefaultPrng.init(sd);
         var iter: usize = 0;
