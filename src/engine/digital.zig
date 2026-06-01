@@ -1931,7 +1931,11 @@ pub const Sample3D = struct {
             // drives a low-pass cutoff, not volume. The legacy H3DSAMPLE path has
             // no per-voice filter, so occlusion is approximated as a loudness
             // reduction here. Obstruction is intentionally omitted.
-            const eff = self.volume * (1.0 - self.occlusion);
+            // occlusion is stored verbatim (SDK m3d.cpp); clamp to [0,1] only
+            // here, for the loudness-reduction approximation, so the getter can
+            // still hand back out-of-range values faithfully.
+            const occ = @min(1.0, @max(0.0, self.occlusion));
+            const eff = self.volume * (1.0 - occ);
             ma.ma_sound_set_volume(&self.sound, @max(0.0, eff));
         }
     }
@@ -1943,12 +1947,14 @@ pub const Sample3D = struct {
     }
 
     pub fn setObstruction(self: *Sample3D, val: f32) void {
-        // Stored only: MSS's software 3D applies no mix effect for obstruction.
-        self.obstruction = @min(1.0, @max(0.0, val));
+        // SDK m3d.cpp AIL_API_set_sample_obstruction: stores verbatim, no clamp
+        // (and software 3D applies no mix effect for obstruction anyway).
+        self.obstruction = val;
     }
 
     pub fn setOcclusion(self: *Sample3D, val: f32) void {
-        self.occlusion = @min(1.0, @max(0.0, val));
+        // SDK stores verbatim; the mix-side clamp lives in applyVolume().
+        self.occlusion = val;
         self.applyVolume();
     }
 

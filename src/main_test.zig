@@ -3730,9 +3730,16 @@ test "6.5/6.6 3D sample exclusion round-trips" {
     defer s.deinit();
     api_3d.AIL_set_3D_sample_exclusion(s, 0.42);
     try testing.expect(@abs(api_3d.AIL_3D_sample_exclusion(s) - 0.42) < 0.001);
-    // Clamped to [0,1].
+    // SDK m3d.cpp stores verbatim -- out-of-range must round-trip un-clamped.
     api_3d.AIL_set_3D_sample_exclusion(s, 5.0);
-    try testing.expect(@abs(api_3d.AIL_3D_sample_exclusion(s) - 1.0) < 0.001);
+    try testing.expectEqual(@as(f32, 5.0), api_3d.AIL_3D_sample_exclusion(s));
+    api_3d.AIL_set_3D_sample_exclusion(s, -2.0);
+    try testing.expectEqual(@as(f32, -2.0), api_3d.AIL_3D_sample_exclusion(s));
+    // Obstruction & occlusion likewise store verbatim (m3d.cpp).
+    api_3d.AIL_set_3D_sample_obstruction(s, 3.5);
+    try testing.expectEqual(@as(f32, 3.5), api_3d.AIL_3D_sample_obstruction(s));
+    api_3d.AIL_set_3D_sample_occlusion(s, 2.25);
+    try testing.expectEqual(@as(f32, 2.25), api_3d.AIL_3D_sample_occlusion(s));
 }
 
 test "6.5/6.6 DLS reverb levels and master room type round-trip" {

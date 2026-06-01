@@ -307,10 +307,12 @@ pub fn AIL_3D_sample_occlusion(s: ?*anyopaque) callconv(.winapi) f32 {
     return sample.occlusion;
 }
 // 6.5/6.6 only: H3DSAMPLE exclusion attenuation hint (stored, queried back).
+// SDK m3d.cpp AIL_API_set_sample_exclusion stores `S->exclusion = exclusion`
+// verbatim (no clamp), so the getter must round-trip out-of-range values.
 pub fn AIL_set_3D_sample_exclusion(s: ?*anyopaque, exclusion: f32) callconv(.winapi) void {
     const p = s orelse return;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
-    sample.exclusion = std.math.clamp(exclusion, 0.0, 1.0);
+    sample.exclusion = exclusion;
 }
 pub fn AIL_3D_sample_exclusion(s: ?*anyopaque) callconv(.winapi) f32 {
     const p = s orelse return 0.0;
