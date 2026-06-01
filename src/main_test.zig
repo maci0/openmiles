@@ -4152,6 +4152,21 @@ test "MP3 inspector parses real Layer III frames" {
     try testing.expectEqual(@as(i32, 0), api_v7b.AIL_enumerate_MP3_frames(&es));
 }
 
+test "MP3 bitrate/sample-rate tables match the MPEG Layer III spec" {
+    // The inspector tests only probe a couple of table entries; lock the full
+    // MPEG-1 / MPEG-2(.5) Layer III bitrate and sample-rate tables so a corrupted
+    // entry (e.g. a wrong 320 kbps or 48 kHz value) is caught directly.
+    const br = openmiles.mp3.MPEG_bit_rate;
+    // MPEG-2/2.5 Layer III bitrates (index 0 = free).
+    try testing.expectEqualSlices(i32, &.{ 0, 8000, 16000, 24000, 32000, 40000, 48000, 56000, 64000, 80000, 96000, 112000, 128000, 144000, 160000 }, &br[0]);
+    // MPEG-1 Layer III bitrates.
+    try testing.expectEqualSlices(i32, &.{ 0, 32000, 40000, 48000, 56000, 64000, 80000, 96000, 112000, 128000, 160000, 192000, 224000, 256000, 320000 }, &br[1]);
+    const sr = openmiles.mp3.MPEG_sample_rate;
+    try testing.expectEqualSlices(i32, &.{ 22050, 24000, 16000, 22050 }, &sr[0][0]); // MPEG-2
+    try testing.expectEqualSlices(i32, &.{ 44100, 48000, 32000, 44100 }, &sr[0][1]); // MPEG-1
+    try testing.expectEqualSlices(i32, &.{ 11025, 12000, 8000, 11025 }, &sr[1][0]); // MPEG-2.5
+}
+
 test "MP3 inspector: mono channel mode and 192 kbps bitrate index" {
     // MPEG-1 Layer III, 192 kbps, 44100 Hz, MONO. Header FF FB B0 C0:
     //   byte2 = 1011(idx 11 -> 192k) 00(44100) 0(pad) 0  = 0xB0
