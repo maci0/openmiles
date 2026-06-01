@@ -1229,18 +1229,20 @@ test "AIL_stream_status: paused/never-started -> SMP_STOPPED, playing -> PLAYING
     defer testing.allocator.free(wav);
     try s.loadFromMemory(wav, false);
 
+    // Null stream -> SMP error -1 (S32).
+    try testing.expectEqual(@as(i32, -1), api_stream.AIL_stream_status(null));
     // Opened but never started -> SMP_STOPPED (8), not SMP_DONE.
-    try testing.expectEqual(@as(u32, 8), api_stream.AIL_stream_status(s));
+    try testing.expectEqual(@as(i32, 8), api_stream.AIL_stream_status(s));
     // Started -> SMP_PLAYING (4).
     api_stream.AIL_start_stream(s);
-    try testing.expectEqual(@as(u32, 4), api_stream.AIL_stream_status(s));
+    try testing.expectEqual(@as(i32, 4), api_stream.AIL_stream_status(s));
     // Paused -> SMP_STOPPED (8), unlike a paused 2D sample (which is SMP_PLAYING).
     api_stream.AIL_pause_stream(s, 1);
-    try testing.expectEqual(@as(u32, 8), api_stream.AIL_stream_status(s));
+    try testing.expectEqual(@as(i32, 8), api_stream.AIL_stream_status(s));
     try testing.expectEqual(@as(u32, 4), dg.AIL_sample_status(s)); // 2D view still PLAYING
     // Unpaused -> SMP_PLAYING again.
     api_stream.AIL_pause_stream(s, 0);
-    try testing.expectEqual(@as(u32, 4), api_stream.AIL_stream_status(s));
+    try testing.expectEqual(@as(i32, 4), api_stream.AIL_stream_status(s));
 }
 
 test "AIL_end_3D_sample fires the 3D EOS callback once (live->DONE only)" {

@@ -139,22 +139,25 @@ pub fn AIL_set_stream_ms_position(s_opt: ?*Sample, ms: i32) callconv(.winapi) vo
     log("AIL_set_stream_ms_position(s={*}, ms={d})\n", .{ s, ms });
     s.setMsPosition(ms);
 }
-pub fn AIL_stream_status(s_opt: ?*Sample) callconv(.winapi) u32 {
-    const s = s_opt orelse return 0;
+pub fn AIL_stream_status(s_opt: ?*Sample) callconv(.winapi) i32 {
+    // SDK mssstrm.cpp returns S32 -1 for a null (or errored) stream.
+    const s = s_opt orelse return -1;
     // SDK mssstrm.cpp AIL_API_stream_status maps stream states differently from a
     // plain HSAMPLE: a paused stream (playcontrol&8) OR a not-yet-started stream
     // (playcontrol==0) reports SMP_STOPPED -- whereas a paused 2D sample reports
     // SMP_PLAYING and a never-started sample reports SMP_DONE. Only a stream that
     // has actually finished reports SMP_DONE.
     const ma = openmiles.ma;
-    if (s.is_done) return @intFromEnum(openmiles.SampleStatus.done);
-    if (s.is_paused) return @intFromEnum(openmiles.SampleStatus.stopped);
+    const done: i32 = @intFromEnum(openmiles.SampleStatus.done);
+    const stopped: i32 = @intFromEnum(openmiles.SampleStatus.stopped);
+    if (s.is_done) return done;
+    if (s.is_paused) return stopped;
     if (s.is_initialized) {
         if (ma.ma_sound_is_playing(&s.sound) != 0) return @intFromEnum(openmiles.SampleStatus.playing);
-        if (ma.ma_sound_at_end(&s.sound) != 0) return @intFromEnum(openmiles.SampleStatus.done);
+        if (ma.ma_sound_at_end(&s.sound) != 0) return done;
     }
     // Opened but not playing / explicitly stopped -> SMP_STOPPED.
-    return @intFromEnum(openmiles.SampleStatus.stopped);
+    return stopped;
 }
 pub fn AIL_stream_playback_rate(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
@@ -255,10 +258,14 @@ pub fn AIL_set_stream_loop_block(s_opt: ?*Sample, loop_start: i32, loop_end: i32
     s.setLoopBlock(loop_start, loop_end);
 }
 pub fn AIL_service_stream(s_opt: ?*Sample, onoff: i32) callconv(.winapi) i32 {
-    const s = s_opt orelse return 0;
-    _ = s;
-    _ = onoff;
-    return 1;
+    _ = onoff; // `fillup`: block on pending async IO (no async IO in our model)
+    // SDK mssstrm.cpp AIL_API_service_stream returns S32 -1 for a null stream or
+    // one that has errored/finished (alldone), otherwise the number of bytes
+    // serviced (start_IOs_if_we_can). Our streams are fully preloaded, so there
+    // is never any IO to service -> 0 bytes on a live stream, -1 once finished.
+    const s = s_opt orelse return -1;
+    if (s.is_done) return -1;
+    return 0;
 }
 pub fn AIL_register_EOF_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
