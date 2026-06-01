@@ -1918,6 +1918,40 @@ comptime {
             "AIL_set_sample_filter",
             "AIL_set_mem_callbacks",
             "AIL_set_timer_user_data",
+            // Wrong-name duplicates: a real Miles export exists under a different
+            // name (open_XMIDI_driver, quick_halt, DLS_unload, open_input/
+            // close_input/get_input_info, ...). We already export the correct
+            // names (parity MISSING stays 0); these aliases are emitted by no
+            // real release.
+            "AIL_open_midi_driver",
+            "AIL_close_midi_driver",
+            "AIL_quick_stop",
+            "AIL_DLS_unload_file",
+            "AIL_input_open",
+            "AIL_input_close",
+            "AIL_input_info",
+            "AIL_pause_sequence",
+            "AIL_3D_sample_float_distances",
+            "AIL_set_3D_sample_float_distances",
+            "AIL_open_stream_by_sample",
+            "AIL_open_stream_ex",
+            "AIL_start_sample_at",
+            "AIL_get_DirectSound3D_info",
+            // The v6 "resource library" and sample-attribute persistence names,
+            // and the filter/stage *_attribute / *_preference spellings: none
+            // appear in any reference DLL or SDK header (the real DSP-property
+            // surface uses *_property, handled elsewhere).
+            "AIL_open_library",
+            "AIL_close_library",
+            "AIL_library_resource_filename",
+            "AIL_load_sample_attributes",
+            "AIL_save_sample_attributes",
+            "AIL_sample_stage_attribute",
+            "AIL_output_filter_driver_attribute",
+            "AIL_set_output_filter_driver_preference",
+            "AIL_enumerate_sample_stage_attributes",
+            "AIL_enumerate_output_filter_driver_attributes",
+            "AIL_enumerate_output_filter_sample_attributes",
         };
         for (targets) |t| {
             if (openmiles.mss_version < t.ver or openmiles.mss_version > t.ver_max) continue;
