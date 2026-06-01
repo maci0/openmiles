@@ -1941,6 +1941,7 @@ comptime {
             "AIL_load_sample_attributes",
             "AIL_save_sample_attributes",
             "AIL_sample_stage_attribute",
+            "AIL_set_sample_stage_preference",
             "AIL_output_filter_driver_attribute",
             "AIL_set_output_filter_driver_preference",
             "AIL_enumerate_sample_stage_attributes",
@@ -1973,24 +1974,24 @@ comptime {
         // DLL export table contains the bare name (AIL_debug_printf) rather than _AIL_debug_printf.
         // The linker automatically prepends `_` to the symbol reference in /EXPORT:name=symbol,
         // so we use the bare name (without leading underscore) as the symbol.
-        // AIL_sprintf spans every version (v3-v10); AIL_debug_printf was dropped
-        // after v8, so only emit its export for builds at or below v8.
-        asm (".section .drectve\n .ascii \" /EXPORT:AIL_sprintf=AIL_sprintf\"\n .text\n");
-        if (openmiles.mss_version <= 80) {
+        // AIL_sprintf was introduced in 5.0 (3.6a exports neither it nor
+        // AIL_debug_printf); AIL_debug_printf runs 5.0..8.0 and is gone by 9.1d.
+        if (openmiles.mss_version >= 50) {
+            asm (".section .drectve\n .ascii \" /EXPORT:AIL_sprintf=AIL_sprintf\"\n .text\n");
+        }
+        if (openmiles.mss_version >= 50 and openmiles.mss_version <= 80) {
             asm (".section .drectve\n .ascii \" /EXPORT:AIL_debug_printf=AIL_debug_printf\"\n .text\n");
         }
         // `stream_background`: an undocumented internal symbol that leaked into
         // the 6.1-6.6 export tables. Its decoration varies *within* a minor
         // version: fastcall `@stream_background@0` in 6.1 and 6.5a-c, but
         // undecorated `stream_background` from 6.5d onward (and all of 6.6),
-        // confirming it is an accidental export, not an API. We can't tell sub-
-        // patches apart at build time (both are version 65), so for 6.5 we emit
-        // *both* names — the extra one is a harmless EXTRA export in whichever
-        // sub-patch lacks it. Each form is backed by the same no-op C stub.
+        // confirming it is an accidental export, not an API. Our canonical 6.5
+        // reference is 6.5h (a 6.5d+ patch), which exports the undecorated form
+        // only, so for v65 we emit just that and match it exactly.
         if (openmiles.mss_version == 61) {
             asm (".section .drectve\n .ascii \" /EXPORT:@stream_background@0=mss_stream_background_stub\"\n .text\n");
         } else if (openmiles.mss_version == 65) {
-            asm (".section .drectve\n .ascii \" /EXPORT:@stream_background@0=mss_stream_background_stub\"\n .text\n");
             asm (".section .drectve\n .ascii \" /EXPORT:stream_background=mss_stream_background_stub\"\n .text\n");
         } else if (openmiles.mss_version == 66) {
             asm (".section .drectve\n .ascii \" /EXPORT:stream_background=mss_stream_background_stub\"\n .text\n");
