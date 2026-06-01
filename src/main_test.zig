@@ -1318,10 +1318,11 @@ test "AIL_speaker_configuration returns the default stereo speaker array (SDK)" 
     const pos: [*]api_v7.MSSVECTOR3D = @ptrCast(pos_one);
     try testing.expectEqual(@as(i32, 2), n_phys);
     try testing.expectEqual(@as(i32, 2), n_log);
-    // Default stereo: ±45° in the left-handed frame -> x=∓1/√2, z=1/√2.
+    // Default stereo (genericdig.cpp MSS_MC_STEREO): ±45° in the horizontal
+    // plane -> x=∓1/√2, y=0, z=1/√2.
     const r: f32 = 0.707106781;
-    try testing.expect(@abs(pos[0].x + r) < 0.0001 and @abs(pos[0].z - r) < 0.0001);
-    try testing.expect(@abs(pos[1].x - r) < 0.0001 and @abs(pos[1].z - r) < 0.0001);
+    try testing.expect(@abs(pos[0].x + r) < 0.0001 and @abs(pos[0].y) < 0.0001 and @abs(pos[0].z - r) < 0.0001);
+    try testing.expect(@abs(pos[1].x - r) < 0.0001 and @abs(pos[1].y) < 0.0001 and @abs(pos[1].z - r) < 0.0001);
     // Null driver returns NULL.
     try testing.expectEqual(@as(?*api_v7.MSSVECTOR3D, null), api_v7.AIL_speaker_configuration(null, &n_phys, &n_log, &falloff, null));
 
