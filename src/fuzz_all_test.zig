@@ -107,6 +107,8 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_3d.AIL_set_3D_sample_float_distances_v5(@as(?*anyopaque, @ptrCast(h3)), rf, rf, rf, rf);
     api_3d.AIL_3D_sample_float_distances_v5(h3, &fo, &fo, &fo, &fo);
     _ = api_3d.AIL_3D_sample_effects_level(@as(?*anyopaque, @ptrCast(h3)));
+    api_3d.AIL_set_3D_sample_exclusion(@as(?*anyopaque, @ptrCast(h3)), rf);
+    _ = api_3d.AIL_3D_sample_exclusion(@as(?*anyopaque, @ptrCast(h3)));
     _ = api_3d.AIL_3D_sample_length(@as(?*anyopaque, @ptrCast(h3)));
     _ = api_3d.AIL_3D_sample_loop_count(@as(?*anyopaque, @ptrCast(h3)));
     api_3d.AIL_3D_sample_ms_position(@as(?*anyopaque, @ptrCast(h3)), &io, &io);
@@ -126,6 +128,10 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_dls.AIL_DLS_load_memory(hm, scp, ru);
     _ = api_v7.AIL_DLS_sample_handle(hm);
     api_dls.AIL_DLS_set_reverb(hm, rf, rf, rf);
+    api_dls.AIL_DLS_set_reverb_levels(hm, rf, rf);
+    api_dls.AIL_DLS_get_reverb_levels(hm, &fo, &fo);
+    api_dls.AIL_DLS_unload(hm, scp); // bogus bank: pointer-equality guard => no-op
+    api_dls.AIL_DLS_unload_file(hm, scp);
     _ = api_digital.AIL_HWND();
     _ = api_v9.AIL_IO_thread_handle(null);
     _ = api_midi.AIL_MIDI_handle_reacquire(scp);
@@ -519,6 +525,10 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_v7.AIL_set_sample_volume_levels(hs, rf, rf);
     api_digital.AIL_set_sample_volume_pan(hs, rf, rf);
     api_stream.AIL_set_stream_volume_pan(hs, rf, rf);
+    api_stream.AIL_set_stream_volume_levels(hs, rf, rf);
+    api_stream.AIL_set_stream_reverb_levels(hs, rf, rf);
+    api_stream.AIL_set_stream_low_pass_cut_off(hs, rf);
+    api_v7.AIL_set_digital_master_room_type(hd, ri);
     api_midi.AIL_set_sequence_loop_count(hq, rszi);
     api_midi.AIL_set_sequence_ms_position(hq, ri);
     api_midi.AIL_set_sequence_tempo(hq, ri, ri);
@@ -575,6 +585,10 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_stream.AIL_stream_status(hs);
     _ = api_stream.AIL_stream_user_data(hs, ri);
     _ = api_stream.AIL_stream_volume(hs);
+    api_stream.AIL_stream_volume_levels(hs, &fo, &fo);
+    api_stream.AIL_stream_volume_pan(hs, &fo, &fo);
+    api_stream.AIL_stream_reverb_levels(hs, &fo, &fo);
+    _ = api_stream.AIL_stream_low_pass_cut_off(hs);
     _ = api_v8.AIL_stricmp(null, null);
     _ = api_v8.AIL_strnicmp(null, null, ru);
     api_v8.AIL_sys_debug(null);
