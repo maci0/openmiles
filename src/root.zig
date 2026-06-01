@@ -89,12 +89,15 @@ pub const xmidiBareToSmf = xmidi.xmidiBareToSmf;
 
 pub const deg2rad = std.math.pi / 180.0;
 
-// MSS 7/8 -> 9 added a `channel_mask` (U32) field between `channels` and
-// `samples` (for multichannel WAVE_FORMAT_EXTENSIBLE data). 3.x/6.1/6.5 have the
-// 9-field layout; 9.3 has the 10-field one. The field is confirmed present only
-// at 9.x, so it is added at the verified boundary (>=90) — gating it lower would
-// risk an out-of-bounds write into a smaller caller-allocated struct.
-pub const AILSOUNDINFO = if (mss_version >= 90) extern struct {
+// MSS 8.0 added a `channel_mask` (U32) field between `channels` and `samples`
+// (for multichannel WAVE_FORMAT_EXTENSIBLE data). Confirmed by disassembling
+// AIL_API_set_sample_info across the reference DLLs: 8.0e and 9.1d read
+// channel_mask at info+0x18 (cmp ~0U), do `channels << 16` for the multichannel
+// DIG_F path, and read block_size at info+0x20 — the 10-field/40-byte layout.
+// 7.0k has no channel_mask, no multichannel shift, and reads block_size at
+// info+0x1c — the 9-field/36-byte layout, matching the 3.x/6.1 headers. So the
+// boundary is 8.0, not 9.0.
+pub const AILSOUNDINFO = if (mss_version >= 80) extern struct {
     format: i32 = 0,
     data_ptr: ?*const anyopaque = null,
     data_len: u32 = 0,

@@ -1579,15 +1579,17 @@ test "AIL_redbook_status returns REDBOOK_* codes (STOPPED=3, ERROR=0)" {
     try testing.expectEqual(@as(u32, 0), api_redbook.AIL_redbook_status(null)); // ERROR (null handle)
 }
 
-test "AILSOUNDINFO layout: channel_mask present only for v9+" {
-    // 3.x/6.1/6.5 have 9 fields (36 bytes); 9.3 added channel_mask between
-    // `channels` and `samples` -> 10 fields (40 bytes). A wrong layout shifts
-    // samples/block_size/initial_ptr and corrupts what a game reads.
-    // Offsets in bytes depend on pointer size (4 on the x86 DLL, 8 on the
-    // native test target), so assert pointer-size-independent properties:
-    // field presence and ordering (channel_mask between channels and samples).
+test "AILSOUNDINFO layout: channel_mask present only for v8+" {
+    // 3.x/6.1/6.5/7.0 have 9 fields (36 bytes); 8.0 added channel_mask between
+    // `channels` and `samples` -> 10 fields (40 bytes), retained in 9.x. Verified
+    // by disassembling AIL_API_set_sample_info: 8.0e/9.1d read channel_mask at
+    // info+0x18 and block_size at +0x20; 7.0k reads block_size at +0x1c with no
+    // channel_mask. A wrong layout shifts samples/block_size/initial_ptr and
+    // corrupts what a game reads. Offsets in bytes depend on pointer size (4 on
+    // the x86 DLL, 8 on the native test target), so assert pointer-size-
+    // independent properties: field presence and ordering.
     const T = openmiles.AILSOUNDINFO;
-    if (openmiles.mss_version >= 90) {
+    if (openmiles.mss_version >= 80) {
         try testing.expect(@hasField(T, "channel_mask"));
         try testing.expect(@offsetOf(T, "channels") < @offsetOf(T, "channel_mask"));
         try testing.expect(@offsetOf(T, "channel_mask") < @offsetOf(T, "samples"));
@@ -1934,7 +1936,7 @@ test "AIL_sample_granularity returns bytes-per-frame (SDK SS_granularity)" {
 }
 
 test "AIL_set_sample_info channel_mask round-trips via channel_count" {
-    if (!@hasField(openmiles.AILSOUNDINFO, "channel_mask")) return; // v9 field only
+    if (!@hasField(openmiles.AILSOUNDINFO, "channel_mask")) return; // v8+ field only
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
     const s = try openmiles.Sample.init(drv);
