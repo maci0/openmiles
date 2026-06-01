@@ -2919,6 +2919,25 @@ test "listener 3D orientation normalizes face & up like the SDK" {
     try testing.expect(@abs(ux) < 0.001 and @abs(uy - 0.6) < 0.001 and @abs(uz - 0.8) < 0.001);
 }
 
+test "AIL_3D_sample_distances round-trips max/min in header param order" {
+    // Mss.h: AIL_set_3D_sample_distances(S, max_dist, min_dist) and the getter
+    // AIL_3D_sample_distances(S, *max_dist, *min_dist) -- max FIRST, min SECOND.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s3p = api_3d.AIL_allocate_3D_sample_handle(drv) orelse return error.AllocFailed;
+    const s3: *openmiles.Sample3D = @ptrCast(@alignCast(s3p));
+
+    api_3d.AIL_set_3D_sample_distances(s3p, 100.0, 5.0); // max=100, min=5
+    var max_d: f32 = -1;
+    var min_d: f32 = -1;
+    api_3d.AIL_3D_sample_distances(s3, &max_d, &min_d);
+    try testing.expectEqual(@as(f32, 100.0), max_d);
+    try testing.expectEqual(@as(f32, 5.0), min_d);
+
+    api_3d.AIL_3D_sample_distances(null, &max_d, &min_d); // null: no write/crash
+    try testing.expectEqual(@as(f32, 100.0), max_d);
+}
+
 test "Sample3D loadFromMemory and start stop lifecycle" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
