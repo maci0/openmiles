@@ -2647,6 +2647,8 @@ test "playback rate and rate_factor compose into the pitch (not overwrite)" {
     api_v8.AIL_set_sample_playback_rate_factor(s, -1.0);
     try testing.expect(@abs(openmiles.ma.ma_sound_get_pitch(&s.sound) - 1.0) < 0.001);
     try testing.expectEqual(@as(f32, 2.0), api_v8.AIL_sample_playback_rate_factor(s));
+    // SDK (wavefile.cpp): a null handle returns 0.0, not the 1.0 default.
+    try testing.expectEqual(@as(f32, 0.0), api_v8.AIL_sample_playback_rate_factor(null));
 }
 
 test "loop_block setter: -2 keeps current offset, start>end swaps (SDK)" {

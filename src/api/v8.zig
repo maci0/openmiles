@@ -620,7 +620,7 @@ pub fn AIL_sample_playback_delay(s_opt: ?*Sample) callconv(.winapi) i32 {
     return s.v9_playback_delay;
 }
 pub fn AIL_sample_playback_rate_factor(s_opt: ?*Sample) callconv(.winapi) f32 {
-    const s = s_opt orelse return 1.0;
+    const s = s_opt orelse return 0.0; // SDK (wavefile.cpp): null handle -> 0, not the 1.0 default
     return if (s.v7_rate_factor > 0) s.v7_rate_factor else 1.0;
 }
 pub fn AIL_sample_speaker_scale_factors(s_opt: ?*Sample, dest_speaker_indexes: ?[*]const i32, levels: ?[*]f32, n_levels: i32) callconv(.winapi) void {
