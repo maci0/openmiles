@@ -178,7 +178,14 @@ pub fn AIL_set_sample_reverb_levels(s_opt: ?*Sample, dry_level: f32, wet_level: 
     s.reverb_level = wet_level; // verbatim for the getter (engine used the clamped value)
 }
 pub fn AIL_sample_reverb_levels(s_opt: ?*Sample, dry_level: ?*f32, wet_level: ?*f32) callconv(.winapi) void {
-    const s = s_opt orelse return;
+    // SDK (wavefile.cpp AIL_API_sample_reverb_levels): unlike the volume getters,
+    // this one writes 0.0 to both out-params on a null handle rather than leaving
+    // the caller's memory untouched.
+    const s = s_opt orelse {
+        if (dry_level) |p| p.* = 0.0;
+        if (wet_level) |p| p.* = 0.0;
+        return;
+    };
     if (dry_level) |p| p.* = s.reverb_dry_level;
     if (wet_level) |p| p.* = s.reverb_level;
 }

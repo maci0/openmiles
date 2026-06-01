@@ -2010,6 +2010,34 @@ test "AIL_sample_playback_rate defaults to 11025 on a fresh, unloaded sample" {
     try testing.expectEqual(@as(i32, 0), dg.AIL_sample_playback_rate(null));
 }
 
+test "AIL_sample_reverb_levels round-trips and zeroes out-params on null" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+
+    // Fresh default: dry=1.0, wet=0.0 (SDK init).
+    var dry: f32 = -1;
+    var wet: f32 = -1;
+    api_v7.AIL_sample_reverb_levels(s, &dry, &wet);
+    try testing.expectEqual(@as(f32, 1.0), dry);
+    try testing.expectEqual(@as(f32, 0.0), wet);
+
+    // Round-trip an explicit set.
+    api_v7.AIL_set_sample_reverb_levels(s, 0.7, 0.3);
+    api_v7.AIL_sample_reverb_levels(s, &dry, &wet);
+    try testing.expectEqual(@as(f32, 0.7), dry);
+    try testing.expectEqual(@as(f32, 0.3), wet);
+
+    // Null handle: SDK (AIL_API_sample_reverb_levels) writes 0.0 to BOTH out-
+    // params rather than leaving them untouched (unlike the volume getters).
+    dry = 9;
+    wet = 9;
+    api_v7.AIL_sample_reverb_levels(null, &dry, &wet);
+    try testing.expectEqual(@as(f32, 0.0), dry);
+    try testing.expectEqual(@as(f32, 0.0), wet);
+}
+
 test "AIL_set_input_state returns 0 for a null handle (SDK guard)" {
     const api_input = @import("api/input.zig");
     // Null handle: no device needed, deterministic. SDK returns 0.
