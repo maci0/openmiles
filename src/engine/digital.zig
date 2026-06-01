@@ -1258,8 +1258,13 @@ pub const Sample = struct {
         const p = std.math.clamp(pan, 0.0, 1.0);
         self.original_volume = @intFromFloat(v * 127.0);
         self.original_pan = @intFromFloat(p * 127.0);
-        self.save_vol_f = v; // exact float for the F32 getter (no i32 quantization)
-        self.save_pan_f = p;
+        // SDK AIL_API_set_sample_volume_pan stores save_volume = pow(volume,10/6)
+        // and save_pan = pan VERBATIM (no clamp); the getter returns
+        // pow(save_volume,6/10) == volume (for volume>=0) and save_pan as-is.
+        // Store the raw inputs so the F32 getter round-trips exactly -- only the
+        // gain/i32 math below uses the clamped v/p (real pow domain + valid mix).
+        self.save_vol_f = volume; // verbatim for the F32 getter (no clamp, no quantization)
+        self.save_pan_f = pan;
         // Exact MSS law (AIL_API_set_sample_volume_pan, wavefile.cpp):
         //   gain  = volume^(10/6)            (0.5 -> -10 dB)
         //   left  = gain * (1-pan)^0.3       right = gain * pan^0.3

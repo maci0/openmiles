@@ -5145,6 +5145,22 @@ test "volume/pan match the exact MSS curve (gain = volume^(10/6))" {
     // Exact float round-trip (no i32 0..127 quantization).
     try testing.expectApproxEqAbs(@as(f32, 0.8), gv, 0.0001);
     try testing.expectApproxEqAbs(@as(f32, 0.25), gp, 0.0001);
+
+    // SDK wavefile.cpp stores save_volume = pow(volume,10/6) and save_pan
+    // verbatim (no clamp); the getter returns pow(save_volume,6/10) == volume
+    // for volume >= 0 and save_pan as-is -- so out-of-range values round-trip.
+    dg.AIL_set_sample_volume_pan(s, 1.5, 0.9);
+    api_v7.AIL_sample_volume_pan(s, &gv, &gp);
+    try testing.expectApproxEqAbs(@as(f32, 1.5), gv, 0.0001); // NOT clamped to 1.0
+    try testing.expectApproxEqAbs(@as(f32, 0.9), gp, 0.0001);
+
+    // Null handle: the getter leaves the caller's out-params UNTOUCHED (it does
+    // not zero them, unlike AIL_sample_reverb_levels).
+    gv = 7.0;
+    gp = 8.0;
+    api_v7.AIL_sample_volume_pan(null, &gv, &gp);
+    try testing.expectEqual(@as(f32, 7.0), gv);
+    try testing.expectEqual(@as(f32, 8.0), gp);
 }
 
 test "5.1 set_levels reconstructs save_pan/fb_pan/volume (inverts volume_pan)" {
