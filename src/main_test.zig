@@ -3143,7 +3143,7 @@ test "AIL_init_sample resets level/reverb/filter/occlusion state to defaults (SD
     const s = try openmiles.Sample.init(driver);
     defer s.deinit();
     const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 44100, 8);
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 44100, 16); // mono16 -> bpf 2
     defer testing.allocator.free(wav);
     try s.loadFromMemory(wav, false);
 
@@ -3153,6 +3153,8 @@ test "AIL_init_sample resets level/reverb/filter/occlusion state to defaults (SD
     api_v7.AIL_set_sample_obstruction(s, 0.9);
     api_v7.AIL_set_sample_occlusion(s, 0.8);
     api_v7.AIL_set_sample_volume_levels(s, 0.2, 0.6);
+    dg.AIL_set_sample_adpcm_block_size(s, 512); // stale ADPCM block size
+    try testing.expectEqual(@as(u32, 512), dg.AIL_sample_granularity(s)); // now reports the block size
 
     // Re-init.
     dg.AIL_init_sample(s);
@@ -3170,6 +3172,10 @@ test "AIL_init_sample resets level/reverb/filter/occlusion state to defaults (SD
     api_v7.AIL_sample_volume_levels(s, &lft, &rgt);
     try testing.expectApproxEqAbs(@as(f32, 1.0), lft, 0.001);
     try testing.expectApproxEqAbs(@as(f32, 1.0), rgt, 0.001);
+    // adpcm block size cleared -> granularity falls back to bytes-per-frame
+    // (a small valid value: 1/2/4/8), no longer the stale 512.
+    const gran = dg.AIL_sample_granularity(s);
+    try testing.expect(gran >= 1 and gran <= 8);
 }
 
 test "fresh driver master reverb levels default to dry=1.0, wet=1.0 (SDK init)" {

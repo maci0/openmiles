@@ -1157,6 +1157,11 @@ pub const Sample = struct {
         self.v7_obstruction = 0.0;
         self.v7_occlusion = 0.0;
         self.v7_exclusion = 0.0;
+        // SDK sets adpcm.blocksize = 256 on init; our 0 sentinel means "derive
+        // granularity from bytes-per-frame" (the right default for a fresh/PCM
+        // sample). Clearing it prevents a reused ADPCM handle from reporting a
+        // stale block size via AIL_sample_granularity.
+        self.adpcm_block_size = 0;
     }
 
     /// Store an S3D falloff graph (AIL_set_sample_3D_*_falloff). Mirrors the SDK:
