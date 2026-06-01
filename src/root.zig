@@ -36,6 +36,8 @@ const audio_encoding = @import("engine/audio_encoding.zig");
 pub const buildWavFromPcm = audio_encoding.buildWavFromPcm;
 pub const buildAdpcmWav = audio_encoding.buildAdpcmWav;
 pub const wrapAdpcmInWav = audio_encoding.wrapAdpcmInWav;
+pub const ima_step_table = audio_encoding.ima_step_table;
+pub const ima_index_table = audio_encoding.ima_index_table;
 
 const midi_mod = @import("engine/midi.zig");
 pub const MidiDriver = midi_mod.MidiDriver;
