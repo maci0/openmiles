@@ -22,6 +22,40 @@ const MidiDriver = openmiles.MidiDriver;
 const AILSOUNDINFO = openmiles.AILSOUNDINFO;
 const openmiles_v8 = @import("v8.zig"); // shared output_speaker_index table
 
+// EAX environment-preset reverb parameters, indexed by EAX_ENVIRONMENT_* room
+// type. Verbatim from m3d.cpp `static ROOM_PARAMS rooms[]` ("MSS 6 values", the
+// active #if 1 table): { wet level, decay time, predelay, damping }. The
+// software-reverb path of AIL_set_room_type applies these to the master reverb.
+const RoomParams = struct { level: f32, time: f32, predelay: f32, damping: f32 };
+const eax_rooms = [_]RoomParams{
+    .{ .level = 0.0, .time = 1.493, .predelay = 0.5, .damping = 0.011 }, // GENERIC
+    .{ .level = 0.25, .time = 0.1, .predelay = 0.1, .damping = 0.002 }, // PADDEDCELL
+    .{ .level = 0.417, .time = 0.4, .predelay = 0.666, .damping = 0.003 }, // ROOM
+    .{ .level = 0.75, .time = 1.499, .predelay = 0.166, .damping = 0.011 }, // BATHROOM
+    .{ .level = 0.208, .time = 0.478, .predelay = 0.1, .damping = 0.004 }, // LIVINGROOM
+    .{ .level = 0.3, .time = 2.309, .predelay = 0.68, .damping = 0.017 }, // STONEROOM
+    .{ .level = 0.403, .time = 4.279, .predelay = 0.5, .damping = 0.03 }, // AUDITORIUM
+    .{ .level = 0.5, .time = 3.961, .predelay = 0.5, .damping = 0.029 }, // CONCERTHALL
+    .{ .level = 0.5, .time = 2.886, .predelay = 1.304, .damping = 0.022 }, // CAVE
+    .{ .level = 0.361, .time = 7.284, .predelay = 0.332, .damping = 0.03 }, // ARENA
+    .{ .level = 0.5, .time = 10.0, .predelay = 0.3, .damping = 0.03 }, // HANGAR
+    .{ .level = 0.153, .time = 0.259, .predelay = 0.55, .damping = 0.03 }, // CARPETEDHALLWAY
+    .{ .level = 0.361, .time = 1.493, .predelay = 0.50, .damping = 0.011 }, // HALLWAY
+    .{ .level = 0.444, .time = 2.697, .predelay = 0.638, .damping = 0.02 }, // STONECORRIDOR
+    .{ .level = 0.25, .time = 1.752, .predelay = 0.776, .damping = 0.011 }, // ALLEY
+    .{ .level = 0.111, .time = 3.145, .predelay = 0.472, .damping = 0.088 }, // FOREST
+    .{ .level = 0.111, .time = 2.767, .predelay = 0.224, .damping = 0.011 }, // CITY
+    .{ .level = 0.2, .time = 0.8, .predelay = 0.2, .damping = 0.300 }, // MOUNTAINS
+    .{ .level = 0.55, .time = 3.00, .predelay = 0.55, .damping = 0.043 }, // QUARRY
+    .{ .level = 0.12, .time = 0.8, .predelay = 0.18, .damping = 0.100 }, // PLAIN
+    .{ .level = 0.208, .time = 1.652, .predelay = 1.5, .damping = 0.012 }, // PARKINGLOT
+    .{ .level = 0.652, .time = 2.886, .predelay = 0.25, .damping = 0.021 }, // SEWERPIPE
+    .{ .level = 1.0, .time = 1.499, .predelay = 0.1, .damping = 0.011 }, // UNDERWATER
+    .{ .level = 0.875, .time = 8.392, .predelay = 1.388, .damping = 0.011 }, // DRUGGED
+    .{ .level = 0.139, .time = 10.00, .predelay = 1.5, .damping = 0.011 }, // DIZZY
+    .{ .level = 0.486, .time = 7.563, .predelay = 2.5, .damping = 0.011 }, // PSYCHOTIC
+};
+
 // --- Unified 3D on HSAMPLE (reuses the sample's miniaudio spatial state) -----
 
 fn enable3D(s: *Sample) void {
@@ -327,7 +361,21 @@ pub fn AIL_digital_master_reverb_levels(dig_opt: ?*DigitalDriver, bus_index: i32
 pub fn AIL_set_room_type(dig_opt: ?*DigitalDriver, bus_index: i32, room_type: i32) callconv(.winapi) void {
     _ = bus_index;
     const d = dig_opt orelse return;
+    // SDK m3d.cpp: dig->reverb[0].room_type = EAX_room_type (stored verbatim).
     d.v7_room_type = room_type;
+    // Software-reverb path: apply the EAX preset to the master reverb so the
+    // master_reverb / master_reverb_levels getters reflect the selected room.
+    //   dry = 1.0, wet = rooms[rt].level, decay/predelay/damping = rooms[rt].*
+    // (The SDK indexes rooms[EAX_room_type] unchecked; we guard the bounds the
+    // fuzzer would otherwise drive out of range.)
+    if (room_type >= 0 and room_type < eax_rooms.len) {
+        const r = eax_rooms[@intCast(room_type)];
+        d.v7_master_reverb_dry = 1.0;
+        d.v7_master_reverb_wet = r.level;
+        d.v7_master_reverb_decay = r.time;
+        d.v7_master_reverb_predelay = r.predelay;
+        d.v7_master_reverb_damping = r.damping;
+    }
 }
 pub fn AIL_room_type(dig_opt: ?*DigitalDriver, bus_index: i32) callconv(.winapi) i32 {
     _ = bus_index;

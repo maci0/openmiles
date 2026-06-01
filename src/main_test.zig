@@ -2919,6 +2919,38 @@ test "listener 3D orientation normalizes face & up like the SDK" {
     try testing.expect(@abs(ux) < 0.001 and @abs(uy - 0.6) < 0.001 and @abs(uz - 0.8) < 0.001);
 }
 
+test "AIL_set_room_type applies the EAX preset to the master reverb (m3d.cpp rooms[])" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    // EAX_ENVIRONMENT_ROOM (index 2): { level 0.417, time 0.4, predelay 0.666,
+    // damping 0.003 }; the setter applies dry=1.0, wet=level, decay/predelay/damping.
+    api_v7.AIL_set_room_type(drv, 0, 2);
+    try testing.expectEqual(@as(i32, 2), api_v7.AIL_room_type(drv, 0)); // room_type verbatim
+    var dry: f32 = 0;
+    var wet: f32 = 0;
+    api_v7.AIL_digital_master_reverb_levels(drv, 0, &dry, &wet);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), dry, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0.417), wet, 0.0001);
+    var time: f32 = 0;
+    var predelay: f32 = 0;
+    var damping: f32 = 0;
+    api_v7.AIL_digital_master_reverb(drv, 0, &time, &predelay, &damping);
+    try testing.expectApproxEqAbs(@as(f32, 0.4), time, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0.666), predelay, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0.003), damping, 0.0001);
+
+    // AIL_set_digital_master_room_type forwards to set_room_type(dig,0,rt).
+    api_v7.AIL_set_digital_master_room_type(drv, 22); // UNDERWATER: wet 1.0
+    api_v7.AIL_digital_master_reverb_levels(drv, 0, &dry, &wet);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), wet, 0.0001);
+
+    // Out-of-range room_type: stored verbatim, preset NOT applied (no OOB read).
+    api_v7.AIL_set_room_type(drv, 0, 9999);
+    try testing.expectEqual(@as(i32, 9999), api_v7.AIL_room_type(drv, 0));
+    api_v7.AIL_digital_master_reverb_levels(drv, 0, &dry, &wet);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), wet, 0.0001); // unchanged from UNDERWATER
+}
+
 test "AIL_3D_sample_distances round-trips max/min in header param order" {
     // Mss.h: AIL_set_3D_sample_distances(S, max_dist, min_dist) and the getter
     // AIL_3D_sample_distances(S, *max_dist, *min_dist) -- max FIRST, min SECOND.
