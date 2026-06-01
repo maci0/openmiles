@@ -1858,8 +1858,30 @@ comptime {
             @import("memory.zig"),    @import("v7.zig"),     @import("v8.zig"),
             @import("v9.zig"),         @import("miles.zig"),  @import("legacy.zig"),
         };
+        // API families dropped wholesale in MSS 8.0. The 8.0e/9.1d DLLs export
+        // none of these symbols (all are present through 7.0k), so emitting them
+        // would bloat the export table beyond the reference. Each token below was
+        // verified to occur in zero 8.0e/9.1d exports and >0 7.0k exports, so a
+        // substring match is safe and only suppresses these from 8.0 on. Covered:
+        // the Quick API, Redbook (CD audio), the whole XMIDI/MIDI-sequencer stack
+        // (sequences, channels, MIDI/XMIDI drivers, midiOut, the MIDI callback
+        // registrations, the software wave synthesizer) and the DLS API.
+        const removed_at_80 = [_][]const u8{
+            "redbook",            "quick",                "sequence",
+            "DLS",                "midiOut",              "XMIDI",
+            "midi_driver",        "register_beat",        "register_trigger",
+            "register_sequence",  "register_timbre",      "register_prefix",
+            "register_ICA",       "channel_notes",        "lock_channel",
+            "release_channel",    "send_channel_voice",   "send_sysex",
+            "controller_value",   "branch_index",         "wave_synthesizer",
+            "map_sequence",       "true_sequence",
+        };
         for (targets) |t| {
             if (openmiles.mss_version < t.ver or openmiles.mss_version > t.ver_max) continue;
+            const dropped = openmiles.mss_version >= 80 and for (removed_at_80) |tok| {
+                if (std.mem.indexOf(u8, t.name, tok) != null) break true;
+            } else false;
+            if (dropped) continue;
             const fname = t.symbol orelse t.name;
             const exp_name = if (t.cdecl) t.name else "_" ++ t.name;
             for (mods) |m| {

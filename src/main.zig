@@ -19,6 +19,9 @@ comptime {
     _ = @import("api/file.zig");
 
     // Version-gated API groups so the export table matches the target release.
+    // NOTE: the actual PE export set is driven by the @export table in
+    // digital.zig (gated per entry by .ver/.ver_max); these imports only force
+    // each module to compile.
     if (mss_version >= 30) _ = @import("api/memory.zig"); // Memory API (the mem_*_lock pair ships since 3.x)
     if (mss_version >= 40) _ = @import("api/rib.zig"); // RIB/ASI + compression (v4+)
     if (mss_version >= 30) _ = @import("api/quick.zig"); // Quick API (ships since 3.x)
