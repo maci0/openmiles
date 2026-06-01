@@ -168,6 +168,14 @@ pub fn AIL_sample_loaded_len(s_opt: ?*Sample) callconv(.winapi) i32 {
 // SDK (AIL_API_sample_ms_lookup, wavefile.cpp): convert a ms position to the
 // source byte position. datarate = effective_rate * bytes-per-frame, datapos =
 // datarate * ms / 1000; *actualms = ms (the input, unchanged). Null S -> ~0U.
+// SDK (wavefile.cpp AIL_API_sample_ms_lookup): null -> ~0U; *actualms = the input
+// ms; datapos = datarate * ms / 1000 with datarate = effective_rate * bytes/frame.
+// For PCM this is exactly our formula (effective_rate * nibbles/2 == rate*bpf).
+// MSS computes datarate from the COMPRESSED stream for ADPCM/ASI (blocksize/
+// samples_per_block, or the ASI bitrate), returning a position in the source
+// bytes; our decoder-based model only has the decoded PCM rate, so for compressed
+// sources this returns a decoded-byte position -- consistent with our own
+// seek/position functions, which also operate on decoded frames.
 pub fn AIL_sample_ms_lookup(s_opt: ?*Sample, milliseconds: i32, actualms: ?*i32) callconv(.winapi) u32 {
     const s = s_opt orelse return ~@as(u32, 0);
     if (actualms) |p| p.* = milliseconds;
