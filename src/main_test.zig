@@ -2169,6 +2169,23 @@ test "AIL_size_processed_digital_audio counts points from data_len (SDK)" {
     try testing.expectEqual(@as(i32, 3456), dg.AIL_size_processed_digital_audio(16000, 1, 1, &info));
     // Stereo 16-bit dest (format 3): point size = 4 -> 800 * 4 + 256 = 3456.
     try testing.expectEqual(@as(i32, 3456), dg.AIL_size_processed_digital_audio(8000, 3, 1, &info));
+
+    // IMA ADPCM source: the SDK counts 2 samples per byte (points <<= 1), unlike
+    // the 16-bit PCM path that halves the byte count. 400 ADPCM bytes -> 800
+    // mono points; dest mono 16-bit @ same rate -> 800*2 + 256 = 1856 (same as
+    // the 1600-byte PCM case above, since 400 nibbles-pairs decode to 800 samples).
+    var adpcm: openmiles.AILSOUNDINFO = .{};
+    adpcm.format = 0x0011; // WAVE_FORMAT_IMA_ADPCM
+    adpcm.bits = 4;
+    adpcm.channels = 1;
+    adpcm.rate = 8000;
+    adpcm.data_len = 400;
+    try testing.expectEqual(@as(i32, 1856), dg.AIL_size_processed_digital_audio(8000, 1, 1, &adpcm));
+    // Stereo ADPCM: 800 bytes -> 1600 samples, halved for stereo pairs -> 800
+    // points; dest stereo 16-bit (format 3, point size 4) -> 800*4 + 256 = 3456.
+    adpcm.channels = 2;
+    adpcm.data_len = 800;
+    try testing.expectEqual(@as(i32, 3456), dg.AIL_size_processed_digital_audio(8000, 3, 1, &adpcm));
 }
 
 test "AIL_process_digital_audio mixes PCM sources into the dest buffer" {
