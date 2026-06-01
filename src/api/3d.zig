@@ -464,7 +464,7 @@ pub fn AIL_set_3D_distance_factor(dig_opt: ?*DigitalDriver, factor: f32) callcon
     }
 }
 pub fn AIL_3D_distance_factor(dig_opt: ?*DigitalDriver) callconv(.winapi) f32 {
-    const dig = dig_opt orelse return 1.0;
+    const dig = dig_opt orelse return 0.0; // SDK (mssds3d.cpp): null handle -> 0.0, not the 1.0 default
     return dig.distance_factor;
 }
 pub fn AIL_set_3D_doppler_factor(dig_opt: ?*DigitalDriver, factor: f32) callconv(.winapi) void {
@@ -478,7 +478,7 @@ pub fn AIL_set_3D_doppler_factor(dig_opt: ?*DigitalDriver, factor: f32) callconv
     }
 }
 pub fn AIL_3D_doppler_factor(dig_opt: ?*DigitalDriver) callconv(.winapi) f32 {
-    const dig = dig_opt orelse return 1.0;
+    const dig = dig_opt orelse return 0.0; // SDK: null handle -> 0.0, not the 1.0 default
     return dig.doppler_factor;
 }
 pub fn AIL_set_3D_rolloff_factor(dig_opt: ?*DigitalDriver, factor: f32) callconv(.winapi) void {
@@ -489,7 +489,7 @@ pub fn AIL_set_3D_rolloff_factor(dig_opt: ?*DigitalDriver, factor: f32) callconv
     }
 }
 pub fn AIL_3D_rolloff_factor(dig_opt: ?*DigitalDriver) callconv(.winapi) f32 {
-    const dig = dig_opt orelse return 1.0;
+    const dig = dig_opt orelse return 0.0; // SDK: null handle -> 0.0, not the 1.0 default
     return dig.rolloff_factor;
 }
 pub fn AIL_set_3D_room_type(dig_opt: ?*DigitalDriver, room_type: i32) callconv(.winapi) void {

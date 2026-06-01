@@ -3700,6 +3700,20 @@ test "distance_factor folds into the per-sample Doppler factor (matches MSS)" {
     try testing.expect(@abs(openmiles.ma.ma_sound_get_doppler_factor(&s.sound) - 6.0) < 0.001);
 }
 
+test "3D distance/doppler/rolloff factors: 1.0 default, 0.0 on null handle (SDK)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    // A fresh driver defaults all three factors to 1.0.
+    try testing.expectEqual(@as(f32, 1.0), api_3d.AIL_3D_distance_factor(drv));
+    try testing.expectEqual(@as(f32, 1.0), api_3d.AIL_3D_doppler_factor(drv));
+    try testing.expectEqual(@as(f32, 1.0), api_3d.AIL_3D_rolloff_factor(drv));
+    // SDK (mssds3d.cpp): a null handle returns 0.0, NOT the 1.0 default --
+    // `if (!dig) return 0.0f;`.
+    try testing.expectEqual(@as(f32, 0.0), api_3d.AIL_3D_distance_factor(null));
+    try testing.expectEqual(@as(f32, 0.0), api_3d.AIL_3D_doppler_factor(null));
+    try testing.expectEqual(@as(f32, 0.0), api_3d.AIL_3D_rolloff_factor(null));
+}
+
 test "occlusion drives the low-pass cutoff (m3d.cpp model), obstruction does not" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
