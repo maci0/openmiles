@@ -7,7 +7,10 @@ resolves by name, including the stdcall byte-count decoration. A faithful
 reimplementation must export the same names with the same `@N`.
 
 Usage:
-    scripts/check_exports.py <ours.dll> <reference.dll> [--names-only]
+    scripts/check_exports.py <ours.dll> <reference.dll> [--names-only] [--strict]
+
+--strict additionally folds EXTRA (symbols we export that the reference lacks)
+into the exit code, so export-table bloat is caught rather than silently printed.
 
 Exit code is the number of (missing + decoration-mismatch) discrepancies, so it
 can gate CI / track progress across iterations.
@@ -39,6 +42,12 @@ def norm(n):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     names_only = "--names-only" in sys.argv
+    # --strict also folds EXTRA (symbols we export that the reference does not)
+    # into the exit code. EXTRA is a real ABI-fidelity dimension: probing code
+    # (GetProcAddress / enumeration) can tell a bloated export table from the
+    # genuine DLL. It is opt-in because a "v9" build legitimately carries a few
+    # 9.3b-SDK functions newer than the 9.1d binary snapshot we diff against.
+    strict = "--strict" in sys.argv
     if len(args) != 2:
         print(__doc__)
         return 2
@@ -61,8 +70,11 @@ def main():
         for k in deco:
             print(f"    reference={rn[k]:44} ours={on[k]}")
     print(f"EXTRA (in ours, not in reference): {len(extra)}")
+    if not names_only:
+        for k in extra:
+            print(f"    {on[k]}")
 
-    return len(missing) + len(deco)
+    return len(missing) + len(deco) + (len(extra) if strict else 0)
 
 
 if __name__ == "__main__":

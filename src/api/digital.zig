@@ -1876,12 +1876,34 @@ comptime {
             "controller_value",   "branch_index",         "wave_synthesizer",
             "map_sequence",       "true_sequence",
         };
+        // Export names that appear in NO reference DLL (3.6a..9.1d) and nowhere in
+        // the 9.3b SDK (headers + source). These table entries were mistakes: no
+        // real Miles release ever exported them, so they must not appear in any
+        // version's export table. Their implementations remain callable internally
+        // and from tests; they are simply never emitted as PE exports.
+        const never_export = [_][]const u8{
+            "AIL_pause_sample",
+            "AIL_open_ASI_provider",
+            "AIL_close_ASI_provider",
+            "AIL_ASI_provider_attribute",
+            "AIL_3D_sample_ms_position",
+            "AIL_set_3D_sample_ms_position",
+            "AIL_set_event_sample_functions",
+            "AIL_set_filter_attribute",
+            "AIL_set_sample_filter",
+            "AIL_set_mem_callbacks",
+            "AIL_set_timer_user_data",
+        };
         for (targets) |t| {
             if (openmiles.mss_version < t.ver or openmiles.mss_version > t.ver_max) continue;
             const dropped = openmiles.mss_version >= 80 and for (removed_at_80) |tok| {
                 if (std.mem.indexOf(u8, t.name, tok) != null) break true;
             } else false;
             if (dropped) continue;
+            const spurious = for (never_export) |n| {
+                if (std.mem.eql(u8, t.name, n)) break true;
+            } else false;
+            if (spurious) continue;
             const fname = t.symbol orelse t.name;
             const exp_name = if (t.cdecl) t.name else "_" ++ t.name;
             for (mods) |m| {
