@@ -577,8 +577,13 @@ test "mssVolumeToGain boundary values" {
     try testing.expectEqual(@as(f32, 1.0), openmiles.mssVolumeToGain(127));
     try testing.expectEqual(@as(f32, 1.0), openmiles.mssVolumeToGain(200));
 
-    const mid_gain = openmiles.mssVolumeToGain(64);
-    try testing.expect(mid_gain > 0.30 and mid_gain < 0.33); // MSS curve ^(10/6)
+    // The 0..127 -> gain table is the SDK's volume_pan curve gain=(v/127)^(10/6)
+    // (wavefile.cpp AIL_API_set_sample_volume_pan), NOT the old v^3 it replaced.
+    // Pin three interior points so a regression to v^3 (which gives 0.016/0.128/
+    // 0.43 here) is caught, not just the 0.30..0.33 mid band.
+    inline for (.{ .{ 32, 0.1005 }, .{ 64, 0.3191 }, .{ 96, 0.6273 } }) |c| {
+        try testing.expect(@abs(openmiles.mssVolumeToGain(c[0]) - c[1]) < 0.001);
+    }
 }
 
 test "gainToMssVolume boundary values" {
