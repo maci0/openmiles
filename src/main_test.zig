@@ -5240,6 +5240,51 @@ test "AIL_digital_configuration reports rate + DIG_F_* format, null-safe" {
     try testing.expectEqual(@as(i32, 1), format); // DIG_F_MONO_16
 }
 
+test "AIL_3D_position/velocity/orientation round-trip (H3DPOBJECT: sample + listener)" {
+    // Getters return exactly what the setters stored; AIL_set_3D_velocity scales
+    // each component by `magnitude` (m3d.cpp set_listener_3D_velocity -> *_vector
+    // with dX*magnitude), so the getter sees the pre-scaled value.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s3 = api_3d.AIL_allocate_3D_sample_handle(drv) orelse return error.AllocFailed;
+
+    var x: f32 = 0;
+    var y: f32 = 0;
+    var z: f32 = 0;
+
+    // --- Sample3D (the "else" H3DPOBJECT branch) ---
+    api_3d.AIL_set_3D_position(s3, 1.0, 2.0, 3.0);
+    api_3d.AIL_3D_position(s3, &x, &y, &z);
+    try testing.expectEqual(@as(f32, 1.0), x);
+    try testing.expectEqual(@as(f32, 2.0), y);
+    try testing.expectEqual(@as(f32, 3.0), z);
+
+    api_3d.AIL_set_3D_velocity(s3, 1.0, 2.0, 3.0, 2.0); // magnitude=2 -> (2,4,6)
+    api_3d.AIL_3D_velocity(s3, &x, &y, &z);
+    try testing.expectEqual(@as(f32, 2.0), x);
+    try testing.expectEqual(@as(f32, 4.0), y);
+    try testing.expectEqual(@as(f32, 6.0), z);
+
+    var fx: f32 = 0;
+    var fy: f32 = 0;
+    var fz: f32 = 0;
+    var ux: f32 = 0;
+    var uy: f32 = 0;
+    var uz: f32 = 0;
+    api_3d.AIL_set_3D_orientation(s3, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0);
+    api_3d.AIL_3D_orientation(s3, &fx, &fy, &fz, &ux, &uy, &uz);
+    try testing.expectEqual(@as(f32, -1.0), fz);
+    try testing.expectEqual(@as(f32, 1.0), uy);
+
+    // --- listener (the isKnownDriver branch of the same polymorphic getter) ---
+    const lobj: *anyopaque = @ptrCast(drv);
+    api_3d.AIL_set_3D_position(lobj, -5.0, 6.0, 7.0);
+    api_3d.AIL_3D_position(lobj, &x, &y, &z);
+    try testing.expectEqual(@as(f32, -5.0), x);
+    try testing.expectEqual(@as(f32, 6.0), y);
+    try testing.expectEqual(@as(f32, 7.0), z);
+}
+
 test "AIL_redbook_set_volume_level returns the previous volume (F32)" {
     const rb = try openmiles.Redbook.init(testing.allocator, 0);
     defer rb.deinit();
