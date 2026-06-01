@@ -376,30 +376,31 @@ pub fn AIL_indent(a0: i32) callconv(.c) void {
 // Real MSS: AIL_mem_close(mem, void** data, U32* size) @12 — close a write
 // stream, optionally handing the accumulated buffer (C-malloc'd, caller frees
 // via AIL_mem_free_lock) back through data/size.
-pub fn AIL_mem_close(mem: ?*anyopaque, data_out: ?*?*anyopaque, size_out: ?*u32) callconv(.winapi) void {
-    const m: *MemStream = @ptrCast(@alignCast(mem orelse {
-        if (data_out) |d| d.* = null;
-        if (size_out) |s| s.* = 0;
-        return;
-    }));
+// SDK (miscutil.cpp): S32 AIL_mem_close(HMEMDUMP, void** buf, U32* size). Returns
+// 1 on success, 0 only if the output allocation fails; a NULL handle returns 1
+// and writes nothing (the body is guarded by `if (m)`). `size` is written
+// independently of `buf`.
+pub fn AIL_mem_close(mem: ?*anyopaque, data_out: ?*?*anyopaque, size_out: ?*u32) callconv(.winapi) i32 {
+    const m: *MemStream = @ptrCast(@alignCast(mem orelse return 1));
+    var ret: i32 = 1;
+    if (size_out) |s| s.* = @intCast(m.len); // SDK: *size = m->totalsize, regardless of buf
     if (data_out) |d| {
         if (m.len > 0) {
             if (std.c.malloc(m.len)) |raw| {
                 const out: [*]u8 = @ptrCast(raw);
                 @memcpy(out[0..m.len], m.buf[0..m.len]);
                 d.* = raw;
-                if (size_out) |s| s.* = @intCast(m.len);
             } else {
                 d.* = null;
-                if (size_out) |s| s.* = 0;
+                ret = 0; // SDK sets ret=0 when the copy buffer can't be allocated
             }
         } else {
             d.* = null;
-            if (size_out) |s| s.* = 0;
         }
     }
     if (m.owns) openmiles.global_allocator.free(m.buf);
     openmiles.global_allocator.destroy(m);
+    return ret;
 }
 // Real MSS: AIL_mem_create() @0 — create an empty, growable in-memory write
 // stream (writes append and grow the backing buffer; see AIL_mem_close).

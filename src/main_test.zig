@@ -3202,7 +3202,7 @@ const api_redbook = @import("api/redbook.zig");
 
 test "v8 AIL_mem in-memory stream round-trips" {
     const m = api_v8.AIL_mem_create() orelse return error.NoMem;
-    defer api_v8.AIL_mem_close(m, null, null);
+    defer _ = api_v8.AIL_mem_close(m, null, null);
     var src = "hello world".*;
     try testing.expectEqual(@as(i32, 11), api_v8.AIL_mem_write(m, &src, 11));
     try testing.expectEqual(@as(i32, 11), api_v8.AIL_mem_pos(m));
@@ -3215,10 +3215,31 @@ test "v8 AIL_mem in-memory stream round-trips" {
     try testing.expectEqual(@as(i32, 0), api_v8.AIL_mem_read(m, &dst, 8));
 }
 
+test "AIL_mem_close returns S32 1 and hands back the buffer + size (SDK)" {
+    // SDK (miscutil.cpp): S32 return, 1 on success; *size and *buf are filled.
+    const m = api_v8.AIL_mem_create() orelse return error.NoMem;
+    var src = "payload!".*;
+    try testing.expectEqual(@as(i32, 8), api_v8.AIL_mem_write(m, &src, 8));
+    var data: ?*anyopaque = null;
+    var size: u32 = 0;
+    try testing.expectEqual(@as(i32, 1), api_v8.AIL_mem_close(m, &data, &size)); // S32 success
+    try testing.expectEqual(@as(u32, 8), size);
+    try testing.expect(data != null);
+    const got: [*]const u8 = @ptrCast(data.?);
+    try testing.expectEqualSlices(u8, "payload!", got[0..8]);
+    std.c.free(data); // AIL_mem_close hands back a malloc'd copy
+    // SDK: a NULL handle returns 1 and writes nothing (the body is `if (m)`).
+    var d2: ?*anyopaque = @ptrFromInt(0xABCD);
+    var s2: u32 = 0xDEAD;
+    try testing.expectEqual(@as(i32, 1), api_v8.AIL_mem_close(null, &d2, &s2));
+    try testing.expectEqual(@as(?*anyopaque, @ptrFromInt(0xABCD)), d2); // untouched
+    try testing.expectEqual(@as(u32, 0xDEAD), s2); // untouched
+}
+
 test "v8 AIL_mem_open read-only view" {
     var data = "abcdef".*;
     const m = api_v8.AIL_mem_open(&data, 6) orelse return error.NoMem;
-    defer api_v8.AIL_mem_close(m, null, null);
+    defer _ = api_v8.AIL_mem_close(m, null, null);
     var dst: [8]u8 = undefined;
     try testing.expectEqual(@as(i32, 3), api_v8.AIL_mem_read(m, &dst, 3));
     try testing.expectEqualSlices(u8, "abc", dst[0..3]);

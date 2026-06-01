@@ -372,7 +372,7 @@ test "fuzz AIL_mem_* in-memory IO with adversarial sizes/positions" {
         }
         var data: ?*anyopaque = null;
         var size: u32 = 0;
-        api_v8.AIL_mem_close(mem, &data, &size);
+        _ = api_v8.AIL_mem_close(mem, &data, &size);
         if (data) |d| std.c.free(d); // AIL_mem_close hands back a malloc'd copy
     }
 
@@ -388,7 +388,7 @@ test "fuzz AIL_mem_* in-memory IO with adversarial sizes/positions" {
         _ = api_v8.AIL_mem_seek(mem, adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)]);
         _ = api_v8.AIL_mem_read(mem, &scratch, adv_i32[rand.intRangeLessThan(usize, 0, adv_i32.len)]);
         _ = api_v8.AIL_mem_write(mem, &scratch, 8); // read-only: must be a no-op
-        api_v8.AIL_mem_close(mem, null, null);
+        _ = api_v8.AIL_mem_close(mem, null, null);
     }
 }
 
@@ -789,7 +789,7 @@ test "fuzz v8 AIL_mem in-memory stream ops" {
     while (trial < 300) : (trial += 1) {
         _ = rand.intRangeAtMost(i32, 0, 1024);
         const m = api_v8.AIL_mem_create() orelse continue;
-        defer api_v8.AIL_mem_close(m, null, null);
+        defer _ = api_v8.AIL_mem_close(m, null, null);
         var step: usize = 0;
         while (step < 40) : (step += 1) {
             switch (rand.intRangeAtMost(u8, 0, 5)) {
@@ -815,7 +815,7 @@ test "fuzz v8 AIL_mem in-memory stream ops" {
     while (v < 200) : (v += 1) {
         const sz = rand.intRangeAtMost(i32, 0, @intCast(payload.len));
         const m = api_v8.AIL_mem_open(&payload, sz) orelse continue;
-        defer api_v8.AIL_mem_close(m, null, null);
+        defer _ = api_v8.AIL_mem_close(m, null, null);
         _ = api_v8.AIL_mem_read(m, &io_buf, rand.intRangeAtMost(i32, 0, @intCast(io_buf.len)));
         _ = api_v8.AIL_mem_write(m, &io_buf, 4); // read-only: must reject, not crash
     }

@@ -751,7 +751,9 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_midi.AIL_midiOutClose(scp);
     if (api_quick.AIL_quick_copy(hs)) |qc| qc.deinit();
     if (api_digital.AIL_allocate_file_sample(hd, scp, rsz)) |fsamp| fsamp.deinit();
-    if (api_v8.AIL_mem_create()) |m| api_v8.AIL_mem_close(m, null, null);
+    if (api_v8.AIL_mem_create()) |m| {
+        _ = api_v8.AIL_mem_close(m, null, null);
+    }
     _ = api_memory.AIL_mem_use_free(null);
     // allocate/release lifecycle on throwaway handles (exercises C-ABI wrappers
     // without tearing down the shared hd/hm/hs handles the loop reuses)
