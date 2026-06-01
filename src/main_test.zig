@@ -3200,6 +3200,25 @@ const api_file = @import("api/file.zig");
 const api_quick = @import("api/quick.zig");
 const api_redbook = @import("api/redbook.zig");
 
+test "AIL_quick_set_volume: S32 0..127 form vs F32 0..1 form (version split)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    // S32 form (exported through 6.1): volume/extravol are 0..127.
+    // 64 scaled by extravol 127/127 -> 64.
+    api_quick.AIL_quick_set_volume(s, 64, 127);
+    try testing.expectEqual(@as(i32, 64), s.original_volume);
+    // F32 form (6.2+, the quick_set_volume_f32 backing): volume/extravol are 0..1.
+    // 0.5 * 1.0 -> 0.5*127 = 63.
+    api_quick.AIL_quick_set_volume_f32(s, 0.5, 1.0);
+    try testing.expectEqual(@as(i32, 63), s.original_volume);
+    // F32 clamps to 0..1, so an out-of-range 2.0 saturates to full (127) -- NOT
+    // the bit-reinterpreted garbage the S32 path would produce for a float.
+    api_quick.AIL_quick_set_volume_f32(s, 2.0, 1.0);
+    try testing.expectEqual(@as(i32, 127), s.original_volume);
+}
+
 test "v8 AIL_mem in-memory stream round-trips" {
     const m = api_v8.AIL_mem_create() orelse return error.NoMem;
     defer _ = api_v8.AIL_mem_close(m, null, null);
