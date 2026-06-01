@@ -582,7 +582,7 @@ pub fn AIL_sample_51_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32, fb_p
     if (lfe_level) |p| p.* = s.v51_sub_level;
 }
 pub fn AIL_sample_buffer_available(s_opt: ?*Sample) callconv(.winapi) i32 {
-    const s = s_opt orelse return 0;
+    const s = s_opt orelse return -1; // SDK (wavefile.cpp) returns -1 on null, not 0
     return if (s.stream_active) 1 else 0; // at least one slot free to refill
 }
 pub fn AIL_sample_buffer_count(s_opt: ?*Sample) callconv(.winapi) i32 {

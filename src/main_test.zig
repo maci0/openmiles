@@ -3718,6 +3718,10 @@ test "v8 sample channel_count and loop_block report real state" {
     dg.AIL_set_sample_loop_count(s, 3);
     try testing.expectEqual(@as(i32, 3), api_v8b.AIL_sample_loop_block(s, null, null));
     try testing.expectEqual(@as(i32, 3), dg.AIL_sample_loop_count(s));
+    // SDK null guards: AIL_API_sample_loop_count and AIL_API_sample_buffer_available
+    // both return -1 on a null handle (NOT 0).
+    try testing.expectEqual(@as(i32, -1), dg.AIL_sample_loop_count(null));
+    try testing.expectEqual(@as(i32, -1), api_v8b.AIL_sample_buffer_available(null));
 }
 
 test "v8 5.1 volume levels round-trip and volume_pan channel order" {
