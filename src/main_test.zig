@@ -3728,6 +3728,14 @@ test "occlusion drives the low-pass cutoff (m3d.cpp model), obstruction does not
 
     // A null handle returns 1.0 (fully open), never 0 (SDK wavefile.cpp).
     try testing.expectEqual(@as(f32, 1.0), api_v7.AIL_sample_low_pass_cut_off(null, 0));
+    // Fresh sample: obstruction/occlusion/exclusion default to 0.0 (init_sample),
+    // and a null handle returns 0.0 (SDK m3d.cpp guards).
+    try testing.expectEqual(@as(f32, 0.0), api_v7.AIL_sample_obstruction(s));
+    try testing.expectEqual(@as(f32, 0.0), api_v7.AIL_sample_occlusion(s));
+    try testing.expectEqual(@as(f32, 0.0), api_v7.AIL_sample_exclusion(s));
+    try testing.expectEqual(@as(f32, 0.0), api_v7.AIL_sample_obstruction(null));
+    try testing.expectEqual(@as(f32, 0.0), api_v7.AIL_sample_occlusion(null));
+    try testing.expectEqual(@as(f32, 0.0), api_v7.AIL_sample_exclusion(null));
     // occlusion=0.75 -> cutoff = (1-0.75)+0.01 = 0.26 (muffled).
     api_v7.AIL_set_sample_occlusion(s, 0.75);
     try testing.expect(@abs(api_v7.AIL_sample_low_pass_cut_off(s, 0) - 0.26) < 0.001);
