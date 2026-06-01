@@ -145,6 +145,20 @@ pub const ADPCMDATA = extern struct {
     samplesR: u32 = 0,
     moresamples: [16]u16 = [_]u16{0} ** 16,
 };
+comptime {
+    // ADPCMDATA sizes the mss_adpcm member of AILMIXINFO, so its layout sets that
+    // struct's stride. Lock the mss.h field order (UINTa savesrc/destend/srcend are
+    // pointer-sized; the rest U32 + U16[16]).
+    const fields = @typeInfo(ADPCMDATA).@"struct".fields;
+    const order = [_][]const u8{
+        "blocksize", "extrasamples", "blockleft", "step", "savesrc",
+        "sample",    "destend",      "srcend",    "samplesL", "samplesR", "moresamples",
+    };
+    if (fields.len != order.len) @compileError("ADPCMDATA field count drifted");
+    for (order, 0..) |fname, i| {
+        if (!std.mem.eql(u8, fields[i].name, fname)) @compileError("ADPCMDATA field order drifted at " ++ fname);
+    }
+}
 
 /// AILMIXINFO (mss.h): one input to the software mixer. Begins with an
 /// AILSOUNDINFO, so an AILSOUNDINFO* and an AILMIXINFO* coincide for the first
@@ -156,6 +170,19 @@ pub const AILMIXINFO = extern struct {
     left_val: i32 = 0,
     right_val: i32 = 0,
 };
+comptime {
+    // AIL_size_processed_digital_audio / AIL_process_digital_audio take an array
+    // of AILMIXINFO and stride it by @sizeOf, and they alias an AILSOUNDINFO* over
+    // the first source's Info -- so Info MUST be at offset 0 and the field order
+    // is ABI. Lock both (a leading-field change would mis-stride every source).
+    if (@offsetOf(AILMIXINFO, "Info") != 0) @compileError("AILMIXINFO.Info must be at offset 0 (AILSOUNDINFO* aliases AILMIXINFO*)");
+    const fields = @typeInfo(AILMIXINFO).@"struct".fields;
+    const order = [_][]const u8{ "Info", "mss_adpcm", "src_fract", "left_val", "right_val" };
+    if (fields.len != order.len) @compileError("AILMIXINFO field count drifted");
+    for (order, 0..) |fname, i| {
+        if (!std.mem.eql(u8, fields[i].name, fname)) @compileError("AILMIXINFO field order drifted at " ++ fname);
+    }
+}
 
 pub const provider_3d_attr_names = [_][*:0]const u8{
     "Rolloff factor",
