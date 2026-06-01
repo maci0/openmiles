@@ -1375,6 +1375,30 @@ test "output_speaker_index matches the SDK MSS_SPEAKER->channel map" {
     try testing.expectEqual(@as(i8, -1), T[0][0]);
     try testing.expectEqual(@as(i8, 0), T[1][0]);
     try testing.expectEqual(@as(i8, -1), T[1][1]);
+
+    // output_speaker_order (channel -> MSS_SPEAKER) must be the exact inverse:
+    // for every config m and output channel c carrying speaker s>=0, the forward
+    // map sends s back to c; and unused channels are -1. This locks both tables
+    // and their mutual consistency.
+    const ORD = @import("api/v7.zig").output_speaker_order;
+    for (0..10) |m| {
+        for (0..18) |c| {
+            const s = ORD[m][c];
+            if (s < 0) continue;
+            try testing.expectEqual(@as(i8, @intCast(c)), T[m][@intCast(s)]);
+        }
+        // And the forward map's non-(-1) entries are exactly covered by the order.
+        for (0..18) |s| {
+            const c = T[m][s];
+            if (c < 0) continue;
+            try testing.expectEqual(@as(i32, @intCast(s)), ORD[m][@intCast(c)]);
+        }
+    }
+    // Spot-check distinctive order rows: 7.1 channels 6/7 are SIDE_LEFT/RIGHT(9/10),
+    // 8.1 channel 6 is BACK_CENTER(8).
+    try testing.expectEqual(@as(i32, 9), ORD[8][6]);
+    try testing.expectEqual(@as(i32, 10), ORD[8][7]);
+    try testing.expectEqual(@as(i32, 8), ORD[9][6]);
 }
 
 test "AIL_set/sample_channel_levels round-trip + default routing (SDK)" {
