@@ -1753,6 +1753,22 @@ test "AIL_WAV_file_write interprets the DIG_F format code (not a bit depth)" {
     const b2 = try H.readWav(path, &rb);
     try testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, b2[22..][0..2], .little));
     try testing.expectEqual(@as(u16, 8), std.mem.readInt(u16, b2[34..][0..2], .little));
+
+    // DIG_F_MULTICHANNEL_MASK (16) packs the channel count in the high 16 bits.
+    // MSS 8.0+ writes that count; pre-8.0 has no multichannel path (bit 16 was
+    // DIG_F_USING_ASI there) so it falls back to the stereo bit -> here, mono.
+    const mc_format: i32 = (6 << 16) | 16 | 1; // 6ch, multichannel, 16-bit
+    try testing.expectEqual(@as(i32, 1), dg.AIL_WAV_file_write(path, @constCast(@ptrCast(&data)), data.len, 22050, mc_format));
+    const b3 = try H.readWav(path, &rb);
+    const got_ch = std.mem.readInt(u16, b3[22..][0..2], .little);
+    if (openmiles.mss_version >= 80) {
+        try testing.expectEqual(@as(u16, 6), got_ch); // multichannel count honored
+        // block_align = ch*bits/8 = 6*2 = 12; avg_bps = rate*block_align.
+        try testing.expectEqual(@as(u16, 12), std.mem.readInt(u16, b3[32..][0..2], .little));
+        try testing.expectEqual(@as(u32, 22050 * 12), std.mem.readInt(u32, b3[28..][0..4], .little));
+    } else {
+        try testing.expectEqual(@as(u16, 1), got_ch); // no multichannel: stereo bit unset -> mono
+    }
 }
 
 test "AIL_WAV_info handles WAVEFORMATEXTENSIBLE PCM (format->1, channel_mask, reject non-PCM)" {

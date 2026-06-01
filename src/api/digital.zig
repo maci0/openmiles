@@ -876,7 +876,16 @@ pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, r
     // The 5th arg is a DIG_F format code (mss.h), NOT a bit depth:
     //   DIG_F_16BITS_MASK (1) -> 16-bit else 8-bit; DIG_F_STEREO_MASK (2) -> stereo.
     if (rate <= 0) return 0;
-    const channels: u16 = if (format & 2 != 0) 2 else 1;
+    // MSS 8.0+ (msssys.c AIL_API_WAV_file_write) honors DIG_F_MULTICHANNEL_MASK
+    // (bit 16): the real channel count is packed in the high 16 bits. Pre-8.0 has
+    // no multichannel path -- and there bit 16 meant DIG_F_USING_ASI, an unrelated
+    // state flag -- so only the stereo bit applies. Gate to match each release.
+    const channels: u16 = blk: {
+        if (openmiles.mss_version >= 80 and (format & 16) != 0) {
+            break :blk @intCast(@as(u32, @bitCast(format)) >> 16);
+        }
+        break :blk if (format & 2 != 0) 2 else 1;
+    };
     const bits: u16 = if (format & 1 != 0) 16 else 8;
     const pcm_data: []const u8 = @as([*]const u8, @ptrCast(@alignCast(data)))[0..len];
     const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, pcm_data, channels, @intCast(rate), bits) catch |err| {
