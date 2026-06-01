@@ -1343,6 +1343,40 @@ test "AIL_speaker_configuration returns the default stereo speaker array (SDK)" 
     try testing.expect(@abs(falloff - 0.9) < 0.0001); // still 0.9, not 0.1
 }
 
+test "output_speaker_index matches the SDK MSS_SPEAKER->channel map" {
+    // wavefile.cpp output_speaker_index[logical_channels][MSS_SPEAKER]. Verify the
+    // distinctive (non-sequential) entries so an accidental edit to the multi-
+    // channel routing table is caught. MSS_SPEAKER: FL=0 FR=1 FC=2 LFE=3 BL=4
+    // BR=5 FLC=6 FRC=7 BC=8 SL=9 SR=10.
+    const T = @import("api/v8.zig").output_speaker_index;
+    // Stereo: only FL/FR map; FC is absent.
+    try testing.expectEqual(@as(i8, 0), T[2][0]); // FL
+    try testing.expectEqual(@as(i8, 1), T[2][1]); // FR
+    try testing.expectEqual(@as(i8, -1), T[2][2]); // FC -> none
+    // Dolby ProLogic (3 ch): FL,FR, and BACK_CENTER (idx 8) -> channel 2; FC absent.
+    try testing.expectEqual(@as(i8, -1), T[3][2]); // FC -> none
+    try testing.expectEqual(@as(i8, 2), T[3][8]); // BC -> 2
+    // 5.1: FL..BR are 0..5 with LFE=3, FC=2; BC absent.
+    try testing.expectEqual(@as(i8, 2), T[6][2]); // FC
+    try testing.expectEqual(@as(i8, 3), T[6][3]); // LFE
+    try testing.expectEqual(@as(i8, 5), T[6][5]); // BR
+    try testing.expectEqual(@as(i8, -1), T[6][8]); // BC -> none
+    // 6.1: adds BACK_CENTER -> channel 6.
+    try testing.expectEqual(@as(i8, 6), T[7][8]); // BC -> 6
+    // 7.1: adds SIDE_LEFT/RIGHT (idx 9/10) -> 6/7; BC absent.
+    try testing.expectEqual(@as(i8, -1), T[8][8]); // BC -> none
+    try testing.expectEqual(@as(i8, 6), T[8][9]); // SL -> 6
+    try testing.expectEqual(@as(i8, 7), T[8][10]); // SR -> 7
+    // 8.1: BC=6, SL=7, SR=8.
+    try testing.expectEqual(@as(i8, 6), T[9][8]); // BC -> 6
+    try testing.expectEqual(@as(i8, 7), T[9][9]); // SL -> 7
+    try testing.expectEqual(@as(i8, 8), T[9][10]); // SR -> 8
+    // Invalid (0) row and mono are fully -1 / single.
+    try testing.expectEqual(@as(i8, -1), T[0][0]);
+    try testing.expectEqual(@as(i8, 0), T[1][0]);
+    try testing.expectEqual(@as(i8, -1), T[1][1]);
+}
+
 test "AIL_set/sample_channel_levels round-trip + default routing (SDK)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2); // stereo out
     defer drv.deinit();
