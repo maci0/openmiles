@@ -1151,6 +1151,34 @@ test "Sample loadFromMemory initializes sample" {
     try testing.expectEqual(openmiles.SampleStatus.done, sample.status()); // loaded, never played -> SMP_DONE
 }
 
+var sob_cb_fired: bool = false;
+fn testSobCallback(s: ?*anyopaque) callconv(.winapi) void {
+    _ = s;
+    sob_cb_fired = true;
+}
+
+test "AIL_register_SOB_callback: the callback actually fires on AIL_start_sample" {
+    // The registration round-trip is covered elsewhere; this checks the harder
+    // property -- that a registered Start-Of-Buffer callback is genuinely invoked
+    // (with the AILSAMPLECB void(HSAMPLE) signature) when the sample starts, not
+    // merely stored. Start fires SOB synchronously, so this is deterministic.
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    const pcm = [_]u8{0} ** 4410;
+    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    defer allocator.free(wav);
+    try s.loadFromMemory(wav, true);
+
+    sob_cb_fired = false;
+    const prev = dg.AIL_register_SOB_callback(s, @ptrCast(@constCast(&testSobCallback)));
+    try testing.expectEqual(@as(?*anyopaque, null), prev); // no prior callback
+    dg.AIL_start_sample(s);
+    try testing.expect(sob_cb_fired);
+}
+
 test "Sample loadFromMemory then start and stop lifecycle" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
