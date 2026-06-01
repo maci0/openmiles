@@ -184,7 +184,20 @@ pub fn AIL_sample_reverb_levels(s_opt: ?*Sample, dry_level: ?*f32, wet_level: ?*
 }
 pub fn AIL_set_sample_info(s_opt: ?*Sample, info: *const AILSOUNDINFO) callconv(.winapi) i32 {
     const s = s_opt orelse return 0; // SDK (wavefile.cpp): 0 on null S/info
-    const ch: u16 = if (info.channels >= 2) 2 else 1;
+    // Channel-count selection mirrors AIL_API_set_sample_info exactly (verified by
+    // disassembling 7.0k vs 8.0e/9.1d):
+    //   v8/v9: channels>2 OR channel_mask!=~0U  -> DIG_F_MULTICHANNEL | channels<<16
+    //          (the true channel count is preserved); channels==2 -> stereo; else
+    //          mono. Collapsing those cases, the resulting count is max(1,channels).
+    //   v7 and earlier: stereo only when channels==2, otherwise mono — there is no
+    //          multichannel path, so >2 channels downgrades to mono, NOT stereo.
+    const ch: u16 = blk: {
+        if (@hasField(AILSOUNDINFO, "channel_mask")) {
+            const want = @max(@as(i32, 1), @min(info.channels, 0xFFFF));
+            break :blk @intCast(want);
+        }
+        break :blk if (info.channels == 2) 2 else 1;
+    };
     const bits: u16 = if (info.bits == 8) 8 else 16;
     s.pcm_format = .{ .channels = ch, .bits = bits };
     if (@hasField(AILSOUNDINFO, "channel_mask")) s.channel_mask = info.channel_mask;

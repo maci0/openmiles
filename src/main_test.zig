@@ -1953,6 +1953,39 @@ test "AIL_set_sample_info channel_mask round-trips via channel_count" {
     try testing.expectEqual(@as(i32, 0), api_v7.AIL_set_sample_info(null, &info));
 }
 
+test "AIL_set_sample_info channel-count selection matches per-version SDK logic" {
+    // Verified by disassembling AIL_API_set_sample_info: v8/v9 preserve the true
+    // channel count for >2 channels (multichannel path), while v7 and earlier have
+    // no multichannel path and downgrade anything that isn't exactly 2 to mono.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+
+    var info: openmiles.AILSOUNDINFO = .{};
+    info.bits = 16;
+
+    // 1 channel -> mono on every version.
+    info.channels = 1;
+    _ = api_v7.AIL_set_sample_info(s, &info);
+    try testing.expectEqual(@as(u16, 1), s.pcm_format.?.channels);
+
+    // 2 channels -> stereo on every version.
+    info.channels = 2;
+    _ = api_v7.AIL_set_sample_info(s, &info);
+    try testing.expectEqual(@as(u16, 2), s.pcm_format.?.channels);
+
+    // 6 channels (5.1): v8+ preserves the count (multichannel); v7 falls back to
+    // mono because only exactly-2 is treated as stereo there.
+    info.channels = 6;
+    _ = api_v7.AIL_set_sample_info(s, &info);
+    if (@hasField(openmiles.AILSOUNDINFO, "channel_mask")) {
+        try testing.expectEqual(@as(u16, 6), s.pcm_format.?.channels);
+    } else {
+        try testing.expectEqual(@as(u16, 1), s.pcm_format.?.channels);
+    }
+}
+
 test "AIL_set_input_state returns 0 for a null handle (SDK guard)" {
     const api_input = @import("api/input.zig");
     // Null handle: no device needed, deterministic. SDK returns 0.
