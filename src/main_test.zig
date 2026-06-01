@@ -1191,6 +1191,33 @@ fn testEosCallback(s: ?*anyopaque) callconv(.winapi) void {
     eos_cb_count += 1;
 }
 
+test "AIL_stream_status: paused/never-started -> SMP_STOPPED, playing -> PLAYING (SDK)" {
+    // SDK mssstrm.cpp: a stream's status differs from a plain sample's -- a
+    // paused or not-yet-started stream is SMP_STOPPED (a paused 2D sample would
+    // be SMP_PLAYING; a never-started one SMP_DONE).
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    const pcm = [_]u8{0} ** 8820;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 44100, 8);
+    defer testing.allocator.free(wav);
+    try s.loadFromMemory(wav, false);
+
+    // Opened but never started -> SMP_STOPPED (8), not SMP_DONE.
+    try testing.expectEqual(@as(u32, 8), api_stream.AIL_stream_status(s));
+    // Started -> SMP_PLAYING (4).
+    api_stream.AIL_start_stream(s);
+    try testing.expectEqual(@as(u32, 4), api_stream.AIL_stream_status(s));
+    // Paused -> SMP_STOPPED (8), unlike a paused 2D sample (which is SMP_PLAYING).
+    api_stream.AIL_pause_stream(s, 1);
+    try testing.expectEqual(@as(u32, 8), api_stream.AIL_stream_status(s));
+    try testing.expectEqual(@as(u32, 4), dg.AIL_sample_status(s)); // 2D view still PLAYING
+    // Unpaused -> SMP_PLAYING again.
+    api_stream.AIL_pause_stream(s, 0);
+    try testing.expectEqual(@as(u32, 4), api_stream.AIL_stream_status(s));
+}
+
 test "AIL_end_3D_sample fires the 3D EOS callback once (live->DONE only)" {
     const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer driver.deinit();

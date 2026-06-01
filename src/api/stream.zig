@@ -141,7 +141,20 @@ pub fn AIL_set_stream_ms_position(s_opt: ?*Sample, ms: i32) callconv(.winapi) vo
 }
 pub fn AIL_stream_status(s_opt: ?*Sample) callconv(.winapi) u32 {
     const s = s_opt orelse return 0;
-    return @intFromEnum(s.status());
+    // SDK mssstrm.cpp AIL_API_stream_status maps stream states differently from a
+    // plain HSAMPLE: a paused stream (playcontrol&8) OR a not-yet-started stream
+    // (playcontrol==0) reports SMP_STOPPED -- whereas a paused 2D sample reports
+    // SMP_PLAYING and a never-started sample reports SMP_DONE. Only a stream that
+    // has actually finished reports SMP_DONE.
+    const ma = openmiles.ma;
+    if (s.is_done) return @intFromEnum(openmiles.SampleStatus.done);
+    if (s.is_paused) return @intFromEnum(openmiles.SampleStatus.stopped);
+    if (s.is_initialized) {
+        if (ma.ma_sound_is_playing(&s.sound) != 0) return @intFromEnum(openmiles.SampleStatus.playing);
+        if (ma.ma_sound_at_end(&s.sound) != 0) return @intFromEnum(openmiles.SampleStatus.done);
+    }
+    // Opened but not playing / explicitly stopped -> SMP_STOPPED.
+    return @intFromEnum(openmiles.SampleStatus.stopped);
 }
 pub fn AIL_stream_playback_rate(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
