@@ -4191,6 +4191,29 @@ test "MP3 inspector: mono channel mode and 192 kbps bitrate index" {
     try testing.expectEqual(@as(i32, 1152), es.samples_per_frame);
 }
 
+test "MP3 inspector: MPEG-2 Layer III is 576 samples/frame at the lower rates" {
+    // MPEG-2 Layer III, 64 kbps, 22050 Hz, stereo. Header FF F3 80 00:
+    //   byte1 = 1111 0011: sync, version 10 (MPEG-2), layer 01 (L3), protection 1
+    //   byte2 = 1000(idx 8 -> 64k in the MPEG-2 table) 00(22050) 0(pad) 0 = 0x80
+    // MPEG-2/2.5 Layer III has half the samples per frame (576, not 1152) and the
+    // frame-size multiplier 72 instead of 144 -- frame size = 72*64000/22050 = 208.
+    const frame_size = 208;
+    var img: [frame_size * 2]u8 = [_]u8{0} ** (frame_size * 2);
+    inline for (.{ 0, frame_size }) |base| {
+        img[base + 0] = 0xFF;
+        img[base + 1] = 0xF3;
+        img[base + 2] = 0x80;
+        img[base + 3] = 0x00;
+    }
+    var es: openmiles.mp3.MP3_INFO = undefined;
+    try testing.expectEqual(@as(i32, 1), api_v7b.AIL_inspect_MP3(&es, &img, img.len));
+    try testing.expectEqual(@as(i32, 1), api_v7b.AIL_enumerate_MP3_frames(&es));
+    try testing.expectEqual(@as(i32, 22050), es.sample_rate);
+    try testing.expectEqual(@as(i32, 64000), es.bit_rate);
+    try testing.expectEqual(@as(i32, 2), es.channels_per_sample); // stereo
+    try testing.expectEqual(@as(i32, 576), es.samples_per_frame); // half of MPEG-1
+}
+
 
 test "event constructor + decoder round-trip (byte-faithful text)" {
     const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
