@@ -99,6 +99,12 @@ pub fn AIL_set_sample_3D_cone(obj: ?*Sample, inner_angle: f32, outer_angle: f32,
     // miniaudio lerps in COSINE; endpoints match exactly, mid-band differs a
     // few percent. Faithfully matching it would require bypassing ma's
     // per-frame spatializer, so the (rarely-used) cone curve is left to ma.
+    // S3D struct is the source of truth (SDK stores DEGS_TO_DIAMS(angle) and
+    // outer_volume verbatim; the getter recovers degrees). Keep the raw degrees
+    // / gain so the getter round-trips even before the voice is initialized.
+    s.s3d_cone_inner_deg = inner_angle;
+    s.s3d_cone_outer_deg = outer_angle;
+    s.s3d_cone_outer_vol = outer_volume_level;
     if (s.is_initialized) ma.ma_sound_set_cone(&s.sound, inner_angle * openmiles.deg2rad, outer_angle * openmiles.deg2rad, std.math.clamp(outer_volume_level, 0.0, 1.0));
 }
 pub fn AIL_set_sample_3D_distances(obj: ?*Sample, max_dist: f32, min_dist: f32, auto_3D_wet_atten: i32) callconv(.winapi) void {
@@ -163,13 +169,11 @@ pub fn AIL_sample_3D_orientation(obj: ?*Sample, fx: ?*f32, fy: ?*f32, fz: ?*f32,
 }
 pub fn AIL_sample_3D_cone(obj: ?*Sample, inner_angle: ?*f32, outer_angle: ?*f32, outer_volume_level: ?*f32) callconv(.winapi) void {
     const s = obj orelse return;
-    var inner: f32 = 0;
-    var outer: f32 = 6.2831855;
-    var gain: f32 = 1;
-    if (s.is_initialized) ma.ma_sound_get_cone(&s.sound, &inner, &outer, &gain);
-    if (inner_angle) |p| p.* = inner / openmiles.deg2rad;
-    if (outer_angle) |p| p.* = outer / openmiles.deg2rad;
-    if (outer_volume_level) |p| p.* = gain;
+    // SDK returns DIAMS_TO_DEGS(S3D.inner/outer_angle) and S3D.outer_volume
+    // verbatim -- i.e. exactly the degrees / gain the app set (valid pre-init).
+    if (inner_angle) |p| p.* = s.s3d_cone_inner_deg;
+    if (outer_angle) |p| p.* = s.s3d_cone_outer_deg;
+    if (outer_volume_level) |p| p.* = s.s3d_cone_outer_vol;
 }
 pub fn AIL_sample_3D_distances(obj: ?*Sample, max_dist: ?*f32, min_dist: ?*f32, auto_3D_wet_atten: ?*i32) callconv(.winapi) void {
     const s = obj orelse return;

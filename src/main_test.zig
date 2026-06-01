@@ -3657,6 +3657,34 @@ test "v7 3D position/velocity round-trip via S3D struct (uninitialized sample)" 
     try testing.expectEqual(@as(f32, 21), px); // 11 + 1*10
 }
 
+test "AIL_sample_3D_cone round-trips inner/outer degrees + verbatim outer_volume" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv); // uninitialized
+    defer s.deinit();
+
+    var inner: f32 = -1;
+    var outer: f32 = -1;
+    var gain: f32 = -1;
+    // Defaults match wavefile.cpp AIL_init_sample: 360/360/1.0.
+    api_v7.AIL_sample_3D_cone(s, &inner, &outer, &gain);
+    try testing.expectApproxEqAbs(@as(f32, 360.0), inner, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 360.0), outer, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), gain, 0.001);
+
+    // Round-trip (uninitialized): degrees recovered exactly, outer_volume verbatim.
+    api_v7.AIL_set_sample_3D_cone(s, 30.0, 90.0, 0.25);
+    api_v7.AIL_sample_3D_cone(s, &inner, &outer, &gain);
+    try testing.expectApproxEqAbs(@as(f32, 30.0), inner, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 90.0), outer, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.25), gain, 0.001);
+
+    // SDK stores outer_volume verbatim (no clamp) -> out-of-range round-trips.
+    api_v7.AIL_set_sample_3D_cone(s, 45.0, 120.0, 1.5);
+    api_v7.AIL_sample_3D_cone(s, &inner, &outer, &gain);
+    try testing.expectApproxEqAbs(@as(f32, 1.5), gain, 0.001);
+}
+
 test "v7/v8 is_3D: position enables it, getter & set_sample_is_3D return it (SDK)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

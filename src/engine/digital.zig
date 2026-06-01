@@ -671,6 +671,13 @@ pub const Sample = struct {
     // carries the negated Z for miniaudio's right-handed space).
     s3d_pos: [3]f32 = .{ 0, 0, 0 },
     s3d_vel: [3]f32 = .{ 0, 0, 0 },
+    // HSAMPLE.S3D cone, in degrees / linear gain -- the source of truth for the
+    // AIL_sample_3D_cone getter (the SDK stores DEGS_TO_DIAMS internally and the
+    // getter returns DIAMS_TO_DEGS, i.e. the original degrees; outer_volume is
+    // stored verbatim). Defaults match wavefile.cpp AIL_init_sample: 360/360/1.0.
+    s3d_cone_inner_deg: f32 = 360.0,
+    s3d_cone_outer_deg: f32 = 360.0,
+    s3d_cone_outer_vol: f32 = 1.0,
     // HSAMPLE.S3D.falloff_function: per-sample 3D falloff callback. Stored and
     // returned by AIL_register_falloff_function_callback (null = engine default).
     falloff_cb: ?*anyopaque = null,
@@ -1126,6 +1133,9 @@ pub const Sample = struct {
         self.s3d_min_dist = 1.0;
         self.s3d_pos = .{ 0, 0, 0 };
         self.s3d_vel = .{ 0, 0, 0 };
+        self.s3d_cone_inner_deg = 360.0; // wavefile.cpp AIL_init_sample defaults
+        self.s3d_cone_outer_deg = 360.0;
+        self.s3d_cone_outer_vol = 1.0;
         self.falloff_cb = null;
         self.last_loaded_buffer = 0;
         self.user_data = [_]u32{0} ** 8;
