@@ -3539,14 +3539,22 @@ test "v9 update_sample_3D_position dead-reckons by velocity" {
     defer s.deinit();
     try s.loadFromMemory(wav, false);
     api_v7.AIL_set_sample_3D_position(s, 0, 0, 0);
-    api_v7.AIL_set_sample_3D_velocity(s, 10, 0, 0, 1); // 10 units/sec on +x (magnitude 1)
-    api_v7.AIL_update_sample_3D_position(s, 1000); // advance 1 second
-    const p = openmiles.ma.ma_sound_get_position(&s.sound);
-    try testing.expect(p.x > 9.0 and p.x < 11.0); // ~10
+    api_v7.AIL_set_sample_3D_velocity(s, 10, 0, 0, 1); // 10 units/ms on +x (magnitude 1)
+    // SDK m3d.cpp: position += velocity * dt_ms (velocity is per-millisecond, so
+    // dt is used directly). 10/ms over 25 ms -> +250 on x.
+    api_v7.AIL_update_sample_3D_position(s, 25);
+    var px: f32 = 0;
+    _ = api_v7.AIL_sample_3D_position(s, &px, null, null);
+    try testing.expectApproxEqAbs(@as(f32, 250.0), px, 0.01);
     // NaN dt is ignored (no crash, position unchanged).
     api_v7.AIL_update_sample_3D_position(s, std.math.nan(f32));
-    const p2 = openmiles.ma.ma_sound_get_position(&s.sound);
-    try testing.expect(p2.x > 9.0 and p2.x < 11.0);
+    _ = api_v7.AIL_sample_3D_position(s, &px, null, null);
+    try testing.expectApproxEqAbs(@as(f32, 250.0), px, 0.01);
+    // Zero velocity -> update is a no-op (SDK early-outs below MSS_EPSILON).
+    api_v7.AIL_set_sample_3D_velocity(s, 0, 0, 0, 1);
+    api_v7.AIL_update_sample_3D_position(s, 1000);
+    _ = api_v7.AIL_sample_3D_position(s, &px, null, null);
+    try testing.expectApproxEqAbs(@as(f32, 250.0), px, 0.01);
 }
 
 test "v7 set_sample_3D_velocity scales the direction by magnitude" {
@@ -3610,6 +3618,43 @@ test "v7 unified 3D pos/vel/orient round-trip in MSS left-handed space" {
     api_v7.AIL_sample_3D_orientation(s, &fx, &fy, &fz, &ux, &uy, &uz);
     try testing.expect(@abs(fx) < 0.001 and @abs(fy) < 0.001 and @abs(fz - 1) < 0.001);
     try testing.expect(@abs(ux) < 0.001 and @abs(uy - 1) < 0.001 and @abs(uz) < 0.001);
+}
+
+test "v7 3D position/velocity round-trip via S3D struct (uninitialized sample)" {
+    // The SDK returns S3D.position/velocity verbatim regardless of init state;
+    // reading ma_sound (only valid post-load) lost values set before loading.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv); // never loaded -> not initialized
+    defer s.deinit();
+
+    var px: f32 = -1;
+    var py: f32 = -1;
+    var pz: f32 = -1;
+    // Fresh, un-positioned sample: is_3D=0, position 0,0,0.
+    try testing.expectEqual(@as(i32, 0), api_v7.AIL_sample_3D_position(s, &px, &py, &pz));
+    try testing.expect(px == 0 and py == 0 and pz == 0);
+
+    api_v7.AIL_set_sample_3D_position(s, 11, 22, 33);
+    try testing.expectEqual(@as(i32, 1), api_v7.AIL_sample_3D_position(s, &px, &py, &pz)); // 3D enabled
+    try testing.expectEqual(@as(f32, 11), px);
+    try testing.expectEqual(@as(f32, 22), py);
+    try testing.expectEqual(@as(f32, 33), pz); // Z not flipped on the way out
+
+    var vx: f32 = 0;
+    var vy: f32 = 0;
+    var vz: f32 = 0;
+    api_v7.AIL_set_sample_3D_velocity(s, 2, 3, 4, 5); // magnitude 5 -> (10,15,20)
+    api_v7.AIL_sample_3D_velocity(s, &vx, &vy, &vz);
+    try testing.expectEqual(@as(f32, 10), vx);
+    try testing.expectEqual(@as(f32, 15), vy);
+    try testing.expectEqual(@as(f32, 20), vz);
+
+    // update advances position by velocity * dt_ms even before init.
+    api_v7.AIL_set_sample_3D_velocity(s, 1, 0, 0, 1);
+    api_v7.AIL_update_sample_3D_position(s, 10); // +10 on x
+    _ = api_v7.AIL_sample_3D_position(s, &px, null, null);
+    try testing.expectEqual(@as(f32, 21), px); // 11 + 1*10
 }
 
 test "v7/v8 is_3D: position enables it, getter & set_sample_is_3D return it (SDK)" {

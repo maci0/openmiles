@@ -665,6 +665,12 @@ pub const Sample = struct {
     // Defaults match wavefile.cpp AIL_init_sample: max 200.0, min 1.0.
     s3d_max_dist: f32 = 200.0,
     s3d_min_dist: f32 = 1.0,
+    // HSAMPLE.S3D.position / velocity in MSS (left-handed +Z) space -- the source
+    // of truth for the AIL_sample_3D_position/velocity getters (the SDK returns
+    // S3D.position/velocity verbatim regardless of init state; the ma_sound copy
+    // carries the negated Z for miniaudio's right-handed space).
+    s3d_pos: [3]f32 = .{ 0, 0, 0 },
+    s3d_vel: [3]f32 = .{ 0, 0, 0 },
     // HSAMPLE.S3D.falloff_function: per-sample 3D falloff callback. Stored and
     // returned by AIL_register_falloff_function_callback (null = engine default).
     falloff_cb: ?*anyopaque = null,
@@ -1118,6 +1124,8 @@ pub const Sample = struct {
         self.s3d_auto_atten = 0;
         self.s3d_max_dist = 200.0; // wavefile.cpp AIL_init_sample defaults
         self.s3d_min_dist = 1.0;
+        self.s3d_pos = .{ 0, 0, 0 };
+        self.s3d_vel = .{ 0, 0, 0 };
         self.falloff_cb = null;
         self.last_loaded_buffer = 0;
         self.user_data = [_]u32{0} ** 8;

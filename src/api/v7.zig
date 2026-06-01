@@ -69,6 +69,7 @@ fn enable3D(s: *Sample) void {
 pub fn AIL_set_sample_3D_position(obj: ?*Sample, x: f32, y: f32, z: f32) callconv(.winapi) void {
     const s = obj orelse return;
     enable3D(s);
+    s.s3d_pos = .{ x, y, z }; // SDK stores S3D.position verbatim (MSS space)
     if (s.is_initialized) ma.ma_sound_set_position(&s.sound, x, y, -z);
 }
 pub fn AIL_set_sample_3D_velocity(obj: ?*Sample, dx: f32, dy: f32, dz: f32, magnitude: f32) callconv(.winapi) void {
@@ -78,6 +79,7 @@ pub fn AIL_set_sample_3D_velocity(obj: ?*Sample, dx: f32, dy: f32, dz: f32, magn
 }
 pub fn AIL_set_sample_3D_velocity_vector(obj: ?*Sample, dx: f32, dy: f32, dz: f32) callconv(.winapi) void {
     const s = obj orelse return;
+    s.s3d_vel = .{ dx, dy, dz }; // SDK stores S3D.velocity verbatim (MSS space)
     if (s.is_initialized) ma.ma_sound_set_velocity(&s.sound, dx, dy, -dz);
 }
 pub fn AIL_set_sample_3D_orientation(obj: ?*Sample, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) callconv(.winapi) void {
@@ -121,28 +123,33 @@ pub fn AIL_set_sample_3D_distances(obj: ?*Sample, max_dist: f32, min_dist: f32, 
 }
 pub fn AIL_update_sample_3D_position(obj: ?*Sample, dt_ms: f32) callconv(.winapi) void {
     const s = obj orelse return;
-    if (!s.is_initialized) return;
     if (!(dt_ms == dt_ms) or std.math.isInf(dt_ms)) return; // NaN/Inf guard
-    const dt_s = dt_ms / 1000.0;
-    const p = ma.ma_sound_get_position(&s.sound);
-    const v = ma.ma_sound_get_velocity(&s.sound);
-    ma.ma_sound_set_position(&s.sound, p.x + v.x * dt_s, p.y + v.y * dt_s, p.z + v.z * dt_s);
+    // SDK m3d.cpp: advances S3D.position by velocity * dt -- velocity is already
+    // per-millisecond (dX_per_ms), so dt is used directly (NOT converted to
+    // seconds). Skips the update when velocity is ~0, then re-sets via the
+    // position API (which stores S3D.position and drives ma_sound).
+    const vx = s.s3d_vel[0];
+    const vy = s.s3d_vel[1];
+    const vz = s.s3d_vel[2];
+    const eps: f32 = 0.0001; // MSS_EPSILON
+    if (@abs(vx) < eps and @abs(vy) < eps and @abs(vz) < eps) return;
+    AIL_set_sample_3D_position(s, s.s3d_pos[0] + vx * dt_ms, s.s3d_pos[1] + vy * dt_ms, s.s3d_pos[2] + vz * dt_ms);
 }
 
 pub fn AIL_sample_3D_position(obj: ?*Sample, x: ?*f32, y: ?*f32, z: ?*f32) callconv(.winapi) i32 {
     const s = obj orelse return 0;
-    const v = if (s.is_initialized) ma.ma_sound_get_position(&s.sound) else ma.ma_vec3f{ .x = 0, .y = 0, .z = 0 };
-    if (x) |p| p.* = v.x;
-    if (y) |p| p.* = v.y;
-    if (z) |p| p.* = -v.z;
+    // SDK returns S->S3D.position verbatim (valid pre-init too); our field holds
+    // the MSS-space value, so no Z flip is needed on the way out.
+    if (x) |p| p.* = s.s3d_pos[0];
+    if (y) |p| p.* = s.s3d_pos[1];
+    if (z) |p| p.* = s.s3d_pos[2];
     return s.is_3D; // SDK returns S->is_3D
 }
 pub fn AIL_sample_3D_velocity(obj: ?*Sample, dx: ?*f32, dy: ?*f32, dz: ?*f32) callconv(.winapi) void {
     const s = obj orelse return;
-    const v = if (s.is_initialized) ma.ma_sound_get_velocity(&s.sound) else ma.ma_vec3f{ .x = 0, .y = 0, .z = 0 };
-    if (dx) |p| p.* = v.x;
-    if (dy) |p| p.* = v.y;
-    if (dz) |p| p.* = -v.z;
+    if (dx) |p| p.* = s.s3d_vel[0]; // SDK returns S->S3D.velocity verbatim
+    if (dy) |p| p.* = s.s3d_vel[1];
+    if (dz) |p| p.* = s.s3d_vel[2];
 }
 pub fn AIL_sample_3D_orientation(obj: ?*Sample, fx: ?*f32, fy: ?*f32, fz: ?*f32, ux: ?*f32, uy: ?*f32, uz: ?*f32) callconv(.winapi) void {
     const s = obj orelse return;
