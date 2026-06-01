@@ -80,6 +80,25 @@ pub const MP3_INFO = extern struct {
     check_original: i32 = 0,
 };
 
+comptime {
+    // MP3_INFO is filled by AIL_inspect_MP3 and read field-by-field by games, so
+    // its layout is ABI. Lock the leading, game-visible fields to the mss.h order
+    // (the rest are private inspector state) -- an accidental reorder/insert that
+    // shifts sample_rate..samples_per_frame would corrupt every reader.
+    const fields = @typeInfo(MP3_INFO).@"struct".fields;
+    const expected = [_][]const u8{
+        "MP3_file_image", "MP3_image_size", "ID3v2",        "ID3v2_size",       "ID3v1",
+        "start_MP3_data", "end_MP3_data",   "sample_rate",  "bit_rate",         "channels_per_sample",
+        "samples_per_frame", "byte_offset", "next_frame_expected", "average_frame_size", "data_size",
+        "header_size",    "side_info_size", "ngr",          "main_data_begin",  "hpos",
+    };
+    for (expected, 0..) |name, i| {
+        if (!std.mem.eql(u8, fields[i].name, name)) {
+            @compileError("MP3_INFO field order drifted from mss.h at index " ++ name);
+        }
+    }
+}
+
 /// Read `n` bits (MSB-first) from `data` at `bitpos`, advancing it. Mirrors the
 /// SDK read_bits: assemble 4 bytes big-endian, shift the window into place.
 fn readBits(data: []const u8, bitpos: *i32, n: i32) u32 {
