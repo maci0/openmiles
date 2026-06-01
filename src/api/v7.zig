@@ -513,6 +513,18 @@ pub const MSS_RECEIVER_LIST = extern struct {
     speaker_level: [9]f32 = [_]f32{0} ** 9,
     n_speakers_affected: i32 = 0,
 };
+comptime {
+    // AIL_set/listener_relative_receiver_array exchange this struct with the
+    // caller, so its 88-byte size (MSSVECTOR3D + 2*MAX_SPEAKERS[9] arrays + S32)
+    // and mss.h field order are ABI. Lock both.
+    if (@sizeOf(MSS_RECEIVER_LIST) != 88) @compileError("MSS_RECEIVER_LIST must be 88 bytes (vec3 + 9+9 + S32)");
+    const fields = @typeInfo(MSS_RECEIVER_LIST).@"struct".fields;
+    const order = [_][]const u8{ "direction", "speaker_index", "speaker_level", "n_speakers_affected" };
+    if (fields.len != order.len) @compileError("MSS_RECEIVER_LIST field count drifted");
+    for (order, 0..) |fname, i| {
+        if (!std.mem.eql(u8, fields[i].name, fname)) @compileError("MSS_RECEIVER_LIST field order drifted at " ++ fname);
+    }
+}
 const MAX_RECEIVER_SPECS: i32 = 32;
 var g_receiver_specs = [_]MSS_RECEIVER_LIST{.{}} ** 32; // dig->D3D.receiver_specifications
 var g_n_receiver_specs: i32 = 0;
