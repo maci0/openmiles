@@ -1220,8 +1220,12 @@ comptime {
             .{ .name = "AIL_quick_stop", .stack_size = 4, .ver = 40 },
             .{ .name = "AIL_quick_status", .stack_size = 4, .ver = 30, .ver_max = 70 },
             // Volume args switch S32 (0..127) -> F32 (0.0..1.0) in the Miles-7 API.
-            .{ .name = "AIL_quick_set_volume", .stack_size = 12, .ver = 30, .ver_max = 69 },
-            .{ .name = "AIL_quick_set_volume", .stack_size = 12, .ver = 70, .symbol = "AIL_quick_set_volume_f32" },
+            // quick_set_volume took S32 0..127 through 6.1 but switched to F32 in
+            // 6.5: disassembly of the debug-log format string is "%ld,%ld" in 6.1d,
+            // "%f,%f" in 6.5h, and "%s,%s" (float->string) in 7.0k. So the float
+            // variant starts at 6.2, not 7.0.
+            .{ .name = "AIL_quick_set_volume", .stack_size = 12, .ver = 30, .ver_max = 61 },
+            .{ .name = "AIL_quick_set_volume", .stack_size = 12, .ver = 62, .symbol = "AIL_quick_set_volume_f32" },
             .{ .name = "AIL_quick_set_speed", .stack_size = 8, .ver = 30, .ver_max = 70 },
             .{ .name = "AIL_quick_ms_length", .stack_size = 4, .ver = 50, .ver_max = 70 },
             .{ .name = "AIL_quick_ms_position", .stack_size = 4, .ver = 50, .ver_max = 70 },
