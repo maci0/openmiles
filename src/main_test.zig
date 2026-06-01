@@ -655,13 +655,34 @@ test "lockChannel skips percussion channel 9" {
     try testing.expectEqual(@as(i32, -1), openmiles.lockChannel(extra_seq));
 }
 
-test "preference defaults match MSS spec" {
-    const P = openmiles.Pref;
-    try testing.expectEqual(@as(i32, 131), openmiles.getPreference(@intFromEnum(P.DIG_RESAMPLING_TOLERANCE)));
-    try testing.expectEqual(@as(i32, 127), openmiles.getPreference(@intFromEnum(P.DIG_DEFAULT_VOLUME)));
-    try testing.expectEqual(@as(i32, 120), openmiles.getPreference(@intFromEnum(P.MDI_SERVICE_RATE)));
-    try testing.expectEqual(@as(i32, 8), openmiles.getPreference(@intFromEnum(P.MDI_SEQUENCES)));
-    try testing.expectEqual(@as(i32, 127), openmiles.getPreference(@intFromEnum(P.MDI_DEFAULT_VOLUME)));
+test "preference defaults match MSS spec at version-correct indices" {
+    // The preference *numbers* are ABI: a game passes the mss.h constant for its
+    // target version. MSS 9.0 renumbered the table (verified by disassembling
+    // init_preferences), so the defaults must land at the version-correct slots.
+    const get = openmiles.getPreference;
+    if (openmiles.mss_version >= 90) {
+        // 9.x numbering (include/mss.h) + 9.x DEFAULT_* values.
+        try testing.expectEqual(@as(i32, 1), get(0)); // AIL_MM_PERIOD (DEFAULT_AMP=1)
+        try testing.expectEqual(@as(i32, 16), get(1)); // AIL_TIMERS
+        try testing.expectEqual(@as(i32, 64), get(3)); // DIG_MIXER_CHANNELS
+        try testing.expectEqual(@as(i32, 131), get(5)); // DIG_RESAMPLING_TOLERANCE
+        try testing.expectEqual(@as(i32, 49152), get(18)); // DIG_OUTPUT_BUFFER_SIZE
+        try testing.expectEqual(@as(i32, 120), get(22)); // MDI_SERVICE_RATE
+        try testing.expectEqual(@as(i32, 127), get(23)); // MDI_DEFAULT_VOLUME
+        try testing.expectEqual(@as(i32, 2), get(26)); // MDI_DEFAULT_BEND_RANGE
+        // Old-layout slot must NOT carry the old default any more.
+        try testing.expectEqual(@as(i32, 16), get(1)); // not DIG_MIXER_CHANNELS=64
+    } else {
+        // 3.x..8.x numbering (Pref enum) + that era's DEFAULT_* values.
+        const P = openmiles.Pref;
+        try testing.expectEqual(@as(i32, 131), get(@intFromEnum(P.DIG_RESAMPLING_TOLERANCE)));
+        try testing.expectEqual(@as(i32, 64), get(@intFromEnum(P.DIG_MIXER_CHANNELS)));
+        try testing.expectEqual(@as(i32, 127), get(@intFromEnum(P.DIG_DEFAULT_VOLUME)));
+        try testing.expectEqual(@as(i32, 120), get(@intFromEnum(P.MDI_SERVICE_RATE)));
+        try testing.expectEqual(@as(i32, 8), get(@intFromEnum(P.MDI_SEQUENCES)));
+        try testing.expectEqual(@as(i32, 127), get(@intFromEnum(P.MDI_DEFAULT_VOLUME)));
+        try testing.expectEqual(@as(i32, 5), get(@intFromEnum(P.AIL_MM_PERIOD)));
+    }
 }
 
 test "detectMidiSize MThd with multiple tracks" {
@@ -2353,6 +2374,9 @@ test "Sequence setChannelMap out-of-range physical clamps" {
 }
 
 test "preference defaults cover all documented prefs" {
+    // Pref is the 3.x..8.x numbering; 9.x renumbered the table (covered by the
+    // version-aware test above), so this old-layout sweep only applies pre-9.0.
+    if (openmiles.mss_version >= 90) return;
     const P = openmiles.Pref;
     try testing.expectEqual(@as(i32, 64), openmiles.getPreference(@intFromEnum(P.DIG_MIXER_CHANNELS)));
     try testing.expectEqual(@as(i32, 1), openmiles.getPreference(@intFromEnum(P.MDI_QUANT_ADVANCE)));

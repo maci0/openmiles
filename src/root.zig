@@ -443,6 +443,9 @@ pub fn redistDirectoryZ() [*:0]const u8 {
 
 // --- Preferences ---
 
+// Preference numbers for the MSS 3.x..8.x ABI (mss.h). 9.x renumbered the whole
+// table; see the version switch in `preferences` below. This enum is the old
+// layout and is used only to seed the old-layout defaults.
 pub const Pref = enum(u32) {
     DIG_RESAMPLING_TOLERANCE = 0,
     DIG_MIXER_CHANNELS = 1,
@@ -461,23 +464,64 @@ pub const Pref = enum(u32) {
     DIG_DECODE_BUFFER_SIZE = 32,
 };
 
+// The preference *numbers* are part of the ABI (games pass the mss.h constant as
+// an integer to AIL_set/get_preference). MSS 9.0 renumbered the entire table:
+// 3.x..8.x share one layout (DIG_MIXER_CHANNELS=1, MDI_DEFAULT_VOLUME=5, N_PREFS
+// =46), while 9.x uses another (DIG_MIXER_CHANNELS=3, MDI_DEFAULT_VOLUME=23,
+// N_PREFS=40). The cutoff is verified by disassembling init_preferences in the
+// reference DLLs: 6.5h/7.0k/8.0e write DEFAULT_DRT(131) and DEFAULT_DOBS(49152)
+// 11 slots apart (old: indices 0 and 11), 9.1d writes them 13 slots apart (new:
+// indices 5 and 18). So the defaults must sit at version-correct slots.
 var preferences: [512]i32 = init: {
     var p = [_]i32{0} ** 512;
-    p[@intFromEnum(Pref.DIG_RESAMPLING_TOLERANCE)] = 131;
-    p[@intFromEnum(Pref.DIG_MIXER_CHANNELS)] = 64;
-    p[@intFromEnum(Pref.DIG_DEFAULT_VOLUME)] = 127;
-    p[@intFromEnum(Pref.MDI_SERVICE_RATE)] = 120;
-    p[@intFromEnum(Pref.MDI_SEQUENCES)] = 8;
-    p[@intFromEnum(Pref.MDI_DEFAULT_VOLUME)] = 127;
-    p[@intFromEnum(Pref.MDI_QUANT_ADVANCE)] = 1;
-    p[@intFromEnum(Pref.MDI_ALLOW_LOOP_BRANCHING)] = 0;
-    p[@intFromEnum(Pref.MDI_DEFAULT_BEND_RANGE)] = 2;
-    p[@intFromEnum(Pref.MDI_DOUBLE_NOTE_OFF)] = 0;
-    p[@intFromEnum(Pref.MDI_SYSEX_BUFFER_SIZE)] = 1536;
-    p[@intFromEnum(Pref.DIG_OUTPUT_BUFFER_SIZE)] = 49152;
-    p[@intFromEnum(Pref.AIL_MM_PERIOD)] = 5;
-    p[@intFromEnum(Pref.DIG_ENABLE_RESAMPLE_FILTER)] = 1;
-    p[@intFromEnum(Pref.DIG_DECODE_BUFFER_SIZE)] = 2048;
+    if (mss_version >= 90) {
+        // MSS 9.x layout + DEFAULT_* values (genericmss.cpp init_preferences).
+        p[0] = 1; // AIL_MM_PERIOD (DEFAULT_AMP)
+        p[1] = 16; // AIL_TIMERS
+        p[2] = 1; // AIL_ENABLE_MMX_SUPPORT
+        p[3] = 64; // DIG_MIXER_CHANNELS
+        p[4] = 1; // DIG_ENABLE_RESAMPLE_FILTER
+        p[5] = 131; // DIG_RESAMPLING_TOLERANCE
+        p[6] = 1; // DIG_DS_FRAGMENT_SIZE
+        p[7] = 256; // DIG_DS_FRAGMENT_CNT
+        p[8] = 48; // DIG_DS_MIX_FRAGMENT_CNT
+        p[9] = 32; // DIG_LEVEL_RAMP_SAMPLES
+        p[10] = 500; // DIG_MAX_PREDELAY_MS
+        p[11] = 1; // DIG_3D_MUTE_AT_MAX
+        p[15] = 8192; // DIG_MAX_CHAIN_ELEMENT_SIZE
+        p[16] = 100; // DIG_MIN_CHAIN_ELEMENT_TIME
+        p[18] = 49152; // DIG_OUTPUT_BUFFER_SIZE
+        p[19] = -1; // DIG_PREFERRED_WO_DEVICE (WAVE_MAPPER)
+        p[21] = 8; // MDI_SEQUENCES
+        p[22] = 120; // MDI_SERVICE_RATE
+        p[23] = 127; // MDI_DEFAULT_VOLUME
+        p[24] = 1; // MDI_QUANT_ADVANCE
+        p[26] = 2; // MDI_DEFAULT_BEND_RANGE
+        p[28] = 1536; // MDI_SYSEX_BUFFER_SIZE
+        p[29] = 64; // DLS_VOICE_LIMIT
+        p[30] = 120; // DLS_TIMEBASE
+        p[32] = 1; // DLS_STREAM_BOOTSTRAP
+        p[34] = 1; // DLS_ENABLE_FILTERING
+        p[35] = 1; // DLS_GM_PASSTHROUGH
+        p[36] = 32768; // DLS_ADPCM_TO_ASI_THRESHOLD
+    } else {
+        // MSS 3.x..8.x layout (Pref enum) + that era's DEFAULT_* values.
+        p[@intFromEnum(Pref.DIG_RESAMPLING_TOLERANCE)] = 131;
+        p[@intFromEnum(Pref.DIG_MIXER_CHANNELS)] = 64;
+        p[@intFromEnum(Pref.DIG_DEFAULT_VOLUME)] = 127;
+        p[@intFromEnum(Pref.MDI_SERVICE_RATE)] = 120;
+        p[@intFromEnum(Pref.MDI_SEQUENCES)] = 8;
+        p[@intFromEnum(Pref.MDI_DEFAULT_VOLUME)] = 127;
+        p[@intFromEnum(Pref.MDI_QUANT_ADVANCE)] = 1;
+        p[@intFromEnum(Pref.MDI_ALLOW_LOOP_BRANCHING)] = 0;
+        p[@intFromEnum(Pref.MDI_DEFAULT_BEND_RANGE)] = 2;
+        p[@intFromEnum(Pref.MDI_DOUBLE_NOTE_OFF)] = 0;
+        p[@intFromEnum(Pref.MDI_SYSEX_BUFFER_SIZE)] = 1536;
+        p[@intFromEnum(Pref.DIG_OUTPUT_BUFFER_SIZE)] = 49152;
+        p[@intFromEnum(Pref.AIL_MM_PERIOD)] = 5;
+        p[@intFromEnum(Pref.DIG_ENABLE_RESAMPLE_FILTER)] = 1;
+        p[@intFromEnum(Pref.DIG_DECODE_BUFFER_SIZE)] = 2048;
+    }
     break :init p;
 };
 
