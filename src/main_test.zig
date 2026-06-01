@@ -463,6 +463,13 @@ test "Sample3D init deinit and default properties" {
     try testing.expectEqual(@as(f32, 1.0), s.orient_uy);
     try testing.expect(!s.is_initialized);
 
+    // Fresh, unloaded 3D sample reports the 11025 init default (original_playback_
+    // rate), mirroring the 2D getter — not the 44100 device rate.
+    const sp: ?*anyopaque = @ptrCast(s);
+    try testing.expectEqual(@as(i32, 11025), api_3d.AIL_3D_sample_playback_rate(sp));
+    api_3d.AIL_set_3D_sample_playback_rate(sp, 32000);
+    try testing.expectEqual(@as(i32, 32000), api_3d.AIL_3D_sample_playback_rate(sp));
+
     s.deinit();
     try testing.expectEqual(@as(usize, 0), driver.samples_3d.items.len);
 }
@@ -1984,6 +1991,23 @@ test "AIL_set_sample_info channel-count selection matches per-version SDK logic"
     } else {
         try testing.expectEqual(@as(u16, 1), s.pcm_format.?.channels);
     }
+}
+
+test "AIL_sample_playback_rate defaults to 11025 on a fresh, unloaded sample" {
+    // SDK AIL_API_init_sample seeds S->original_playback_rate = 11025, and the
+    // getter returns that field verbatim. A freshly allocated+init'd sample that
+    // has not loaded a file and has no app-set rate must therefore report 11025,
+    // not the device/mixer rate. Loading a file overwrites it with the native rate.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try testing.expectEqual(@as(i32, 11025), dg.AIL_sample_playback_rate(s));
+    // An explicit set still round-trips.
+    dg.AIL_set_sample_playback_rate(s, 32000);
+    try testing.expectEqual(@as(i32, 32000), dg.AIL_sample_playback_rate(s));
+    // Null guard: SDK returns 0.
+    try testing.expectEqual(@as(i32, 0), dg.AIL_sample_playback_rate(null));
 }
 
 test "AIL_set_input_state returns 0 for a null handle (SDK guard)" {

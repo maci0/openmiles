@@ -172,7 +172,13 @@ pub fn AIL_set_3D_sample_loop_count(s: ?*anyopaque, count: i32) callconv(.winapi
 pub fn AIL_3D_sample_playback_rate(s: ?*anyopaque) callconv(.winapi) i32 {
     const p = s orelse return 0;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
-    return openmiles.satI32(sample.target_rate orelse 44100.0);
+    // Mirror AIL_API_sample_playback_rate (a 3D sample is HSAMPLE-backed and is
+    // init'd through the same AIL_API_init_sample): explicit app-set rate first,
+    // then the loaded decoder's native rate (original_playback_rate is set to the
+    // file rate at load), then the 11025 init default for a fresh sample.
+    if (sample.target_rate) |tr| return openmiles.satI32(tr);
+    if (sample.decoder) |d| return @intCast(d.outputSampleRate);
+    return 11025;
 }
 pub fn AIL_set_3D_sample_playback_rate(s: ?*anyopaque, rate: i32) callconv(.winapi) void {
     const p = s orelse return;
