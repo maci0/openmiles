@@ -241,7 +241,10 @@ pub const DigitalDriver = struct {
     v7_master_reverb_predelay: f32 = 0.0,
     v7_master_reverb_damping: f32 = 0.0,
     v7_master_reverb_dry: f32 = 1.0,
-    v7_master_reverb_wet: f32 = 0.0,
+    // SDK genericdig.cpp inits reverb[0].master_wet = 1.0F (a NEUTRAL multiplier
+    // for per-sample wet sends -- not added reverb, since samples default to
+    // wet_level 0). Defaulting it to 0 would zero all sample reverb.
+    v7_master_reverb_wet: f32 = 1.0,
     v7_room_type: i32 = 0,
     // DSP processor callbacks [input_stage, output_stage]. Stored for query
     // round-tripping; not invoked (miniaudio manages its own processing graph).

@@ -3134,6 +3134,19 @@ test "AIL_update_listener_3D_position advances by velocity * dt_ms (per-ms)" {
     try testing.expectApproxEqAbs(@as(f32, 100.0), x, 0.01);
 }
 
+test "fresh driver master reverb levels default to dry=1.0, wet=1.0 (SDK init)" {
+    // SDK genericdig.cpp inits reverb[0].master_dry = master_wet = 1.0F. master_wet
+    // is a neutral multiplier for per-sample wet sends; defaulting it to 0 would
+    // silence all reverb.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    var dry: f32 = -1;
+    var wet: f32 = -1;
+    api_v7.AIL_digital_master_reverb_levels(drv, 0, &dry, &wet);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), dry, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), wet, 0.0001);
+}
+
 test "AIL_set_room_type applies the EAX preset to the master reverb (m3d.cpp rooms[])" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
