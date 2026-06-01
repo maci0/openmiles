@@ -567,6 +567,31 @@ pub const SamplePcmFormat = struct {
     bits: u16,
 };
 
+/// Source bytes-per-frame (channels * bits/8) parsed from a WAV/RIFF header,
+/// or null if the data is not a WAV we can read a `fmt ` chunk from. Walks the
+/// chunk list like AIL_WAV_info; used to give AIL_sample_granularity the SDK's
+/// source-format basis instead of miniaudio's decoded frame size.
+fn wavSourceBytesPerFrame(data: []const u8) ?u32 {
+    if (data.len < 44) return null;
+    if (!std.mem.eql(u8, data[0..4], "RIFF") or !std.mem.eql(u8, data[8..12], "WAVE")) return null;
+    var off: usize = 12;
+    while (off + 8 <= data.len) {
+        const tag = data[off .. off + 4];
+        const csize = std.mem.readInt(u32, data[off + 4 .. off + 8][0..4], .little);
+        off += 8;
+        if (std.mem.eql(u8, tag, "fmt ") and csize >= 16 and off + 16 <= data.len) {
+            const channels = std.mem.readInt(u16, data[off + 2 .. off + 4][0..2], .little);
+            const bits = std.mem.readInt(u16, data[off + 14 .. off + 16][0..2], .little);
+            if (channels == 0 or bits == 0) return null;
+            return @as(u32, channels) * (@as(u32, bits) / 8);
+        }
+        const next = off +| csize +| (csize & 1);
+        if (next <= off) return null;
+        off = next;
+    }
+    return null;
+}
+
 pub const Sample = struct {
     driver: *DigitalDriver,
     sound: ma.ma_sound,
@@ -640,6 +665,12 @@ pub const Sample = struct {
     stream_src: StreamSource = undefined,
     stream_active: bool = false,
     cached_length_frames: u64 = 0,
+    // Source-format bytes-per-frame parsed from the loaded WAV header (channels *
+    // bits/8). 0 = unknown (non-WAV / raw): AIL_sample_granularity then falls back
+    // to the decoder-output frame size. The SDK's SS_granularity is the SOURCE
+    // sample format, not whatever miniaudio decodes to, so this keeps granularity
+    // stable and faithful (e.g. mono-8 -> 1, not the decoder's promoted size).
+    src_bpf: u32 = 0,
     reverb_node: ?*ma.ma_delay_node = null,
     reverb_room_type: f32 = 0.0,
     reverb_level: f32 = 0.0, // wet level
@@ -983,6 +1014,7 @@ pub const Sample = struct {
         }
         self.owned_buffer = owned_copy;
         self.decoder = decoder;
+        self.src_bpf = wavSourceBytesPerFrame(internal_data) orelse 0;
         self.is_initialized = true;
         self.is_done = false;
         self.is_paused = false;
@@ -1157,6 +1189,9 @@ pub const Sample = struct {
         self.v7_obstruction = 0.0;
         self.v7_occlusion = 0.0;
         self.v7_exclusion = 0.0;
+        // NB: src_bpf is a property of the loaded source data, not a parameter --
+        // AIL_init_sample does not reload, so it is left intact (recomputed only
+        // on the next load).
         // SDK sets adpcm.blocksize = 256 on init; our 0 sentinel means "derive
         // granularity from bytes-per-frame" (the right default for a fresh/PCM
         // sample). Clearing it prevents a reused ADPCM handle from reporting a

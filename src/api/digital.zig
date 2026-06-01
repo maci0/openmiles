@@ -349,6 +349,11 @@ pub fn AIL_set_sample_adpcm_block_size(s_opt: ?*Sample, block_size: u32) callcon
 pub fn AIL_sample_granularity(s_opt: ?*Sample) callconv(.winapi) u32 {
     const s = s_opt orelse return 0;
     if (s.adpcm_block_size > 0) return s.adpcm_block_size;
+    // SDK SS_granularity is the SOURCE sample-format frame size (mono-8=1,
+    // mono-16/stereo-8=2, stereo-16=4), not whatever miniaudio decodes to. Use
+    // the WAV-parsed source bpf when known (stable across reverb/level changes
+    // that rebuild the decoded node), else fall back to the decoded frame size.
+    if (s.src_bpf > 0) return s.src_bpf;
     const bpf = s.bytesPerFrame();
     return if (bpf == 0) 1 else bpf;
 }

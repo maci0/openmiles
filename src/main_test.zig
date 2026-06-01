@@ -3147,12 +3147,18 @@ test "AIL_init_sample resets level/reverb/filter/occlusion state to defaults (SD
     defer testing.allocator.free(wav);
     try s.loadFromMemory(wav, false);
 
+    // Granularity reflects the SOURCE format (mono-16 = 2), stable regardless of
+    // what miniaudio decodes to.
+    try testing.expectEqual(@as(u32, 2), dg.AIL_sample_granularity(s));
+
     // Dirty the state.
     api_v7.AIL_set_sample_reverb_levels(s, 0.3, 0.7);
     api_v7.AIL_set_sample_low_pass_cut_off(s, 0, 0.4);
     api_v7.AIL_set_sample_obstruction(s, 0.9);
     api_v7.AIL_set_sample_occlusion(s, 0.8);
     api_v7.AIL_set_sample_volume_levels(s, 0.2, 0.6);
+    // Source-format granularity is unchanged by reverb/level rebuilds.
+    try testing.expectEqual(@as(u32, 2), dg.AIL_sample_granularity(s));
     dg.AIL_set_sample_adpcm_block_size(s, 512); // stale ADPCM block size
     try testing.expectEqual(@as(u32, 512), dg.AIL_sample_granularity(s)); // now reports the block size
 
@@ -3172,10 +3178,9 @@ test "AIL_init_sample resets level/reverb/filter/occlusion state to defaults (SD
     api_v7.AIL_sample_volume_levels(s, &lft, &rgt);
     try testing.expectApproxEqAbs(@as(f32, 1.0), lft, 0.001);
     try testing.expectApproxEqAbs(@as(f32, 1.0), rgt, 0.001);
-    // adpcm block size cleared -> granularity falls back to bytes-per-frame
-    // (a small valid value: 1/2/4/8), no longer the stale 512.
-    const gran = dg.AIL_sample_granularity(s);
-    try testing.expect(gran >= 1 and gran <= 8);
+    // adpcm block size cleared -> granularity back to the source-format frame
+    // size (mono-16 = 2), no longer the stale 512.
+    try testing.expectEqual(@as(u32, 2), dg.AIL_sample_granularity(s));
 }
 
 test "fresh driver master reverb levels default to dry=1.0, wet=1.0 (SDK init)" {
