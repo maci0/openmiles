@@ -557,7 +557,7 @@ test "fuzz AIL_redbook drive/track ops (C-ABI export)" {
         switch (rand.intRangeAtMost(u8, 0, 4)) {
             0 => _ = api_redbook.AIL_redbook_play(rb, t1, t2),
             1 => _ = api_redbook.AIL_redbook_track_info(rb, t1, null, null),
-            2 => api_redbook.AIL_redbook_set_volume(rb, @bitCast(t1)),
+            2 => _ = api_redbook.AIL_redbook_set_volume(rb, @bitCast(t1)),
             3 => _ = api_redbook.AIL_redbook_status(rb),
             4 => _ = api_redbook.AIL_redbook_position(rb),
             else => unreachable,

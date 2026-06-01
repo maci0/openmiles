@@ -570,10 +570,13 @@ pub fn AIL_get_DirectSound_info(s_opt: ?*Sample, lplpDS: ?*?*anyopaque, lplpDSB:
     if (lplpDS) |p| p.* = null;
     if (lplpDSB) |p| p.* = null;
 }
-pub fn AIL_set_DirectSound_HWND(driver_opt: ?*DigitalDriver, hwnd: *anyopaque) callconv(.winapi) void {
-    const driver = driver_opt orelse return;
+// SDK (mss.h 3.x/6.1): S32 return -- hands back a success status (1; 0 for a null
+// driver). We have no DirectSound backend, so it is a no-op that still reports OK.
+pub fn AIL_set_DirectSound_HWND(driver_opt: ?*DigitalDriver, hwnd: *anyopaque) callconv(.winapi) i32 {
+    const driver = driver_opt orelse return 0;
     _ = driver;
     _ = hwnd;
+    return 1;
 }
 pub fn AIL_set_digital_driver_processor(driver_opt: ?*DigitalDriver, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const driver = driver_opt orelse return null;

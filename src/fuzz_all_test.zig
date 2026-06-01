@@ -338,7 +338,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     _ = api_redbook.AIL_redbook_position(hr);
     _ = api_redbook.AIL_redbook_resume(hr);
     api_redbook.AIL_redbook_retract(hr);
-    api_redbook.AIL_redbook_set_volume(hr, ri);
+    _ = api_redbook.AIL_redbook_set_volume(hr, ri);
     _ = api_v7.AIL_redbook_set_volume_level(hr, rf);
     _ = api_redbook.AIL_redbook_status(hr);
     _ = api_redbook.AIL_redbook_stop(hr);
@@ -451,7 +451,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     api_3d.AIL_set_3D_velocity(@as(?*anyopaque, @ptrCast(h3)), rf, rf, rf, rf);
     api_3d.AIL_set_3D_velocity_vector(@as(?*anyopaque, @ptrCast(h3)), rf, rf, rf);
     _ = api_dls.AIL_set_DLS_processor(hm, ri, null);
-    api_digital.AIL_set_DirectSound_HWND(hd, scp);
+    _ = api_digital.AIL_set_DirectSound_HWND(hd, scp);
     api_midi.AIL_set_XMIDI_master_volume(hm, ri);
     _ = api_digital.AIL_set_digital_driver_processor(hd, ri, null);
     api_v7.AIL_set_digital_master_reverb(hd, ri, rf, rf, rf);

@@ -100,7 +100,7 @@ test "coverage: digital.zig exports" {
     _ = dg.AIL_sample_granularity(s);
     _ = dg.AIL_minimum_sample_buffer_size(drv, 44100, 0);
     dg.AIL_get_DirectSound_info(null, null, null);
-    dg.AIL_set_DirectSound_HWND(drv, sc());
+    _ = dg.AIL_set_DirectSound_HWND(drv, sc());
     _ = dg.AIL_set_digital_driver_processor(drv, 0, null);
     _ = dg.AIL_process_digital_audio(sc(), 0, 0, 0, 0, null);
     _ = dg.AIL_size_processed_digital_audio(44100, 1, 1, sc());
@@ -350,7 +350,7 @@ test "coverage: redbook.zig exports" {
     _ = rb.AIL_redbook_position(h);
     _ = rb.AIL_redbook_track(h);
     rb.AIL_redbook_track_info(h, 1, &u32o, &u32o);
-    rb.AIL_redbook_set_volume(h, 64);
+    _ = rb.AIL_redbook_set_volume(h, 64);
     _ = rb.AIL_redbook_volume(h);
     const h2 = rb.AIL_redbook_open(0);
     if (h2) |hh| rb.AIL_redbook_close(hh);
