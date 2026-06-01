@@ -4991,4 +4991,29 @@ test "file callbacks route through the VFS with the correct ABI" {
     const r = api_file.AIL_file_read("any", &dst);
     try testing.expect(r != null);
     try testing.expectEqualStrings("Hello VFS payload!", dst[0..vfs_data.len]);
+
+    // The _info tracking variants (the REAL exports; the plain names are
+    // __FILE__/__LINE__ macros) must do the same work, not return null/0.
+    const fname: ?*anyopaque = @constCast(@ptrCast("any"));
+    try testing.expectEqual(@as(i32, @intCast(vfs_data.len)), api_v9.AIL_file_size_info(fname, null, 0));
+    var dst2: [64]u8 = undefined;
+    const r2 = api_v9.AIL_file_read_info(fname, &dst2, null, 0);
+    try testing.expect(r2 != null);
+    try testing.expectEqualStrings("Hello VFS payload!", dst2[0..vfs_data.len]);
+    // Null filename is guarded (no deref of the span).
+    try testing.expectEqual(@as(i32, 0), api_v9.AIL_file_size_info(null, null, 0));
+}
+
+test "AIL_mem_alloc_lock_info actually allocates (the real exported allocator)" {
+    // AIL_mem_alloc_lock(size) is a macro for AIL_mem_alloc_lock_info(size,
+    // __FILE__, __LINE__), so the _info form must allocate, not return null.
+    const p = api_v9.AIL_mem_alloc_lock_info(64, null, 0);
+    try testing.expect(p != null);
+    // Writable, and freeable via the matching AIL_mem_free_lock.
+    const bytes: [*]u8 = @ptrCast(p.?);
+    bytes[0] = 0xAB;
+    bytes[63] = 0xCD;
+    try testing.expectEqual(@as(u8, 0xAB), bytes[0]);
+    const mem = @import("api/memory.zig");
+    mem.AIL_mem_free_lock(p.?);
 }

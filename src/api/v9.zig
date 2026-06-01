@@ -4,6 +4,7 @@
 //! have no OpenMiles engine equivalent yet, so they link and return safe defaults.
 const std = @import("std");
 const openmiles = @import("openmiles");
+const api_file = @import("file.zig");
 
 pub fn AIL_IO_thread_handle(a0: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
@@ -90,18 +91,22 @@ pub fn AIL_file_callbacks(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3:
     _ = a3;
 
 }
-pub fn AIL_file_read_info(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: u32) callconv(.winapi) ?*anyopaque {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    _ = a3;
-    return null;
+// Tracking macro target for AIL_file_read(filename, dest): reads the whole file
+// into `dest` (or a fresh AIL_mem_free_lock buffer if dest is null). caller/line
+// are debug metadata.
+pub fn AIL_file_read_info(filename: ?*anyopaque, dest: ?*anyopaque, caller: ?*anyopaque, line: u32) callconv(.winapi) ?*anyopaque {
+    _ = caller;
+    _ = line;
+    const fname = filename orelse return null;
+    return api_file.AIL_file_read(@ptrCast(fname), dest);
 }
-pub fn AIL_file_size_info(a0: ?*anyopaque, a1: ?*anyopaque, a2: u32) callconv(.winapi) i32 {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    return 0;
+// Tracking macro target for AIL_file_size(filename): returns the file size in
+// bytes (0 if not found). caller/line are debug metadata.
+pub fn AIL_file_size_info(filename: ?*anyopaque, caller: ?*anyopaque, line: u32) callconv(.winapi) i32 {
+    _ = caller;
+    _ = line;
+    const fname = filename orelse return 0;
+    return @bitCast(api_file.AIL_file_size(@ptrCast(fname)));
 }
 pub fn AIL_find_environment_preset(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     _ = a0;
@@ -120,11 +125,14 @@ pub fn AIL_get_soundbank_name(bank: ?*anyopaque) callconv(.winapi) ?*anyopaque {
 pub fn AIL_get_time() callconv(.winapi) u64 {
     return openmiles.getUsCount64(); // Miles "time" is a microsecond tick
 }
-pub fn AIL_mem_alloc_lock_info(a0: u32, a1: ?*anyopaque, a2: u32) callconv(.winapi) ?*anyopaque {
-    _ = a0;
-    _ = a1;
-    _ = a2;
-    return null;
+// AIL_mem_alloc_lock(size) is the tracking macro for AIL_mem_alloc_lock_info(
+// size, __FILE__, __LINE__) -- so the _info form is the real exported allocator,
+// not a stub. file/line are debug metadata. Allocate `size` bytes (free with
+// AIL_mem_free_lock), matching the non-instrumented path.
+pub fn AIL_mem_alloc_lock_info(size: u32, file: ?*anyopaque, line: u32) callconv(.winapi) ?*anyopaque {
+    _ = file;
+    _ = line;
+    return std.c.malloc(size);
 }
 pub fn AIL_ms_count64() callconv(.winapi) u64 {
     return openmiles.getMsCount64();
