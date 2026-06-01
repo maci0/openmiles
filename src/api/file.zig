@@ -121,7 +121,7 @@ fn detectMpeg(in: []const u8) ?i32 {
         const skip: u32 = 10 + (@as(u32, s[9]) | (@as(u32, s[8]) << 7) | (@as(u32, s[7]) << 14) | (@as(u32, s[6]) << 21));
         if (skip < s.len) s = s[skip..] else return null;
     }
-    const lim = @min(s.len, 8192); // AIL_MAX_FILE_HEADER_SIZE
+    const lim = @min(s.len, openmiles.max_file_header_size); // AIL_MAX_FILE_HEADER_SIZE (4096 pre-7.0, else 8192)
     var ftype: i32 = 0;
     var p: usize = 0;
     while (p + 4 <= lim) {

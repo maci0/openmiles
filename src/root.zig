@@ -89,6 +89,14 @@ pub const xmidiBareToSmf = xmidi.xmidiBareToSmf;
 
 pub const deg2rad = std.math.pi / 180.0;
 
+// AIL_MAX_FILE_HEADER_SIZE bounds how far AIL_file_type scans for an MPEG frame
+// sync (miscutil.cpp clamps the scan length to it). MSS 7.0 doubled it from 4096
+// to 8192 — verified by disassembling AIL_file_type in the reference DLLs: 6.5h
+// clamps with the immediate 0x1000, while 7.0k and 8.0e use 0x2000. A too-large
+// limit can false-positive a non-MPEG file whose junk happens to contain a sync
+// pattern past the real cutoff, so the value must match the target version.
+pub const max_file_header_size: usize = if (mss_version >= 70) 8192 else 4096;
+
 // MSS 8.0 added a `channel_mask` (U32) field between `channels` and `samples`
 // (for multichannel WAVE_FORMAT_EXTENSIBLE data). Confirmed by disassembling
 // AIL_API_set_sample_info across the reference DLLs: 8.0e and 9.1d read

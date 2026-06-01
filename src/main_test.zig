@@ -1494,6 +1494,24 @@ test "AIL_file_type classifies WAV/MIDI/XMIDI/OGG/VOC/BINKA/DLS/MLS (SDK)" {
     try testing.expectEqual(@as(i32, 0), api_file.AIL_file_type(&junk, junk.len)); // UNKNOWN
 }
 
+test "AIL_file_type MPEG scan honors the version-dependent header-size cap" {
+    // AIL_MAX_FILE_HEADER_SIZE bounds the MPEG frame-sync scan: 4096 before MSS
+    // 7.0, 8192 from 7.0 on (verified by disassembling AIL_file_type). Place a
+    // valid MPEG-1 Layer III frame sync (FF FB 90 00) at offset 5000 -- inside the
+    // 8192 window but past the 4096 one -- so the classification flips on version.
+    var buf = [_]u8{0} ** 5104;
+    buf[5000] = 0xFF;
+    buf[5001] = 0xFB;
+    buf[5002] = 0x90;
+    buf[5003] = 0x00;
+    const got = api_file.AIL_file_type(&buf, buf.len);
+    if (openmiles.mss_version >= 70) {
+        try testing.expectEqual(@as(i32, 13), got); // MPEG_L3_AUDIO: scan reaches 5000
+    } else {
+        try testing.expectEqual(@as(i32, 0), got); // UNKNOWN: scan stops at 4096
+    }
+}
+
 test "AIL_compress_ADPCM/decompress_ADPCM round-trip through raw-block AILSOUNDINFO" {
     // Original 16-bit mono PCM: a slow ramp (ADPCM tracks it well).
     var pcm: [2000]i16 = undefined;
