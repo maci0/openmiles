@@ -240,6 +240,18 @@ pub const Bank = struct {
     const sound_info_size = @sizeOf(MILESBANKSOUNDINFO);
     comptime {
         if (sound_info_size != 44) @compileError("MILESBANKSOUNDINFO must be 44 bytes (compiled-bank format)");
+        // The 44-byte total survives any reorder of the eleven 4-byte fields, but
+        // the compiled-bank record is memcpy'd in verbatim, so each field must sit
+        // at its mss.h offset. Lock the field order, not just the size.
+        const fields = @typeInfo(MILESBANKSOUNDINFO).@"struct".fields;
+        const order = [_][]const u8{
+            "ChannelCount", "ChannelMask", "Rate", "DataLen", "SoundLimit",
+            "IsExternal", "DurationMs", "StreamBufferSize", "IsAdpcm", "AdpcmBlockSize", "MixVolumeDAC",
+        };
+        if (fields.len != order.len) @compileError("MILESBANKSOUNDINFO field count drifted");
+        for (order, 0..) |fname, i| {
+            if (!std.mem.eql(u8, fields[i].name, fname)) @compileError("MILESBANKSOUNDINFO field order drifted at " ++ fname);
+        }
     }
 
     /// AIL_sound_asset_info: optionally copy the sound's MILESBANKSOUNDINFO into
