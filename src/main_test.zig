@@ -2919,6 +2919,33 @@ test "listener 3D orientation normalizes face & up like the SDK" {
     try testing.expect(@abs(ux) < 0.001 and @abs(uy - 0.6) < 0.001 and @abs(uz - 0.8) < 0.001);
 }
 
+test "AIL_update_listener_3D_position advances by velocity * dt_ms (per-ms)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    api_3d.AIL_set_listener_3D_position(drv, 0, 0, 0);
+    // Listener velocity is per-millisecond (magnitude 1 = no scale): 2/ms on +x,
+    // -1/ms on +z (Z round-trips through the negate-on-set/negate-on-get pair).
+    api_3d.AIL_set_listener_3D_velocity(drv, 2, 0, -1, 1);
+    var x: f32 = 0;
+    var y: f32 = 0;
+    var z: f32 = 0;
+    api_v7.AIL_listener_3D_velocity(drv, &x, &y, &z);
+    try testing.expectApproxEqAbs(@as(f32, 2.0), x, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, -1.0), z, 0.001);
+
+    // SDK m3d.cpp: position += velocity * dt_ms. 50 ms -> +100 x, -50 z.
+    api_v7.AIL_update_listener_3D_position(drv, 50);
+    api_v7.AIL_listener_3D_position(drv, &x, &y, &z);
+    try testing.expectApproxEqAbs(@as(f32, 100.0), x, 0.01);
+    try testing.expectApproxEqAbs(@as(f32, -50.0), z, 0.01);
+
+    // Zero velocity -> update is a no-op (early-out below MSS_EPSILON).
+    api_3d.AIL_set_listener_3D_velocity(drv, 0, 0, 0, 1);
+    api_v7.AIL_update_listener_3D_position(drv, 1000);
+    api_v7.AIL_listener_3D_position(drv, &x, &y, &z);
+    try testing.expectApproxEqAbs(@as(f32, 100.0), x, 0.01);
+}
+
 test "AIL_set_room_type applies the EAX preset to the master reverb (m3d.cpp rooms[])" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
