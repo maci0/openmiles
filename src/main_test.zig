@@ -3657,6 +3657,30 @@ test "v7 3D position/velocity round-trip via S3D struct (uninitialized sample)" 
     try testing.expectEqual(@as(f32, 21), px); // 11 + 1*10
 }
 
+test "AIL_3D_sample_attribute Position returns MSS-space Z (not negated) when live" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample3D.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false); // is_initialized = true (exercises the bug path)
+
+    api_3d.AIL_set_3D_position(@as(*anyopaque, @ptrCast(s)), 1.0, 2.0, 3.0);
+    var pos: [3]f32 = .{ 0, 0, 0 };
+    api_3d.AIL_3D_sample_attribute(@as(*anyopaque, @ptrCast(s)), "Position", @ptrCast(&pos));
+    try testing.expectApproxEqAbs(@as(f32, 1.0), pos[0], 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 2.0), pos[1], 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 3.0), pos[2], 0.001); // +Z, not -3
+    // Consistent with the dedicated getter.
+    var gx: f32 = 0;
+    var gy: f32 = 0;
+    var gz: f32 = 0;
+    api_3d.AIL_3D_position(@as(*anyopaque, @ptrCast(s)), &gx, &gy, &gz);
+    try testing.expectApproxEqAbs(@as(f32, 3.0), gz, 0.001);
+}
+
 test "AIL_sample_3D_cone round-trips inner/outer degrees + verbatim outer_volume" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

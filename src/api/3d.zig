@@ -386,17 +386,12 @@ pub fn AIL_3D_sample_attribute(s: ?*anyopaque, name: [*:0]const u8, val: *anyopa
         const v: *f32 = @ptrCast(@alignCast(val));
         v.* = sample.effects_level;
     } else if (std.mem.eql(u8, n, "Position")) {
+        // Read the stored MSS-space position (the ma_sound copy carries a negated
+        // Z for miniaudio's right-handed space, so reading it back would flip Z).
         const v: *[3]f32 = @ptrCast(@alignCast(val));
-        if (sample.is_initialized) {
-            const pos = openmiles.ma.ma_sound_get_position(&sample.sound);
-            v.*[0] = pos.x;
-            v.*[1] = pos.y;
-            v.*[2] = pos.z;
-        } else {
-            v.*[0] = sample.pos_x;
-            v.*[1] = sample.pos_y;
-            v.*[2] = sample.pos_z;
-        }
+        v.*[0] = sample.pos_x;
+        v.*[1] = sample.pos_y;
+        v.*[2] = sample.pos_z;
     } else if (std.mem.eql(u8, n, "Velocity")) {
         const v: *[4]f32 = @ptrCast(@alignCast(val));
         v.*[0] = sample.velocity_x;
