@@ -520,12 +520,18 @@ pub fn AIL_digital_CPU_percent(driver_opt: ?*DigitalDriver) callconv(.winapi) i3
     return @intFromFloat(@min(pct, 100.0));
 }
 pub fn AIL_digital_latency(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
-    const driver = driver_opt orelse return 0;
+    const driver = driver_opt orelse return 0; // SDK: null -> 0
     if (driver.getDevice()) |device| {
         const period = device.playback.internalPeriodSizeInFrames;
+        const periods = @max(device.playback.internalPeriods, 1);
         const rate = device.playback.internalSampleRate;
         if (rate > 0 and period > 0) {
-            return (period * 1000) / rate;
+            // SDK (genericdig.cpp) reports TOTAL output buffering, not one period:
+            // (hw_buffer_ms) * DIG_DS_MIX_FRAGMENT_CNT. Our equivalent is the full
+            // device buffer = all internalPeriods of internalPeriodSizeInFrames, so
+            // multiply by the period count (was reporting a single period, ~N times
+            // too low).
+            return (period * periods * 1000) / rate;
         }
     }
     // Fallback for no-device engines (tests) or if period info unavailable
