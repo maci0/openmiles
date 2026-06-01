@@ -291,7 +291,12 @@ pub fn AIL_digital_master_volume_level(dig_opt: ?*DigitalDriver) callconv(.winap
 }
 pub fn AIL_set_digital_master_volume_level(dig_opt: ?*DigitalDriver, master_volume: f32) callconv(.winapi) void {
     const d = dig_opt orelse return;
-    d.setMasterVolume(std.math.clamp(master_volume, 0.0, 1.0));
+    // SDK (genericdig.cpp AIL_API_set_digital_master_volume_level): stores
+    // `dig->master_volume = master_volume` VERBATIM (no clamp); only the
+    // hardware mix is clamped downstream. The getter returns the raw field,
+    // so we must not clamp here or the round-trip diverges for out-of-range
+    // values.
+    d.setMasterVolume(master_volume);
 }
 pub fn AIL_set_digital_master_reverb(dig_opt: ?*DigitalDriver, bus_index: i32, reverb_decay_time: f32, reverb_predelay: f32, reverb_damping: f32) callconv(.winapi) void {
     _ = bus_index;

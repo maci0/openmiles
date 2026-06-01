@@ -5203,6 +5203,21 @@ test "digital master volume is linear (vol/127), not the sample-volume curve" {
     try testing.expectApproxEqAbs(@as(f32, 1.0), hd.getMasterVolume(), 0.001);
 }
 
+test "AIL_digital_master_volume_level (F32) round-trips verbatim, null->0, default 1.0" {
+    // SDK genericdig.cpp: default dig->master_volume = 1.0F; the F32 setter
+    // stores verbatim (NO clamp) and the getter returns the raw field.
+    try testing.expectEqual(@as(f32, 0.0), api_v7.AIL_digital_master_volume_level(null));
+    const hd = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer hd.deinit();
+    try testing.expectApproxEqAbs(@as(f32, 1.0), api_v7.AIL_digital_master_volume_level(hd), 0.001); // default
+    api_v7.AIL_set_digital_master_volume_level(hd, 0.5);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), api_v7.AIL_digital_master_volume_level(hd), 0.001);
+    // Out-of-range value must survive the round-trip un-clamped (SDK stores verbatim).
+    api_v7.AIL_set_digital_master_volume_level(hd, 1.5);
+    try testing.expectApproxEqAbs(@as(f32, 1.5), api_v7.AIL_digital_master_volume_level(hd), 0.001);
+    api_v7.AIL_set_digital_master_volume_level(null, 0.3); // null setter: no crash
+}
+
 test "AIL_redbook_set_volume_level returns the previous volume (F32)" {
     const rb = try openmiles.Redbook.init(testing.allocator, 0);
     defer rb.deinit();
