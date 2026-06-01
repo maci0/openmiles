@@ -54,8 +54,13 @@ pub fn AIL_get_timer_highest_delay() callconv(.winapi) u32 {
 }
 // Timer divisor is not applicable in our implementation (single-rate timers).
 pub fn AIL_set_timer_divisor(timer_opt: ?*openmiles.Timer, divisor: u32) callconv(.winapi) void {
-    _ = timer_opt;
-    _ = divisor;
+    const timer = timer_opt orelse return;
+    log("AIL_set_timer_divisor(timer={*}, divisor={d})\n", .{ timer, divisor });
+    // Legacy 8254 PIT rate: the timer fires every `divisor` ticks of the
+    // ~1193180 Hz PC interval-timer clock, i.e. period = divisor / 1193180 s.
+    // A divisor of 0 means the full 16-bit reload value (65536), per the PIT.
+    const div: u64 = if (divisor == 0) 65536 else divisor;
+    timer.setPeriodUs(div * 1_000_000 / 1_193_180);
 }
 pub fn AIL_set_timer_user(timer_opt: ?*openmiles.Timer, user: u32) callconv(.winapi) u32 {
     // SDK (mssdig.cpp): store the new user value, return the previous one. A bad

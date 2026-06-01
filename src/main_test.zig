@@ -2667,6 +2667,37 @@ test "Timer setPeriodUs and setUserData" {
     try testing.expectEqual(@as(u32, 42), timer.getUserData());
 }
 
+test "AIL_set_timer_frequency/period/divisor convert to the right period (SDK)" {
+    const api_timer = @import("api/timer.zig");
+    const dummy_cb = struct {
+        fn cb(_: u32) callconv(.winapi) void {}
+    }.cb;
+    const timer = try openmiles.Timer.init(testing.allocator, dummy_cb);
+    defer timer.deinit();
+
+    // frequency: SDK genericmss.cpp -> set_timer_period(1000000 / hertz).
+    api_timer.AIL_set_timer_frequency(timer, 1000); // 1000 Hz -> 1000 us
+    try testing.expectEqual(@as(u32, 1000), timer.getPeriodUs());
+    api_timer.AIL_set_timer_frequency(timer, 60); // 60 Hz -> 16666 us
+    try testing.expectEqual(@as(u32, 16666), timer.getPeriodUs());
+
+    // period: microseconds verbatim.
+    api_timer.AIL_set_timer_period(timer, 4000);
+    try testing.expectEqual(@as(u32, 4000), timer.getPeriodUs());
+
+    // divisor: legacy 8254 PIT, period = divisor / 1193180 s. 1193 ticks ~ 999 us.
+    api_timer.AIL_set_timer_divisor(timer, 1193);
+    try testing.expectEqual(@as(u32, 1193 * 1_000_000 / 1_193_180), timer.getPeriodUs());
+    // Divisor 0 means 65536 (full PIT reload) ~ 54925 us.
+    api_timer.AIL_set_timer_divisor(timer, 0);
+    try testing.expectEqual(@as(u32, 65536 * 1_000_000 / 1_193_180), timer.getPeriodUs());
+
+    // Null timer: all are no-ops (no crash).
+    api_timer.AIL_set_timer_frequency(null, 100);
+    api_timer.AIL_set_timer_period(null, 100);
+    api_timer.AIL_set_timer_divisor(null, 100);
+}
+
 test "Timer start and stop lifecycle" {
     var called = std.atomic.Value(u32).init(0);
     const State = struct {
