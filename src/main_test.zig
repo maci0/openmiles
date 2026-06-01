@@ -1985,6 +1985,19 @@ test "AIL_sample_buffer_info: null -> head/tail -1, return is starved not succes
     try testing.expectEqual(@as(i32, 0), tail);
 }
 
+test "AIL_init_sample return-class version split: void (<=7) vs S32 (8+)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    // Pre-8.0 form is void (the table exports AIL_init_sample@4 there).
+    dg.AIL_init_sample(s);
+    // MSS 8.0 changed it to S32 init_sample(HSAMPLE, S32 format) -> 1 on success,
+    // 0 on a null handle (the table exports AIL_init_sample_v8@8 from 8.0 on).
+    try testing.expectEqual(@as(i32, 1), dg.AIL_init_sample_v8(s, 0));
+    try testing.expectEqual(@as(i32, 0), dg.AIL_init_sample_v8(null, 0));
+}
+
 test "AIL_set/sample_buffer_count validates [2,8] and round-trips" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
