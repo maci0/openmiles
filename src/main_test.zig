@@ -3134,6 +3134,44 @@ test "AIL_update_listener_3D_position advances by velocity * dt_ms (per-ms)" {
     try testing.expectApproxEqAbs(@as(f32, 100.0), x, 0.01);
 }
 
+test "AIL_init_sample resets level/reverb/filter/occlusion state to defaults (SDK)" {
+    // SDK wavefile.cpp AIL_init_sample restores a reused handle to its defaults:
+    // volume_levels 1/1, low_pass 1.0, dry 1.0, wet 0.0, obstruction/occlusion/
+    // exclusion 0. Our reset() must do the same or a reused sample keeps stale state.
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    const pcm = [_]u8{0} ** 4410;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 44100, 8);
+    defer testing.allocator.free(wav);
+    try s.loadFromMemory(wav, false);
+
+    // Dirty the state.
+    api_v7.AIL_set_sample_reverb_levels(s, 0.3, 0.7);
+    api_v7.AIL_set_sample_low_pass_cut_off(s, 0, 0.4);
+    api_v7.AIL_set_sample_obstruction(s, 0.9);
+    api_v7.AIL_set_sample_occlusion(s, 0.8);
+    api_v7.AIL_set_sample_volume_levels(s, 0.2, 0.6);
+
+    // Re-init.
+    dg.AIL_init_sample(s);
+
+    var dry: f32 = -1;
+    var wet: f32 = -1;
+    api_v7.AIL_sample_reverb_levels(s, &dry, &wet);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), dry, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.0), wet, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), api_v7.AIL_sample_low_pass_cut_off(s, 0), 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.0), api_v7.AIL_sample_obstruction(s), 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.0), api_v7.AIL_sample_occlusion(s), 0.001);
+    var lft: f32 = -1;
+    var rgt: f32 = -1;
+    api_v7.AIL_sample_volume_levels(s, &lft, &rgt);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), lft, 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), rgt, 0.001);
+}
+
 test "fresh driver master reverb levels default to dry=1.0, wet=1.0 (SDK init)" {
     // SDK genericdig.cpp inits reverb[0].master_dry = master_wet = 1.0F. master_wet
     // is a neutral multiplier for per-sample wet sends; defaulting it to 0 would

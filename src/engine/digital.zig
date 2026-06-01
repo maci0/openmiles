@@ -1142,6 +1142,21 @@ pub const Sample = struct {
         self.falloff_cb = null;
         self.last_loaded_buffer = 0;
         self.user_data = [_]u32{0} ** 8;
+        // SDK wavefile.cpp AIL_init_sample also resets the level / reverb / filter
+        // / occlusion state of a reused handle to its defaults:
+        //   set_sample_volume_levels(1,1); low_pass_cutoff[*]=1; sys_level=1;
+        //   dry_level=1; wet_level=0; exclusion=obstruction=occlusion=0.
+        self.v51_levels = [_]f32{1.0} ** 6; // volume_levels(1,1) -> front/back 1.0
+        self.v51_fb_pan = 0.5;
+        self.v51_center_level = 1.0;
+        self.v51_sub_level = 1.0;
+        self.low_pass_cutoff_norm = 1.0; // fully open (no filtering)
+        self.reverb_dry_level = 1.0;
+        self.reverb_level = 0.0; // wet
+        self.reverb_room_type = 0.0;
+        self.v7_obstruction = 0.0;
+        self.v7_occlusion = 0.0;
+        self.v7_exclusion = 0.0;
     }
 
     /// Store an S3D falloff graph (AIL_set_sample_3D_*_falloff). Mirrors the SDK:
