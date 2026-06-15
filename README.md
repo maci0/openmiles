@@ -111,6 +111,8 @@ Set `OPENMILES_DEBUG=1` in your environment to enable verbose logging to `openmi
 OPENMILES_DEBUG=1 wine YourGame.exe
 ```
 
+Debug builds enable logging by default; set `OPENMILES_DEBUG=0` to turn it off. Release builds log only when `OPENMILES_DEBUG` is set to `1` or `true`. The on-disk log is capped at 64 MiB per process to prevent unbounded growth.
+
 ## Architecture
 
 ```mermaid

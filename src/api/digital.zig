@@ -35,7 +35,10 @@ pub fn AIL_set_redist_directory(path: [*:0]const u8) callconv(.winapi) [*:0]cons
     return openmiles.redistDirectoryZ();
 }
 pub fn AIL_last_error() callconv(.winapi) [*:0]const u8 {
-    if (openmiles.last_error_buf[0] == 0) return "";
+    // SDK (genericmss.cpp) always returns &AIL_error, a stable pointer to the
+    // 256-byte buffer that is the empty string when no error is set. Returning a
+    // distinct "" literal when empty would hand back an unstable pointer that
+    // never reflects later errors for callers that cache it.
     return &openmiles.last_error_buf;
 }
 pub fn AIL_get_preference(number: u32) callconv(.winapi) i32 {
@@ -82,7 +85,8 @@ pub fn AIL_set_named_sample_file(s_opt: ?*Sample, file_type: [*:0]const u8, file
         log("AIL_set_named_sample_file is routing MP3 directly to decoder\n", .{});
     }
     if (is_raw and size > 0) {
-        s.setAddress(@constCast(file_image), @intCast(size)) catch {
+        s.setAddress(@constCast(file_image), @intCast(size)) catch |err| {
+            log("AIL_set_named_sample_file: raw PCM setAddress failed ({any})\n", .{err});
             openmiles.setLastError("Failed to load raw PCM sample");
             return 0;
         };
@@ -230,7 +234,8 @@ pub fn AIL_set_sample_file(s_opt: ?*Sample, data: *anyopaque, block: i32) callco
     // set_sample_file always loads a complete file image. Chunked double-buffered
     // streaming uses AIL_set_sample_type + AIL_load_sample_buffer instead, so the
     // block parameter is not meaningful here.
-    s.load(data, -1) catch {
+    s.load(data, -1) catch |err| {
+        log("AIL_set_sample_file: load failed ({any})\n", .{err});
         openmiles.setLastError("Failed to load sample file");
         return 0;
     };
@@ -239,8 +244,10 @@ pub fn AIL_set_sample_file(s_opt: ?*Sample, data: *anyopaque, block: i32) callco
 pub fn AIL_set_sample_address(s_opt: ?*Sample, data: *anyopaque, size: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_set_sample_address(s={*}, data={*}, size={d})\n", .{ s, data, size });
+    openmiles.clearLastError();
     s.setAddress(data, size) catch |err| {
         log("AIL_set_sample_address: failed: {any}\n", .{err});
+        openmiles.setLastError("Failed to set sample address");
     };
 }
 pub fn AIL_set_sample_type(s_opt: ?*Sample, format: u32, flags: u32) callconv(.winapi) void {
@@ -380,7 +387,9 @@ pub fn AIL_allocate_file_sample(driver_opt: ?*DigitalDriver, data: *anyopaque, f
     const raw: [*]const u8 = @ptrCast(@alignCast(data));
     const size = openmiles.detectAudioSize(raw);
     if (size == 0) return s; // unknown format, return empty sample
-    s.loadFromMemory(raw[0..size], true) catch {
+    s.loadFromMemory(raw[0..size], true) catch |err| {
+        log("AIL_allocate_file_sample: loadFromMemory failed ({any})\n", .{err});
+        openmiles.setLastError("Failed to load sample from memory");
         s.deinit();
         return null;
     };
@@ -482,7 +491,7 @@ pub fn AIL_sample_buffer_info(s_opt: ?*Sample, buff_num: i32, pos: ?*u32, len: ?
         const even = @mod(buff_num, 2) == 0;
         if (pos) |p| p.* = if (even) p0 else p1;
         if (len) |p| p.* = if (even) l0 else l1;
-        return if (s.stream_src.starved) 1 else 0; // return S->starved
+        return if (s.stream_src.isStarved()) 1 else 0; // return S->starved
     }
     if (pos) |p| p.* = 0;
     if (len) |p| p.* = if (s.owned_buffer) |buf| @intCast(@min(buf.len, std.math.maxInt(u32))) else 0;
@@ -787,20 +796,37 @@ pub fn AIL_MMX_available() callconv(.winapi) i32 {
 pub fn AIL_HWND() callconv(.winapi) ?*anyopaque {
     return null;
 }
-pub fn AIL_set_error(msg: [*:0]const u8) callconv(.winapi) void {
-    openmiles.setLastError(std.mem.span(msg));
+pub fn AIL_set_error(msg: ?[*:0]const u8) callconv(.winapi) void {
+    // SDK (genericmss.cpp): a NULL message clears the error rather than crashing.
+    const m = msg orelse {
+        openmiles.clearLastError();
+        return;
+    };
+    openmiles.setLastError(std.mem.span(m));
 }
 // AIL_debug_printf and AIL_sprintf are implemented in C (src/bindings/c_impl.c)
 // to avoid Zig stage2_llvm miscompilation of C varargs on Windows.
 
 pub fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
-    const raw: [*]const u8 = @ptrCast(@alignCast(data));
+    // Size-less SDK ABI: the caller guarantees the buffer spans the declared RIFF
+    // size, so there is no length to bound against here. Internal callers that
+    // know the real buffer length must use wavInfoBounded so an attacker-supplied
+    // RIFF size field cannot drive reads past the actual allocation.
+    return wavInfoBounded(@ptrCast(@alignCast(data)), std.math.maxInt(usize), info);
+}
+
+/// WAV header inspector bounded to `max_len` bytes of `raw`. Chunk-walk reads
+/// never run past `min(declared RIFF size, max_len)`, so a lying in-file RIFF
+/// size cannot cause an out-of-bounds read when the real buffer length is known.
+pub fn wavInfoBounded(raw: [*]const u8, max_len: usize, info: *anyopaque) i32 {
+    if (max_len < 12) return 0;
     if (raw[0] != 'R' or raw[1] != 'I' or raw[2] != 'F' or raw[3] != 'F') return 0;
     if (raw[8] != 'W' or raw[9] != 'A' or raw[10] != 'V' or raw[11] != 'E') return 0;
     const out: *AILSOUNDINFO = @ptrCast(@alignCast(info));
-    // Use the RIFF chunk size to determine the file end boundary
+    // Use the RIFF chunk size to determine the file end boundary, clamped to the
+    // known buffer length so a lying RIFF size cannot read past the allocation.
     const riff_body = std.mem.readInt(u32, raw[4..8][0..4], .little);
-    const file_end: usize = @as(usize, riff_body) + 8;
+    const file_end: usize = @min(@as(usize, riff_body) + 8, max_len);
     var offset: usize = 12;
     var audio_format: u16 = 1;
     var num_channels: u16 = 1;
@@ -1449,7 +1475,7 @@ comptime {
             .{ .name = "MIX_RIB_MAIN", .stack_size = 8, .ver = 65, .ver_max = 80, .symbol = "MIX_RIB_MAIN_v7" },
             // Intermittent export: present in 6.x and v8 (8.0j), absent from v5,
             // v7, and v9 — two separate version ranges.
-                        .{ .name = "MSSDisableThreadLibraryCalls", .stack_size = 4, .ver = 80, .ver_max = 89 },
+            .{ .name = "MSSDisableThreadLibraryCalls", .stack_size = 4, .ver = 80, .ver_max = 89 },
             .{ .name = "MSS_alloc_info", .stack_size = 16, .ver = 90 },
             .{ .name = "MSS_free_info", .stack_size = 16, .ver = 90 },
             .{ .name = "RIB_provider_system_data", .stack_size = 8, .ver = 50 },
@@ -1623,9 +1649,9 @@ comptime {
             .{ .name = "AIL_enumerate_sample_stage_attributes", .stack_size = 16, .ver = 70, .ver_max = 70, .symbol = "AIL_enumerate_sample_stage_attributes_v7" },
             // channel levels: v7 @8/@12 lacked the src/dst matrices v8 added (@20).
             .{ .name = "AIL_sample_channel_levels", .stack_size = 20, .ver = 80 },
-                        .{ .name = "AIL_sample_channel_levels", .stack_size = 8, .ver = 70, .ver_max = 70, .symbol = "AIL_sample_channel_levels_v7" },
+            .{ .name = "AIL_sample_channel_levels", .stack_size = 8, .ver = 70, .ver_max = 70, .symbol = "AIL_sample_channel_levels_v7" },
             .{ .name = "AIL_set_sample_channel_levels", .stack_size = 20, .ver = 80 },
-                        .{ .name = "AIL_set_sample_channel_levels", .stack_size = 12, .ver = 70, .ver_max = 70, .symbol = "AIL_set_sample_channel_levels_v7" },
+            .{ .name = "AIL_set_sample_channel_levels", .stack_size = 12, .ver = 70, .ver_max = 70, .symbol = "AIL_set_sample_channel_levels_v7" },
             .{ .name = "AIL_listener_relative_receiver_array", .stack_size = 8, .ver = 70 },
             .{ .name = "AIL_set_listener_relative_receiver_array", .stack_size = 12, .ver = 70 },
             .{ .name = "AIL_speaker_configuration", .stack_size = 20, .ver = 70 },
@@ -1633,10 +1659,10 @@ comptime {
             .{ .name = "AIL_speaker_reverb_levels", .stack_size = 16, .ver = 70 },
             // speaker reverb levels: v7 @16 lacked the per-speaker index array (v8 @20).
             .{ .name = "AIL_set_speaker_reverb_levels", .stack_size = 20, .ver = 80 },
-                        .{ .name = "AIL_set_speaker_reverb_levels", .stack_size = 16, .ver = 70, .ver_max = 70, .symbol = "AIL_set_speaker_reverb_levels_v7" },
+            .{ .name = "AIL_set_speaker_reverb_levels", .stack_size = 16, .ver = 70, .ver_max = 70, .symbol = "AIL_set_speaker_reverb_levels_v7" },
             .{ .name = "AIL_calculate_3D_channel_levels", .stack_size = 56, .ver = 70, .ver_max = 70, .symbol = "AIL_calculate_3D_channel_levels_v7" },
             .{ .name = "AIL_calculate_3D_channel_levels", .stack_size = 68, .ver = 80 },
-                        .{ .name = "AIL_digital_output_filter", .stack_size = 4, .ver = 70 },
+            .{ .name = "AIL_digital_output_filter", .stack_size = 4, .ver = 70 },
             .{ .name = "AIL_output_filter_driver_attribute", .stack_size = 12, .ver = 70, .ver_max = 79 },
             .{ .name = "AIL_set_output_filter_driver_preference", .stack_size = 12, .ver = 70, .ver_max = 79 },
             .{ .name = "AIL_enumerate_output_filter_driver_attributes", .stack_size = 12, .ver = 70, .ver_max = 79 },
@@ -1726,7 +1752,7 @@ comptime {
             .{ .name = "AIL_sample_speaker_scale_factors", .stack_size = 16, .ver = 80 },
             // Arity dips in v7: 6.x and 8.x+ take the 7-arg @28 form; v7 takes a
             // 6-arg @24 form.
-                        .{ .name = "AIL_sample_stage_property", .stack_size = 24, .ver = 70, .ver_max = 79, .symbol = "AIL_sample_stage_property_v7" },
+            .{ .name = "AIL_sample_stage_property", .stack_size = 24, .ver = 70, .ver_max = 79, .symbol = "AIL_sample_stage_property_v7" },
             .{ .name = "AIL_sample_stage_property", .stack_size = 28, .ver = 80 },
             .{ .name = "AIL_set_sample_51_volume_levels", .stack_size = 28, .ver = 80 },
             .{ .name = "AIL_set_sample_51_volume_pan", .stack_size = 24, .ver = 80 },
@@ -1888,12 +1914,12 @@ comptime {
         // function is located by name (or `symbol` override) across the api
         // modules — none of which import this one, so there is no cycle.
         const mods = .{
-            @This(),                  @import("3d.zig"),     @import("stream.zig"),
-            @import("quick.zig"),     @import("redbook.zig"), @import("timer.zig"),
-            @import("file.zig"),      @import("input.zig"),  @import("midi.zig"),
-            @import("dls.zig"),       @import("rib.zig"),    @import("filter.zig"),
-            @import("memory.zig"),    @import("v7.zig"),     @import("v8.zig"),
-            @import("v9.zig"),         @import("miles.zig"),  @import("legacy.zig"),
+            @This(),               @import("3d.zig"),      @import("stream.zig"),
+            @import("quick.zig"),  @import("redbook.zig"), @import("timer.zig"),
+            @import("file.zig"),   @import("input.zig"),   @import("midi.zig"),
+            @import("dls.zig"),    @import("rib.zig"),     @import("filter.zig"),
+            @import("memory.zig"), @import("v7.zig"),      @import("v8.zig"),
+            @import("v9.zig"),     @import("miles.zig"),   @import("legacy.zig"),
         };
         // API families dropped wholesale in MSS 8.0. The 8.0e/9.1d DLLs export
         // none of these symbols (all are present through 7.0k), so emitting them
@@ -1904,14 +1930,14 @@ comptime {
         // (sequences, channels, MIDI/XMIDI drivers, midiOut, the MIDI callback
         // registrations, the software wave synthesizer) and the DLS API.
         const removed_at_80 = [_][]const u8{
-            "redbook",            "quick",                "sequence",
-            "DLS",                "midiOut",              "XMIDI",
-            "midi_driver",        "register_beat",        "register_trigger",
-            "register_sequence",  "register_timbre",      "register_prefix",
-            "register_ICA",       "channel_notes",        "lock_channel",
-            "release_channel",    "send_channel_voice",   "send_sysex",
-            "controller_value",   "branch_index",         "wave_synthesizer",
-            "map_sequence",       "true_sequence",
+            "redbook",           "quick",              "sequence",
+            "DLS",               "midiOut",            "XMIDI",
+            "midi_driver",       "register_beat",      "register_trigger",
+            "register_sequence", "register_timbre",    "register_prefix",
+            "register_ICA",      "channel_notes",      "lock_channel",
+            "release_channel",   "send_channel_voice", "send_sysex",
+            "controller_value",  "branch_index",       "wave_synthesizer",
+            "map_sequence",      "true_sequence",
         };
         // Export names that appear in NO reference DLL (3.6a..9.1d) and nowhere in
         // the 9.3b SDK (headers + source). These table entries were mistakes: no

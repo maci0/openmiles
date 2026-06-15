@@ -357,7 +357,7 @@ test "coverage: redbook.zig exports" {
 }
 
 test "coverage: timer.zig exports" {
-    const t = tm.AIL_register_timer(dummyTimerCb) orelse return;
+    const t = tm.AIL_register_timer(dummyTimerCb) orelse return error.NoTimer;
     const tt: *openmiles.Timer = @ptrCast(@alignCast(t));
     tm.AIL_set_timer_frequency(tt, 60);
     tm.AIL_set_timer_period(tt, 16000);
@@ -369,7 +369,7 @@ test "coverage: timer.zig exports" {
     _ = tm.AIL_get_timer_highest_delay();
     tm.AIL_release_timer_handle(tt); // frees tt
     // A second timer exercises the *_all_timers paths (which free it).
-    _ = tm.AIL_register_timer(dummyTimerCb) orelse return;
+    _ = tm.AIL_register_timer(dummyTimerCb) orelse return error.NoTimer;
     tm.AIL_start_all_timers();
     tm.AIL_stop_all_timers();
     tm.AIL_release_all_timers();
@@ -395,11 +395,11 @@ test "coverage: file/input.zig exports" {
 }
 
 test "coverage: midi.zig exports" {
-    const mdi = md.AIL_open_midi_driver(0) orelse return;
+    const mdi = md.AIL_open_midi_driver(0) orelse return error.NoMidiDriver;
     defer md.AIL_close_midi_driver(mdi);
     const mp: *anyopaque = @ptrCast(mdi);
     _ = md.AIL_open_XMIDI_driver(0);
-    const seq = md.AIL_allocate_sequence_handle(mdi) orelse return;
+    const seq = md.AIL_allocate_sequence_handle(mdi) orelse return error.NoSequence;
     defer md.AIL_release_sequence_handle(seq);
 
     // Minimal valid SMF so the size-less init_sequence detects a real length.

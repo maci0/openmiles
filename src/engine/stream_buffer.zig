@@ -53,6 +53,9 @@ pub const StreamSource = struct {
     /// `bits` is 8 or 16; 8-bit is treated as unsigned PCM, 16-bit as signed,
     /// matching the MSS DIG_F_* raw formats.
     pub fn init(self: *StreamSource, bits: u16, channels: u16, sample_rate: u32, hook: ?EobHook, ctx: ?*anyopaque) !void {
+        // A zero channel count yields frame_size==0, which would divide-by-zero
+        // in the read path. Reject it at the boundary rather than crash later.
+        if (channels == 0) return error.InvalidParam;
         const fmt: ma.ma_format = if (bits <= 8) ma.ma_format_u8 else ma.ma_format_s16;
         const bytes_per_sample: usize = if (bits <= 8) 1 else 2;
         self.* = .{
@@ -94,6 +97,14 @@ pub const StreamSource = struct {
             if (self.slots[i].data == null and !self.slots[i].eof) return @intCast(i);
         }
         return -1;
+    }
+
+    /// Whether the mixer underran (both slots empty) since the last submit.
+    /// Read under the lock because `onRead` (audio thread) writes `starved`.
+    pub fn isStarved(self: *StreamSource) bool {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        return self.starved;
     }
 
     pub fn bufferInfo(self: *StreamSource, pos0: *u32, len0: *u32, pos1: *u32, len1: *u32) void {

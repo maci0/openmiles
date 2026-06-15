@@ -70,12 +70,12 @@ pub fn AIL_quick_load_mem(data: *anyopaque, size: u32) callconv(.winapi) ?*Sampl
 // Like AIL_quick_load_mem, but the filename supplies a format hint. Our loader
 // auto-detects the format from the data, so the name is advisory only.
 pub fn AIL_quick_load_named_mem(data: ?*anyopaque, filename: ?[*:0]const u8, size: u32) callconv(.winapi) ?*Sample {
-    if (filename) |f| {
-        log("AIL_quick_load_named_mem(data={*}, filename={s}, size={d})\n", .{ data orelse undefined, f, size });
-    } else {
-        log("AIL_quick_load_named_mem(data={*}, filename=null, size={d})\n", .{ data orelse undefined, size });
-    }
     const d = data orelse return null;
+    if (filename) |f| {
+        log("AIL_quick_load_named_mem(data={*}, filename={s}, size={d})\n", .{ d, f, size });
+    } else {
+        log("AIL_quick_load_named_mem(data={*}, filename=null, size={d})\n", .{ d, size });
+    }
     return AIL_quick_load_mem(d, size);
 }
 pub fn AIL_quick_copy(s_opt: ?*Sample) callconv(.winapi) ?*Sample {

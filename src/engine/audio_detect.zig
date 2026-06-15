@@ -1,3 +1,7 @@
+//! Audio/MIDI size sniffing: derive the in-memory byte length of a sound blob
+//! from its container header (RIFF/WAV, AIFF/FORM, MIDI, …) so streaming reads
+//! know how much to pull. Pure (depends only on std).
+
 const std = @import("std");
 
 pub const streaming_sentinel_size: usize = 16 * 1024 * 1024;

@@ -131,9 +131,8 @@ pub fn AIL_DLS_unload(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.wina
 pub fn AIL_DLS_compact(driver_opt: ?*MidiDriver) callconv(.winapi) void {
     _ = driver_opt;
 }
-// MSS DLS_INFO structure (6.6-era): first field is total memory usage in bytes.
-// Games typically inspect only the first field for "how much RAM does the soundfont use?"
 // AILDLSINFO (mss.h): 148-byte device-info struct returned by AIL_DLS_get_info.
+// Games inspect CurrentDLSMemory for "how much RAM does the soundfont use?".
 const AILDLSINFO = extern struct {
     Description: [128]u8 = [_]u8{0} ** 128,
     MaxDLSMemory: i32 = 0,
@@ -362,7 +361,14 @@ pub fn AIL_merge_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyopaque, ou
         return 0;
     }
 
-    const total = xsz + dsz;
+    // xsz/dsz are derived from attacker-controlled image headers and can each
+    // approach 2^32. A plain add wraps on the 32-bit target, producing an
+    // undersized malloc that the two memcpy's below would overflow. Reject the
+    // overflow instead of allocating short.
+    const total = std.math.add(usize, xsz, dsz) catch {
+        openmiles.setLastError("AIL_merge_DLS_with_XMI: image sizes overflow");
+        return 0;
+    };
     const buf = std.c.malloc(total) orelse return 0;
     const dst: [*]u8 = @ptrCast(buf);
     @memcpy(dst[0..xsz], xraw[0..xsz]);

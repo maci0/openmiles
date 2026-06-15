@@ -41,11 +41,6 @@ const MemStream = struct {
     }
 };
 
-fn cstrlen(p: [*:0]const u8) usize {
-    return std.mem.len(p);
-}
-
-
 // --- WAV cue-point ("marker") parsing -------------------------------------
 // A RIFF/WAVE image can carry a 'cue ' chunk (a list of cue points, each with a
 // sample offset) and a LIST/adtl/'labl' chunk mapping cue ids to names. These
@@ -463,7 +458,7 @@ pub fn AIL_mem_read(mem: ?*anyopaque, dst: ?*anyopaque, n: i32) callconv(.winapi
 pub fn AIL_mem_seek(mem: ?*anyopaque, pos: i32) callconv(.winapi) i32 {
     const m: *MemStream = @ptrCast(@alignCast(mem orelse return -1));
     const p: usize = if (pos < 0) 0 else @intCast(pos);
-    m.pos = @min(p, m.buf.len);
+    m.pos = @min(p, m.len);
     return @intCast(m.pos);
 }
 pub fn AIL_mem_size(mem: ?*anyopaque) callconv(.winapi) i32 {
@@ -476,9 +471,14 @@ pub fn AIL_mem_write(mem: ?*anyopaque, src: ?*anyopaque, n: i32) callconv(.winap
     if (n <= 0 or !m.writable) return 0;
     const want: usize = @intCast(n);
     // Owned write streams grow to fit (AIL_mem_create semantics); views over
-    // caller memory stay fixed and truncate at the end of the buffer.
+    // caller memory stay fixed and truncate at the end of the buffer. Grow the
+    // capacity geometrically so a stream filled by many small AIL_mem_write
+    // calls stays amortized O(n) rather than reallocating-and-copying on every
+    // call (O(n^2)). The valid byte count is tracked separately in `m.len`, so
+    // the slack capacity past `m.len` is never read back.
     if (m.owns and m.pos + want > m.buf.len) {
-        if (openmiles.global_allocator.realloc(m.buf, m.pos + want)) |nb| {
+        const new_cap = @max(m.pos + want, m.buf.len *| 2);
+        if (openmiles.global_allocator.realloc(m.buf, new_cap)) |nb| {
             m.buf = nb;
         } else |_| {}
     }
@@ -515,9 +515,14 @@ pub fn AIL_open_soundbank(filename: ?*anyopaque, name: ?*anyopaque) callconv(.wi
     const fname: [*:0]const u8 = @ptrCast(fn_ptr);
     const fname_slice = std.mem.span(fname);
     // Read the file via the configured callbacks / filesystem.
-    const image = openmiles.readWholeFile(fname_slice) catch return null;
+    const image = openmiles.readWholeFile(fname_slice) catch |err| {
+        openmiles.log("AIL_open_soundbank: read '{s}' failed ({any})\n", .{ fname_slice, err });
+        openmiles.setLastError("Failed to read sound bank file");
+        return null;
+    };
     defer openmiles.global_allocator.free(image);
-    const bank = openmiles.soundbank.loadFromMemory(openmiles.global_allocator, fname_slice, image) catch {
+    const bank = openmiles.soundbank.loadFromMemory(openmiles.global_allocator, fname_slice, image) catch |err| {
+        openmiles.log("AIL_open_soundbank: parse '{s}' failed ({any})\n", .{ fname_slice, err });
         openmiles.setLastError("Failed to open sound bank");
         return null;
     };

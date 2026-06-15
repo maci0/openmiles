@@ -49,6 +49,34 @@ fn satI32(v: f32) i32 {
     return @intFromFloat(v);
 }
 
+/// Apply an MSS loop count to a miniaudio sound: count 0 means infinite looping.
+fn applyLoopCount(sound: *ma.ma_sound, count: i32) void {
+    ma.ma_sound_set_looping(sound, if (count == 0) ma.MA_TRUE else ma.MA_FALSE);
+}
+
+/// Translate an MSS byte-offset loop block into miniaudio frame ranges. Works on
+/// any sample type exposing `bytesPerFrame`, `loop_start_frame`, `loop_end_frame`
+/// and `decoder` (Sample and Sample3D share the exact same logic).
+fn applyLoopBlock(self: anytype, start_bytes: i32, end_bytes: i32) void {
+    const bpf = self.bytesPerFrame();
+    if (start_bytes >= 0 and bpf > 0) {
+        self.loop_start_frame = @as(u64, @intCast(start_bytes)) / @as(u64, bpf);
+    } else {
+        self.loop_start_frame = 0;
+    }
+    if (end_bytes > 0 and bpf > 0) {
+        self.loop_end_frame = @as(u64, @intCast(end_bytes)) / @as(u64, bpf);
+        if (self.decoder) |d| {
+            _ = ma.ma_data_source_set_range_in_pcm_frames(d, 0, self.loop_end_frame);
+        }
+    } else {
+        self.loop_end_frame = 0;
+        if (self.decoder) |d| {
+            _ = ma.ma_data_source_set_range_in_pcm_frames(d, 0, std.math.maxInt(u64));
+        }
+    }
+}
+
 /// A peak soft-limiter as a custom miniaudio node: passes audio below the knee
 /// untouched and saturates peaks toward unity so a bus can't clip.
 pub const LimiterNode = extern struct {
@@ -141,6 +169,10 @@ pub const MixBus = struct {
         const eng = &self.driver.engine;
         const endpoint = ma.ma_engine_get_endpoint(eng);
         if (on and self.limiter == null) {
+            // One effect node per bus: tear down a compressor first, else both
+            // would attach to the same insert point and the second attach would
+            // orphan (and leak) the first while corrupting the bus routing.
+            if (self.compressor != null) self.installCompressor(false);
             const node = self.driver.allocator.create(LimiterNode) catch return;
             var chans = [_]u32{2};
             var cfg = ma.ma_node_config_init();
@@ -172,6 +204,10 @@ pub const MixBus = struct {
         const eng = &self.driver.engine;
         const endpoint = ma.ma_engine_get_endpoint(eng);
         if (on and self.compressor == null) {
+            // One effect node per bus: tear down a limiter first so the two
+            // slots can't both point at the same insert (which would leak the
+            // displaced node and leave the bus graph in an inconsistent state).
+            if (self.limiter != null) self.enableLimiter(false);
             const node = self.driver.allocator.create(CompressorNode) catch return;
             node.env = 1.0;
             var chans = [_]u32{2};
@@ -319,7 +355,9 @@ pub const DigitalDriver = struct {
         _ = frames;
         _ = frame_count;
         const self: *DigitalDriver = @ptrCast(@alignCast(user orelse return));
-        if (self.mix_callback) |cb| cb(self);
+        // Read on the audio thread; written on the app thread via
+        // AIL_register_mix_callback. Atomic to avoid a torn/half-published pointer.
+        if (@atomicLoad(?*const fn (?*DigitalDriver) callconv(.winapi) void, &self.mix_callback, .acquire)) |cb| cb(self);
     }
 
     /// Allocate a new mixer bus (a miniaudio sound group) samples can route to.
@@ -455,7 +493,10 @@ pub const DigitalDriver = struct {
     /// AIL_process_digital_audio can return them to the game.
     fn onProcessCapture(pUserData: ?*anyopaque, pFramesOut: [*c]f32, frameCount: ma.ma_uint64) callconv(.c) void {
         const self: *DigitalDriver = @ptrCast(@alignCast(pUserData.?));
-        if (!self.capture_enabled) return;
+        // capture_enabled is published with a release store by enableCapture once
+        // the capture buffer has been pre-allocated; acquire-load it here so the
+        // audio thread never observes the flag set before the buffer capacity is.
+        if (!@atomicLoad(bool, &self.capture_enabled, .acquire)) return;
         const channels = ma.ma_engine_get_channels(&self.engine);
         const sample_count: usize = @as(usize, @intCast(frameCount)) * channels;
         if (!self.capture_mutex.tryLock()) return;
@@ -471,13 +512,15 @@ pub const DigitalDriver = struct {
     /// Enable the capture path and pre-allocate the buffer so the audio
     /// thread callback never needs to allocate.
     pub fn enableCapture(self: *DigitalDriver) void {
-        if (self.capture_enabled) return;
+        if (@atomicLoad(bool, &self.capture_enabled, .acquire)) return;
         const channels = ma.ma_engine_get_channels(&self.engine);
         const rate = ma.ma_engine_get_sample_rate(&self.engine);
         // Pre-allocate for ~50ms of audio (a generous render buffer).
         const cap: usize = @as(usize, rate / 20) * channels;
         self.capture_buf.ensureTotalCapacity(self.allocator, cap) catch {};
-        self.capture_enabled = true;
+        // Release store: the buffer capacity above must be visible to the audio
+        // thread before it observes the flag set (see onProcessCapture).
+        @atomicStore(bool, &self.capture_enabled, true, .release);
     }
 
     /// Read captured frames into a caller-supplied buffer. Returns the
@@ -489,7 +532,7 @@ pub const DigitalDriver = struct {
         const sample_count = self.capture_buf.items.len;
         const frame_count = if (channels == 0) 0 else sample_count / channels;
         // Convert f32 → s16 into dest
-        const out_frames = @min(frame_count, max_bytes / (channels * 2));
+        const out_frames = if (channels == 0) 0 else @min(frame_count, max_bytes / (channels * 2));
         const out_samples = out_frames * channels;
         const out: [*]i16 = @ptrCast(@alignCast(dest));
         for (0..out_samples) |i| {
@@ -865,7 +908,7 @@ pub const Sample = struct {
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            self.pitch = tr / native_rate;
+            if (native_rate > 0) self.pitch = tr / native_rate;
         }
 
         log("Sample.loadFromOwnedMemory success: s={*}, vol={d}, pan={d}, pitch={d}, loop={d}\n", .{ self, self.volume, self.pan, self.pitch, self.loop_count });
@@ -954,14 +997,14 @@ pub const Sample = struct {
         errdefer self.driver.allocator.destroy(decoder);
         var result = ma.ma_decoder_init(boundedMemRead, boundedMemSeek, @ptrCast(ctx), null, decoder);
         if (result != ma.MA_SUCCESS) {
-            self.driver.allocator.destroy(ctx);
+            // ctx/decoder are freed by their errdefers on this error return.
             return error.DecoderInitFailed;
         }
 
         result = ma.ma_sound_init_from_data_source(&self.driver.engine, @ptrCast(decoder), ma.MA_SOUND_FLAG_NO_SPATIALIZATION, null, &self.sound);
         if (result != ma.MA_SUCCESS) {
             _ = ma.ma_decoder_uninit(decoder);
-            self.driver.allocator.destroy(ctx);
+            // decoder allocation and ctx are freed by their errdefers.
             return error.SampleLoadFailed;
         }
         self.decoder = decoder;
@@ -973,7 +1016,7 @@ pub const Sample = struct {
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            self.pitch = tr / native_rate;
+            if (native_rate > 0) self.pitch = tr / native_rate;
         }
 
         log("Sample.loadFromBoundedPointer success: s={*}, vol={d}, pan={d}, pitch={d}, loop={d}\n", .{ self, self.volume, self.pan, self.pitch, self.loop_count });
@@ -1022,7 +1065,7 @@ pub const Sample = struct {
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            self.pitch = tr / native_rate;
+            if (native_rate > 0) self.pitch = tr / native_rate;
         }
 
         log("Sample.loadFromMemory success: s={*}, vol={d}, pan={d}, pitch={d}, loop={d}\n", .{ self, self.volume, self.pan, self.pitch, self.loop_count });
@@ -1238,11 +1281,7 @@ pub const Sample = struct {
         self.was_stopped = false;
         self.has_played = true;
         if (self.is_initialized) {
-            if (self.loop_count == 0) {
-                ma.ma_sound_set_looping(&self.sound, ma.MA_TRUE);
-            } else {
-                ma.ma_sound_set_looping(&self.sound, ma.MA_FALSE);
-            }
+            applyLoopCount(&self.sound, self.loop_count);
             // SDK wavefile.cpp AIL_API_start_sample rewinds to the beginning
             // (buf[tail].pos = 0) before playing -- it does NOT resume from the
             // current position. Continuing from where a sample was stopped is
@@ -1465,7 +1504,10 @@ pub const Sample = struct {
 
         if (self.reverb_node) |node| {
             ma.ma_delay_node_set_wet(node, level);
-            ma.ma_delay_node_set_dry(node, 1.0 - level * 0.5);
+            // Drive the node dry from the independently-stored dry level (set via
+            // AIL_set_sample_reverb_levels; SDK default 1.0) so that control
+            // actually reaches the audio, instead of a fixed wet-derived value.
+            ma.ma_delay_node_set_dry(node, std.math.clamp(self.reverb_dry_level, 0.0, 1.0));
             ma.ma_delay_node_set_decay(node, decay);
         } else {
             const node = self.driver.allocator.create(ma.ma_delay_node) catch {
@@ -1484,7 +1526,7 @@ pub const Sample = struct {
             _ = ma.ma_node_attach_output_bus(@ptrCast(node), 0, endpoint, 0);
             _ = ma.ma_node_attach_output_bus(@ptrCast(&self.sound), 0, @ptrCast(node), 0);
             ma.ma_delay_node_set_wet(node, level);
-            ma.ma_delay_node_set_dry(node, 1.0 - level * 0.5);
+            ma.ma_delay_node_set_dry(node, std.math.clamp(self.reverb_dry_level, 0.0, 1.0));
             self.reverb_node = node;
         }
     }
@@ -1569,11 +1611,7 @@ pub const Sample = struct {
         log("Sample.setLoopCount: s={*}, count={d}\n", .{ self, count });
         // MSS uses 0 for infinite looping.
         if (self.is_initialized) {
-            if (count == 0) {
-                ma.ma_sound_set_looping(&self.sound, ma.MA_TRUE);
-            } else {
-                ma.ma_sound_set_looping(&self.sound, ma.MA_FALSE);
-            }
+            applyLoopCount(&self.sound, count);
         }
     }
 
@@ -1590,23 +1628,7 @@ pub const Sample = struct {
     }
 
     pub fn setLoopBlock(self: *Sample, start_bytes: i32, end_bytes: i32) void {
-        const bpf = self.bytesPerFrame();
-        if (start_bytes >= 0 and bpf > 0) {
-            self.loop_start_frame = @as(u64, @intCast(start_bytes)) / @as(u64, bpf);
-        } else {
-            self.loop_start_frame = 0;
-        }
-        if (end_bytes > 0 and bpf > 0) {
-            self.loop_end_frame = @as(u64, @intCast(end_bytes)) / @as(u64, bpf);
-            if (self.decoder) |d| {
-                _ = ma.ma_data_source_set_range_in_pcm_frames(d, 0, self.loop_end_frame);
-            }
-        } else {
-            self.loop_end_frame = 0;
-            if (self.decoder) |d| {
-                _ = ma.ma_data_source_set_range_in_pcm_frames(d, 0, std.math.maxInt(u64));
-            }
-        }
+        applyLoopBlock(self, start_bytes, end_bytes);
     }
 
     pub fn getPosition(self: *Sample) u32 {
@@ -1737,23 +1759,7 @@ pub const Sample3D = struct {
     }
 
     pub fn setLoopBlock(self: *Sample3D, start_bytes: i32, end_bytes: i32) void {
-        const bpf = self.bytesPerFrame();
-        if (start_bytes >= 0 and bpf > 0) {
-            self.loop_start_frame = @as(u64, @intCast(start_bytes)) / @as(u64, bpf);
-        } else {
-            self.loop_start_frame = 0;
-        }
-        if (end_bytes > 0 and bpf > 0) {
-            self.loop_end_frame = @as(u64, @intCast(end_bytes)) / @as(u64, bpf);
-            if (self.decoder) |d| {
-                _ = ma.ma_data_source_set_range_in_pcm_frames(d, 0, self.loop_end_frame);
-            }
-        } else {
-            self.loop_end_frame = 0;
-            if (self.decoder) |d| {
-                _ = ma.ma_data_source_set_range_in_pcm_frames(d, 0, std.math.maxInt(u64));
-            }
-        }
+        applyLoopBlock(self, start_bytes, end_bytes);
     }
 
     pub fn init(driver: *DigitalDriver) !*Sample3D {
@@ -1831,7 +1837,7 @@ pub const Sample3D = struct {
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            self.pitch = tr / native_rate;
+            if (native_rate > 0) self.pitch = tr / native_rate;
         }
 
         ma.ma_sound_set_volume(&self.sound, self.volume);
@@ -1874,7 +1880,7 @@ pub const Sample3D = struct {
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            self.pitch = tr / native_rate;
+            if (native_rate > 0) self.pitch = tr / native_rate;
         }
 
         self.applyVolume();
@@ -1925,7 +1931,7 @@ pub const Sample3D = struct {
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            self.pitch = tr / native_rate;
+            if (native_rate > 0) self.pitch = tr / native_rate;
         }
 
         self.applyVolume();
@@ -1972,11 +1978,7 @@ pub const Sample3D = struct {
         self.is_paused = false;
         self.was_stopped = false;
         if (self.is_initialized) {
-            if (self.loop_count == 0) {
-                ma.ma_sound_set_looping(&self.sound, ma.MA_TRUE);
-            } else {
-                ma.ma_sound_set_looping(&self.sound, ma.MA_FALSE);
-            }
+            applyLoopCount(&self.sound, self.loop_count);
             // SDK AIL_API_start_3D_sample rewinds to the beginning before playing
             // (AIL_resume_3D_sample is what continues from the current position).
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, 0);
@@ -1985,9 +1987,13 @@ pub const Sample3D = struct {
     }
 
     pub fn stop(self: *Sample3D) void {
+        // Match the 2D AIL_API_stop_sample contract: a no-op unless currently
+        // SMP_PLAYING (DONE/STOPPED/never-started keep their status), and it
+        // stops in place WITHOUT rewinding so AIL_resume_3D_sample continues
+        // from the stop point. (A later AIL_start_3D_sample is what rewinds.)
+        if (self.status() != .playing) return;
         if (self.is_initialized) {
             _ = ma.ma_sound_stop(&self.sound);
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
         }
         self.is_done = false;
         self.is_paused = false;
@@ -2080,21 +2086,20 @@ pub const Sample3D = struct {
         self.loop_count = count;
         self.loops_remaining = count;
         if (self.is_initialized) {
-            if (count == 0) {
-                ma.ma_sound_set_looping(&self.sound, ma.MA_TRUE);
-            } else {
-                ma.ma_sound_set_looping(&self.sound, ma.MA_FALSE);
-            }
+            applyLoopCount(&self.sound, count);
         }
     }
 
     pub fn setPlaybackRate(self: *Sample3D, rate: i32) void {
+        // SDK: a rate <= 0 is ignored, the current rate is left unchanged
+        // (matches the 2D Sample.setPlaybackRate guard).
+        if (rate <= 0) return;
         const tr = @as(f32, @floatFromInt(rate));
         self.target_rate = tr;
         if (self.is_initialized) {
             if (self.decoder) |d| {
                 const native_rate = @as(f32, @floatFromInt(d.outputSampleRate));
-                self.pitch = tr / native_rate;
+                if (native_rate > 0) self.pitch = tr / native_rate;
                 ma.ma_sound_set_pitch(&self.sound, self.pitch);
             }
         }
@@ -2113,7 +2118,11 @@ pub const Sample3D = struct {
     pub fn setOffset(self: *Sample3D, pos: u32) void {
         if (self.is_initialized) {
             const bpf = self.bytesPerFrame();
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, if (bpf > 0) pos / bpf else 0);
+            // Round to the nearest frame boundary, matching the 2D
+            // Sample.setPosition (AIL_API_set_sample_position rounds, not floors)
+            // so the offset round-trip via getOffset holds.
+            const frame: u64 = if (bpf > 0) (@as(u64, pos) + bpf / 2) / bpf else 0;
+            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
         }
     }
 
@@ -2132,8 +2141,12 @@ pub const Sample3D = struct {
         if (self.is_initialized and self.decoder != null) {
             var cursor: u64 = 0;
             _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
-            const rate = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
-            const ms_per_frame = 1000.0 / rate;
+            // Use the effective playback rate (an explicitly-set rate overrides
+            // native), matching the 2D Sample.getMsPosition so the ms round-trip
+            // holds when a 3D sample's playback rate was changed.
+            const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
+            const effective = self.target_rate orelse native;
+            const ms_per_frame: f32 = if (effective > 0) 1000.0 / effective else 0;
             pos.current = satI32(@as(f32, @floatFromInt(cursor)) * ms_per_frame);
             pos.total = satI32(@as(f32, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
         }
@@ -2142,8 +2155,12 @@ pub const Sample3D = struct {
 
     pub fn setMsPosition(self: *Sample3D, ms: i32) void {
         if (self.is_initialized and self.decoder != null) {
-            const rate = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
-            const frame = satU64(@as(f32, @floatFromInt(ms)) * rate / 1000.0);
+            // Effective rate (explicit playback rate overrides native), matching
+            // the 2D Sample.setMsPosition so an explicitly-set rate maps ms onto
+            // the source position correctly.
+            const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
+            const effective = self.target_rate orelse native;
+            const frame = satU64(@as(f32, @floatFromInt(ms)) * effective / 1000.0);
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
         }
     }

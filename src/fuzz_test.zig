@@ -909,3 +909,82 @@ test "fuzz SoundBank loader with random and mutated banks" {
         } else |_| {}
     }
 }
+
+test "fuzz MP3 inspect + enumerateFrames with random and mutated frame data" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE24);
+    const rand = prng.random();
+    var buf: [4096]u8 = undefined;
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        const len = rand.intRangeAtMost(usize, 0, buf.len);
+        const data = randBytes(rand, &buf, len);
+        // Plant the structures that drive the parser into its deep branches:
+        // an ID3v2 header (with a synchsafe size), MPEG frame syncs, and the
+        // Xing/Info VBR tag plus a trailing ID3v1 "TAG".
+        if (data.len >= 10 and rand.boolean()) {
+            @memcpy(data[0..3], "ID3");
+            data[3] = rand.int(u8) % 0xff; // version major < 0xff
+            data[4] = rand.int(u8) % 0xff;
+            data[5] = rand.int(u8); // flags (bit 0x10 toggles a 10-byte footer)
+            // synchsafe 28-bit size; keep small so the skip lands inside the buf
+            data[6] = 0;
+            data[7] = 0;
+            data[8] = 0;
+            data[9] = @intCast(rand.intRangeAtMost(usize, 0, 0x7f));
+        }
+        // Scatter a few 11-bit frame syncs so enumerateFrames finds candidates.
+        var planted: usize = 0;
+        while (planted < 4 and data.len >= 2) : (planted += 1) {
+            const at = rand.intRangeAtMost(usize, 0, data.len - 2);
+            data[at] = 0xFF;
+            data[at + 1] = 0xE0 | (rand.int(u8) & 0x1f);
+        }
+        // Occasionally drop a Xing/Info VBR tag and a trailing ID3v1 tag.
+        if (data.len >= 16 and rand.boolean()) {
+            const at = rand.intRangeAtMost(usize, 0, data.len - 4);
+            @memcpy(data[at .. at + 4], if (rand.boolean()) "Xing" else "Info");
+        }
+        if (data.len >= 128 and rand.boolean()) {
+            @memcpy(data[data.len - 128 .. data.len - 125], "TAG");
+        }
+
+        var es: openmiles.mp3.MP3_INFO = .{};
+        // image_size is i32 in the SDK ABI; pass adversarial sizes too, but the
+        // pointer must stay valid so only feed sizes within the real buffer.
+        const sz: i32 = if (rand.boolean()) @intCast(data.len) else rand.intRangeAtMost(i32, 0, @intCast(data.len));
+        if (sz <= 0) continue;
+        openmiles.mp3.inspect(&es, @ptrCast(data.ptr), sz);
+        // Walk every frame; each call strictly advances ptr/bytes_left so this
+        // always terminates, but cap it as a watchdog against any regression.
+        var frames: usize = 0;
+        while (frames < 100_000 and openmiles.mp3.enumerateFrames(&es) != 0) : (frames += 1) {}
+    }
+}
+
+test "fuzz detectAudioSize/detectMidiSize with adversarial headers" {
+    // These walk a raw, length-less pointer up to streaming_sentinel_size, so the
+    // backing buffer must be at least that large to keep every read in bounds.
+    const cap: usize = 16 * 1024 * 1024;
+    const region = try testing.allocator.alloc(u8, cap + 16);
+    defer testing.allocator.free(region);
+    @memset(region, 0);
+
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE25);
+    const rand = prng.random();
+    var i: usize = 0;
+    while (i < 2000) : (i += 1) {
+        // Randomize only the header window; the zeroed tail bounds the MIDI walk.
+        rand.bytes(region[0..256]);
+        switch (rand.intRangeAtMost(u8, 0, 6)) {
+            0 => @memcpy(region[0..4], "RIFF"),
+            1 => @memcpy(region[0..4], "FORM"),
+            2 => @memcpy(region[0..4], "MThd"),
+            3 => @memcpy(region[0..4], "OggS"),
+            4 => @memcpy(region[0..4], "fLaC"),
+            5 => @memcpy(region[0..3], "ID3"),
+            else => {}, // leave random (often hits the 0xFFEx mp3-sync branch)
+        }
+        _ = openmiles.detectAudioSize(@ptrCast(region.ptr));
+        _ = openmiles.detectMidiSize(@ptrCast(region.ptr));
+    }
+}

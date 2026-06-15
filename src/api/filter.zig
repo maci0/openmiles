@@ -71,12 +71,8 @@ pub fn AIL_enumerate_filter_attributes(filter: *anyopaque, next: *?*anyopaque, n
     return 1;
 }
 pub fn AIL_enumerate_filter_sample_attributes(filter: *anyopaque, next: *?*anyopaque, name: *[*:0]const u8) callconv(.winapi) i32 {
-    _ = filter;
-    const idx: usize = if (next.* == null) 0 else @intFromPtr(next.*);
-    if (idx >= filter_attr_names.len) return 0;
-    name.* = filter_attr_names[idx];
-    next.* = @ptrFromInt(idx + 1);
-    return 1;
+    // Same enumeration as the driver-level attributes (shared name table).
+    return AIL_enumerate_filter_attributes(filter, next, name);
 }
 pub fn AIL_filter_sample_attribute(s_opt: ?*Sample, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const s = s_opt orelse return;

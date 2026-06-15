@@ -153,7 +153,7 @@ pub fn AIL_file_type(data: *anyopaque, len: u32) callconv(.winapi) i32 {
     var si: AILSOUNDINFO = .{};
     var mp3_off: usize = 0;
     var mp3_len: usize = buf.len;
-    if (digital.AIL_WAV_info(data, &si) != 0) {
+    if (digital.wavInfoBounded(buf.ptr, buf.len, &si) != 0) {
         switch (si.format) {
             1 => return 1, // PCM_WAV (EXTENSIBLE PCM is reported as 1 by WAV_info)
             0x0011 => return if (si.bits == 4) 2 else 3, // ADPCM_WAV / OTHER_WAV

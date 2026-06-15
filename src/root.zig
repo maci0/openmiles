@@ -583,8 +583,9 @@ pub fn setPreference(number: u32, value: i32) i32 {
 /// attenuation behavior (~60 dB dynamic range).
 ///
 /// The original MSS library used a heavily weighted scale where low values
-/// (e.g., 30/127) produced dramatic attenuation. A cubic power curve
-/// `(v/127)^3` closely matches this: value 30 → gain ~0.013 (vs linear ~0.236).
+/// (e.g., 30/127) produced dramatic attenuation. The curve `(v/127)^(10/6)`
+/// matches `AIL_API_set_sample_volume_pan` (0.5 → −10 dB): value 30 → gain
+/// ~0.090 (vs linear ~0.236). See `volume_to_gain_table`.
 pub fn mssVolumeToGain(value: i32) f32 {
     if (value <= 0) return 0.0;
     if (value >= 127) return 1.0;
@@ -758,7 +759,8 @@ pub fn openDigitalDriver(frequency: u32, bits: i32, channels: i32) ?*DigitalDriv
     clearLastError();
     if (last_digital_driver) |existing| return existing;
     const ch: u32 = if (channels <= 0) 2 else @intCast(channels);
-    const driver = DigitalDriver.init(global_allocator, frequency, bits, ch) catch {
+    const driver = DigitalDriver.init(global_allocator, frequency, bits, ch) catch |err| {
+        log("openDigitalDriver: DigitalDriver.init failed: {any}\n", .{err});
         setLastError("Failed to initialize digital driver");
         return null;
     };

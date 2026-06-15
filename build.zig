@@ -75,10 +75,11 @@ pub fn build(b: *std.Build) void {
 
     // Target MSS version: gates which API groups are compiled/exported so the
     // DLL is ABI-shaped like a specific Miles release. Encoded major*10+minor:
-    // 30=3.x, 40=4.x, 50=5.x, 60=6.0, 61=6.1, 65=6.5, 66=6.6 (default newest).
+    // 30=3.x, 40=4.x, 50=5.x, 60=6.0, 61=6.1, 65=6.5, 66=6.6, 70=7.x, 80=8.x,
+    // 90=9.x (default 9, the newest).
     const mss_version_str = b.option([]const u8, "mss-version", "Target MSS version (3,4,5,6,6.0,6.1,6.5,6.6,7,8,9)") orelse "9";
     const mss_version: u16 = parseMssVersion(mss_version_str) orelse {
-        std.debug.print("invalid -Dmss-version='{s}' (use 3,4,5,6,6.0,6.1,6.5,6.6)\n", .{mss_version_str});
+        std.debug.print("invalid -Dmss-version='{s}' (use 3,4,5,6,6.0,6.1,6.5,6.6,7,8,9)\n", .{mss_version_str});
         std.process.exit(1);
     };
     const build_opts = b.addOptions();

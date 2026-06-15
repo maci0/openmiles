@@ -1,3 +1,7 @@
+//! MIDI engine: MidiDriver loads SoundFont/DLS instruments and Sequence plays
+//! XMIDI/SMF data, synthesizing through TSF/TML to the miniaudio output. Backs
+//! the AIL_*_sequence MIDI surface.
+
 const std = @import("std");
 const root = @import("../root.zig");
 const ma = root.ma;

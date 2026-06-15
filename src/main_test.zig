@@ -1788,6 +1788,22 @@ test "AIL_compress_ADPCM/decompress_ADPCM round-trip through raw-block AILSOUNDI
     try testing.expectEqual(mid.samples, outi.samples);
     try testing.expectEqual(@as(u32, 2000), outi.samples);
 
+    // Fidelity: the decoded PCM must actually track the source ramp -- not just
+    // carry a correct header. A decoder that emitted silence or garbage would
+    // satisfy every structural check above. IMA ADPCM stores the first sample of
+    // each block verbatim and tracks a smooth slope tightly, so compare the clean
+    // monotonic run before the first sawtooth wrap (i in 0..199) within a lossy
+    // tolerance. Read via byte offsets to avoid any alignment assumption.
+    const dec: [*]const u8 = @ptrCast(outi.data_ptr.?);
+    try testing.expect(outi.data_len >= 190 * 2);
+    var max_err: i32 = 0;
+    for (0..190) |i| {
+        const dv = std.mem.readInt(i16, dec[i * 2 ..][0..2], .little);
+        const ad: i32 = @intCast(@abs(@as(i32, dv) - @as(i32, pcm[i])));
+        max_err = @max(max_err, ad);
+    }
+    try testing.expect(max_err < 1500);
+
     // SDK validation guards: non-IMA format and zero samples both return 0.
     mid.format = 1;
     try testing.expectEqual(@as(i32, 0), dg.AIL_decompress_ADPCM(&mid, &out_ptr, &out_size));

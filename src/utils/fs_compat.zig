@@ -1,3 +1,7 @@
+//! Filesystem compatibility shim. Wraps file/directory operations over std.Io
+//! with a native Windows fallback so the rest of the codebase has one portable
+//! open/read/seek/stat surface regardless of target OS.
+
 const std = @import("std");
 const builtin = @import("builtin");
 const logger = @import("logger.zig");

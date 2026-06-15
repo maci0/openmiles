@@ -1,3 +1,7 @@
+//! RIB plugin/provider registry. A Provider wraps a loadable codec module
+//! (.asi/.m3d/.flt) and the interfaces it registers; this is the broker the
+//! AIL_* / RIB_* surface uses to enumerate and dispatch into plugins.
+
 const std = @import("std");
 const root = @import("../root.zig");
 const ma = root.ma;

@@ -274,8 +274,10 @@ pub fn AIL_digital_mixed_samples(dig: ?*DigitalDriver) callconv(.winapi) u64 {
 const AilMixerCb = *const fn (?*DigitalDriver) callconv(.winapi) void;
 pub fn AIL_register_mix_callback(dig: ?*DigitalDriver, mixcb: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const d = dig orelse return null;
-    const prev = d.mix_callback;
-    d.mix_callback = if (mixcb) |p| @as(AilMixerCb, @ptrCast(@alignCast(p))) else null;
+    // Atomic exchange: the audio thread reads mix_callback in mixDispatch, so the
+    // store must not be torn or reordered against that read.
+    const next: ?AilMixerCb = if (mixcb) |p| @as(AilMixerCb, @ptrCast(@alignCast(p))) else null;
+    const prev = @atomicRmw(?AilMixerCb, &d.mix_callback, .Xchg, next, .acq_rel);
     return if (prev) |p| @constCast(@ptrCast(p)) else null;
 }
 pub fn AIL_end_fade_sample(s_opt: ?*Sample) callconv(.winapi) void {
