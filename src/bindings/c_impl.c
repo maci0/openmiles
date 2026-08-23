@@ -7,8 +7,6 @@
 #define TML_IMPLEMENTATION
 #include "../deps/tml.h"
 
-// tml_message uses anonymous unions; Zig's @cImport cannot access anonymous
-// union fields, so we provide named accessor functions.
 // Count active voices on a specific MIDI channel.
 // TSF's internal voice array isn't cleanly exposed to Zig, so we iterate here.
 int openmiles_tsf_channel_note_count(tsf* f, int channel) {
@@ -47,6 +45,8 @@ char* AIL_sprintf(char* buf, const char* fmt, ...) {
 // table; no game references it, so a no-op is faithful.
 void mss_stream_background_stub(void) {}
 
+// tml_message uses anonymous unions; Zig's @cImport cannot access anonymous
+// union fields, so we provide these named accessor functions.
 unsigned char openmiles_tml_get_key(tml_message* m) { return m->key; }
 unsigned char openmiles_tml_get_velocity(tml_message* m) { return m->velocity; }
 unsigned char openmiles_tml_get_control(tml_message* m) { return m->control; }

@@ -46,8 +46,9 @@ pub fn AIL_DLS_unload_file(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(
     log("AIL_DLS_unload_file(driver={*}, bank={*})\n", .{ driver, bank });
     driver.unloadDLS(bank);
 }
-pub fn AIL_set_filter_DLS_preference(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
-    const driver = driver_opt orelse return;
+/// Shared body of AIL_set_filter_DLS_preference and DLSSetAttribute (identical
+/// SDK semantics under both export names).
+fn setDlsFilterPref(driver: *MidiDriver, name: [*:0]const u8, val: *anyopaque) void {
     const name_slice = std.mem.span(name);
     const v: *const f32 = @ptrCast(@alignCast(val));
     if (std.ascii.eqlIgnoreCase(name_slice, "cutoff")) {
@@ -55,6 +56,10 @@ pub fn AIL_set_filter_DLS_preference(driver_opt: ?*MidiDriver, name: [*:0]const 
     } else if (std.ascii.eqlIgnoreCase(name_slice, "compression")) {
         driver.dls_filter_pref_compression = v.*;
     }
+}
+pub fn AIL_set_filter_DLS_preference(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
+    const driver = driver_opt orelse return;
+    setDlsFilterPref(driver, name, val);
 }
 pub fn AIL_filter_DLS_attribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const driver = driver_opt orelse return;
@@ -406,13 +411,7 @@ pub fn DLSMSSGetCPU(driver_opt: ?*MidiDriver) callconv(.winapi) f32 {
 }
 pub fn DLSSetAttribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyopaque) callconv(.c) void {
     const driver = driver_opt orelse return;
-    const name_slice = std.mem.span(name);
-    const v: *const f32 = @ptrCast(@alignCast(val));
-    if (std.ascii.eqlIgnoreCase(name_slice, "cutoff")) {
-        driver.dls_filter_pref_cutoff = v.*;
-    } else if (std.ascii.eqlIgnoreCase(name_slice, "compression")) {
-        driver.dls_filter_pref_compression = v.*;
-    }
+    setDlsFilterPref(driver, name, val);
 }
 pub fn DLSUnloadAll(driver_opt: ?*MidiDriver) callconv(.c) void {
     const driver = driver_opt orelse return;
