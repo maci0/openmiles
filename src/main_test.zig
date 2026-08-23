@@ -572,16 +572,22 @@ test "detectMidiSize unknown format returns sentinel" {
 
 test "getMsCount returns monotonically increasing values" {
     const t1 = openmiles.getMsCount();
-    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch {};
-    const t2 = openmiles.getMsCount();
-    try testing.expect(t2 > t1);
+    // Poll until the clock ticks (bounded) rather than trusting a fixed sleep:
+    // a swallowed sleep error must not fail the assertion, a stalled clock must.
+    var waited: u32 = 0;
+    while (openmiles.getMsCount() == t1 and waited < 5000) : (waited += 10) {
+        openmiles.io.sleep(std.Io.Duration.fromNanoseconds(10 * std.time.ns_per_ms), .awake) catch {};
+    }
+    try testing.expect(openmiles.getMsCount() > t1);
 }
 
 test "getUsCount returns monotonically increasing values" {
     const t1 = openmiles.getUsCount();
-    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch {};
-    const t2 = openmiles.getUsCount();
-    try testing.expect(t2 > t1);
+    var waited: u32 = 0;
+    while (openmiles.getUsCount() == t1 and waited < 5000) : (waited += 10) {
+        openmiles.io.sleep(std.Io.Duration.fromNanoseconds(10 * std.time.ns_per_ms), .awake) catch {};
+    }
+    try testing.expect(openmiles.getUsCount() > t1);
 }
 
 test "getRedistDirectory returns empty initially" {
@@ -2647,8 +2653,15 @@ test "Redbook getPosition advances during playback" {
     defer rb.deinit();
 
     rb.play(1, 5);
-    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch {};
-    const pos = rb.getPosition();
+    // Poll until the position ticks (bounded): robust to a swallowed sleep
+    // error, still fails if playback never advances the position.
+    var pos: u32 = 0;
+    var waited: u32 = 0;
+    while (pos == 0 and waited < 5000) : (waited += 10) {
+        pos = rb.getPosition();
+        if (pos > 0) break;
+        openmiles.io.sleep(std.Io.Duration.fromNanoseconds(10 * std.time.ns_per_ms), .awake) catch {};
+    }
     try testing.expect(pos > 0);
 }
 
@@ -2658,9 +2671,15 @@ test "Redbook paused position is stable" {
     defer rb.deinit();
 
     rb.play(1, 5);
-    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch {};
+    // Let some playback elapse, then pause; a paused redbook reports the frozen
+    // pause-time position, so two later reads must be identical.
+    var waited: u32 = 0;
+    while (rb.getPosition() == 0 and waited < 5000) : (waited += 10) {
+        openmiles.io.sleep(std.Io.Duration.fromNanoseconds(10 * std.time.ns_per_ms), .awake) catch {};
+    }
     rb.pause();
     const p1 = rb.getPosition();
+    try testing.expect(p1 > 0);
     openmiles.io.sleep(std.Io.Duration.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch {};
     const p2 = rb.getPosition();
     try testing.expectEqual(p1, p2);
@@ -2807,12 +2826,17 @@ test "Timer start and stop lifecycle" {
     timer.start();
     try testing.expect(timer.is_running);
 
-    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(50 * std.time.ns_per_ms), .awake) catch {};
+    // The callback runs on its own thread; poll for the first fire (generous
+    // window, same pattern as the self-stopping timer test) instead of trusting
+    // a fixed sleep on a possibly loaded machine.
+    var waited: u32 = 0;
+    while (called.load(.monotonic) == 0 and waited < 5000) : (waited += 10) {
+        openmiles.io.sleep(std.Io.Duration.fromNanoseconds(10 * std.time.ns_per_ms), .awake) catch {};
+    }
     timer.stop();
     try testing.expect(!timer.is_running);
 
-    const count = called.load(.monotonic);
-    try testing.expect(count > 0);
+    try testing.expect(called.load(.monotonic) > 0);
 }
 
 test "Timer double start is idempotent" {
