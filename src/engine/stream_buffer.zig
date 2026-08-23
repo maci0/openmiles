@@ -1,10 +1,13 @@
 //! Double-buffered streaming source for the MSS buffer-feed API.
 //!
-//! MSS lets an app stream raw PCM by ping-ponging two app-owned buffers: it polls
+//! MSS lets an app stream raw PCM by ping-ponging app-owned buffers: it polls
 //! `AIL_sample_buffer_ready` for a free slot, fills it with `AIL_load_sample_buffer`,
-//! and the mixer drains slot 0 then slot 1 then 0… firing the End-Of-Buffer
-//! callback as each drains so the app can refill it. A zero-length buffer signals
-//! end-of-stream.
+//! and the mixer drains the ring in order, firing the End-Of-Buffer callback as
+//! each buffer drains so the app can refill it. A zero-length buffer signals
+//! end-of-stream. The SDK ring depth is configurable (AIL_set_sample_buffer_count,
+//! 2..8); this source carries up to that many slots so the configured ring count
+//! and the transport can never disagree (a submission beyond the transport would
+//! otherwise be silently dropped while the loader reported success).
 //!
 //! This implements that contract as a custom `ma_data_source`: buffers are
 //! referenced in place (never copied — the app owns them until its EOB fires) and
@@ -26,13 +29,19 @@ const Slot = struct {
 };
 
 pub const StreamSource = struct {
+    /// Maximum ring depth (MILES sample buffer count limit, mss.h: 2..8).
+    pub const max_slots: usize = 8;
+
     base: ma.ma_data_source_base = undefined,
     format: ma.ma_format = ma.ma_format_s16,
     channels: u32 = 2,
     sample_rate: u32 = 22050,
     frame_size: usize = 4,
     mutex: std.Io.Mutex = .init,
-    slots: [2]Slot = .{ .{}, .{} },
+    slots: [max_slots]Slot = [_]Slot{.{}} ** max_slots,
+    // Active ring depth. Fixed at stream creation from the sample's configured
+    // buffer count (AIL_set_sample_buffer_count); indices beyond it are invalid.
+    slot_count: usize = 2,
     current: usize = 0,
     cursor_frames: u64 = 0,
     starved: bool = false,
@@ -77,7 +86,7 @@ pub const StreamSource = struct {
 
     /// Submit a buffer into slot `index`. A zero `len` marks end-of-stream.
     pub fn loadBuffer(self: *StreamSource, index: usize, data: ?*const anyopaque, len: usize) void {
-        if (index > 1) return;
+        if (index >= self.slot_count) return;
         self.mutex.lockUncancelable(io);
         defer self.mutex.unlock(io);
         if (len == 0 or data == null) {
@@ -89,11 +98,11 @@ pub const StreamSource = struct {
         self.ended = false;
     }
 
-    /// Index (0/1) of a slot free to be filled, or -1 if both are occupied.
+    /// Index of a slot free to be filled, or -1 if the ring is full.
     pub fn bufferReady(self: *StreamSource) i32 {
         self.mutex.lockUncancelable(io);
         defer self.mutex.unlock(io);
-        for (0..2) |i| {
+        for (0..self.slot_count) |i| {
             if (self.slots[i].data == null and !self.slots[i].eof) return @intCast(i);
         }
         return -1;
@@ -124,8 +133,9 @@ pub const StreamSource = struct {
         const fc: usize = @intCast(frame_count);
 
         // EOB events captured under lock, fired after unlock to avoid re-entrant
-        // deadlock if the app refills from within its callback.
-        var eob_events: [4]struct { idx: i32, len: u32, addr: ?*anyopaque } = undefined;
+        // deadlock if the app refills from within its callback. Sized so every
+        // slot of the deepest ring can drain within one read.
+        var eob_events: [max_slots]struct { idx: i32, len: u32, addr: ?*anyopaque } = undefined;
         var eob_n: usize = 0;
         var total: usize = 0;
         var at_end = false;
@@ -139,10 +149,18 @@ pub const StreamSource = struct {
                 break;
             }
             if (slot.data == null) {
-                // Current slot empty — try the other; if both empty, underrun.
-                const other = 1 - self.current;
-                if (self.slots[other].data != null or self.slots[other].eof) {
-                    self.current = other;
+                // Current slot empty — advance to the next ring slot holding
+                // data or an end marker; if none, underrun.
+                var next: ?usize = null;
+                for (1..self.slot_count) |k| {
+                    const idx = (self.current + k) % self.slot_count;
+                    if (self.slots[idx].data != null or self.slots[idx].eof) {
+                        next = idx;
+                        break;
+                    }
+                }
+                if (next) |idx| {
+                    self.current = idx;
                     continue;
                 }
                 self.starved = true;
@@ -156,12 +174,12 @@ pub const StreamSource = struct {
                     eob_events[eob_n] = .{
                         .idx = @intCast(self.current),
                         .len = @intCast(slot.len),
-                        .addr = @constCast(@ptrCast(slot.data)),
+                        .addr = @ptrCast(@constCast(slot.data)),
                     };
                     eob_n += 1;
                 }
                 slot.* = .{};
-                self.current = 1 - self.current;
+                self.current = (self.current + 1) % self.slot_count;
                 continue;
             }
 

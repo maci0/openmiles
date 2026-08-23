@@ -1694,10 +1694,11 @@ test "AIL_file_type classifies WAV/MIDI/XMIDI/OGG/VOC/BINKA/DLS/MLS (SDK)" {
 
     // IMA ADPCM WAV (tag 0x11, bits 4, block_align 512) -> ADPCM_WAV(2).
     var adpcm = [_]u8{
-        'R', 'I', 'F', 'F', 0, 0, 0, 0, 'W', 'A', 'V', 'E',
-        'f', 'm', 't', ' ', 16, 0, 0, 0,
-        0x11, 0, 1, 0, 0x40, 0x1f, 0, 0, 0, 0, 0, 0, 0, 2, 4, 0,
-        'd', 'a', 't', 'a', 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        'R',  'I',  'F', 'F', 0,  0, 0, 0, 'W',  'A', 'V', 'E',
+        'f',  'm',  't', ' ', 16, 0, 0, 0, 0x11, 0,   1,   0,
+        0x40, 0x1f, 0,   0,   0,  0, 0, 0, 0,    2,   4,   0,
+        'd',  'a',  't', 'a', 16, 0, 0, 0, 0,    0,   0,   0,
+        0,    0,    0,   0,   0,  0, 0, 0, 0,    0,   0,   0,
     };
     adpcm[4] = @truncate(@as(u32, adpcm.len) - 8);
     try testing.expectEqual(@as(i32, 2), api_file.AIL_file_type(&adpcm, adpcm.len)); // ADPCM_WAV
@@ -1764,7 +1765,7 @@ test "AIL_compress_ADPCM/decompress_ADPCM round-trip through raw-block AILSOUNDI
     // AIL_WAV_info reports the raw ADPCM block data (format 0x11, bits 4), which
     // is exactly what AIL_decompress_ADPCM expects (SDK convention).
     var mid: openmiles.AILSOUNDINFO = .{};
-    try testing.expect(dg.AIL_WAV_info(@constCast(@ptrCast(adpcm_wav.ptr)), &mid) != 0);
+    try testing.expect(dg.AIL_WAV_info(@ptrCast(@constCast(adpcm_wav.ptr)), &mid) != 0);
     try testing.expectEqual(@as(i32, 0x11), mid.format);
     try testing.expectEqual(@as(i32, 4), mid.bits);
     // SDK block alignment for mono @ 22050: 256<<0 * ((22050+5000)/11025=2) = 512.
@@ -1962,10 +1963,11 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
 
     // IMA ADPCM (wFormatTag=0x11) stereo -> format is the WAVE tag 0x11 (17).
     var adpcm = [_]u8{
-        'R', 'I', 'F', 'F', 44, 0, 0, 0, 'W', 'A', 'V', 'E',
-        'f', 'm', 't', ' ', 16, 0, 0, 0,
-        0x11, 0, 2, 0, 0x44, 0xAC, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0,
-        'd', 'a', 't', 'a', 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        'R',  'I',  'F', 'F', 44, 0, 0, 0, 'W',  'A', 'V', 'E',
+        'f',  'm',  't', ' ', 16, 0, 0, 0, 0x11, 0,   2,   0,
+        0x44, 0xAC, 0,   0,   0,  0, 0, 0, 0,    0,   4,   0,
+        'd',  'a',  't', 'a', 8,  0, 0, 0, 0,    0,   0,   0,
+        0,    0,    0,   0,
     };
     var info2: openmiles.AILSOUNDINFO = .{};
     try testing.expect(dg.AIL_WAV_info(&adpcm, &info2) != 0);
@@ -1987,12 +1989,12 @@ test "AIL_WAV_file_write interprets the DIG_F format code (not a bit depth)" {
     };
     var rb: [512]u8 = undefined;
     // DIG_F format 3 = DIG_F_16BITS_MASK|DIG_F_STEREO_MASK -> 16-bit stereo.
-    try testing.expectEqual(@as(i32, 1), dg.AIL_WAV_file_write(path, @constCast(@ptrCast(&data)), data.len, 22050, 3));
+    try testing.expectEqual(@as(i32, 1), dg.AIL_WAV_file_write(path, @ptrCast(@constCast(&data)), data.len, 22050, 3));
     const b = try H.readWav(path, &rb);
     try testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, b[22..][0..2], .little)); // channels
     try testing.expectEqual(@as(u16, 16), std.mem.readInt(u16, b[34..][0..2], .little)); // bits
     // DIG_F format 0 -> 8-bit mono.
-    try testing.expectEqual(@as(i32, 1), dg.AIL_WAV_file_write(path, @constCast(@ptrCast(&data)), data.len, 22050, 0));
+    try testing.expectEqual(@as(i32, 1), dg.AIL_WAV_file_write(path, @ptrCast(@constCast(&data)), data.len, 22050, 0));
     const b2 = try H.readWav(path, &rb);
     try testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, b2[22..][0..2], .little));
     try testing.expectEqual(@as(u16, 8), std.mem.readInt(u16, b2[34..][0..2], .little));
@@ -2001,7 +2003,7 @@ test "AIL_WAV_file_write interprets the DIG_F format code (not a bit depth)" {
     // MSS 8.0+ writes that count; pre-8.0 has no multichannel path (bit 16 was
     // DIG_F_USING_ASI there) so it falls back to the stereo bit -> here, mono.
     const mc_format: i32 = (6 << 16) | 16 | 1; // 6ch, multichannel, 16-bit
-    try testing.expectEqual(@as(i32, 1), dg.AIL_WAV_file_write(path, @constCast(@ptrCast(&data)), data.len, 22050, mc_format));
+    try testing.expectEqual(@as(i32, 1), dg.AIL_WAV_file_write(path, @ptrCast(@constCast(&data)), data.len, 22050, mc_format));
     const b3 = try H.readWav(path, &rb);
     const got_ch = std.mem.readInt(u16, b3[22..][0..2], .little);
     if (openmiles.mss_version >= 80) {
@@ -3583,6 +3585,44 @@ test "StreamSource underrun emits silence and keeps playing" {
     try testing.expectEqualSlices(u8, &([_]u8{0} ** 6), out[2..8]); // silence
 }
 
+// The configured ring depth (AIL_set_sample_buffer_count, 2..8) must be honored
+// by the transport: a 4-deep ring stores and drains slots 0..3 in order, firing
+// EOB per drain. (Regression: the transport used to be a fixed ping-pong and
+// silently dropped submissions to slot >= 2 while the loader reported success.)
+test "StreamSource honors a 4-slot ring end to end" {
+    var ctx = StreamTestCtx{};
+    var ss: openmiles.StreamSource = undefined;
+    try ss.init(16, 2, 44100, streamTestHook, &ctx); // 16-bit stereo → 4 bytes/frame
+    defer ss.deinit();
+    ss.slot_count = 4;
+
+    const buf_a = [_]u8{ 1, 2, 3, 4 }; // 1 frame each
+    const buf_b = [_]u8{ 5, 6, 7, 8 };
+    const buf_c = [_]u8{ 9, 10, 11, 12 };
+    const buf_d = [_]u8{ 13, 14, 15, 16 };
+    ss.loadBuffer(0, &buf_a, buf_a.len);
+    ss.loadBuffer(1, &buf_b, buf_b.len);
+    ss.loadBuffer(2, &buf_c, buf_c.len);
+    ss.loadBuffer(3, &buf_d, buf_d.len);
+    try testing.expectEqual(@as(i32, -1), ss.bufferReady()); // ring full
+
+    var out: [20]u8 = [_]u8{0xAA} ** 20; // request 5 frames; only 4 are queued
+    var read: u64 = 0;
+    const r = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, &out, 5, &read);
+    try testing.expectEqual(openmiles.ma.MA_SUCCESS, r); // underrun, not ended
+    try testing.expectEqual(@as(u64, 5), read); // 5th frame padded with silence
+    try testing.expectEqualSlices(u8, &buf_a, out[0..4]);
+    try testing.expectEqualSlices(u8, &buf_b, out[4..8]);
+    try testing.expectEqualSlices(u8, &buf_c, out[8..12]);
+    try testing.expectEqualSlices(u8, &buf_d, out[12..16]);
+    try testing.expectEqualSlices(u8, &([_]u8{0} ** 4), out[16..20]);
+    // Every drain fired its hook, in ring order.
+    try testing.expectEqual(@as(u32, 4), ctx.eob_count);
+    try testing.expectEqual(@as(i32, 3), ctx.last_idx);
+    // All four slots are free again.
+    try testing.expectEqual(@as(i32, 0), ss.bufferReady());
+}
+
 // --- MSS v8/v9 implemented utilities ----------------------------------------
 const api_v8 = @import("api/v8.zig");
 const api_v9 = @import("api/v9.zig");
@@ -3794,13 +3834,13 @@ test "AIL_MIDI_to_XMI allocates the output and returns it via XMIDI** (SDK)" {
     const smf = [_]u8{ 'M', 'T', 'h', 'd', 1, 2, 3, 4, 5, 6, 7, 8 };
     // Size query: null output pointer, just reports the size.
     var size: u32 = 0;
-    try testing.expectEqual(@as(i32, 1), api_midi.AIL_MIDI_to_XMI(@constCast(@ptrCast(&smf)), smf.len, null, &size, 0));
+    try testing.expectEqual(@as(i32, 1), api_midi.AIL_MIDI_to_XMI(@ptrCast(@constCast(&smf)), smf.len, null, &size, 0));
     try testing.expectEqual(@as(u32, smf.len), size);
     // Conversion: the function allocates a buffer and returns its pointer; the
     // caller's pointer variable is NOT overwritten with the data (no overflow).
     var out_ptr: ?*anyopaque = null;
     size = 0;
-    try testing.expectEqual(@as(i32, 1), api_midi.AIL_MIDI_to_XMI(@constCast(@ptrCast(&smf)), smf.len, &out_ptr, &size, 0));
+    try testing.expectEqual(@as(i32, 1), api_midi.AIL_MIDI_to_XMI(@ptrCast(@constCast(&smf)), smf.len, &out_ptr, &size, 0));
     try testing.expect(out_ptr != null);
     try testing.expectEqual(@as(u32, smf.len), size);
     const got: [*]const u8 = @ptrCast(out_ptr.?);
@@ -3808,7 +3848,7 @@ test "AIL_MIDI_to_XMI allocates the output and returns it via XMIDI** (SDK)" {
     std.c.free(out_ptr);
     // Empty input -> 0, output pointer set null.
     out_ptr = @ptrFromInt(0x1234);
-    try testing.expectEqual(@as(i32, 0), api_midi.AIL_MIDI_to_XMI(@constCast(@ptrCast(&smf)), 0, &out_ptr, &size, 0));
+    try testing.expectEqual(@as(i32, 0), api_midi.AIL_MIDI_to_XMI(@ptrCast(@constCast(&smf)), 0, &out_ptr, &size, 0));
     try testing.expectEqual(@as(?*anyopaque, null), out_ptr);
 }
 
@@ -4671,8 +4711,6 @@ test "v9 register_mix_callback fires per engine mix" {
     try testing.expect(back != null);
 }
 
-
-
 test "v8 playback delay + MMX available" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
@@ -4772,7 +4810,6 @@ test "MP3 inspector: MPEG-2 Layer III is 576 samples/frame at the lower rates" {
     try testing.expectEqual(@as(i32, 2), es.channels_per_sample); // stereo
     try testing.expectEqual(@as(i32, 576), es.samples_per_frame); // half of MPEG-1
 }
-
 
 test "event constructor + decoder round-trip (byte-faithful text)" {
     const ev = api_v8b.AIL_create_event() orelse return error.NoEvent;
@@ -4913,7 +4950,7 @@ test "Miles event system frees all systems and variables (no leaks)" {
 }
 
 fn cstr(s: [*:0]const u8) ?*anyopaque {
-    return @constCast(@ptrCast(s));
+    return @ptrCast(@constCast(s));
 }
 
 test "ramp event step encodes byte-faithfully and round-trips" {
@@ -5821,7 +5858,7 @@ test "file callbacks route through the VFS with the correct ABI" {
     vfs_data = "Hello VFS payload!";
     // SDK order: (open, close, seek, read). If seek/read were swapped, the read
     // below would invoke the seek callback and fail.
-    api_file.AIL_set_file_callbacks(@constCast(@ptrCast(&vfsOpen)), @constCast(@ptrCast(&vfsClose)), @constCast(@ptrCast(&vfsSeek)), @constCast(@ptrCast(&vfsRead)));
+    api_file.AIL_set_file_callbacks(@ptrCast(@constCast(&vfsOpen)), @ptrCast(@constCast(&vfsClose)), @ptrCast(@constCast(&vfsSeek)), @ptrCast(@constCast(&vfsRead)));
     defer api_file.AIL_set_file_callbacks(null, null, null, null);
 
     // AIL_file_size returns open()'s length value.
@@ -5835,7 +5872,7 @@ test "file callbacks route through the VFS with the correct ABI" {
 
     // The _info tracking variants (the REAL exports; the plain names are
     // __FILE__/__LINE__ macros) must do the same work, not return null/0.
-    const fname: ?*anyopaque = @constCast(@ptrCast("any"));
+    const fname: ?*anyopaque = @ptrCast(@constCast("any"));
     try testing.expectEqual(@as(i32, @intCast(vfs_data.len)), api_v9.AIL_file_size_info(fname, null, 0));
     var dst2: [64]u8 = undefined;
     const r2 = api_v9.AIL_file_read_info(fname, &dst2, null, 0);

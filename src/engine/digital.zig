@@ -1151,6 +1151,10 @@ pub const Sample = struct {
             const rate: u32 = if (self.target_rate) |r| root.satU32(r) else 22050;
             try self.stream_src.init(fmt.bits, fmt.channels, rate, streamEobBridge, self);
             errdefer self.stream_src.deinit();
+            // Size the transport's ring to the configured buffer count so every
+            // slot AIL_load_sample_buffer accepts is actually storable.
+            self.stream_src.slot_count =
+                @intCast(@min(@max(self.n_buffers, 2), StreamSource.max_slots));
 
             const res = ma.ma_sound_init_from_data_source(&self.driver.engine, @ptrCast(&self.stream_src.base), ma.MA_SOUND_FLAG_NO_SPATIALIZATION, null, &self.sound);
             if (res != ma.MA_SUCCESS) return error.SampleLoadFailed;

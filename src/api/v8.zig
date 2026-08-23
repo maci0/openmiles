@@ -19,11 +19,10 @@ fn enumerateAssets(bank: ?*anyopaque, next: ?*anyopaque, name: ?*anyopaque, kind
     const idx: usize = if (np.* == MSS_FIRST) 0 else np.*;
     if (idx >= b.assetCount(kind)) return 0;
     const nm = b.assetName(kind, @intCast(idx)) orelse return 0;
-    out.* = @constCast(@ptrCast(nm));
+    out.* = @ptrCast(@constCast(nm));
     np.* = idx + 1;
     return 1;
 }
-
 
 /// MILESMEM: an in-memory byte stream (AIL_mem_* family).
 const MemStream = struct {
@@ -241,11 +240,9 @@ pub fn AIL_create_event() callconv(.winapi) ?*anyopaque {
 }
 pub fn AIL_debug(a0: ?*anyopaque) callconv(.c) void {
     _ = a0;
-
 }
 pub fn AIL_debug_log(a0: ?*anyopaque) callconv(.c) void {
     _ = a0;
-
 }
 pub fn AIL_enumerate_environment_presets(bank: ?*anyopaque, next: ?*anyopaque, list: ?*anyopaque, name: ?*anyopaque) callconv(.winapi) i32 {
     _ = list;
@@ -358,7 +355,7 @@ pub fn AIL_get_marker_list(bank: ?*anyopaque, sound_name: ?*anyopaque) callconv(
 }
 pub fn AIL_get_soundbank_filename(bank: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return null));
-    return @constCast(@ptrCast(b.filename.ptr));
+    return @ptrCast(@constCast(b.filename.ptr));
 }
 pub fn AIL_get_soundbank_mem_usage(bank: ?*anyopaque) callconv(.winapi) i32 {
     const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return 0));
@@ -366,7 +363,6 @@ pub fn AIL_get_soundbank_mem_usage(bank: ?*anyopaque) callconv(.winapi) i32 {
 }
 pub fn AIL_indent(a0: i32) callconv(.c) void {
     _ = a0;
-
 }
 // Real MSS: AIL_mem_close(mem, void** data, U32* size) @12 — close a write
 // stream, optionally handing the accumulated buffer (C-malloc'd, caller frees
@@ -442,7 +438,7 @@ pub fn AIL_mem_prints(mem: ?*anyopaque, str: ?*anyopaque) callconv(.winapi) i32 
     const cstr: [*:0]const u8 = @ptrCast(sp);
     const len = std.mem.len(cstr);
     if (len == 0) return 0;
-    return AIL_mem_write(mem, @constCast(@ptrCast(sp)), @intCast(@min(len, @as(usize, std.math.maxInt(i32)))));
+    return AIL_mem_write(mem, @ptrCast(@constCast(sp)), @intCast(@min(len, @as(usize, std.math.maxInt(i32)))));
 }
 pub fn AIL_mem_read(mem: ?*anyopaque, dst: ?*anyopaque, n: i32) callconv(.winapi) i32 {
     const m: *MemStream = @ptrCast(@alignCast(mem orelse return 0));
@@ -564,7 +560,6 @@ pub fn AIL_register_falloff_function_callback(s_opt: ?*Sample, falloff_cb: ?*any
 }
 pub fn AIL_register_trace_callback(a0: ?*anyopaque) callconv(.winapi) void {
     _ = a0;
-
 }
 // Channel order matches the SDK header: f_left, f_right, b_left, b_right,
 // center, sub. v51_levels is stored in exactly this order.
@@ -784,6 +779,9 @@ pub fn AIL_set_sample_buffer_count(s_opt: ?*Sample, n_buffers: i32) callconv(.wi
     const s = s_opt orelse return 0;
     if (n_buffers < 2 or n_buffers > 8) return 0;
     s.n_buffers = n_buffers;
+    // Keep an already-streaming transport in sync so its slots and the
+    // configured ring can never disagree.
+    if (s.stream_active) s.stream_src.slot_count = @intCast(n_buffers);
     return 1;
 }
 pub fn AIL_set_sample_is_3D(s_opt: ?*Sample, is_3D: i32) callconv(.winapi) i32 {
@@ -847,7 +845,6 @@ pub fn AIL_set_sample_speaker_scale_factors(s_opt: ?*Sample, dest_speaker_indexe
 pub fn AIL_sound_asset_filename(a0: ?*anyopaque, a1: i32) callconv(.winapi) void {
     _ = a0;
     _ = a1;
-
 }
 pub fn AIL_stricmp(a: ?*anyopaque, b: ?*anyopaque) callconv(.winapi) i32 {
     const pa: [*:0]const u8 = @ptrCast(a orelse return 0);
@@ -874,7 +871,6 @@ pub fn AIL_strnicmp(a: ?*anyopaque, b: ?*anyopaque, n: u32) callconv(.winapi) i3
 }
 pub fn AIL_sys_debug(a0: ?*anyopaque) callconv(.c) void {
     _ = a0;
-
 }
 pub fn AIL_unapply_environment_preset(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
