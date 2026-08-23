@@ -8,5 +8,8 @@
         "build.zig",
         "build.zig.zon",
         "src",
+        "deps",
+        "tests",
+        "test_media",
     },
 }

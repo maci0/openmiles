@@ -28,7 +28,7 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406 # v2.2.1
         with:
-          version: 0.15.2
+          version: 0.16.0
 
       - name: Cache Zig global cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
