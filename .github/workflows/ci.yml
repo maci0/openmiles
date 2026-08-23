@@ -42,13 +42,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-zig-
 
-      - name: Check formatting
+      - name: Lint (zig fmt + shellcheck, same rules as `make lint`)
         if: matrix.os == 'ubuntu-latest'
-        run: zig fmt --check .
-
-      - name: Shellcheck
-        if: matrix.os == 'ubuntu-latest'
-        run: shellcheck scripts/*.sh
+        run: make lint
 
       - name: Build
         run: zig build
