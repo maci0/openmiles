@@ -1249,13 +1249,17 @@ test "Sample loadFromBoundedPointer mounts via bounded callbacks" {
     // not survive from any previous load.
     try testing.expectEqual(@as(u32, 0), sample.src_bpf);
 
-    // A streaming sentinel (OGG/MP3/FLAC) routes here too.
+    // A streaming sentinel (OGG/MP3/FLAC) routes here too. Reads are bounded by
+    // the 16 MB sentinel window, so the backing allocation must cover it for
+    // failure to be deterministic; the all-zero payload makes every decoder
+    // reject the stream once it hits the window's end.
     const s2 = try openmiles.Sample.init(driver);
     defer s2.deinit();
-    var ogg: [64]u8 = undefined;
+    const ogg = try allocator.alloc(u8, openmiles.streaming_sentinel_size + 1);
+    defer allocator.free(ogg);
     @memcpy(ogg[0..4], "OggS");
     @memset(ogg[4..], 0);
-    try testing.expectError(error.DecoderInitFailed, s2.loadFromUnownedMemoryUnknownSize(&ogg));
+    try testing.expectError(error.DecoderInitFailed, s2.loadFromUnownedMemoryUnknownSize(ogg.ptr));
     try testing.expect(!s2.is_initialized);
 }
 
