@@ -257,10 +257,14 @@ fn nextId() u64 {
 }
 
 // Progress PLAYING instances to COMPLETE once their bank duration has elapsed.
+// A zero duration (sound unresolvable in any loaded bank) completes as soon as
+// processing starts: without this the instance would sit PLAYING forever and
+// MilesCompleteEventQueueProcessing would never reap it, growing g_instances
+// by one entry per enqueued event on games that loop event queues.
 fn updateInstances() void {
     const now = openmiles.getMsCount64();
     for (g_instances.items) |inst| {
-        if (inst.status == STATUS_PLAYING and inst.duration_ms != 0) {
+        if (inst.status == STATUS_PLAYING) {
             if (now -% inst.start_ms >= inst.duration_ms) inst.status = STATUS_COMPLETE;
         }
     }
@@ -332,7 +336,7 @@ fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: 
             }
             cur = next;
         }
-        if (flags & ENQUEUE_FREE_EVENT != 0) std.c.free(@constCast(@ptrCast(ev)));
+        if (flags & ENQUEUE_FREE_EVENT != 0) std.c.free(@ptrCast(@constCast(ev)));
     }
     return qid;
 }

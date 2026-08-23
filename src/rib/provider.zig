@@ -74,6 +74,11 @@ pub const Provider = struct {
     name: [:0]const u8,
     allocator: std.mem.Allocator,
     interfaces: std.ArrayListUnmanaged(*Interface),
+    // Owned path of a temp file this Provider was loaded from (e.g. the
+    // in-memory ASI image AIL_open_ASI_provider writes to disk). Deleted when
+    // the provider is released, after the module is unloaded and the OS lets
+    // go of the file; null for providers loaded from real on-disk plugins.
+    temp_path: ?[:0]u8 = null,
     user_data: [8]usize = [_]usize{0} ** 8,
     system_data: [8]usize = [_]usize{0} ** 8,
 
@@ -132,6 +137,16 @@ pub const Provider = struct {
                 _ = rib_main(self.handle, 0, rib_alloc_provider_handle, rib_register_interface, rib_unregister_interface);
             }
             lib.close();
+        }
+        // The module is unloaded, so the temp image file is unlocked and can go.
+        // (Deleting before FreeLibrary would fail on Windows, which locks loaded
+        // DLLs — the leak that accumulated one temp file per AIL_open_ASI_provider.)
+        if (self.temp_path) |tmp| {
+            std.Io.Dir.deleteFileAbsolute(root.io, tmp) catch {
+                std.Io.Dir.cwd().deleteFile(root.io, tmp) catch {};
+            };
+            self.allocator.free(tmp);
+            self.temp_path = null;
         }
         for (self.interfaces.items) |iface| {
             iface.deinit();

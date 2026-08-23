@@ -151,8 +151,9 @@ comptime {
     // pointer-sized; the rest U32 + U16[16]).
     const fields = @typeInfo(ADPCMDATA).@"struct".fields;
     const order = [_][]const u8{
-        "blocksize", "extrasamples", "blockleft", "step", "savesrc",
-        "sample",    "destend",      "srcend",    "samplesL", "samplesR", "moresamples",
+        "blocksize",   "extrasamples", "blockleft", "step",     "savesrc",
+        "sample",      "destend",      "srcend",    "samplesL", "samplesR",
+        "moresamples",
     };
     if (fields.len != order.len) @compileError("ADPCMDATA field count drifted");
     for (order, 0..) |fname, i| {
@@ -737,14 +738,13 @@ pub fn startup() void {
 }
 
 pub fn shutdown() void {
-    if (last_digital_driver) |d| {
-        last_digital_driver = null;
-        d.deinit();
-    }
-    if (last_midi_driver) |m| {
-        last_midi_driver = null;
-        m.deinit();
-    }
+    // MSS's AIL_shutdown releases everything startup acquired. Timer threads
+    // stop first (their callbacks may touch the drivers), then MIDI sequences
+    // (their voices are attached to the digital engine and must be stopped
+    // before it is torn down), then the drivers themselves.
+    releaseAllTimers();
+    if (last_midi_driver) |m| closeMidiDriver(m);
+    if (last_digital_driver) |d| closeDigitalDriver(d);
     for (global_providers.items) |p| p.deinit();
     global_providers.deinit(global_allocator);
     global_providers = .empty;

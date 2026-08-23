@@ -1685,6 +1685,35 @@ test "AIL_set_timer_user stores new and returns the previous value (SDK)" {
     try testing.expectEqual(@as(u32, 0), api_timer.AIL_set_timer_user(null, 5));
 }
 
+test "timer can stop itself from inside its callback without deadlocking" {
+    const T = openmiles.Timer;
+    var fired = std.atomic.Value(u32).init(0);
+    const H = struct {
+        var timer_ptr: ?*T = null;
+        var counter: *std.atomic.Value(u32) = undefined;
+        fn cb(_: u32) callconv(.winapi) void {
+            _ = counter.fetchAdd(1, .monotonic);
+            // One-shot pattern from MSS games: stop your own timer from the
+            // callback. Must not join/deadlock on the calling thread.
+            if (timer_ptr) |t| t.stop();
+        }
+    };
+    H.counter = &fired;
+    const t = try T.init(openmiles.global_allocator, H.cb);
+    defer t.deinit();
+    H.timer_ptr = t;
+    t.setPeriodUs(1_000);
+    t.start();
+    // The callback stops the timer on its first fire; give it a generous
+    // window, then require that the thread actually wound down.
+    var waited: u32 = 0;
+    while (fired.load(.monotonic) == 0 and waited < 5000) : (waited += 10) {
+        openmiles.io.sleep(std.Io.Duration.fromNanoseconds(10 * std.time.ns_per_ms), .awake) catch {};
+    }
+    try testing.expect(fired.load(.monotonic) >= 1);
+    try testing.expect(!@atomicLoad(bool, &t.is_running, .acquire));
+}
+
 test "AIL_file_type classifies WAV/MIDI/XMIDI/OGG/VOC/BINKA/DLS/MLS (SDK)" {
     // Complete PCM WAV — AIL_WAV_info (and thus file_type) needs a data chunk.
     const pcm = [_]u8{0} ** 32;
@@ -5482,6 +5511,31 @@ test "MilesSetSoundLabelLimits caps concurrent sounds per label (evicts oldest)"
     var sfx: i32 = 0;
     while (api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("sfx"), 0, @ptrCast(&info)) == 1) sfx += 1;
     try testing.expectEqual(@as(i32, 1), sfx);
+}
+
+test "zero-duration instances complete on processing instead of accumulating" {
+    api_miles_t.MilesShutdownEventSystem();
+    defer api_miles_t.MilesShutdownEventSystem();
+
+    // No bank is loaded, so both sounds resolve to duration 0. Before queue
+    // processing they are tracked (PENDING); Begin+Complete must reap them
+    // rather than leave them PLAYING forever (unbounded per-event growth).
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("unknown_a"), 0, 0, cstr2(""), null, 0, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("unknown_b"), 0, 0, cstr2(""), null, 0, 0);
+    var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
+    var pending: i32 = 0;
+    while (api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0x1, null, 0, @ptrCast(&info)) == 1) pending += 1;
+    try testing.expectEqual(@as(i32, 2), pending); // PENDING before processing
+
+    _ = api_miles_t.MilesBeginEventQueueProcessing();
+    _ = api_miles_t.MilesCompleteEventQueueProcessing();
+
+    nx = @ptrFromInt(std.math.maxInt(usize));
+    try testing.expectEqual(@as(i32, 0), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, null, 0, @ptrCast(&info)));
+    var state: api_miles_t.MILESEVENTSTATE = undefined;
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(@as(i32, 0), state.PlayingSoundCount);
 }
 
 test "container resolves bank-prefixed sound names (Container_GetSound)" {

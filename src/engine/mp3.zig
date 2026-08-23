@@ -87,10 +87,10 @@ comptime {
     // shifts sample_rate..samples_per_frame would corrupt every reader.
     const fields = @typeInfo(MP3_INFO).@"struct".fields;
     const expected = [_][]const u8{
-        "MP3_file_image", "MP3_image_size", "ID3v2",        "ID3v2_size",       "ID3v1",
-        "start_MP3_data", "end_MP3_data",   "sample_rate",  "bit_rate",         "channels_per_sample",
-        "samples_per_frame", "byte_offset", "next_frame_expected", "average_frame_size", "data_size",
-        "header_size",    "side_info_size", "ngr",          "main_data_begin",  "hpos",
+        "MP3_file_image",    "MP3_image_size", "ID3v2",               "ID3v2_size",         "ID3v1",
+        "start_MP3_data",    "end_MP3_data",   "sample_rate",         "bit_rate",           "channels_per_sample",
+        "samples_per_frame", "byte_offset",    "next_frame_expected", "average_frame_size", "data_size",
+        "header_size",       "side_info_size", "ngr",                 "main_data_begin",    "hpos",
     };
     for (expected, 0..) |name, i| {
         if (!std.mem.eql(u8, fields[i].name, name)) {

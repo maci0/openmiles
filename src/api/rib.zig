@@ -155,12 +155,17 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     };
     wf.close(io);
 
-    // Load the provider (calls RIB_Main inside the DLL)
-    return openmiles.Provider.load(openmiles.global_allocator, path) catch {
+    // Load the provider (calls RIB_Main inside the DLL). On success the
+    // Provider owns deleting the temp image: it records the path and removes
+    // the file when released, once the OS has unlocked the loaded module. The
+    // file must outlive the provider here — Windows cannot delete a loaded DLL.
+    const p = openmiles.Provider.load(openmiles.global_allocator, path) catch {
         std.Io.Dir.deleteFileAbsolute(io, path) catch {};
         std.Io.Dir.cwd().deleteFile(io, path) catch {};
         return null;
     };
+    p.temp_path = openmiles.global_allocator.dupeZ(u8, path) catch null;
+    return p;
 }
 pub fn AIL_close_ASI_provider(provider_opt: ?*Provider) callconv(.winapi) void {
     const provider = provider_opt orelse return;

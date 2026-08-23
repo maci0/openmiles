@@ -404,10 +404,10 @@ test "coverage: midi.zig exports" {
 
     // Minimal valid SMF so the size-less init_sequence detects a real length.
     const smf = [_]u8{
-        'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0, 0, 1, 0, 0x60,
+        'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0,    0,    1, 0, 0x60,
         'M', 'T', 'r', 'k', 0, 0, 0, 4, 0, 0xFF, 0x2F, 0,
     };
-    _ = md.AIL_init_sequence(seq, @constCast(@ptrCast(&smf)), 0);
+    _ = md.AIL_init_sequence(seq, @ptrCast(@constCast(&smf)), 0);
 
     md.AIL_start_sequence(seq);
     md.AIL_pause_sequence(seq);
@@ -454,7 +454,7 @@ test "coverage: midi.zig exports" {
     md.AIL_midiOutClose(mp);
     var out_len: u32 = scratch.len;
     var xmi_out: ?*anyopaque = null;
-    _ = md.AIL_MIDI_to_XMI(@constCast(@ptrCast(&smf)), smf.len, &xmi_out, &out_len, 0);
+    _ = md.AIL_MIDI_to_XMI(@ptrCast(@constCast(&smf)), smf.len, &xmi_out, &out_len, 0);
     freeLock(xmi_out);
     var lst: ?*anyopaque = null;
     var lsz: u32 = 0;
@@ -528,7 +528,10 @@ test "coverage: rib.zig exports" {
     var entry: openmiles.RIB_INTERFACE_ENTRY = undefined;
     rnext = null;
     _ = rib.RIB_enumerate_interface(np, "x", 0, &rnext, &entry);
-    { var tsv: i32 = 42; _ = rib.RIB_type_string(&tsv, 1); }
+    {
+        var tsv: i32 = 42;
+        _ = rib.RIB_type_string(&tsv, 1);
+    }
     _ = rib.RIB_provider_system_data(np, 0);
     _ = rib.RIB_provider_user_data(np, 0);
     rib.RIB_set_provider_system_data(np, 0, 0);
@@ -569,7 +572,7 @@ test "coverage: lifecycle / driver open-close exports" {
 
     // WAV file write.
     const wbytes = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0 };
-    _ = dg.AIL_WAV_file_write("/tmp/om_cov.wav", @constCast(@ptrCast(&wbytes)), wbytes.len, 44100, 1);
+    _ = dg.AIL_WAV_file_write("/tmp/om_cov.wav", @ptrCast(@constCast(&wbytes)), wbytes.len, 44100, 1);
 
     // XMIDI driver close (open covered in midi test).
     const xm = md.AIL_open_XMIDI_driver(0);

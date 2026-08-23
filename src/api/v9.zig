@@ -89,7 +89,6 @@ pub fn AIL_file_callbacks(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3:
     _ = a1;
     _ = a2;
     _ = a3;
-
 }
 // Tracking macro target for AIL_file_read(filename, dest): reads the whole file
 // into `dest` (or a fresh AIL_mem_free_lock buffer if dest is null). caller/line
@@ -120,7 +119,7 @@ pub fn AIL_find_sound_preset(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi)
 }
 pub fn AIL_get_soundbank_name(bank: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const b: *openmiles.Bank = @ptrCast(@alignCast(bank orelse return null));
-    return @constCast(@ptrCast(b.name()));
+    return @ptrCast(@constCast(b.name()));
 }
 pub fn AIL_get_time() callconv(.winapi) u64 {
     return openmiles.getUsCount64(); // Miles "time" is a microsecond tick
@@ -278,7 +277,7 @@ pub fn AIL_register_mix_callback(dig: ?*DigitalDriver, mixcb: ?*anyopaque) callc
     // store must not be torn or reordered against that read.
     const next: ?AilMixerCb = if (mixcb) |p| @as(AilMixerCb, @ptrCast(@alignCast(p))) else null;
     const prev = @atomicRmw(?AilMixerCb, &d.mix_callback, .Xchg, next, .acq_rel);
-    return if (prev) |p| @constCast(@ptrCast(p)) else null;
+    return if (prev) |p| @ptrCast(@constCast(p)) else null;
 }
 pub fn AIL_end_fade_sample(s_opt: ?*Sample) callconv(.winapi) void {
     const s = s_opt orelse return;

@@ -299,16 +299,16 @@ pub fn AIL_find_DLS(data_ptr: ?*const anyopaque, size: u32, xmi_out: ?*?*anyopaq
     var ok: i32 = 0;
 
     if (dls_container.findDls(data)) |dls_img| {
-        if (dls_out) |pp| pp.* = @constCast(@ptrCast(dls_img.ptr));
+        if (dls_out) |pp| pp.* = @ptrCast(@constCast(dls_img.ptr));
         if (dls_len) |p| p.* = @intCast(dls_img.len);
         ok = 1;
         const off = @intFromPtr(dls_img.ptr) - @intFromPtr(data.ptr);
         if (off > 0 and dls_container.findXmi(data[0..off]) != null) {
-            if (xmi_out) |pp| pp.* = @constCast(@ptrCast(data.ptr));
+            if (xmi_out) |pp| pp.* = @ptrCast(@constCast(data.ptr));
             if (xmi_len) |p| p.* = @intCast(off);
         }
     } else if (dls_container.findXmi(data)) |xmi_img| {
-        if (xmi_out) |pp| pp.* = @constCast(@ptrCast(xmi_img.ptr));
+        if (xmi_out) |pp| pp.* = @ptrCast(@constCast(xmi_img.ptr));
         if (xmi_len) |p| p.* = @intCast(xmi_img.len);
     }
     return ok;

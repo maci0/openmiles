@@ -640,9 +640,9 @@ fn ord(comptime prefix: []const i32) [18]i32 {
 }
 // FL=0 FR=1 FC=2 LFE=3 BL=4 BR=5 BC=8 SL=9 SR=10
 pub const output_speaker_order = [10][18]i32{
-    ord(&.{}), ord(&.{0}), ord(&.{ 0, 1 }), ord(&.{ 0, 1, 8 }),
-    ord(&.{ 0, 1, 4, 5 }), ord(&.{ 0, 1, 2, 4, 5 }), ord(&.{ 0, 1, 2, 3, 4, 5 }),
-    ord(&.{ 0, 1, 2, 3, 4, 5, 8 }), ord(&.{ 0, 1, 2, 3, 4, 5, 9, 10 }), ord(&.{ 0, 1, 2, 3, 4, 5, 8, 9, 10 }),
+    ord(&.{}),                          ord(&.{0}),                            ord(&.{ 0, 1 }),             ord(&.{ 0, 1, 8 }),
+    ord(&.{ 0, 1, 4, 5 }),              ord(&.{ 0, 1, 2, 4, 5 }),              ord(&.{ 0, 1, 2, 3, 4, 5 }), ord(&.{ 0, 1, 2, 3, 4, 5, 8 }),
+    ord(&.{ 0, 1, 2, 3, 4, 5, 9, 10 }), ord(&.{ 0, 1, 2, 3, 4, 5, 8, 9, 10 }),
 };
 var g_speaker_wet_reverb = [_]f32{1.0} ** 9; // D3D.speaker_wet_reverb_response
 var g_speaker_dry_reverb = [_]f32{1.0} ** 9; // D3D.speaker_dry_reverb_response

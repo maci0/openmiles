@@ -245,8 +245,9 @@ pub const Bank = struct {
         // at its mss.h offset. Lock the field order, not just the size.
         const fields = @typeInfo(MILESBANKSOUNDINFO).@"struct".fields;
         const order = [_][]const u8{
-            "ChannelCount", "ChannelMask", "Rate", "DataLen", "SoundLimit",
-            "IsExternal", "DurationMs", "StreamBufferSize", "IsAdpcm", "AdpcmBlockSize", "MixVolumeDAC",
+            "ChannelCount", "ChannelMask", "Rate",             "DataLen", "SoundLimit",
+            "IsExternal",   "DurationMs",  "StreamBufferSize", "IsAdpcm", "AdpcmBlockSize",
+            "MixVolumeDAC",
         };
         if (fields.len != order.len) @compileError("MILESBANKSOUNDINFO field count drifted");
         for (order, 0..) |fname, i| {
