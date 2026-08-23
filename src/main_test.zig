@@ -83,6 +83,49 @@ test "Sequence basic properties" {
     try testing.expectEqual(@as(i32, 5), seq.loop_count);
 }
 
+test "Sequence ms position saturates instead of panicking beyond i32" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.MidiDriver.init(allocator);
+    defer driver.deinit();
+
+    const seq = try openmiles.Sequence.init(driver);
+    defer seq.deinit();
+
+    // TML event times are u32 milliseconds, so total_ms can exceed maxInt(i32)
+    // on a long/crafted sequence; time_ms accumulates unbounded in playback.
+    seq.total_ms = 4294967295.0; // u32 max
+    seq.time_ms = 4e12; // ~46 days of playback
+    const pos = seq.getMsPosition();
+    try testing.expectEqual(std.math.maxInt(i32), pos.total);
+    try testing.expectEqual(std.math.maxInt(i32), pos.current);
+
+    // In-range values keep the plain truncating conversion.
+    seq.time_ms = 1234.0;
+    try testing.expectEqual(@as(i32, 1234), seq.getMsPosition().current);
+}
+
+test "Sequence setMsPosition clamps beat math for tiny ms_per_beat" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.MidiDriver.init(allocator);
+    defer driver.deinit();
+
+    const seq = try openmiles.Sequence.init(driver);
+    defer seq.deinit();
+
+    // A crafted tempo event (1 us/beat) yields ms_per_beat = 0.001; seeking near
+    // i32-max ms then divides to ~2.1e12 beats, far past i32 range.
+    seq.ms_per_beat = 0.001;
+    seq.setMsPosition(2000000000);
+    try testing.expectEqual(@as(f64, 2000000000.0), seq.time_ms);
+    // beats_elapsed saturates at maxInt-1 so the +1 bookkeeping cannot overflow.
+    const beats: i32 = std.math.maxInt(i32) - 1;
+    try testing.expectEqual(@mod(beats, seq.beats_per_measure) + 1, seq.current_beat_in_measure);
+    try testing.expectEqual(@divTrunc(beats, seq.beats_per_measure) + 1, seq.current_measure);
+
+    // Extreme negative seeks clamp symmetrically without panicking.
+    seq.setMsPosition(std.math.minInt(i32));
+}
+
 test "Provider registry allows duplicate interface names" {
     const allocator = testing.allocator;
     const provider = try openmiles.Provider.init(allocator, null);

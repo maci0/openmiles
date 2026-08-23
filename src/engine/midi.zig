@@ -9,6 +9,7 @@ const tsf = root.tsf;
 const log = root.log;
 const fs_compat = root.fs_compat;
 const io = root.io;
+const testing = std.testing;
 
 extern fn openmiles_tml_get_key(m: *tsf.tml_message) u8;
 extern fn openmiles_tml_get_velocity(m: *tsf.tml_message) u8;
@@ -142,6 +143,14 @@ pub const XmidiLoopEntry = struct {
     start_time_ms: f64 = 0,
     count: i32 = 1, // 0 = infinite, N>0 = N total passes remaining
 };
+
+/// Truncate an f64 beat count into i32, clamping the high side one unit below
+/// maxInt so every caller's `+ 1` (beat/measure bookkeeping) stays overflow-free.
+/// ms_per_beat can be as small as 0.001 (a crafted 1-us-per-beat tempo event),
+/// pushing time/ms_per_beat far past i32 range where @intFromFloat would panic.
+fn satBeats(v: f64) i32 {
+    return @min(root.satI32F64(v), std.math.maxInt(i32) - 1);
+}
 
 pub const Sequence = struct {
     driver: *MidiDriver,
@@ -416,7 +425,7 @@ pub const Sequence = struct {
                                         self.current_msg = top.start_msg;
                                         self.time_ms = top.start_time_ms;
                                         if (self.ms_per_beat > 0) {
-                                            const beats_elapsed: i32 = @intFromFloat(self.time_ms / self.ms_per_beat);
+                                            const beats_elapsed: i32 = satBeats(self.time_ms / self.ms_per_beat);
                                             self.current_beat_in_measure = @mod(beats_elapsed, self.beats_per_measure) + 1;
                                             self.current_measure = @divTrunc(beats_elapsed, self.beats_per_measure) + 1;
                                             self.next_beat_ms = @as(f64, @floatFromInt(beats_elapsed + 1)) * self.ms_per_beat;
@@ -731,8 +740,10 @@ pub const Sequence = struct {
 
     pub fn getMsPosition(self: *Sequence) MsPosition {
         return .{
-            .current = @intFromFloat(self.time_ms),
-            .total = @intFromFloat(self.total_ms),
+            // Saturating: total_ms comes from TML u32 event times and can
+            // exceed maxInt(i32); time_ms accumulates unbounded in playback.
+            .current = root.satI32F64(self.time_ms),
+            .total = root.satI32F64(self.total_ms),
         };
     }
 
@@ -782,7 +793,7 @@ pub const Sequence = struct {
 
     fn recalcBeatPosition(self: *Sequence, target_ms: f64) void {
         if (self.ms_per_beat <= 0) return;
-        const beats_elapsed: i32 = @intFromFloat(target_ms / self.ms_per_beat);
+        const beats_elapsed: i32 = satBeats(target_ms / self.ms_per_beat);
         self.current_beat_in_measure = @mod(beats_elapsed, self.beats_per_measure) + 1;
         self.current_measure = @divTrunc(beats_elapsed, self.beats_per_measure) + 1;
         self.next_beat_ms = @as(f64, @floatFromInt(beats_elapsed + 1)) * self.ms_per_beat;
@@ -829,3 +840,13 @@ pub const Sequence = struct {
         }
     }
 };
+
+test "satBeats truncates in range and clamps extremes with +1 headroom" {
+    try testing.expectEqual(@as(i32, 0), satBeats(0.0));
+    try testing.expectEqual(@as(i32, 7), satBeats(7.9)); // truncates toward zero
+    try testing.expectEqual(@as(i32, -7), satBeats(-7.9));
+    try testing.expectEqual(@as(i32, 0), satBeats(std.math.nan(f64)));
+    // Beyond i32: clamps one below maxInt so callers' `+ 1` cannot overflow.
+    try testing.expectEqual(std.math.maxInt(i32) - 1, satBeats(2e12));
+    try testing.expectEqual(std.math.maxInt(i32) - 1, satBeats(1e300));
+}

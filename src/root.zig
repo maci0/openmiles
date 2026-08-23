@@ -639,6 +639,16 @@ pub fn satI32(v: f32) i32 {
     return @intFromFloat(v);
 }
 
+/// Saturating f64 -> i32 (NaN -> 0, out-of-range -> clamped). Same contract as
+/// satI32 for sources wider than f32 -- e.g. TML event times are u32
+/// milliseconds and can exceed maxInt(i32) on long/crafted sequences.
+pub fn satI32F64(v: f64) i32 {
+    if (std.math.isNan(v)) return 0;
+    if (v >= 2147483647.0) return std.math.maxInt(i32);
+    if (v <= -2147483648.0) return std.math.minInt(i32);
+    return @intFromFloat(v);
+}
+
 /// Saturating f32 -> u32 (NaN/negative -> 0, overflow -> clamped).
 pub fn satU32(v: f32) u32 {
     if (!(v >= 0)) return 0; // false for NaN and negatives
