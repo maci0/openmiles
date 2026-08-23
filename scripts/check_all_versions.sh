@@ -14,7 +14,7 @@
 # Usage: scripts/check_all_versions.sh [--strict]
 #   --strict folds EXTRA into the per-version pass/fail too.
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 STRICT=""
 [ "${1:-}" = "--strict" ] && STRICT="--strict"

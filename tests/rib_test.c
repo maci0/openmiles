@@ -6,6 +6,8 @@ typedef int (__stdcall *t_AIL_enumerate_filters)(void** next, void** dest, char*
 typedef void* (__stdcall *t_AIL_ASI_provider_attribute)(void* provider, const char* name);
 
 int play_test_main(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
     printf("--- OpenMiles RIB/ASI Test ---\n");
     
     HMODULE mss = LoadLibrary("mss32.dll");

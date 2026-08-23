@@ -46,6 +46,10 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: zig fmt --check .
 
+      - name: Shellcheck
+        if: matrix.os == 'ubuntu-latest'
+        run: shellcheck scripts/*.sh
+
       - name: Build
         run: zig build
 

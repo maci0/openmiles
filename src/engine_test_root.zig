@@ -9,4 +9,5 @@
 
 comptime {
     _ = @import("engine/digital.zig");
+    _ = @import("engine/midi.zig");
 }

@@ -23,6 +23,12 @@ const OpenmilesModule = struct {
     tsf: *std.Build.Module,
 };
 
+// C sources compile with warnings as errors. c_impl.c additionally silences
+// -Wnull-pointer-subtraction because vendored tsf.h computes struct member
+// offsets via ((struct tsf_region*)0)->FIELD pointer math.
+const c_flags = [_][]const u8{ "-std=c99", "-Wall", "-Wextra", "-Werror" };
+const c_flags_tsf = [_][]const u8{ "-std=c99", "-Wall", "-Wextra", "-Werror", "-Wno-null-pointer-subtraction" };
+
 /// Build an (anonymous) openmiles module plus its c_impl object for a given
 /// resolved target. Used to produce a musl-targeted copy for the native test
 /// executables on a glibc host (see `test_target`).
@@ -51,7 +57,7 @@ fn addOpenmilesModule(
         .root_module = b.createModule(.{ .target = rtarget, .optimize = optimize, .link_libc = true }),
     });
     ci.root_module.addIncludePath(b.path("deps"));
-    ci.root_module.addCSourceFile(.{ .file = b.path("src/bindings/c_impl.c"), .flags = &.{"-std=c99"} });
+    ci.root_module.addCSourceFile(.{ .file = b.path("src/bindings/c_impl.c"), .flags = &c_flags_tsf });
 
     return .{ .mod = m, .c_impl = ci, .ma = ma, .tsf = tsf };
 }
@@ -144,7 +150,7 @@ pub fn build(b: *std.Build) void {
     c_impl.root_module.addIncludePath(b.path("deps"));
     c_impl.root_module.addCSourceFile(.{
         .file = b.path("src/bindings/c_impl.c"),
-        .flags = &.{"-std=c99"},
+        .flags = &c_flags_tsf,
     });
 
     lib.root_module.addObject(c_impl);
@@ -201,7 +207,7 @@ pub fn build(b: *std.Build) void {
     engine_c_impl.root_module.addIncludePath(b.path("deps"));
     engine_c_impl.root_module.addCSourceFile(.{
         .file = b.path("src/bindings/c_impl.c"),
-        .flags = &.{"-std=c99"},
+        .flags = &c_flags_tsf,
     });
     const engine_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -240,7 +246,7 @@ pub fn build(b: *std.Build) void {
         });
         obj.root_module.addCSourceFile(.{
             .file = b.path(t.source),
-            .flags = &.{"-std=c99"},
+            .flags = &c_flags,
         });
         obj.root_module.addIncludePath(b.path("src"));
 
@@ -271,7 +277,7 @@ pub fn build(b: *std.Build) void {
     });
     mock_asi.root_module.addCSourceFile(.{
         .file = b.path("src/bindings/mock_asi.c"),
-        .flags = &.{"-std=c99"},
+        .flags = &c_flags,
     });
     // Install to bin/plugins/ (output name depends on platform: mock.dll, libmock.so, etc.)
     const install_mock = b.addInstallArtifact(mock_asi, .{

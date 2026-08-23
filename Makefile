@@ -10,6 +10,7 @@ test:
 
 lint:
 	zig fmt --check .
+	shellcheck scripts/*.sh
 
 format:
 	zig fmt .

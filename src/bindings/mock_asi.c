@@ -20,6 +20,8 @@ static RIB_INTERFACE_ENTRY ASI_entries[] = {
 };
 
 __declspec(dllexport) S32 __stdcall RIB_Main(HPROVIDER provider, U32 up_down, RIB_alloc_provider_handle_ptr alloc, RIB_register_interface_ptr reg, RIB_unregister_interface_ptr unreg) {
+    (void)alloc;
+    (void)unreg;
     if (up_down) {
         reg(provider, "ASI digital audio engine", 1, ASI_entries);
     }
@@ -27,5 +29,8 @@ __declspec(dllexport) S32 __stdcall RIB_Main(HPROVIDER provider, U32 up_down, RI
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
+    (void)hinstDLL;
+    (void)fdwReason;
+    (void)lpvReserved;
     return TRUE;
 }
