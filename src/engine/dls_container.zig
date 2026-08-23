@@ -65,26 +65,39 @@ fn smfImageSize(data: []const u8) usize {
     return pos;
 }
 
+/// Largest image extent xmiImageSizePtr accepts from header-declared sizes.
+/// This pointer-based API carries no length, so a lying IFF/MThd size field
+/// would otherwise drive reads at offsets up to ~4 GiB past the caller's
+/// buffer (guaranteed SIGSEGV on 64-bit targets; on 32-bit the wrap happens
+/// to stay near the image). Matches readWholeFile's 256 MiB load cap: no
+/// legitimate caller passes a larger image, so a larger claim is corruption.
+const max_ptr_image_size: usize = 256 * 1024 * 1024;
+
 /// Pointer-based XMI/SMF image sizing for callers that lack an explicit length
 /// (e.g. `AIL_merge_DLS_with_XMI`). Relies on the IFF format guarantee that an
 /// `XDIR` group is always followed by its `CAT  XMID` group, so the look-ahead
-/// reads stay inside the supplied image. Returns 0 for unrecognized data.
+/// reads stay inside the supplied image. Header-declared extents are bounded
+/// by max_ptr_image_size; beyond it (or for unrecognized data) returns 0.
 pub fn xmiImageSizePtr(raw: [*]const u8) usize {
     if (std.mem.eql(u8, raw[0..4], "MThd")) {
         const hdr_len = std.mem.readInt(u32, raw[4..8], .big);
         const num_tracks = std.mem.readInt(u16, raw[10..12], .big);
-        var pos: usize = 8 + @as(usize, hdr_len);
+        var pos: usize = 8 +| @as(usize, hdr_len);
+        if (pos > max_ptr_image_size) return 0;
         var found: u16 = 0;
         while (found < num_tracks) : (found += 1) {
+            if (pos +| 8 > max_ptr_image_size) return 0;
             if (!std.mem.eql(u8, raw[pos .. pos + 4], "MTrk")) break;
             const trk_len = std.mem.readInt(u32, raw[pos + 4 .. pos + 8][0..4], .big);
-            pos += 8 + @as(usize, trk_len);
+            pos +|= 8 +| @as(usize, trk_len);
+            if (pos > max_ptr_image_size) return 0;
         }
         return pos;
     }
     if (!std.mem.eql(u8, raw[0..4], "FORM")) return 0;
     const form_body = std.mem.readInt(u32, raw[4..8], .big);
-    var end = align2(8 + @as(usize, form_body));
+    var end = align2(8 +| @as(usize, form_body));
+    if (end > max_ptr_image_size) return 0;
     // Only an XDIR group is guaranteed to be followed by a CAT group; a bare
     // `FORM XMID` is the whole image, so do not read past it.
     if (std.mem.eql(u8, raw[8..12], "XDIR") and
@@ -92,7 +105,8 @@ pub fn xmiImageSizePtr(raw: [*]const u8) usize {
         std.mem.eql(u8, raw[end + 8 .. end + 12], "XMID"))
     {
         const cat_body = std.mem.readInt(u32, raw[end + 4 .. end + 8][0..4], .big);
-        end = align2(end + 8 + @as(usize, cat_body));
+        end = align2(end +| 8 +| @as(usize, cat_body));
+        if (end > max_ptr_image_size) return 0;
     }
     return end;
 }

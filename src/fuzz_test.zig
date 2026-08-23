@@ -159,6 +159,22 @@ test "lying chunk sizes do not overflow the cursor" {
     if (openmiles.xmidiToSmf(testing.allocator, &form, 0)) |smf| {
         testing.allocator.free(smf);
     } else |_| {}
+
+    // xmiImageSizePtr (length-less pointer API) must likewise reject absurd
+    // declared extents instead of reading gigabytes past the image.
+    const pform: [*]const u8 = @ptrCast(&form);
+    try testing.expectEqual(@as(usize, 0), openmiles.dls_container.xmiImageSizePtr(pform));
+    const pmthd: [*]const u8 = @ptrCast(&mthd);
+    try testing.expectEqual(@as(usize, 0), openmiles.dls_container.xmiImageSizePtr(pmthd));
+
+    // A well-formed XDIR whose CAT group claims an absurd size is rejected too:
+    // end lands exactly on the CAT header (all reads stay inside this array).
+    var cat_huge = [_]u8{ 'F', 'O', 'R', 'M', 0, 0, 0, 20 } ++ // body 20 -> first group ends at 28
+        [_]u8{ 'X', 'D', 'I', 'R' } ++
+        [_]u8{0} ** 16 ++ // pad first group out to offset 28
+        [_]u8{ 'C', 'A', 'T', ' ', 0xFF, 0xFF, 0xFF, 0xFF } ++ // claimed CAT body: absurd
+        [_]u8{ 'X', 'M', 'I', 'D' };
+    try testing.expectEqual(@as(usize, 0), openmiles.dls_container.xmiImageSizePtr(@ptrCast(&cat_huge)));
 }
 
 // --- Double-buffer streaming source ----------------------------------------
