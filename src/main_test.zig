@@ -1228,6 +1228,37 @@ test "Sample loadFromMemory initializes sample" {
     try testing.expectEqual(openmiles.SampleStatus.done, sample.status()); // loaded, never played -> SMP_DONE
 }
 
+test "Sample loadFromBoundedPointer mounts via bounded callbacks" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const sample = try openmiles.Sample.init(driver);
+    defer sample.deinit();
+
+    const pcm = [_]u8{0} ** 4410;
+    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    defer allocator.free(wav);
+
+    // The size-less pointer path mounts through bounded read/seek callbacks
+    // instead of fabricating a slice the caller's buffer may not back.
+    try sample.loadFromBoundedPointer(wav.ptr, wav.len);
+    try testing.expect(sample.is_initialized);
+    try testing.expect(sample.bounded_mem_ctx != null);
+    // No WAV header is parsed on this path, so the source-format hint must
+    // not survive from any previous load.
+    try testing.expectEqual(@as(u32, 0), sample.src_bpf);
+
+    // A streaming sentinel (OGG/MP3/FLAC) routes here too.
+    const s2 = try openmiles.Sample.init(driver);
+    defer s2.deinit();
+    var ogg: [64]u8 = undefined;
+    @memcpy(ogg[0..4], "OggS");
+    @memset(ogg[4..], 0);
+    try testing.expectError(error.DecoderInitFailed, s2.loadFromUnownedMemoryUnknownSize(&ogg));
+    try testing.expect(!s2.is_initialized);
+}
+
 var sob_cb_fired: bool = false;
 fn testSobCallback(s: ?*anyopaque) callconv(.winapi) void {
     _ = s;

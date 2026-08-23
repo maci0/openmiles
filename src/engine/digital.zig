@@ -911,12 +911,7 @@ pub const Sample = struct {
 
     pub fn loadFromUnownedMemoryUnknownSize(self: *Sample, data_ptr: [*]const u8) !void {
         const detected = root.detectAudioSize(data_ptr);
-        if (detected > 0) {
-            // Format recognized — for WAV/AIFF this is the real size; for streaming
-            // formats (OGG/MP3/FLAC) it is a 16 MB sentinel window.
-            log("Sample.loadFromUnownedMemoryUnknownSize detected size: {d}\n", .{detected});
-            try self.loadFromMemory(data_ptr[0..detected], false);
-        } else {
+        if (detected == 0) {
             // Format unrecognized. With only a bare pointer there is no size to
             // bound reads by, and miniaudio's format probing would over-read any
             // buffer smaller than its detection window. Refuse — matching MSS,
@@ -924,12 +919,22 @@ pub const Sample = struct {
             log("Sample.loadFromUnownedMemoryUnknownSize: unrecognized format, refusing\n", .{});
             return error.UnsupportedAudioFormat;
         }
+        if (detected != root.streaming_sentinel_size) {
+            log("Sample.loadFromUnownedMemoryUnknownSize detected size: {d}\n", .{detected});
+            try self.loadFromMemory(data_ptr[0..detected], false);
+        } else {
+            // Streaming formats (OGG/MP3/FLAC): the sentinel is not a real
+            // length, so a fake slice that large could run past the caller's
+            // allocation. Read through bounded callbacks instead (mirrors
+            // Sample3D.loadFromUnownedPointer).
+            try self.loadFromBoundedPointer(data_ptr, root.streaming_sentinel_size);
+        }
     }
 
     /// Load audio from a raw pointer using custom ma_decoder read/seek callbacks.
     /// This avoids creating a Zig slice of unknown length — miniaudio reads through
     /// callbacks that bounds-check against `max_size`, returning EOF if exceeded.
-    fn loadFromBoundedPointer(self: *Sample, data_ptr: [*]const u8, max_size: usize) !void {
+    pub fn loadFromBoundedPointer(self: *Sample, data_ptr: [*]const u8, max_size: usize) !void {
         self.cleanupPlaybackState();
         log("Sample.loadFromBoundedPointer mounting bounded stream (max_size={d})\n", .{max_size});
 
@@ -953,6 +958,10 @@ pub const Sample = struct {
             return error.SampleLoadFailed;
         }
         self.bounded_mem_ctx = ctx;
+        // Bounded mounts serve non-WAV streaming formats only; clear any
+        // source-format hint left by a previous load (loadFromMemory would
+        // recompute it; there is no WAV header to parse here).
+        self.src_bpf = 0;
         self.finishDecoderLoad(decoder);
 
         log("Sample.loadFromBoundedPointer success: s={*}, vol={d}, pan={d}, pitch={d}, loop={d}\n", .{ self, self.volume, self.pan, self.pitch, self.loop_count });
