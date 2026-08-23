@@ -33,7 +33,8 @@ pub const Redbook = struct {
     track_end: u32 = 0,
     status: RedbookStatus = .stopped,
     volume: u32 = 127,
-    /// Wall-clock timestamp (ms) when playback started.
+    /// Monotonic-clock reading (ms) when playback started; paired with nowMs()
+    /// so position math is immune to system-time steps (NTP, manual change).
     play_start_ms: i64 = 0,
     paused_position_ms: i64 = 0,
 

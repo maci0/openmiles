@@ -234,7 +234,6 @@ pub fn clearFileError() void {
 // width as a pointer). open RETURNS the file length and fills *FileHandle;
 // seek takes (handle, offset, type) where type is 0=SET, 1=CUR, 2=END.
 pub const SEEK_SET: u32 = 0;
-pub const SEEK_CUR: u32 = 1;
 pub const SEEK_END: u32 = 2;
 pub var cb_file_open: ?*const fn ([*:0]const u8, *u32) callconv(.winapi) u32 = null;
 pub var cb_file_close: ?*const fn (u32) callconv(.winapi) void = null;

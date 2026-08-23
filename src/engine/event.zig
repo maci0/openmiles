@@ -209,11 +209,6 @@ pub const EventConstruct = struct {
         self.raw(";");
         return true;
     }
-    pub fn addBare(self: *EventConstruct, t: StepType) bool {
-        self.printType(t);
-        self.raw(";");
-        return true;
-    }
     // --- field encoders (mirror the SDK AIL_mem_print* calls and the decoder) ---
     // A string field: content followed by the ';' separator (AIL_mem_prints + ';').
     fn fieldStr(self: *EventConstruct, s: []const u8) void {
@@ -505,18 +500,27 @@ const Decoder = struct {
         x.* = v;
         self.eatSep();
     }
-    fn copyFloat(self: *Decoder, x: *f32) void {
+    // Scan a "%f"/"%d"-style field up to its ';' separator and advance past it;
+    // flag overflow (so nextStep bails) at a premature NUL rather than stepping
+    // past the string end, like eatSep/nibble do.
+    fn fieldText(self: *Decoder) []const u8 {
         var len: usize = 0;
         while (self.p[len] != ';' and self.p[len] != 0) len += 1;
-        x.* = std.fmt.parseFloat(f32, self.p[0..len]) catch 0;
-        self.p += len + 1;
+        const s = self.p[0..len];
+        self.p += len;
+        if (self.p[0] == ';') {
+            self.p += 1;
+        } else {
+            self.overflow = true;
+        }
+        return s;
+    }
+    fn copyFloat(self: *Decoder, x: *f32) void {
+        x.* = std.fmt.parseFloat(f32, self.fieldText()) catch 0;
     }
     // A decimal integer field written with "%d" (may be more than one digit).
     fn copyDecimal(self: *Decoder, x: *i32) void {
-        var len: usize = 0;
-        while (self.p[len] != ';' and self.p[len] != 0) len += 1;
-        x.* = std.fmt.parseInt(i32, self.p[0..len], 10) catch 0;
-        self.p += len + 1;
+        x.* = std.fmt.parseInt(i32, self.fieldText(), 10) catch 0;
     }
     // Split the colon-separated cache/purge sound list into namelist/namecount,
     // mirroring the SDK: reserve `count` pointers in the scratch buffer, copy the
@@ -583,10 +587,7 @@ pub fn nextStep(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: []
     switch (st) {
         .version => {
             d.p += 2; // type + ';'
-            var len: usize = 0;
-            while (d.p[len] != ';' and d.p[len] != 0) len += 1;
-            const ver = std.fmt.parseInt(i32, d.p[0..len], 10) catch -1;
-            d.p += len + 1;
+            const ver = std.fmt.parseInt(i32, d.fieldText(), 10) catch -1;
             if (ver != CURRENT_EVENT_VERSION) return null;
             if (d.p[0] == 0 or d.p[0] == '\r' or d.p[0] == '\n') return null;
             return nextStep(@ptrCast(d.p), step, scratch);
@@ -753,4 +754,22 @@ pub fn nextStep(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: []
     }
     if (d.overflow) return null;
     return @ptrCast(d.p);
+}
+
+test "nextStep stops at a premature NUL inside float/decimal fields" {
+    const testing = std.testing;
+    var step: EVENT_STEP_INFO = undefined;
+    var scratch: [256]u8 align(8) = undefined;
+
+    // Ramp (type ':') whose float field ("1.") is cut off by the terminator:
+    // the decoder must flag overflow and stop instead of stepping past the NUL
+    // and decoding whatever follows it in memory.
+    try testing.expectEqual(@as(?[*:0]const u8, null), nextStep(":n;l;1.", &step, &scratch));
+    // move_var (type '@', 16) truncated inside a decimal interp_type field.
+    try testing.expectEqual(@as(?[*:0]const u8, null), nextStep("@n;1.5;2.0;1", &step, &scratch));
+    // A bare version header ends the event cleanly (no steps follow).
+    try testing.expectEqual(@as(?[*:0]const u8, null), nextStep("9;4", &step, &scratch));
+
+    // Well-formed equivalents still decode fully.
+    try testing.expect(nextStep(":n;l;1.;t;1;0;2;", &step, &scratch) != null);
 }

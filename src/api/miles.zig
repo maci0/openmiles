@@ -28,7 +28,6 @@ const openmiles = @import("openmiles");
 const log = openmiles.log;
 
 // MILESEVENT_ENQUEUE_* flags (mss.h).
-const ENQUEUE_BUFFER_PTR: i32 = 0x1;
 const ENQUEUE_FREE_EVENT: i32 = 0x2;
 
 // MILESEVENTSTATE (mss.h _MILESEVENTSTATE) — returned by MilesGetEventSystemState.
@@ -309,35 +308,50 @@ fn createInstance(queued_id: u64, soundname_full: []const u8, labels_in: []const
     };
 }
 
+// Shared walk over an event string's decoded steps: nextStep with a per-walk
+// scratch buffer, bounded at 256 steps so a corrupt/cyclic string cannot spin.
+// Steps whose decode fails end the walk (the partial step is not reported),
+// matching both call sites.
+const StepWalker = struct {
+    step: openmiles.event.EVENT_STEP_INFO = undefined,
+    scratch: [512]u8 align(8) = undefined,
+    cur: ?[*:0]const u8,
+    guard: u32 = 0,
+
+    fn init(event: ?[*]const u8) StepWalker {
+        return .{ .cur = @ptrCast(event) };
+    }
+
+    fn next(self: *StepWalker) ?*const openmiles.event.EVENT_STEP_INFO {
+        const c = self.cur orelse return null;
+        if (self.guard >= 256) return null;
+        self.guard += 1;
+        self.cur = openmiles.event.nextStep(c, &self.step, &self.scratch) orelse return null;
+        return &self.step;
+    }
+};
+
 // Parse an event's bytecode and create an instance per start-sound step.
 fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: i32) u64 {
     if (event == null) return 0;
+    var walker = StepWalker.init(event);
     const qid = nextId();
-    if (event) |ev| {
-        var step: openmiles.event.EVENT_STEP_INFO = undefined;
-        var scratch: [512]u8 align(8) = undefined;
-        var cur: ?[*:0]const u8 = @ptrCast(ev);
-        var guard: u32 = 0;
-        while (cur != null and guard < 256) : (guard += 1) {
-            const next = openmiles.event.nextStep(cur.?, &step, &scratch);
-            if (next == null) break;
-            if (step.type == @intFromEnum(openmiles.event.StepType.start_sound)) {
-                const sn = step.u.start.soundname;
-                const lb = step.u.start.labels;
-                const lbl: []const u8 = if (lb.str) |lp| lp[0..@intCast(@max(lb.len, 0))] else "";
-                if (sn.str) |sp| createInstance(qid, sp[0..@intCast(@max(sn.len, 0))], lbl, user_buffer, ubl);
-            } else if (step.type == @intFromEnum(openmiles.event.StepType.cache_sounds)) {
-                applyCacheStep(step.u.load, true);
-            } else if (step.type == @intFromEnum(openmiles.event.StepType.purge_sounds)) {
-                applyCacheStep(step.u.load, false);
-            } else if (step.type == @intFromEnum(openmiles.event.StepType.persist)) {
-                const pn = step.u.persist.name;
-                if (pn.str) |sp| persistAdd(sp[0..@intCast(@max(pn.len, 0))]);
-            }
-            cur = next;
+    while (walker.next()) |st| {
+        if (st.type == @intFromEnum(openmiles.event.StepType.start_sound)) {
+            const sn = st.u.start.soundname;
+            const lb = st.u.start.labels;
+            const lbl: []const u8 = if (lb.str) |lp| lp[0..@intCast(@max(lb.len, 0))] else "";
+            if (sn.str) |sp| createInstance(qid, sp[0..@intCast(@max(sn.len, 0))], lbl, user_buffer, ubl);
+        } else if (st.type == @intFromEnum(openmiles.event.StepType.cache_sounds)) {
+            applyCacheStep(st.u.load, true);
+        } else if (st.type == @intFromEnum(openmiles.event.StepType.purge_sounds)) {
+            applyCacheStep(st.u.load, false);
+        } else if (st.type == @intFromEnum(openmiles.event.StepType.persist)) {
+            const pn = st.u.persist.name;
+            if (pn.str) |sp| persistAdd(sp[0..@intCast(@max(pn.len, 0))]);
         }
-        if (flags & ENQUEUE_FREE_EVENT != 0) std.c.free(@ptrCast(@constCast(ev)));
     }
+    if (flags & ENQUEUE_FREE_EVENT != 0) std.c.free(@ptrCast(@constCast(event.?)));
     return qid;
 }
 
@@ -665,22 +679,15 @@ pub fn MilesFindEvent(bank: ?*anyopaque, event_name: ?[*:0]const u8) callconv(.w
 pub fn MilesGetEventLength(event_name: ?[*:0]const u8) callconv(.winapi) i32 {
     const name = std.mem.span(event_name orelse return 0);
     const ev = openmiles.soundbank.containerFindEvent(name) orelse return 0;
-    var step: openmiles.event.EVENT_STEP_INFO = undefined;
-    var scratch: [512]u8 align(8) = undefined;
-    var cur: ?[*:0]const u8 = @ptrCast(ev);
-    var guard: u32 = 0;
-    while (cur != null and guard < 256) : (guard += 1) {
-        const next = openmiles.event.nextStep(cur.?, &step, &scratch);
-        if (next == null) break;
-        if (step.type == @intFromEnum(openmiles.event.StepType.start_sound)) {
-            const sn = step.u.start.soundname;
-            const sp = sn.str orelse return 0;
-            const full = sp[0..@intCast(@max(sn.len, 0))];
-            const cut = std.mem.indexOfScalar(u8, full, ':') orelse full.len;
-            if (openmiles.soundbank.containerSoundDurationMs(full[0..cut])) |ms| return @intCast(ms);
-            return 0;
-        }
-        cur = next;
+    var walker = StepWalker.init(ev);
+    while (walker.next()) |st| {
+        if (st.type != @intFromEnum(openmiles.event.StepType.start_sound)) continue;
+        const sn = st.u.start.soundname;
+        const sp = sn.str orelse return 0;
+        const full = sp[0..@intCast(@max(sn.len, 0))];
+        const cut = std.mem.indexOfScalar(u8, full, ':') orelse full.len;
+        if (openmiles.soundbank.containerSoundDurationMs(full[0..cut])) |ms| return @intCast(ms);
+        return 0;
     }
     return 0;
 }

@@ -168,10 +168,6 @@ pub const Filter = struct {
         }
     }
 
-    pub fn getCutoff(self: *const Filter) f64 {
-        return self.cutoff_frequency;
-    }
-
     /// Set a named attribute. Supported: "Cutoff" (Hz), "Order" (1-4).
     pub fn setAttribute(self: *Filter, name: []const u8, value: f32) void {
         if (std.ascii.eqlIgnoreCase(name, "cutoff")) {

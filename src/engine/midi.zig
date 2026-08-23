@@ -244,13 +244,18 @@ pub const Sequence = struct {
         }
     }
 
+    /// Clamp a raw user/file BPM ratio into the range every consumer can
+    /// divide by: games request extreme values, and onRead needs a non-zero
+    /// divisor. Single source of truth for the [0.01, 100] bound.
+    fn clampedTempoRatio(raw: f64) f64 {
+        return @max(0.01, @min(raw, 100.0));
+    }
+
     /// Recalculate tempo_ratio from user_bpm and a given file BPM.
-    /// Tempo ratio is clamped to [0.01, 100] — games occasionally request
-    /// extreme values, but onRead needs a non-zero divisor.
     fn recalcTempoRatio(self: *Sequence, file_bpm: i32) void {
         if (self.user_bpm > 0 and file_bpm > 0) {
             const raw = @as(f64, @floatFromInt(self.user_bpm)) / @as(f64, @floatFromInt(file_bpm));
-            const target = @max(0.01, @min(raw, 100.0));
+            const target = clampedTempoRatio(raw);
             if (self.tempo_fade_active) {
                 self.tempo_fade_target_ratio = target;
             } else {
@@ -271,7 +276,7 @@ pub const Sequence = struct {
             self.user_bpm = target_bpm;
             if (target_bpm > 0 and self.tempo > 0) {
                 const raw = @as(f64, @floatFromInt(target_bpm)) / @as(f64, @floatFromInt(self.tempo));
-                self.tempo_ratio = @max(0.01, @min(raw, 100.0));
+                self.tempo_ratio = clampedTempoRatio(raw);
             } else {
                 self.tempo_ratio = 1.0;
             }
@@ -282,7 +287,7 @@ pub const Sequence = struct {
         self.tempo_fade_start_ratio = self.tempo_ratio;
         if (target_bpm > 0 and self.tempo > 0) {
             const raw = @as(f64, @floatFromInt(target_bpm)) / @as(f64, @floatFromInt(self.tempo));
-            self.tempo_fade_target_ratio = @max(0.01, @min(raw, 100.0));
+            self.tempo_fade_target_ratio = clampedTempoRatio(raw);
         } else {
             self.tempo_fade_target_ratio = 1.0;
         }
@@ -291,7 +296,8 @@ pub const Sequence = struct {
         self.tempo_fade_active = true;
     }
 
-    /// Advance the tempo fade by `real_ms` of wall-clock time, updating `tempo_ratio` in place.
+    /// Advance the tempo fade by `real_ms` of rendered-audio time (frames x
+    /// ms-per-frame, independent of any OS clock), updating `tempo_ratio` in place.
     fn advanceTempoFade(self: *Sequence, real_ms: f64) void {
         if (!self.tempo_fade_active) return;
         self.tempo_fade_elapsed_ms += real_ms;

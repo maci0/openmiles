@@ -209,7 +209,6 @@ pub const MixBus = struct {
             // displaced node and leave the bus graph in an inconsistent state).
             if (self.limiter != null) self.enableLimiter(false);
             const node = self.driver.allocator.create(CompressorNode) catch return;
-            node.env = 1.0;
             var chans = [_]u32{2};
             var cfg = ma.ma_node_config_init();
             cfg.vtable = &CompressorNode.vtable;
@@ -287,11 +286,6 @@ pub const DigitalDriver = struct {
     driver_processors: [2]usize = .{ 0, 0 },
     // Filters opened against this driver (tracked for cleanup on driver close).
     filters: std.ArrayListUnmanaged(*root.Filter) = .empty,
-    // Captured output buffer for AIL_process_digital_audio. Populated by
-    // the onProcess callback each time the audio thread renders a buffer.
-    capture_buf: std.ArrayListUnmanaged(f32) = .empty,
-    capture_mutex: std.Io.Mutex = .init,
-    capture_enabled: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, frequency: u32, bits: i32, channels: u32) !*DigitalDriver {
         _ = bits;
@@ -339,11 +333,6 @@ pub const DigitalDriver = struct {
         if (ma.ma_engine_get_listener_count(&self.engine) > 0) {
             ma.ma_spatializer_listener_set_speed_of_sound(&self.engine.listeners[0], mss_speed_of_sound);
         }
-
-        // Install an onProcess callback so AIL_process_digital_audio can
-        // capture the engine's mixed output without interfering with playback.
-        self.engine.onProcess = onProcessCapture;
-        self.engine.pProcessUserData = @ptrCast(self);
 
         root.last_digital_driver = self;
         root.registerDriver(self);
@@ -425,7 +414,6 @@ pub const DigitalDriver = struct {
             s.deinit();
         }
         self.samples_3d.deinit(self.allocator);
-        self.capture_buf.deinit(self.allocator);
         ma.ma_engine_uninit(&self.engine);
         self.allocator.destroy(self);
     }
@@ -486,60 +474,6 @@ pub const DigitalDriver = struct {
             if (s.status() == .playing) count += 1;
         }
         return count;
-    }
-
-    /// Called from the audio thread each time the engine renders a buffer.
-    /// Copies the mixed float frames into the capture ring so that
-    /// AIL_process_digital_audio can return them to the game.
-    fn onProcessCapture(pUserData: ?*anyopaque, pFramesOut: [*c]f32, frameCount: ma.ma_uint64) callconv(.c) void {
-        const self: *DigitalDriver = @ptrCast(@alignCast(pUserData.?));
-        // capture_enabled is published with a release store by enableCapture once
-        // the capture buffer has been pre-allocated; acquire-load it here so the
-        // audio thread never observes the flag set before the buffer capacity is.
-        if (!@atomicLoad(bool, &self.capture_enabled, .acquire)) return;
-        const channels = ma.ma_engine_get_channels(&self.engine);
-        const sample_count: usize = @as(usize, @intCast(frameCount)) * channels;
-        if (!self.capture_mutex.tryLock()) return;
-        defer self.capture_mutex.unlock(io);
-        // Keep only the latest buffer; games typically call process_digital_audio
-        // once per frame expecting the most recent rendered block.
-        self.capture_buf.clearRetainingCapacity();
-        if (self.capture_buf.capacity >= sample_count) {
-            self.capture_buf.appendSliceAssumeCapacity(pFramesOut[0..sample_count]);
-        }
-    }
-
-    /// Enable the capture path and pre-allocate the buffer so the audio
-    /// thread callback never needs to allocate.
-    pub fn enableCapture(self: *DigitalDriver) void {
-        if (@atomicLoad(bool, &self.capture_enabled, .acquire)) return;
-        const channels = ma.ma_engine_get_channels(&self.engine);
-        const rate = ma.ma_engine_get_sample_rate(&self.engine);
-        // Pre-allocate for ~50ms of audio (a generous render buffer).
-        const cap: usize = @as(usize, rate / 20) * channels;
-        self.capture_buf.ensureTotalCapacity(self.allocator, cap) catch {};
-        // Release store: the buffer capacity above must be visible to the audio
-        // thread before it observes the flag set (see onProcessCapture).
-        @atomicStore(bool, &self.capture_enabled, true, .release);
-    }
-
-    /// Read captured frames into a caller-supplied buffer. Returns the
-    /// number of BYTES written. Converts from float to 16-bit PCM.
-    pub fn readCaptured(self: *DigitalDriver, dest: [*]u8, max_bytes: usize) u32 {
-        if (!self.capture_mutex.tryLock()) return 0;
-        defer self.capture_mutex.unlock(io);
-        const channels = ma.ma_engine_get_channels(&self.engine);
-        const sample_count = self.capture_buf.items.len;
-        const frame_count = if (channels == 0) 0 else sample_count / channels;
-        // Convert f32 → s16 into dest
-        const out_frames = if (channels == 0) 0 else @min(frame_count, max_bytes / (channels * 2));
-        const out_samples = out_frames * channels;
-        const out: [*]i16 = @ptrCast(@alignCast(dest));
-        for (0..out_samples) |i| {
-            const clamped = @max(-1.0, @min(1.0, self.capture_buf.items[i]));
-            out[i] = @intFromFloat(clamped * 32767.0);
-        }
-        return @intCast(out_samples * 2);
     }
 
     // MSS is left-handed (forward=+Z); miniaudio is right-handed (forward=-Z).
@@ -883,6 +817,34 @@ pub const Sample = struct {
         }
     }
 
+    /// Shared post-init tail of every decoder-backed Sample load: adopt the
+    /// decoder, cache the length, apply stored rate/volume/pan state, register
+    /// the EOS bridge, and re-apply any loop range. No fallible step here;
+    /// callers assign their ownership fields (owned buffer/bounded ctx) first.
+    fn finishDecoderLoad(self: *Sample, decoder: *ma.ma_decoder) void {
+        self.decoder = decoder;
+        self.is_initialized = true;
+        self.is_done = false;
+        self.is_paused = false;
+        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
+
+        if (self.target_rate) |tr| {
+            const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
+            if (native_rate > 0) self.pitch = tr / native_rate;
+        }
+
+        ma.ma_sound_set_volume(&self.sound, self.volume);
+        ma.ma_sound_set_pan(&self.sound, self.pan);
+        ma.ma_sound_set_pitch(&self.sound, self.pitch);
+        // Disable miniaudio looping on load; start() re-enables it for infinite
+        // loops (count == 0). Finite loop counting is handled by the EOS bridge.
+        ma.ma_sound_set_looping(&self.sound, 0);
+        _ = ma.ma_sound_set_end_callback(&self.sound, Sample.eosCallbackBridge, self);
+        if (self.loop_end_frame > 0) {
+            _ = ma.ma_data_source_set_range_in_pcm_frames(decoder, 0, self.loop_end_frame);
+        }
+    }
+
     pub fn loadFromOwnedMemory(self: *Sample, data: []u8) !void {
         self.cleanupPlaybackState();
 
@@ -900,26 +862,9 @@ pub const Sample = struct {
         // paths can safely free the buffer on failure without causing a double-free
         // through a later Sample.deinit.
         self.owned_buffer = data;
-        self.decoder = decoder;
-        self.is_initialized = true;
-        self.is_done = false;
-        self.is_paused = false;
-        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
-
-        if (self.target_rate) |tr| {
-            const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            if (native_rate > 0) self.pitch = tr / native_rate;
-        }
+        self.finishDecoderLoad(decoder);
 
         log("Sample.loadFromOwnedMemory success: s={*}, vol={d}, pan={d}, pitch={d}, loop={d}\n", .{ self, self.volume, self.pan, self.pitch, self.loop_count });
-        ma.ma_sound_set_volume(&self.sound, self.volume);
-        ma.ma_sound_set_pan(&self.sound, self.pan);
-        ma.ma_sound_set_pitch(&self.sound, self.pitch);
-        ma.ma_sound_set_looping(&self.sound, 0);
-        _ = ma.ma_sound_set_end_callback(&self.sound, Sample.eosCallbackBridge, self);
-        if (self.loop_end_frame > 0) {
-            _ = ma.ma_data_source_set_range_in_pcm_frames(decoder, 0, self.loop_end_frame);
-        }
     }
 
     /// Context for bounded memory read/seek callbacks used by ma_decoder_init.
@@ -1007,27 +952,10 @@ pub const Sample = struct {
             // decoder allocation and ctx are freed by their errdefers.
             return error.SampleLoadFailed;
         }
-        self.decoder = decoder;
         self.bounded_mem_ctx = ctx;
-        self.is_initialized = true;
-        self.is_done = false;
-        self.is_paused = false;
-        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
-
-        if (self.target_rate) |tr| {
-            const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            if (native_rate > 0) self.pitch = tr / native_rate;
-        }
+        self.finishDecoderLoad(decoder);
 
         log("Sample.loadFromBoundedPointer success: s={*}, vol={d}, pan={d}, pitch={d}, loop={d}\n", .{ self, self.volume, self.pan, self.pitch, self.loop_count });
-        ma.ma_sound_set_volume(&self.sound, self.volume);
-        ma.ma_sound_set_pan(&self.sound, self.pan);
-        ma.ma_sound_set_pitch(&self.sound, self.pitch);
-        ma.ma_sound_set_looping(&self.sound, 0);
-        _ = ma.ma_sound_set_end_callback(&self.sound, Sample.eosCallbackBridge, self);
-        if (self.loop_end_frame > 0) {
-            _ = ma.ma_data_source_set_range_in_pcm_frames(decoder, 0, self.loop_end_frame);
-        }
     }
 
     pub fn loadFromMemory(self: *Sample, data: []const u8, copy_data: bool) !void {
@@ -1056,30 +984,10 @@ pub const Sample = struct {
             return error.SampleLoadFailed;
         }
         self.owned_buffer = owned_copy;
-        self.decoder = decoder;
         self.src_bpf = wavSourceBytesPerFrame(internal_data) orelse 0;
-        self.is_initialized = true;
-        self.is_done = false;
-        self.is_paused = false;
-        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
-
-        if (self.target_rate) |tr| {
-            const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            if (native_rate > 0) self.pitch = tr / native_rate;
-        }
+        self.finishDecoderLoad(decoder);
 
         log("Sample.loadFromMemory success: s={*}, vol={d}, pan={d}, pitch={d}, loop={d}\n", .{ self, self.volume, self.pan, self.pitch, self.loop_count });
-        ma.ma_sound_set_volume(&self.sound, self.volume);
-        ma.ma_sound_set_pan(&self.sound, self.pan);
-        ma.ma_sound_set_pitch(&self.sound, self.pitch);
-        // Disable miniaudio looping on load; start() re-enables it for infinite loops (count == 0).
-        // Finite loop counting is handled in the EOS callback.
-        ma.ma_sound_set_looping(&self.sound, 0);
-        _ = ma.ma_sound_set_end_callback(&self.sound, Sample.eosCallbackBridge, self);
-        // Re-apply loop end range if set
-        if (self.loop_end_frame > 0) {
-            _ = ma.ma_data_source_set_range_in_pcm_frames(decoder, 0, self.loop_end_frame);
-        }
     }
 
     pub fn loadFromFile(self: *Sample, path: []const u8) !void {
@@ -1818,6 +1726,42 @@ pub const Sample3D = struct {
         }
     }
 
+    /// Shared post-init tail of every decoder-backed Sample3D load: adopt the
+    /// decoder, cache the length, apply stored rate/volume state, register the
+    /// EOS bridge, and re-apply all stored spatial settings (they may have been
+    /// set before audio loaded). No fallible step here; callers assign their
+    /// ownership fields first.
+    fn finishDecoderLoad(self: *Sample3D, decoder: *ma.ma_decoder) void {
+        self.decoder = decoder;
+        self.is_initialized = true;
+        self.is_done = false;
+        self.is_paused = false;
+        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
+
+        if (self.target_rate) |tr| {
+            const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
+            if (native_rate > 0) self.pitch = tr / native_rate;
+        }
+
+        self.applyVolume();
+        ma.ma_sound_set_pitch(&self.sound, self.pitch);
+        // Disable miniaudio looping on load; start() re-enables it for infinite
+        // loops. Finite loop counting is handled by the EOS bridge.
+        ma.ma_sound_set_looping(&self.sound, 0);
+        _ = ma.ma_sound_set_end_callback(&self.sound, Sample3D.eosCallbackBridge, self);
+        if (self.driver.rolloff_factor != 1.0) ma.ma_sound_set_rolloff(&self.sound, self.driver.rolloff_factor);
+        if (self.driver.effectiveDoppler() != 1.0) ma.ma_sound_set_doppler_factor(&self.sound, self.driver.effectiveDoppler());
+        ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
+        ma.ma_sound_set_velocity(&self.sound, self.velocity_x, self.velocity_y, -self.velocity_z);
+        ma.ma_sound_set_min_distance(&self.sound, self.min_distance);
+        ma.ma_sound_set_max_distance(&self.sound, self.max_distance);
+        self.applyCone();
+        ma.ma_sound_set_direction(&self.sound, self.orient_fx, self.orient_fy, -self.orient_fz);
+        if (self.loop_end_frame > 0) {
+            _ = ma.ma_data_source_set_range_in_pcm_frames(decoder, 0, self.loop_end_frame);
+        }
+    }
+
     pub fn loadFromOwnedMemory(self: *Sample3D, data: []u8) !void {
         self.cleanupPlaybackState();
 
@@ -1833,24 +1777,7 @@ pub const Sample3D = struct {
         }
         // Take ownership only after all fallible steps succeed (see Sample.loadFromOwnedMemory).
         self.owned_buffer = data;
-        self.decoder = decoder;
-        self.is_initialized = true;
-        self.is_done = false;
-        self.is_paused = false;
-        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
-
-        if (self.target_rate) |tr| {
-            const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            if (native_rate > 0) self.pitch = tr / native_rate;
-        }
-
-        ma.ma_sound_set_volume(&self.sound, self.volume);
-        ma.ma_sound_set_pitch(&self.sound, self.pitch);
-        ma.ma_sound_set_looping(&self.sound, 0);
-        _ = ma.ma_sound_set_end_callback(&self.sound, Sample3D.eosCallbackBridge, self);
-        if (self.loop_end_frame > 0) {
-            _ = ma.ma_data_source_set_range_in_pcm_frames(decoder, 0, self.loop_end_frame);
-        }
+        self.finishDecoderLoad(decoder);
     }
 
     pub fn loadFromMemory(self: *Sample3D, data: []const u8, copy_data: bool) !void {
@@ -1876,33 +1803,7 @@ pub const Sample3D = struct {
             return error.SoundInitFailed;
         }
         self.owned_buffer = owned_copy;
-        self.decoder = decoder;
-        self.is_initialized = true;
-        self.is_done = false;
-        self.is_paused = false;
-        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
-
-        if (self.target_rate) |tr| {
-            const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            if (native_rate > 0) self.pitch = tr / native_rate;
-        }
-
-        self.applyVolume();
-        ma.ma_sound_set_pitch(&self.sound, self.pitch);
-        ma.ma_sound_set_looping(&self.sound, 0);
-        _ = ma.ma_sound_set_end_callback(&self.sound, Sample3D.eosCallbackBridge, self);
-        if (self.driver.rolloff_factor != 1.0) ma.ma_sound_set_rolloff(&self.sound, self.driver.rolloff_factor);
-        if (self.driver.effectiveDoppler() != 1.0) ma.ma_sound_set_doppler_factor(&self.sound, self.driver.effectiveDoppler());
-        // Re-apply stored spatial settings (may have been set before audio loaded)
-        ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
-        ma.ma_sound_set_velocity(&self.sound, self.velocity_x, self.velocity_y, -self.velocity_z);
-        ma.ma_sound_set_min_distance(&self.sound, self.min_distance);
-        ma.ma_sound_set_max_distance(&self.sound, self.max_distance);
-        self.applyCone();
-        ma.ma_sound_set_direction(&self.sound, self.orient_fx, self.orient_fy, -self.orient_fz);
-        if (self.loop_end_frame > 0) {
-            _ = ma.ma_data_source_set_range_in_pcm_frames(decoder, 0, self.loop_end_frame);
-        }
+        self.finishDecoderLoad(decoder);
     }
 
     fn loadFromBoundedPointer(self: *Sample3D, data_ptr: [*]const u8, max_size: usize) !void {
@@ -1916,43 +1817,18 @@ pub const Sample3D = struct {
         errdefer self.driver.allocator.destroy(decoder);
         var result = ma.ma_decoder_init(Sample.boundedMemRead, Sample.boundedMemSeek, @ptrCast(ctx), null, decoder);
         if (result != ma.MA_SUCCESS) {
-            self.driver.allocator.destroy(ctx);
+            // ctx/decoder are freed by their errdefers on this error return.
             return error.DecoderInitFailed;
         }
 
         result = ma.ma_sound_init_from_data_source(&self.driver.engine, @ptrCast(decoder), 0, null, &self.sound);
         if (result != ma.MA_SUCCESS) {
             _ = ma.ma_decoder_uninit(decoder);
-            self.driver.allocator.destroy(ctx);
+            // decoder allocation and ctx are freed by their errdefers.
             return error.SoundInitFailed;
         }
-        self.decoder = decoder;
         self.bounded_mem_ctx = ctx;
-        self.is_initialized = true;
-        self.is_done = false;
-        self.is_paused = false;
-        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
-
-        if (self.target_rate) |tr| {
-            const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            if (native_rate > 0) self.pitch = tr / native_rate;
-        }
-
-        self.applyVolume();
-        ma.ma_sound_set_pitch(&self.sound, self.pitch);
-        ma.ma_sound_set_looping(&self.sound, 0);
-        _ = ma.ma_sound_set_end_callback(&self.sound, Sample3D.eosCallbackBridge, self);
-        if (self.driver.rolloff_factor != 1.0) ma.ma_sound_set_rolloff(&self.sound, self.driver.rolloff_factor);
-        if (self.driver.effectiveDoppler() != 1.0) ma.ma_sound_set_doppler_factor(&self.sound, self.driver.effectiveDoppler());
-        ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
-        ma.ma_sound_set_velocity(&self.sound, self.velocity_x, self.velocity_y, -self.velocity_z);
-        ma.ma_sound_set_min_distance(&self.sound, self.min_distance);
-        ma.ma_sound_set_max_distance(&self.sound, self.max_distance);
-        self.applyCone();
-        ma.ma_sound_set_direction(&self.sound, self.orient_fx, self.orient_fy, -self.orient_fz);
-        if (self.loop_end_frame > 0) {
-            _ = ma.ma_data_source_set_range_in_pcm_frames(decoder, 0, self.loop_end_frame);
-        }
+        self.finishDecoderLoad(decoder);
     }
 
     pub fn loadFromUnownedPointer(self: *Sample3D, data_ptr: [*]const u8) !void {
@@ -2260,17 +2136,13 @@ pub const Sample3D = struct {
 const CbProbe = struct {
     var eob_hs: ?*anyopaque = null;
     var eos_hs: ?*anyopaque = null;
-    var sob_hs: ?*anyopaque = null;
     var eob_calls: u32 = 0;
     var eos_calls: u32 = 0;
-    var sob_calls: u32 = 0;
     fn reset() void {
         eob_hs = null;
         eos_hs = null;
-        sob_hs = null;
         eob_calls = 0;
         eos_calls = 0;
-        sob_calls = 0;
     }
     fn onEob(s: ?*anyopaque) callconv(.winapi) void {
         eob_hs = s;
@@ -2279,10 +2151,6 @@ const CbProbe = struct {
     fn onEos(s: ?*anyopaque) callconv(.winapi) void {
         eos_hs = s;
         eos_calls += 1;
-    }
-    fn onSob(s: ?*anyopaque) callconv(.winapi) void {
-        sob_hs = s;
-        sob_calls += 1;
     }
 };
 
