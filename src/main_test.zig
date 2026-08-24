@@ -875,10 +875,27 @@ test "releaseChannel ignores out-of-range channel" {
     const seq = try openmiles.Sequence.init(driver);
     defer seq.deinit();
 
-    // Should not crash or corrupt state
+    // Lock one channel so a buggy out-of-range release has visible state to
+    // corrupt: it must neither clear the valid slot nor touch any other slot.
+    for (&openmiles.locked_channels.*) |*slot| slot.* = null;
+    const ch = openmiles.lockChannel(seq);
+    try testing.expect(ch >= 0 and ch <= 15);
+
     openmiles.releaseChannel(seq, -1);
     openmiles.releaseChannel(seq, 16);
     openmiles.releaseChannel(seq, 100);
+
+    for (&openmiles.locked_channels.*, 0..) |*slot, i| {
+        if (i == @as(usize, @intCast(ch))) {
+            try testing.expectEqual(@as(?*anyopaque, @ptrCast(seq)), slot.*);
+        } else {
+            try testing.expectEqual(@as(?*anyopaque, null), slot.*);
+        }
+    }
+
+    // The in-range release still works afterwards.
+    openmiles.releaseChannel(seq, ch);
+    try testing.expectEqual(@as(?*anyopaque, null), openmiles.locked_channels[@intCast(ch)]);
 }
 
 test "Sample setLoopCount" {
@@ -1017,6 +1034,30 @@ test "isSafePluginFilename accepts safe names" {
     try testing.expect(openmiles.isSafePluginFilename("reverb.flt"));
     try testing.expect(openmiles.isSafePluginFilename(""));
     try testing.expect(openmiles.isSafePluginFilename("a"));
+}
+
+test "loadApplicationProviders skips corrupt plugins and missing directories" {
+    // Games ship broken third-party .asi files; discovery must filter by
+    // extension, skip unloadable candidates, and keep running (count 0, no
+    // provider registered, no crash) -- the same graceful-degradation contract
+    // native_rib_test exercises manually against real plugins.
+    const io = openmiles.io;
+    const cwd = std.Io.Dir.cwd();
+    const dirname = "om_prov_scan_test";
+    cwd.createDir(io, dirname, .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+    defer cwd.deleteTree(io, dirname) catch {};
+    try cwd.writeFile(io, .{ .sub_path = dirname ++ "/readme.txt", .data = "not a plugin" });
+    try cwd.writeFile(io, .{ .sub_path = dirname ++ "/broken.asi", .data = "\xDE\xAD\xBE\xEF" ** 4 });
+
+    const before = openmiles.getAllProviders().len;
+    try testing.expectEqual(@as(i32, 0), openmiles.loadApplicationProviders(dirname));
+    try testing.expectEqual(before, openmiles.getAllProviders().len);
+
+    // A nonexistent directory is reported and returns 0 rather than crashing.
+    try testing.expectEqual(@as(i32, 0), openmiles.loadApplicationProviders(dirname ++ "/missing"));
 }
 
 test "panToMss converts linear pan to MSS range" {
@@ -3889,11 +3930,25 @@ test "v8 case-insensitive string compares" {
     try testing.expect(api_v8.AIL_strnicmp(&a, &d, 4) != 0);
 }
 
-test "v9 64-bit counters and time conversions" {
+test "v9 64-bit counters advance monotonically and time conversions" {
+    // Each clock must strictly advance (bounded poll, same pattern as the
+    // getMsCount/getUsCount tests) -- a frozen or backwards counter breaks
+    // every ms-position/dead-reckoning consumer, so >= alone is not enough.
     const t0 = api_v9.AIL_ms_count64();
+    var waited: u32 = 0;
+    while (api_v9.AIL_ms_count64() == t0 and waited < 5000) : (waited += 10) {
+        openmiles.io.sleep(std.Io.Duration.fromNanoseconds(10 * std.time.ns_per_ms), .awake) catch {};
+    }
+    try testing.expect(api_v9.AIL_ms_count64() > t0);
+
     const us0 = api_v9.AIL_us_count64();
-    try testing.expect(api_v9.AIL_ms_count64() >= t0);
-    try testing.expect(us0 >= t0); // us >= ms in absolute count
+    waited = 0;
+    while (api_v9.AIL_us_count64() == us0 and waited < 5000) : (waited += 10) {
+        openmiles.io.sleep(std.Io.Duration.fromNanoseconds(10 * std.time.ns_per_ms), .awake) catch {};
+    }
+    try testing.expect(api_v9.AIL_us_count64() > us0);
+
+    // Conversions: ms -> us ticks and back.
     try testing.expectEqual(@as(u64, 5000), api_v9.AIL_ms_to_time(5));
     try testing.expectEqual(@as(u64, 5), api_v9.AIL_time_to_ms(5000));
 }
