@@ -614,7 +614,7 @@ test "fuzz: invoke every export with adversarial inputs" {
             _ = api_dls.DLSMSSGetCPU(hm);
             _ = api_dls.DLSMSSOpen(hm, hd, null, ru, ru, ri, ri); // (mdi, dig, libname, flags, rate, bits, channels)
             api_dls.DLSSetAttribute(hm, rstr, scp);
-            _ = api_digital.DllMain(scp, ru, null);
+            _ = @import("main.zig").DllMain(scp, ru, null);
             _ = api_v7.RIB_MAIN(null, rstr);
             _ = api_rib.RIB_alloc_provider_handle(scp);
             _ = api_rib.RIB_enumerate_providers(rstr, &pp, &prov);

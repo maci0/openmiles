@@ -597,7 +597,7 @@ test "coverage: lifecycle / driver open-close exports" {
 
     // DllMain (DLL_PROCESS_ATTACH = 1).
     var hinst: u8 = 0;
-    _ = dg.DllMain(@ptrCast(&hinst), 1, null);
+    _ = @import("main.zig").DllMain(@ptrCast(&hinst), 1, null);
 
     // Variadic C exports.
     AIL_debug_printf("coverage %d", @as(c_int, 1));
