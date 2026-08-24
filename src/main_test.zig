@@ -6196,6 +6196,49 @@ test "file callbacks route through the VFS with the correct ABI" {
     try testing.expectEqual(@as(i32, 0), api_v9.AIL_file_size_info(null, null, 0));
 }
 
+// A VFS whose open reports length 0 (empty or sizeless file). Counts closes so
+// the test can pin that AIL_file_size releases the handle on every path -- open
+// hands out a live token even when it cannot name a size.
+var zero_len_open_calls: u32 = 0;
+var zero_len_close_calls: u32 = 0;
+var zero_len_seek_end: i32 = 0;
+fn zeroLenOpen(name: [*:0]const u8, handle: *u32) callconv(.winapi) u32 {
+    _ = name;
+    zero_len_open_calls += 1;
+    handle.* = 0xBEEF;
+    return 0;
+}
+fn zeroLenClose(h: u32) callconv(.winapi) void {
+    if (h == 0xBEEF) zero_len_close_calls += 1;
+}
+fn zeroLenSeek(h: u32, offset: i32, typ: u32) callconv(.winapi) i32 {
+    _ = h;
+    if (typ == openmiles.SEEK_END and offset == 0) return zero_len_seek_end;
+    return 0;
+}
+
+test "AIL_file_size closes the VFS handle when open reports length 0" {
+    api_file.AIL_set_file_callbacks(@ptrCast(@constCast(&zeroLenOpen)), @ptrCast(@constCast(&zeroLenClose)), @ptrCast(@constCast(&zeroLenSeek)), @ptrCast(@constCast(&vfsRead)));
+    defer api_file.AIL_set_file_callbacks(null, null, null, null);
+
+    // No seek fallback: size stays 0, but the opened handle must still be closed.
+    zero_len_open_calls = 0;
+    zero_len_close_calls = 0;
+    zero_len_seek_end = 0;
+    try testing.expectEqual(@as(u32, 0), api_file.AIL_file_size("empty"));
+    try testing.expectEqual(@as(u32, 1), zero_len_open_calls);
+    try testing.expectEqual(@as(u32, 1), zero_len_close_calls);
+    // The failed probe sets the documented error state.
+    try testing.expectEqualStrings("File not found", std.mem.span(api_file.AIL_file_error()));
+
+    // Seek-to-end names a size for a length-0 open: the fallback value is
+    // returned and the handle is closed exactly once more.
+    zero_len_close_calls = 0;
+    zero_len_seek_end = 42;
+    try testing.expectEqual(@as(u32, 42), api_file.AIL_file_size("sizeless"));
+    try testing.expectEqual(@as(u32, 1), zero_len_close_calls);
+}
+
 test "AIL_mem_alloc_lock_info actually allocates (the real exported allocator)" {
     // AIL_mem_alloc_lock(size) is a macro for AIL_mem_alloc_lock_info(size,
     // __FILE__, __LINE__), so the _info form must allocate, not return null.

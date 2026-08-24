@@ -173,7 +173,12 @@ pub const MixBus = struct {
             // would attach to the same insert point and the second attach would
             // orphan (and leak) the first while corrupting the bus routing.
             if (self.compressor != null) self.installCompressor(false);
-            const node = self.driver.allocator.create(LimiterNode) catch return;
+            const node = self.driver.allocator.create(LimiterNode) catch {
+                // No error channel on this void API; say why the effect is absent
+                // or a later enableLimiter(true) query will lie.
+                log("MixBus.enableLimiter: node allocation failed\n", .{});
+                return;
+            };
             var chans = [_]u32{2};
             var cfg = ma.ma_node_config_init();
             cfg.vtable = &LimiterNode.vtable;
@@ -208,7 +213,10 @@ pub const MixBus = struct {
             // slots can't both point at the same insert (which would leak the
             // displaced node and leave the bus graph in an inconsistent state).
             if (self.limiter != null) self.enableLimiter(false);
-            const node = self.driver.allocator.create(CompressorNode) catch return;
+            const node = self.driver.allocator.create(CompressorNode) catch {
+                log("MixBus.installCompressor: node allocation failed\n", .{});
+                return;
+            };
             var chans = [_]u32{2};
             var cfg = ma.ma_node_config_init();
             cfg.vtable = &CompressorNode.vtable;

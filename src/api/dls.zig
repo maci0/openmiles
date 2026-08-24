@@ -20,8 +20,7 @@ pub fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flag
     log("AIL_DLS_load_file(driver={*}, filename={s}, flags={d})\n", .{ driver, filename, flags });
     openmiles.clearLastError();
     if (openmiles.cb_file_open != null) {
-        const buf = openmiles.fileCallbackReadAll(filename) catch null;
-        if (buf) |b| {
+        if (openmiles.fileCallbackReadAll(filename)) |b| {
             defer openmiles.global_allocator.free(b);
             const tsf_mod = openmiles.tsf;
             const loaded = tsf_mod.tsf_load_memory(b.ptr, @intCast(@min(b.len, @as(usize, std.math.maxInt(c_int)))));
@@ -34,9 +33,15 @@ pub fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flag
             driver.owns_soundfont = true;
             tsf_mod.tsf_set_output(driver.soundfont, tsf_mod.TSF_STEREO_INTERLEAVED, 44100, 0);
             return @ptrCast(driver.soundfont.?);
+        } else |err| {
+            // Not fatal on its own: fall through to a direct filesystem read,
+            // but record why the VFS path failed or the later failure below
+            // has no visible cause.
+            log("AIL_DLS_load_file: callback read failed ({any}); falling back to direct read\n", .{err});
         }
     }
-    return driver.loadDLS(std.mem.span(filename)) catch {
+    return driver.loadDLS(std.mem.span(filename)) catch |err| {
+        log("AIL_DLS_load_file: load '{s}' failed ({any})\n", .{ std.mem.span(filename), err });
         openmiles.setLastError("Failed to load DLS/SoundFont file");
         return null;
     };

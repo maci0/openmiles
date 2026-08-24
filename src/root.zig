@@ -306,22 +306,28 @@ pub fn readWholeFile(path: []const u8) ![]u8 {
 pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
     clearFileError();
     if (cb_file_open != null) {
-        const buf = fileCallbackReadAll(filename) catch null;
-        if (buf) |b| {
-            defer global_allocator.free(b);
-            if (dest) |d| {
-                @memcpy(@as([*]u8, @ptrCast(@alignCast(d)))[0..b.len], b);
-                return d;
-            }
-            const out: [*]u8 = @ptrCast(std.c.malloc(b.len) orelse {
-                setFileError("Out of memory");
-                return null;
+        const buf = fileCallbackReadAll(filename) catch |err| {
+            // Name the real failure mode: a blanket "not found" would send an
+            // operator chasing a missing file when the VFS read or its
+            // allocation actually failed.
+            setFileError(switch (err) {
+                error.FileNotFound => "File not found",
+                error.OutOfMemory => "Out of memory",
+                else => "Read failed",
             });
-            @memcpy(out[0..b.len], b);
-            return out;
+            return null;
+        };
+        defer global_allocator.free(buf);
+        if (dest) |d| {
+            @memcpy(@as([*]u8, @ptrCast(@alignCast(d)))[0..buf.len], buf);
+            return d;
         }
-        setFileError("File not found");
-        return null;
+        const out: [*]u8 = @ptrCast(std.c.malloc(buf.len) orelse {
+            setFileError("Out of memory");
+            return null;
+        });
+        @memcpy(out[0..buf.len], buf);
+        return out;
     }
     const path = std.mem.span(filename);
     const file = fs_compat.openFile(io, path, .{}) catch {
@@ -333,7 +339,10 @@ pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
         setFileError("Stat failed");
         return null;
     };
-    if (file_len == 0) return null;
+    if (file_len == 0) {
+        setFileError("Empty file");
+        return null;
+    }
     const size: usize = @intCast(file_len);
     if (dest) |d| {
         const buf: [*]u8 = @ptrCast(@alignCast(d));
@@ -371,12 +380,26 @@ pub fn ailFileSize(filename: [*:0]const u8) u32 {
         const close_fn = cb_file_close orelse return 0;
         // open returns the file length and fills the handle out-param.
         var handle: u32 = 0;
-        const size = open_fn(filename, &handle);
+        var size = open_fn(filename, &handle);
+        if (size == 0) {
+            // Same 0-return ambiguity fileCallbackReadAll resolves: some VFS
+            // open fine but report length 0 until a seek-to-end names the
+            // size. From here on the handle may be live, so every path below
+            // must close it -- returning early here leaked one VFS handle per
+            // AIL_file_size call on an empty/sizeless file.
+            if (cb_file_seek) |seek_fn| {
+                const end_pos = seek_fn(handle, 0, SEEK_END);
+                if (end_pos > 0) {
+                    size = @intCast(end_pos);
+                    _ = seek_fn(handle, 0, SEEK_SET);
+                }
+            }
+        }
+        close_fn(handle);
         if (size == 0) {
             setFileError("File not found");
             return 0;
         }
-        close_fn(handle);
         return size;
     }
     const path = std.mem.span(filename);
@@ -389,7 +412,10 @@ pub fn ailFileSize(filename: [*:0]const u8) u32 {
         setFileError("Stat failed");
         return 0;
     };
-    if (file_len == 0) return 0;
+    if (file_len == 0) {
+        setFileError("Empty file");
+        return 0;
+    }
     return @intCast(@min(file_len, std.math.maxInt(u32)));
 }
 

@@ -122,11 +122,22 @@ pub const Filter = struct {
             log("Filter.attachSample failed: {d}\n", .{result});
             return;
         }
-        // Track the sample for cleanup and set back-reference
-        sample.attached_filter = self;
+        // Track the sample for cleanup BEFORE setting the back-reference: if the
+        // tracking append fails, an attached_filter left pointing at this filter
+        // would dangle once this Filter is deinit'd (Sample.deinit calls
+        // attached_filter.detachSample). Also undo the audio re-route so the
+        // sample never feeds a filter node that no longer knows about it.
         self.attached_samples.append(self.allocator, sample) catch {
             log("Filter.attachSample: failed to track sample\n", .{});
+            _ = ma.ma_node_attach_output_bus(
+                @ptrCast(&sample.sound),
+                0,
+                ma.ma_engine_get_endpoint(&self.driver.engine),
+                0,
+            );
+            return;
         };
+        sample.attached_filter = self;
     }
 
     /// Detach a sample from this filter, routing it back to the engine endpoint.

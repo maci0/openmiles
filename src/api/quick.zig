@@ -28,8 +28,7 @@ pub fn AIL_quick_load(filename: [*:0]const u8) callconv(.winapi) ?*Sample {
             return null;
         };
         if (openmiles.cb_file_open != null) {
-            const buf = openmiles.fileCallbackReadAll(filename) catch null;
-            if (buf) |b| {
+            if (openmiles.fileCallbackReadAll(filename)) |b| {
                 s.loadFromOwnedMemory(b) catch {
                     openmiles.global_allocator.free(b);
                     openmiles.setLastError("Failed to load quick sample from memory");
@@ -37,6 +36,11 @@ pub fn AIL_quick_load(filename: [*:0]const u8) callconv(.winapi) ?*Sample {
                     return null;
                 };
                 return s;
+            } else |err| {
+                // Not fatal on its own: fall through to a direct filesystem read,
+                // but record why the VFS path failed or the later failure below
+                // has no visible cause.
+                log("AIL_quick_load: callback read failed ({any}); falling back to direct read\n", .{err});
             }
         }
         s.loadFromFile(std.mem.span(filename)) catch {
@@ -191,8 +195,7 @@ pub fn AIL_quick_load_and_play(filename: [*:0]const u8, loop_count: i32, start_p
         };
         loaded: {
             if (openmiles.cb_file_open != null) {
-                const buf = openmiles.fileCallbackReadAll(filename) catch null;
-                if (buf) |b| {
+                if (openmiles.fileCallbackReadAll(filename)) |b| {
                     s.loadFromOwnedMemory(b) catch {
                         openmiles.global_allocator.free(b);
                         break :loaded;
@@ -200,6 +203,8 @@ pub fn AIL_quick_load_and_play(filename: [*:0]const u8, loop_count: i32, start_p
                     s.setLoopCount(loop_count);
                     if (start_paused == 0) s.start();
                     return s;
+                } else |err| {
+                    log("AIL_quick_load_and_play: callback read failed ({any}); falling back to direct read\n", .{err});
                 }
             }
             s.loadFromFile(std.mem.span(filename)) catch break :loaded;

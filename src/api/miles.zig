@@ -663,7 +663,10 @@ pub fn MilesAddSoundBank(filename: ?[*:0]const u8, name: ?[*:0]const u8) callcon
         return null;
     };
     defer openmiles.global_allocator.free(image);
-    const bank = openmiles.soundbank.loadFromMemory(openmiles.global_allocator, fname, image) catch {
+    const bank = openmiles.soundbank.loadFromMemory(openmiles.global_allocator, fname, image) catch |err| {
+        // Same signal as AIL_open_soundbank: the parse error names which check
+        // rejected the bank (NotABank / BadVersion / BadMetaSize / BadAssetTable).
+        log("MilesAddSoundBank: parse '{s}' failed ({any})\n", .{ fname, err });
         openmiles.setLastError("Failed to add sound bank");
         return null;
     };
