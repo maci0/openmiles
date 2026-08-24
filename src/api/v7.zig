@@ -20,7 +20,7 @@ const DigitalDriver = openmiles.DigitalDriver;
 const Redbook = openmiles.Redbook;
 const MidiDriver = openmiles.MidiDriver;
 const AILSOUNDINFO = openmiles.AILSOUNDINFO;
-const openmiles_v8 = @import("v8.zig"); // shared output_speaker_index table
+const speaker = @import("../engine/speaker.zig");
 
 // EAX environment-preset reverb parameters, indexed by EAX_ENVIRONMENT_* room
 // type. Verbatim from m3d.cpp `static ROOM_PARAMS rooms[]` ("MSS 6 values", the
@@ -488,9 +488,9 @@ fn sampleSourceChannels(s: *Sample) u32 {
 }
 // speaker_enum_to_source_chan (wavefile.cpp): the source channel carrying an
 // MSS_SPEAKER, derived from channel_mask — the Nth set bit maps to source N.
-fn srcChanOf(s: *Sample, speaker: i32) i32 {
-    if (speaker < 0 or speaker > 31) return -1;
-    const bit = @as(u32, 1) << @intCast(speaker);
+fn srcChanOf(s: *Sample, spk: i32) i32 {
+    if (spk < 0 or spk > 31) return -1;
+    const bit = @as(u32, 1) << @intCast(spk);
     if (s.channel_mask & bit == 0) return -1;
     const idx: u32 = @popCount(s.channel_mask & (bit - 1));
     return if (idx >= sampleSourceChannels(s)) -1 else @intCast(idx);
@@ -510,12 +510,12 @@ pub fn AIL_sample_channel_levels(s_opt: ?*Sample, src: ?*const anyopaque, dst: ?
     const dst_idx: [*]const i32 = @ptrCast(@alignCast(dst orelse return));
     const lv: [*]f32 = @ptrCast(@alignCast(levels orelse return));
     if (n_levels <= 0) return;
-    const row = openmiles_v8.output_speaker_index[logicalChannels(s)];
+    const row = speaker.output_speaker_index[logicalChannels(s)];
     var i: usize = 0;
     while (i < @as(usize, @intCast(n_levels))) : (i += 1) {
         const sc = srcChanOf(s, src_idx[i]);
         const dspk = dst_idx[i];
-        const dc: i32 = if (dspk >= 0 and dspk <= openmiles_v8.SPK_MAX_INDEX) row[@intCast(dspk)] else -1;
+        const dc: i32 = if (dspk >= 0 and dspk <= speaker.SPK_MAX_INDEX) row[@intCast(dspk)] else -1;
         if (sc < 0 or dc < 0) {
             lv[i] = 0.0;
             continue;
@@ -542,12 +542,12 @@ pub fn AIL_set_sample_channel_levels(s_opt: ?*Sample, src: ?*const anyopaque, ds
         };
         s.user_channel_levels_set = true;
     }
-    const row = openmiles_v8.output_speaker_index[logicalChannels(s)];
+    const row = speaker.output_speaker_index[logicalChannels(s)];
     var i: usize = 0;
     while (i < @as(usize, @intCast(n_levels))) : (i += 1) {
         const sc = srcChanOf(s, src_idx[i]);
         const dspk = dst_idx[i];
-        const dc: i32 = if (dspk >= 0 and dspk <= openmiles_v8.SPK_MAX_INDEX) row[@intCast(dspk)] else -1;
+        const dc: i32 = if (dspk >= 0 and dspk <= speaker.SPK_MAX_INDEX) row[@intCast(dspk)] else -1;
         if (sc < 0 or dc < 0) continue;
         s.user_channel_levels[@intCast(dc)][@intCast(sc)] = lv[i];
     }
@@ -676,11 +676,11 @@ pub fn AIL_set_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array: ?*cons
     const spk = speaker_index_array orelse return;
     const spks: [*]const i32 = @ptrCast(@alignCast(spk));
     const n: usize = @min(@as(usize, @intCast(@max(n_levels, 0))), logical);
-    const row = openmiles_v8.output_speaker_index[logical];
+    const row = speaker.output_speaker_index[logical];
     var i: usize = 0;
     while (i < n) : (i += 1) {
         const s = spks[i];
-        const dch: i32 = if (s >= 0 and s <= openmiles_v8.SPK_MAX_INDEX) row[@intCast(s)] else -1;
+        const dch: i32 = if (s >= 0 and s <= speaker.SPK_MAX_INDEX) row[@intCast(s)] else -1;
         if (dch < 0) continue;
         if (wet_array) |w| {
             const wp: [*]const f32 = @ptrCast(@alignCast(w));

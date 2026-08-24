@@ -306,10 +306,14 @@ pub fn build(b: *std.Build) void {
 
     // Install the test media (WAV/MIDI/SoundFont) next to the test exes so the
     // harnesses find them relative to their own directory (they look up
-    // test_media/test.{wav,mid,sf2}).
-    b.installDirectory(.{
-        .source_dir = b.path("test_media"),
-        .install_dir = .bin,
-        .install_subdir = "test_media",
-    });
+    // test_media/test.{wav,mid,sf2}). The directory is gitignored ("provide
+    // your own"), so skip the install when it is absent instead of failing the
+    // build on machines without the fixtures (e.g. CI).
+    if (std.Io.Dir.cwd().access(b.graph.io, "test_media", .{})) |_| {
+        b.installDirectory(.{
+            .source_dir = b.path("test_media"),
+            .install_dir = .bin,
+            .install_subdir = "test_media",
+        });
+    } else |_| {}
 }

@@ -383,7 +383,8 @@ test "coverage: file/input.zig exports" {
     _ = fl.AIL_file_size("/nonexistent_om_test");
     _ = fl.AIL_file_type(sc(), 16);
     _ = fl.AIL_file_read("/nonexistent_om_test", null);
-    _ = fl.AIL_file_write("/tmp/om_cov_test.bin", sc(), 4);
+    _ = fl.AIL_file_write("om_cov_test.bin", sc(), 4);
+    defer std.Io.Dir.cwd().deleteFile(openmiles.io, "om_cov_test.bin") catch {};
     fl.AIL_set_file_callbacks(null, null, null, null);
     fl.AIL_set_file_async_callbacks(null, null, null, null, null);
 
@@ -573,9 +574,10 @@ test "coverage: lifecycle / driver open-close exports" {
     _ = dg.AIL_waveOutOpen(&wdrv, null, 0, null);
     if (wdrv) |w| dg.AIL_waveOutClose(w);
 
-    // WAV file write.
+    // WAV file write (relative scratch path; "/tmp" is not writable on Windows).
     const wbytes = [_]u8{ 0, 0, 0, 0, 0, 0, 0, 0 };
-    _ = dg.AIL_WAV_file_write("/tmp/om_cov.wav", @ptrCast(@constCast(&wbytes)), wbytes.len, 44100, 1);
+    _ = dg.AIL_WAV_file_write("om_cov.wav", @ptrCast(@constCast(&wbytes)), wbytes.len, 44100, 1);
+    defer std.Io.Dir.cwd().deleteFile(openmiles.io, "om_cov.wav") catch {};
 
     // XMIDI driver close (open covered in midi test).
     const xm = md.AIL_open_XMIDI_driver(0);

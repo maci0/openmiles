@@ -2093,10 +2093,14 @@ pub const Sample3D = struct {
     /// the auto-tick updatePosition, which is gated on the auto_update flag).
     pub fn updatePositionExplicit(self: *Sample3D, dt_ms: f32) void {
         if (!(dt_ms == dt_ms) or std.math.isInf(dt_ms)) return; // NaN/Inf guard
-        const dt_s = dt_ms / 1000.0;
-        self.pos_x += self.velocity_x * dt_s;
-        self.pos_y += self.velocity_y * dt_s;
-        self.pos_z += self.velocity_z * dt_s;
+        // SDK m3d.cpp: velocity is per-millisecond, so position advances by
+        // velocity * dt_ms directly (NOT dt/1000); early-out when velocity is
+        // ~0, mirroring AIL_API_update_listener_3D_position.
+        const eps: f32 = 0.0001; // MSS_EPSILON
+        if (@abs(self.velocity_x) < eps and @abs(self.velocity_y) < eps and @abs(self.velocity_z) < eps) return;
+        self.pos_x += self.velocity_x * dt_ms;
+        self.pos_y += self.velocity_y * dt_ms;
+        self.pos_z += self.velocity_z * dt_ms;
         if (self.is_initialized) {
             ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
         }
@@ -2110,13 +2114,20 @@ pub const Sample3D = struct {
         }
     }
 
-    pub fn updatePosition(self: *Sample3D, dt_s: f32) void {
-        if (!self.auto_update or !self.is_initialized) return;
+    pub fn updatePosition(self: *Sample3D, dt_ms: f32) void {
+        if (!self.auto_update) return;
+        if (!(dt_ms == dt_ms) or std.math.isInf(dt_ms)) return; // NaN/Inf guard
+        // SDK m3d.cpp: velocity is per-millisecond, advance by velocity * dt_ms.
+        // Dead reckoning is a geometric op on the object (like
+        // updatePositionExplicit): the stored position moves even before a
+        // sound is loaded; only the ma_sound push waits for initialization.
         if (self.velocity_x == 0 and self.velocity_y == 0 and self.velocity_z == 0) return;
-        self.pos_x += self.velocity_x * dt_s;
-        self.pos_y += self.velocity_y * dt_s;
-        self.pos_z += self.velocity_z * dt_s;
-        ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
+        self.pos_x += self.velocity_x * dt_ms;
+        self.pos_y += self.velocity_y * dt_ms;
+        self.pos_z += self.velocity_z * dt_ms;
+        if (self.is_initialized) {
+            ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
+        }
     }
     pub fn setOrientation(self: *Sample3D, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) void {
         // SDK (m3d.cpp) normalizes face & up before storing; the getter returns

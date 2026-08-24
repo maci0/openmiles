@@ -443,7 +443,9 @@ pub fn AIL_auto_update_3D_position(s: ?*anyopaque, onoff: i32) callconv(.winapi)
 pub fn AIL_update_3D_position(s: ?*anyopaque, dt: f32) callconv(.winapi) void {
     const p = s orelse return;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
-    sample.updatePosition(dt / 1000.0);
+    // SDK m3d.cpp: dt is milliseconds and velocity is per-millisecond, so the
+    // position advances by velocity * dt directly (no unit conversion).
+    sample.updatePosition(dt);
 }
 pub fn AIL_set_3D_velocity_vector(s: ?*anyopaque, x: f32, y: f32, z: f32) callconv(.winapi) void {
     const p = s orelse return;

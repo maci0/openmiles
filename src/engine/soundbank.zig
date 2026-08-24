@@ -202,11 +202,13 @@ pub const Bank = struct {
     /// DataLen at Info+12) is from hlbank.cpp.
     pub fn soundAssetFilename(self: *const Bank, sound_name: []const u8, out: [*]u8) i32 {
         const data_off = self.findSoundDataOffset(sound_name) orelse 0;
-        if (data_off == 0 or data_off + 8 > self.meta.len) {
+        // Offset math in usize (64-bit): a lying u32 DataOffset from the bank
+        // file must saturate/widen here, not overflow a u32 addition.
+        if (data_off == 0 or @as(usize, data_off) + 8 > self.meta.len) {
             out[0] = 0;
             return -1;
         }
-        const fn_abs = data_off + self.rdU32(data_off + 4); // pSound + FileNameOffset
+        const fn_abs = @as(usize, data_off) + self.rdU32(data_off + 4); // pSound + FileNameOffset
         if (fn_abs >= self.meta.len) {
             out[0] = 0;
             return -1;
@@ -221,7 +223,7 @@ pub const Bank = struct {
         w += sfn.len;
         out[w] = 0;
         // MILESBANKSOUNDINFO.DataLen is at Sound+12 (Info) +12.
-        if (data_off + 28 > self.meta.len) return 0;
+        if (@as(usize, data_off) + 28 > self.meta.len) return 0;
         return self.rdI32(data_off + 24);
     }
 
@@ -265,16 +267,17 @@ pub const Bank = struct {
     /// found. Mirrors hlbank.cpp.
     pub fn soundAssetInfo(self: *const Bank, sound_name: []const u8, out_filename: ?[*]u8, out_info: ?[*]u8) i32 {
         const data_off = self.findSoundDataOffset(sound_name) orelse 0;
-        if (data_off == 0 or data_off + 8 > self.meta.len) {
+        // Offset math in usize (64-bit): see soundAssetFilename.
+        if (data_off == 0 or @as(usize, data_off) + 8 > self.meta.len) {
             if (out_filename) |o| o[0] = 0;
             return 0;
         }
         if (out_info) |oi| {
-            if (data_off + 12 + sound_info_size <= self.meta.len) {
+            if (@as(usize, data_off) + 12 + sound_info_size <= self.meta.len) {
                 @memcpy(oi[0..sound_info_size], self.meta[data_off + 12 ..][0..sound_info_size]);
             }
         }
-        const fn_abs = data_off + self.rdU32(data_off + 4);
+        const fn_abs = @as(usize, data_off) + self.rdU32(data_off + 4);
         if (fn_abs >= self.meta.len) {
             if (out_filename) |o| o[0] = 0;
             return 0;
@@ -297,7 +300,7 @@ pub const Bank = struct {
     /// MILESBANKSOUNDINFO.DurationMs (Sound+12 Info, +24) for a named sound.
     pub fn soundDurationMs(self: *const Bank, sound_name: []const u8) ?u32 {
         const data_off = self.findSoundDataOffset(sound_name) orelse return null;
-        if (data_off + 40 > self.meta.len) return 0;
+        if (@as(usize, data_off) + 40 > self.meta.len) return 0;
         return self.rdU32(data_off + 36);
     }
 

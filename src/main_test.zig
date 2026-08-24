@@ -2089,7 +2089,10 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
 
 test "AIL_WAV_file_write interprets the DIG_F format code (not a bit depth)" {
     const data = [_]u8{0} ** 64;
-    const path = "/tmp/om_wavfmt_test.wav";
+    // Relative scratch path: "/tmp" is not writable on Windows (no C:\tmp), so
+    // keep the file next to the test's working directory and clean it up.
+    const path = "om_wavfmt_test.wav";
+    defer std.Io.Dir.cwd().deleteFile(openmiles.io, path) catch {};
     const H = struct {
         fn readWav(p: []const u8, buf: []u8) ![]u8 {
             const io = openmiles.io;
@@ -3281,6 +3284,54 @@ test "AIL_update_listener_3D_position advances by velocity * dt_ms (per-ms)" {
     api_v7.AIL_update_listener_3D_position(drv, 1000);
     api_v7.AIL_listener_3D_position(drv, &x, &y, &z);
     try testing.expectApproxEqAbs(@as(f32, 100.0), x, 0.01);
+}
+
+test "AIL_update_3D_position advances by velocity * dt_ms (per-ms)" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const h3 = api_3d.AIL_allocate_3D_sample_handle(drv) orelse return error.NoSample;
+    defer api_3d.AIL_release_3D_sample_handle(h3);
+    // Sample velocity is per-millisecond (magnitude 1 = no scale): 2/ms on +x.
+    api_3d.AIL_set_3D_velocity(h3, 2, 0, 0, 1);
+    var x: f32 = 0;
+    var y: f32 = 0;
+    var z: f32 = 0;
+    api_3d.AIL_3D_velocity(@constCast(h3), &x, &y, &z);
+    try testing.expectApproxEqAbs(@as(f32, 2.0), x, 0.001);
+
+    // SDK m3d.cpp: position += velocity * dt_ms. 50 ms -> +100 x. Dead
+    // reckoning works before any audio is loaded (stored position only).
+    api_3d.AIL_auto_update_3D_position(@constCast(h3), 1);
+    api_3d.AIL_update_3D_position(@constCast(h3), 50);
+    api_3d.AIL_3D_position(@constCast(h3), &x, &y, &z);
+    try testing.expectApproxEqAbs(@as(f32, 100.0), x, 0.01);
+
+    // The v5 legacy explicit form advances by the same per-ms units.
+    api_3d.AIL_3D_auto_update_position(@constCast(h3), 1);
+    api_3d.AIL_3D_update_position(@constCast(h3), 25);
+    api_3d.AIL_3D_position(@constCast(h3), &x, &y, &z);
+    try testing.expectApproxEqAbs(@as(f32, 150.0), x, 0.01);
+}
+
+test "AIL_update_3D_position ignores NaN/Inf dt instead of poisoning position" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const h3 = api_3d.AIL_allocate_3D_sample_handle(drv) orelse return error.NoSample;
+    defer api_3d.AIL_release_3D_sample_handle(h3);
+    api_3d.AIL_set_3D_velocity(h3, 2, 0, 0, 1);
+    api_3d.AIL_auto_update_3D_position(@constCast(h3), 1);
+    // A NaN or Inf dt must be dropped like the listener/explicit paths do:
+    // NaN += anything sticks forever and would feed NaN into the mixer's
+    // distance-attenuation math on every later tick.
+    api_3d.AIL_update_3D_position(@constCast(h3), std.math.nan(f32));
+    api_3d.AIL_update_3D_position(@constCast(h3), std.math.inf(f32));
+    var x: f32 = -1;
+    var y: f32 = -1;
+    var z: f32 = -1;
+    api_3d.AIL_3D_position(@constCast(h3), &x, &y, &z);
+    try testing.expectEqual(@as(f32, 0.0), x);
+    try testing.expectEqual(@as(f32, 0.0), y);
+    try testing.expectEqual(@as(f32, 0.0), z);
 }
 
 test "AIL_init_sample resets level/reverb/filter/occlusion state to defaults (SDK)" {
@@ -4977,6 +5028,9 @@ const api_dls_t = @import("api/dls.zig");
 const api_timer_t = @import("api/timer.zig");
 
 test "DLS unload C-ABI variants free a loaded soundfont" {
+    // The soundfont fixture is gitignored ("provide your own"); on machines
+    // without it (e.g. CI) there is nothing to assert, so skip quietly.
+    std.Io.Dir.cwd().access(openmiles.io, "test_media/test.sf2", .{}) catch return;
     const hm = try openmiles.MidiDriver.init(testing.allocator);
     defer hm.deinit();
     // Each unload variant frees the bank, so reload a fresh one before the next.
@@ -5659,6 +5713,33 @@ test "container resolves bank-prefixed sound names (Container_GetSound)" {
     try testing.expectEqual(@as(?u32, 4500), openmiles.soundbank.containerSoundDurationMs("fx/boom"));
     try testing.expectEqual(@as(?u32, 4500), openmiles.soundbank.containerSoundDurationMs("boom"));
     try testing.expectEqual(@as(?u32, null), openmiles.soundbank.containerSoundDurationMs("nope"));
+}
+
+test "soundbank rejects lying u32 sound offsets without overflowing" {
+    var img: [200]u8 = undefined;
+    @memset(&img, 0);
+    const sb = openmiles.soundbank;
+    std.mem.writeInt(u32, img[0..4], sb.BANK_TAG, .little);
+    std.mem.writeInt(i32, img[4..8], 8, .little);
+    std.mem.writeInt(u32, img[32..36], 60, .little);
+    std.mem.writeInt(u32, img[52..56], 1, .little);
+    std.mem.writeInt(u32, img[60..64], 76, .little);
+    // DataOffset = maxInt(u32): every offset computation on this record must
+    // widen/saturate instead of overflowing a u32 addition (panic in safe
+    // builds, wrap -> bogus reads in release).
+    std.mem.writeInt(u32, img[64..68], std.math.maxInt(u32), .little);
+    @memcpy(img[76..81], "boom\x00");
+    std.mem.writeInt(i32, img[8..12], 120, .little);
+    const bank = try sb.loadFromMemory(testing.allocator, "evil.mbnk", img[0..120]);
+    defer bank.deinit();
+
+    var fname: [64]u8 = undefined;
+    try testing.expectEqual(@as(i32, -1), bank.soundAssetFilename("boom", &fname));
+    try testing.expectEqual(@as(u8, 0), fname[0]);
+    try testing.expectEqual(@as(i32, 0), bank.soundAssetInfo("boom", &fname, null));
+    try testing.expectEqual(@as(u8, 0), fname[0]);
+    // Found by name but its record lies past the metadata: duration reports 0.
+    try testing.expectEqual(@as(?u32, 0), sb.containerSoundDurationMs("boom"));
 }
 
 test "MilesTextDumpEventSystem reports system/instance/persist counts" {
