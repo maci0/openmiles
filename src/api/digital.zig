@@ -983,6 +983,16 @@ pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, r
     };
     return 1;
 }
+/// Hand a freshly built WAV to the caller as a malloc'd buffer (free with
+/// AIL_mem_free_lock). Returns 0 if the allocation fails.
+fn adoptWavOut(wav: []const u8, outdata: **anyopaque, outsize: *u32) i32 {
+    const out_ptr: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse return 0);
+    @memcpy(out_ptr[0..wav.len], wav);
+    outdata.* = out_ptr;
+    outsize.* = @intCast(wav.len);
+    return 1;
+}
+
 /// Allocates a new buffer which must be freed by the caller using AIL_mem_free_lock.
 pub fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsize: *u32) callconv(.winapi) i32 {
     if (info.data_ptr == null or info.data_len == 0) return 0;
@@ -1011,11 +1021,7 @@ pub fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsi
         return 0;
     };
     defer openmiles.global_allocator.free(wav);
-    const out_ptr: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse return 0);
-    @memcpy(out_ptr[0..wav.len], wav);
-    outdata.* = out_ptr;
-    outsize.* = @intCast(wav.len);
-    return 1;
+    return adoptWavOut(wav, outdata, outsize);
 }
 /// AIL_decompress_ADPCM(AILSOUNDINFO const *info, void **outdata, U32 *outsize)
 /// Decodes the ADPCM image described by `info` to a 16-bit PCM WAV. Allocates
@@ -1095,12 +1101,7 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
         return 0;
     };
     defer openmiles.global_allocator.free(wav);
-
-    const out_ptr: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse return 0);
-    @memcpy(out_ptr[0..wav.len], wav);
-    outdata.* = out_ptr;
-    outsize.* = @intCast(wav.len);
-    return 1;
+    return adoptWavOut(wav, outdata, outsize);
 }
 // SDK: AIL_create_wave_synthesizer(HDIGDRIVER dig, HMDIDRIVER mdi,
 // void const* wave_lib, S32 polyphony) -- param 2 is the MIDI driver (not a

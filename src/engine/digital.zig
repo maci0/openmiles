@@ -714,6 +714,20 @@ pub const Sample = struct {
     user_channel_levels: [9][9]f32 = [_][9]f32{[_]f32{0} ** 9} ** 9,
     user_channel_levels_set: bool = false,
 
+    /// Fire the app's EOB then EOS callback (AILSAMPLECB: void callback(HSAMPLE S),
+    /// single arg; the app queries buffer state separately). EOB first so
+    /// double-buffer streaming games can refill before seeing end-of-sample.
+    fn fireEobThenEosCallbacks(self: *Sample) void {
+        if (self.eob_callback != 0) {
+            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eob_callback);
+            cb(@ptrCast(self));
+        }
+        if (self.eos_callback != 0) {
+            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eos_callback);
+            cb(@ptrCast(self));
+        }
+    }
+
     fn eosCallbackBridge(pUserData: ?*anyopaque, pSound: ?*ma.ma_sound) callconv(.c) void {
         _ = pSound;
         const self: *Sample = @ptrCast(@alignCast(pUserData.?));
@@ -732,16 +746,7 @@ pub const Sample = struct {
         }
         // loops_remaining == 1: last iteration done
         self.is_done = true;
-        // Fire EOB (End Of Buffer) callback — used by double-buffer streaming games to refill buffers.
-        // AILSAMPLECB: void callback(HSAMPLE S) — single arg; app queries buffer state separately.
-        if (self.eob_callback != 0) {
-            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eob_callback);
-            cb(@ptrCast(self));
-        }
-        if (self.eos_callback != 0) {
-            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eos_callback);
-            cb(@ptrCast(self));
-        }
+        self.fireEobThenEosCallbacks();
     }
 
     pub fn init(driver: *DigitalDriver) !*Sample {
@@ -773,23 +778,7 @@ pub const Sample = struct {
             f.detachSample(self);
         }
         self.removeReverb();
-        if (self.is_initialized) {
-            ma.ma_sound_uninit(&self.sound);
-        }
-        if (self.stream_active) {
-            self.stream_src.deinit();
-            self.stream_active = false;
-        }
-        if (self.decoder) |d| {
-            _ = ma.ma_decoder_uninit(d);
-            self.driver.allocator.destroy(d);
-        }
-        if (self.bounded_mem_ctx) |ctx| {
-            self.driver.allocator.destroy(ctx);
-        }
-        if (self.owned_buffer) |buf| {
-            self.driver.allocator.free(buf);
-        }
+        self.cleanupPlaybackState();
         self.driver.allocator.destroy(self);
     }
 
@@ -1246,14 +1235,7 @@ pub const Sample = struct {
         }
         self.is_done = true;
         if (already_done) return;
-        if (self.eob_callback != 0) {
-            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eob_callback);
-            cb(@ptrCast(self));
-        }
-        if (self.eos_callback != 0) {
-            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eos_callback);
-            cb(@ptrCast(self));
-        }
+        self.fireEobThenEosCallbacks();
     }
 
     pub fn pause(self: *Sample) void {
@@ -1699,19 +1681,7 @@ pub const Sample3D = struct {
                 }
             }
         }
-        if (self.is_initialized) {
-            ma.ma_sound_uninit(&self.sound);
-        }
-        if (self.decoder) |d| {
-            _ = ma.ma_decoder_uninit(d);
-            self.driver.allocator.destroy(d);
-        }
-        if (self.bounded_mem_ctx) |ctx| {
-            self.driver.allocator.destroy(ctx);
-        }
-        if (self.owned_buffer) |buf| {
-            self.driver.allocator.free(buf);
-        }
+        self.cleanupPlaybackState();
         self.driver.allocator.destroy(self);
     }
 
