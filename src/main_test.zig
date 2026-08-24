@@ -4057,6 +4057,17 @@ test "v8 SoundBank loads and enumerates assets (synthetic)" {
     try testing.expectEqual(@as(u32, 0), bank.assetCount(.events));
 }
 
+test "v8 SoundBank name is terminated when all 4 chars are non-NUL" {
+    // SoundBankName[4] is a fixed-width field; a bank using all four bytes must
+    // not send the C-string scan past the metadata allocation (over-read).
+    var img: [128]u8 = undefined;
+    const sz = buildSyntheticBank(&img);
+    @memcpy(img[56..60], "ABCD");
+    const bank = try openmiles.soundbank.loadFromMemory(testing.allocator, "test.bank", img[0..sz]);
+    defer bank.deinit();
+    try testing.expectEqualStrings("ABCD", std.mem.span(bank.name()));
+}
+
 test "v8 SoundBank rejects non-bank and truncated data" {
     try testing.expectError(error.TooShort, openmiles.soundbank.loadFromMemory(testing.allocator, "x", "short"));
     var img: [128]u8 = undefined;

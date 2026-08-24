@@ -105,6 +105,11 @@ const asset_entry_size = 8; // { U32 NameOffset; U32 DataOffset; }
 
 pub const Bank = struct {
     meta: []u8,
+    // SoundBankName[4] copied out NUL-terminated at load: the on-disk field is
+    // fixed-width and may use all 4 bytes, so handing out a pointer into meta
+    // would let C-string consumers run past the block (over-read under
+    // ReleaseFast). Immutable after load, so sharing it is race-free.
+    name_buf: [5]u8 = [_]u8{0} ** 5,
     filename: [:0]u8,
     allocator: std.mem.Allocator,
 
@@ -120,9 +125,7 @@ pub const Bank = struct {
         return self.rdI32(off_meta_size);
     }
     pub fn name(self: *const Bank) [*:0]const u8 {
-        // SoundBankName[4] is a fixed 4-char field; ensure it stays in bounds.
-        if (off_name + 4 <= self.meta.len) return @ptrCast(self.meta.ptr + off_name);
-        return "";
+        return @ptrCast(&self.name_buf);
     }
 
     fn countFor(self: *const Bank, which: AssetKind) u32 {
@@ -328,14 +331,26 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
     if (meta_size < header_size or @as(usize, @intCast(meta_size)) > image.len) return error.BadMetaSize;
     const msz: usize = @intCast(meta_size);
 
-    const meta = try allocator.dupe(u8, image[0..msz]);
+    // Copy the metadata with one trailing NUL sentinel: fixed-width on-disk
+    // string fields (SoundBankName[4]) and event-step text are consumed as C
+    // strings via bare pointers, so a malformed bank whose bytes run non-zero
+    // right up to the block end must not send strlen/step-decode scans past
+    // the allocation (over-read under ReleaseFast).
+    const meta = try allocator.alloc(u8, msz + 1);
     errdefer allocator.free(meta);
+    @memcpy(meta[0..msz], image[0..msz]);
+    meta[msz] = 0;
     const fname = try allocator.dupeZ(u8, filename);
     errdefer allocator.free(fname);
 
     const self = try allocator.create(Bank);
     errdefer allocator.destroy(self);
     self.* = .{ .meta = meta, .filename = fname, .allocator = allocator };
+
+    // Copy SoundBankName[4] out terminated (meta_size >= header_size > off_name,
+    // enforced above, so the read is in bounds).
+    const nlen = @min(msz - off_name, 4);
+    @memcpy(self.name_buf[0..nlen], image[off_name..][0..nlen]);
 
     // Validate each asset table fits inside the metadata (errdefers above free
     // meta/fname/self on failure — do not deinit here or they double-free).

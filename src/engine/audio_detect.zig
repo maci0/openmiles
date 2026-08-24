@@ -8,14 +8,20 @@ const root = @import("../root.zig");
 
 pub const streaming_sentinel_size: usize = 16 * 1024 * 1024;
 
+/// Largest extent these pointer-based sniffers may report from header-declared
+/// sizes. The API carries no true buffer length, so a lying RIFF/FORM body size
+/// would otherwise drive reads up to ~4 GiB past the caller's buffer. Matches
+/// readWholeFile's 256 MiB load cap: no legitimate image can be larger.
+const max_declared_image_size: usize = 256 * 1024 * 1024;
+
 pub fn detectAudioSize(raw: [*]const u8) usize {
     if (raw[0] == 'R' and raw[1] == 'I' and raw[2] == 'F' and raw[3] == 'F') {
         const body = std.mem.readInt(u32, raw[4..8], .little);
-        return @as(usize, body) +| 8;
+        return @min(@as(usize, body) +| 8, max_declared_image_size);
     }
     if (raw[0] == 'F' and raw[1] == 'O' and raw[2] == 'R' and raw[3] == 'M') {
         const body = std.mem.readInt(u32, raw[4..8], .big);
-        return @as(usize, body) +| 8;
+        return @min(@as(usize, body) +| 8, max_declared_image_size);
     }
     if (raw[0] == 'M' and raw[1] == 'T' and raw[2] == 'h' and raw[3] == 'd') {
         return detectMidiSize(raw);
@@ -37,7 +43,7 @@ pub fn detectAudioSize(raw: [*]const u8) usize {
 pub fn detectMidiSize(raw: [*]const u8) usize {
     if (raw[0] == 'F' and raw[1] == 'O' and raw[2] == 'R' and raw[3] == 'M') {
         const body = std.mem.readInt(u32, raw[4..8], .big);
-        return @as(usize, body) +| 8;
+        return @min(@as(usize, body) +| 8, max_declared_image_size);
     }
     if (raw[0] == 'M' and raw[1] == 'T' and raw[2] == 'h' and raw[3] == 'd') {
         const hdr_size = std.mem.readInt(u32, raw[4..8], .big);
