@@ -4,7 +4,6 @@
 //! have no OpenMiles engine equivalent yet, so they link and return safe defaults.
 const std = @import("std");
 const openmiles = @import("openmiles");
-const api_file = @import("file.zig");
 
 pub fn AIL_IO_thread_handle(a0: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
@@ -97,7 +96,7 @@ pub fn AIL_file_read_info(filename: ?*anyopaque, dest: ?*anyopaque, caller: ?*an
     _ = caller;
     _ = line;
     const fname = filename orelse return null;
-    return api_file.AIL_file_read(@ptrCast(fname), dest);
+    return openmiles.ailFileRead(@ptrCast(fname), dest);
 }
 // Tracking macro target for AIL_file_size(filename): returns the file size in
 // bytes (0 if not found). caller/line are debug metadata.
@@ -105,7 +104,7 @@ pub fn AIL_file_size_info(filename: ?*anyopaque, caller: ?*anyopaque, line: u32)
     _ = caller;
     _ = line;
     const fname = filename orelse return 0;
-    return @bitCast(api_file.AIL_file_size(@ptrCast(fname)));
+    return @bitCast(openmiles.ailFileSize(@ptrCast(fname)));
 }
 pub fn AIL_find_environment_preset(a0: ?*anyopaque, a1: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     _ = a0;

@@ -72,6 +72,8 @@ const audio_detect = @import("engine/audio_detect.zig");
 pub const streaming_sentinel_size = audio_detect.streaming_sentinel_size;
 pub const detectAudioSize = audio_detect.detectAudioSize;
 pub const detectMidiSize = audio_detect.detectMidiSize;
+pub const detectFileType = audio_detect.detectFileType;
+pub const wavInfoBounded = audio_detect.wavInfoBounded;
 
 pub const dls_container = @import("engine/dls_container.zig");
 pub const StreamSource = @import("engine/stream_buffer.zig").StreamSource;
@@ -79,6 +81,7 @@ pub const soundbank = @import("engine/soundbank.zig");
 pub const Bank = soundbank.Bank;
 pub const event = @import("engine/event.zig");
 pub const mp3 = @import("engine/mp3.zig");
+pub const speaker = @import("engine/speaker.zig");
 
 pub const get_ASI_INTERFACE = @import("engine/asi.zig").get_ASI_INTERFACE;
 
@@ -293,6 +296,101 @@ pub fn readWholeFile(path: []const u8) ![]u8 {
     const n = f.readPositionalAll(io, buf, 0) catch return error.ReadFailed;
     if (n < buf.len) return error.ReadFailed;
     return buf;
+}
+
+// --- AIL file services (shared by api/file.zig and api/v9.zig) ---
+
+/// AIL_file_read core: read a whole file into `dest` (zero-padding short
+/// reads), or into a fresh malloc'd buffer when `dest` is null (free with
+/// AIL_mem_free_lock). Returns null and sets the file error on failure.
+pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
+    clearFileError();
+    if (cb_file_open != null) {
+        const buf = fileCallbackReadAll(filename) catch null;
+        if (buf) |b| {
+            defer global_allocator.free(b);
+            if (dest) |d| {
+                @memcpy(@as([*]u8, @ptrCast(@alignCast(d)))[0..b.len], b);
+                return d;
+            }
+            const out: [*]u8 = @ptrCast(std.c.malloc(b.len) orelse {
+                setFileError("Out of memory");
+                return null;
+            });
+            @memcpy(out[0..b.len], b);
+            return out;
+        }
+        setFileError("File not found");
+        return null;
+    }
+    const path = std.mem.span(filename);
+    const file = fs_compat.openFile(io, path, .{}) catch {
+        setFileError("File not found");
+        return null;
+    };
+    defer file.close(io);
+    const file_len = file.length(io) catch {
+        setFileError("Stat failed");
+        return null;
+    };
+    if (file_len == 0) return null;
+    const size: usize = @intCast(file_len);
+    if (dest) |d| {
+        const buf: [*]u8 = @ptrCast(@alignCast(d));
+        const n = file.readPositionalAll(io, buf[0..size], 0) catch {
+            setFileError("Read error");
+            return null;
+        };
+        if (n < size) {
+            @memset(buf[n..size], 0);
+        }
+        return d;
+    } else {
+        const buf: [*]u8 = @ptrCast(std.c.malloc(size) orelse {
+            setFileError("Out of memory");
+            return null;
+        });
+        const n = file.readPositionalAll(io, buf[0..size], 0) catch {
+            std.c.free(buf);
+            setFileError("Read error");
+            return null;
+        };
+        if (n < size) {
+            @memset(buf[n..size], 0);
+        }
+        return buf;
+    }
+}
+
+/// AIL_file_size core: size in bytes via the app's callbacks when set,
+/// otherwise from the filesystem. Returns 0 and sets the file error on failure.
+pub fn ailFileSize(filename: [*:0]const u8) u32 {
+    clearFileError();
+    if (cb_file_open != null) {
+        const open_fn = cb_file_open.?;
+        const close_fn = cb_file_close orelse return 0;
+        // open returns the file length and fills the handle out-param.
+        var handle: u32 = 0;
+        const size = open_fn(filename, &handle);
+        if (size == 0) {
+            setFileError("File not found");
+            return 0;
+        }
+        close_fn(handle);
+        return size;
+    }
+    const path = std.mem.span(filename);
+    const file = fs_compat.openFile(io, path, .{}) catch {
+        setFileError("File not found");
+        return 0;
+    };
+    defer file.close(io);
+    const file_len = file.length(io) catch {
+        setFileError("Stat failed");
+        return 0;
+    };
+    if (file_len == 0) return 0;
+    return @intCast(@min(file_len, std.math.maxInt(u32)));
 }
 
 // --- Provider state ---

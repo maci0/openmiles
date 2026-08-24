@@ -312,7 +312,7 @@ pub fn AIL_file_type_named(data: ?*anyopaque, filename: ?[*:0]const u8, size: u3
         if (suffixIgnoreCase(name, ".speex32")) return 23; // AILFILETYPE_S32_VOICE
     }
     const d = data orelse return 0;
-    return @import("file.zig").AIL_file_type(d, size);
+    return openmiles.detectFileType(d, size);
 }
 pub fn AIL_filter_property(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
@@ -815,7 +815,7 @@ pub fn AIL_set_sample_playback_rate_factor(s_opt: ?*Sample, factor: f32) callcon
     s.v7_rate_factor = factor;
     s.applyEffectivePitch();
 }
-const speaker_mod = @import("../engine/speaker.zig");
+const speaker_mod = openmiles.speaker;
 pub const SPK_MAX_INDEX = speaker_mod.SPK_MAX_INDEX;
 pub const SPK_X = speaker_mod.SPK_X;
 pub const output_speaker_index = speaker_mod.output_speaker_index;

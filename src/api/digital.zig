@@ -852,108 +852,12 @@ pub fn AIL_set_error(msg: ?[*:0]const u8) callconv(.winapi) void {
 pub fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
     // Size-less SDK ABI: the caller guarantees the buffer spans the declared RIFF
     // size, so there is no length to bound against here. Internal callers that
-    // know the real buffer length must use wavInfoBounded so an attacker-supplied
-    // RIFF size field cannot drive reads past the actual allocation.
-    return wavInfoBounded(@ptrCast(@alignCast(data)), std.math.maxInt(usize), info);
+    // know the real buffer length must use wavInfoBounded (openmiles facade) so
+    // an attacker-supplied RIFF size field cannot drive reads past the actual
+    // allocation.
+    return openmiles.wavInfoBounded(@ptrCast(@alignCast(data)), std.math.maxInt(usize), info);
 }
 
-/// WAV header inspector bounded to `max_len` bytes of `raw`. Chunk-walk reads
-/// never run past `min(declared RIFF size, max_len)`, so a lying in-file RIFF
-/// size cannot cause an out-of-bounds read when the real buffer length is known.
-pub fn wavInfoBounded(raw: [*]const u8, max_len: usize, info: *anyopaque) i32 {
-    if (max_len < 12) return 0;
-    if (raw[0] != 'R' or raw[1] != 'I' or raw[2] != 'F' or raw[3] != 'F') return 0;
-    if (raw[8] != 'W' or raw[9] != 'A' or raw[10] != 'V' or raw[11] != 'E') return 0;
-    const out: *AILSOUNDINFO = @ptrCast(@alignCast(info));
-    // Use the RIFF chunk size to determine the file end boundary, clamped to the
-    // known buffer length so a lying RIFF size cannot read past the allocation.
-    const riff_body = std.mem.readInt(u32, raw[4..8][0..4], .little);
-    const file_end: usize = @min(@as(usize, riff_body) + 8, max_len);
-    var offset: usize = 12;
-    var audio_format: u16 = 1;
-    var num_channels: u16 = 1;
-    var sample_rate: u32 = 44100;
-    var bits_per_sample: u16 = 16;
-    var block_align: u16 = 2;
-    var data_ptr: ?*const anyopaque = null;
-    var data_len: u32 = 0;
-    var fact_samples: ?u32 = null;
-    // WAVEFORMATEXTENSIBLE (0xFFFE) extension fields, captured if present.
-    var ext_cbsize: u16 = 0;
-    var ext_channel_mask: u32 = 0;
-    var ext_subformat_pcm: bool = false;
-    while (offset + 8 <= file_end) {
-        const tag = raw[offset .. offset + 4];
-        const chunk_size = std.mem.readInt(u32, raw[offset + 4 .. offset + 8][0..4], .little);
-        offset += 8;
-        if (std.mem.eql(u8, tag, "fmt ") and chunk_size >= 16 and offset + 16 <= file_end) {
-            audio_format = std.mem.readInt(u16, raw[offset .. offset + 2][0..2], .little);
-            num_channels = std.mem.readInt(u16, raw[offset + 2 .. offset + 4][0..2], .little);
-            sample_rate = std.mem.readInt(u32, raw[offset + 4 .. offset + 8][0..4], .little);
-            block_align = std.mem.readInt(u16, raw[offset + 12 .. offset + 14][0..2], .little);
-            bits_per_sample = std.mem.readInt(u16, raw[offset + 14 .. offset + 16][0..2], .little);
-            // WAVEFORMATEXTENSIBLE: read cbSize, dwChannelMask, and the SubFormat
-            // GUID so we can validate/convert PCMEX the way the SDK does.
-            if (audio_format == 0xFFFE and chunk_size >= 40 and offset + 40 <= file_end) {
-                ext_cbsize = std.mem.readInt(u16, raw[offset + 16 .. offset + 18][0..2], .little);
-                ext_channel_mask = std.mem.readInt(u32, raw[offset + 20 .. offset + 24][0..4], .little);
-                // KSDATAFORMAT_SUBTYPE_PCM = {00000001-0000-0010-8000-00aa00389b71}
-                const pcm_guid = [16]u8{ 0x01, 0, 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71 };
-                ext_subformat_pcm = std.mem.eql(u8, raw[offset + 24 .. offset + 40], &pcm_guid);
-            }
-        } else if (std.mem.eql(u8, tag, "fact") and chunk_size >= 4 and offset + 4 <= file_end) {
-            fact_samples = std.mem.readInt(u32, raw[offset .. offset + 4][0..4], .little);
-        } else if (std.mem.eql(u8, tag, "data")) {
-            data_ptr = raw + offset;
-            data_len = chunk_size;
-            // Keep walking for a fact chunk only if we haven't seen one (data is
-            // usually last, so break here matches the SDK's data-found exit).
-            break;
-        }
-        const next = offset +| chunk_size +| (chunk_size & 1); // pad to even (saturating)
-        if (next <= offset) break; // guard against zero/wraparound
-        offset = next;
-    }
-    if (data_ptr == null) return 0;
-    // Per AIL_API_WAV_info (wavefile.cpp): info->format is the WAVE format_tag
-    // (1=PCM, 0x11=IMA ADPCM, 0x02=MS ADPCM), NOT a DIG_F_ code; channel_mask is
-    // ~0U; initial_ptr is always data_ptr; and `samples` is the total interleaved
-    // sample count: (data_len*8)/bits for PCM, block-derived for IMA ADPCM.
-    out.format = audio_format;
-    out.data_ptr = data_ptr;
-    out.data_len = data_len;
-    out.rate = sample_rate;
-    out.bits = bits_per_sample;
-    out.channels = num_channels;
-    out.block_size = block_align;
-    out.initial_ptr = data_ptr;
-    if (@hasField(AILSOUNDINFO, "channel_mask")) out.channel_mask = ~@as(u32, 0);
-    if (audio_format == 0xFFFE) {
-        // WAVEFORMATEXTENSIBLE: the SDK only accepts a 16-bit PCM subformat whose
-        // block alignment is channels*2, reports it as plain WAVE_FORMAT_PCM, and
-        // carries the file's dwChannelMask. Anything else is rejected (return 0).
-        if (ext_cbsize < 22 or !ext_subformat_pcm or block_align != num_channels *| 2) return 0;
-        out.format = 1; // WAVE_FORMAT_PCM
-        if (@hasField(AILSOUNDINFO, "channel_mask")) out.channel_mask = ext_channel_mask;
-    }
-    if (audio_format == 0x0011 and bits_per_sample == 4) {
-        // IMA ADPCM: use the fact chunk's sample count if present, else derive
-        // from the block size (SDK formula).
-        if (fact_samples) |fs| {
-            out.samples = fs;
-        } else if (block_align > 0 and num_channels > 0) {
-            const spb0: u32 = @as(u32, 4) << @intCast(@min(num_channels / 2, 16));
-            if (block_align > spb0) {
-                const samples_per_block: u32 = 1 + (@as(u32, block_align) - spb0) * 8 / spb0;
-                const blocks: u32 = (data_len +| (block_align - 1)) / block_align;
-                out.samples = blocks *| samples_per_block;
-            } else out.samples = 0;
-        } else out.samples = 0;
-    } else if (bits_per_sample > 0) {
-        out.samples = @intCast(@min((@as(u64, data_len) * 8) / bits_per_sample, std.math.maxInt(u32)));
-    } else out.samples = 0;
-    return 1;
-}
 pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, rate: i32, format: i32) callconv(.winapi) i32 {
     // The 5th arg is a DIG_F format code (mss.h), NOT a bit depth:
     //   DIG_F_16BITS_MASK (1) -> 16-bit else 8-bit; DIG_F_STEREO_MASK (2) -> stereo.

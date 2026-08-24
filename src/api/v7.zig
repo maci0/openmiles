@@ -20,7 +20,7 @@ const DigitalDriver = openmiles.DigitalDriver;
 const Redbook = openmiles.Redbook;
 const MidiDriver = openmiles.MidiDriver;
 const AILSOUNDINFO = openmiles.AILSOUNDINFO;
-const speaker = @import("../engine/speaker.zig");
+const speaker = openmiles.speaker;
 
 // EAX environment-preset reverb parameters, indexed by EAX_ENVIRONMENT_* room
 // type. Verbatim from m3d.cpp `static ROOM_PARAMS rooms[]` ("MSS 6 values", the
