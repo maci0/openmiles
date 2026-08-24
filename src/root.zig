@@ -396,7 +396,6 @@ pub fn ailFileSize(filename: [*:0]const u8) u32 {
 // --- Provider state ---
 
 pub var startup_provider: ?*Provider = null;
-pub var asi_temp_counter: u32 = 0;
 
 var global_providers: std.ArrayList(*Provider) = .empty;
 

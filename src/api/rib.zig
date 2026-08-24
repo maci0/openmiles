@@ -119,7 +119,6 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     const raw: []const u8 = @as([*]const u8, @ptrCast(@alignCast(buffer)))[0..size];
     if (raw[0] != 'M' or raw[1] != 'Z') return null;
 
-    const id = @atomicRmw(u32, &openmiles.asi_temp_counter, .Add, 1, .monotonic);
     var path_buf: [512:0]u8 = undefined;
 
     var tmp_dir_buf: [260]u8 = undefined;
@@ -132,22 +131,58 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
         break :blk GetTempPathA(tmp_dir_buf.len, &tmp_dir_buf);
     } else 0;
 
-    const path: [:0]const u8 = if (tmp_len > 0)
-        std.fmt.bufPrintZ(&path_buf, "{s}om_asi_{d}.dll", .{ tmp_dir_buf[0..tmp_len], id }) catch |err| {
-            log("Error: {any}\n", .{err});
-            return null;
+    // The image is written to TEMP and then LoadLibrary'd, so the file name must
+    // not be predictable: a sequential counter would let a local process plant
+    // (or race-replace) om_asi_<next>.dll ahead of us and get its own code loaded
+    // into this one. A random name created exclusively closes both routes.
+    var path: [:0]const u8 = "";
+    var created: ?std.Io.File = null;
+    // Entropy for the name; without it the unpredictable-name guarantee is gone,
+    // so fail closed rather than fall back to a guessable pattern.
+    var id_bytes: [8]u8 = undefined;
+    io.randomSecure(&id_bytes) catch |err| {
+        log("AIL_open_ASI_provider: no entropy for temp file name: {any}\n", .{err});
+        return null;
+    };
+    var id = std.mem.readInt(u64, &id_bytes, .little);
+    for (0..4) |_| {
+        path = if (tmp_len > 0)
+            std.fmt.bufPrintZ(&path_buf, "{s}om_asi_{x:016}.dll", .{ tmp_dir_buf[0..tmp_len], id }) catch |err| {
+                log("Error: {any}\n", .{err});
+                return null;
+            }
+        else
+            std.fmt.bufPrintZ(&path_buf, ".\\om_asi_{x:016}.dll", .{id}) catch |err| {
+                log("Error: {any}\n", .{err});
+                return null;
+            };
+        if (std.Io.Dir.createFileAbsolute(io, path, .{ .exclusive = true })) |f| {
+            created = f;
+            break;
+        } else |abs_err| switch (abs_err) {
+            // An occupied name retries with a fresh id; any other absolute-open
+            // failure falls through to the cwd-relative attempt.
+            error.PathAlreadyExists => {
+                id +%= 1;
+                continue;
+            },
+            else => {},
         }
-    else
-        std.fmt.bufPrintZ(&path_buf, ".\\om_asi_{d}.dll", .{id}) catch |err| {
-            log("Error: {any}\n", .{err});
-            return null;
-        };
-
-    const wf = std.Io.Dir.createFileAbsolute(io, path, .{}) catch
-        (std.Io.Dir.cwd().createFile(io, path, .{}) catch |err| {
-            log("Error: {any}\n", .{err});
-            return null;
-        });
+        if (std.Io.Dir.cwd().createFile(io, path, .{ .exclusive = true })) |f| {
+            created = f;
+            break;
+        } else |cwd_err| switch (cwd_err) {
+            error.PathAlreadyExists => {
+                id +%= 1;
+                continue;
+            },
+            else => {
+                log("Error: {any}\n", .{cwd_err});
+                return null;
+            },
+        }
+    }
+    const wf = created orelse return null;
     wf.writeStreamingAll(io, raw) catch {
         wf.close(io);
         std.Io.Dir.deleteFileAbsolute(io, path) catch {};

@@ -545,6 +545,12 @@ test "coverage: rib.zig exports" {
     const ph = rib.RIB_alloc_provider_handle(sc());
     if (ph) |p| rib.RIB_free_provider_handle(@ptrCast(@alignCast(p)));
     _ = rib.AIL_open_ASI_provider(sc(), 0);
+    // In-memory provider image: the temp-image path must create a file, attempt
+    // the load (fails on a non-PE payload), and clean the image up.
+    {
+        const mz_img = "MZ\x90\x00not-a-pe-image";
+        _ = rib.AIL_open_ASI_provider(@ptrCast(&mz_img), mz_img.len);
+    }
     rib.AIL_close_ASI_provider(np);
     _ = rib.AIL_ASI_provider_attribute(np, "x");
     dg_request_eob();
