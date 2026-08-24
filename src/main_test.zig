@@ -2651,6 +2651,27 @@ test "AIL_process_digital_audio mixes PCM sources into the dest buffer" {
     try testing.expectEqual(@as(i32, 0), dg.AIL_process_digital_audio(@ptrCast(&dest), 8, 0, 1, 2, @ptrCast(&srcs)));
 }
 
+test "AIL_process_digital_audio resamples at floor(j*src_rate/dest_rate)" {
+    // Mono 16-bit ramp source at 11025 Hz into an 8000 Hz mono dest. Output
+    // frame j must take source point floor(j*11025/8000) — the nearest-
+    // neighbour mapping the SDK mixer uses. Pins the division-free cursor
+    // against the closed form; the second source has no data (zero points)
+    // and must contribute nothing.
+    var src: [64]i16 = undefined;
+    for (&src, 0..) |*v, k| v.* = @intCast(k);
+    var srcs = [_]openmiles.AILMIXINFO{ .{}, .{} };
+    srcs[0].Info = .{ .format = 1, .bits = 16, .channels = 1, .rate = 11025, .data_len = src.len * 2, .data_ptr = @ptrCast(&src) };
+    var dest: [32]i16 = undefined;
+    const n = dg.AIL_process_digital_audio(@ptrCast(&dest), @intCast(dest.len * 2), 8000, 1, 2, @ptrCast(&srcs));
+    // 32 mono 16-bit points -> 64 bytes (bounded by dest_size, not the
+    // source's 46-point resampled length).
+    try testing.expectEqual(@as(i32, 64), n);
+    for (dest, 0..) |v, j| {
+        const want: i16 = @intCast(j * 11025 / 8000);
+        try testing.expectEqual(want, v);
+    }
+}
+
 test "AIL_size_processed_digital_audio takes the max over multiple sources (SDK)" {
     // Two AILMIXINFO sources; the function sizes for the largest after resampling.
     var srcs = [_]openmiles.AILMIXINFO{ .{}, .{} };

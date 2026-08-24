@@ -614,6 +614,19 @@ const MixSrc = struct {
     rate: u32 = 0,
 };
 
+// A mixer input plus the resample cursor the mix loop advances. The source
+// position for output frame j is floor(j * rate / dest_rate); carrying it
+// forward via the quotient/remainder decomposition of rate/dest_rate keeps the
+// mix loop division-free (one add + compare per source per frame instead of a
+// 64-bit divide, which dominates the loop on the software-mixer hot path).
+const MixCursor = struct {
+    src: MixSrc,
+    step_q: u64, // floor(rate / dest_rate): whole source points per output frame
+    step_r: u64, // rate % dest_rate: fractional remainder carried between frames
+    rem: u64 = 0, // accumulated remainder, always < dest_rate
+    pos: u64 = 0, // current source position == floor(j * rate / dest_rate)
+};
+
 // Decode one IMA-ADPCM source's raw blocks to owned interleaved 16-bit PCM via
 // the same wrap-and-decode path as AIL_decompress_ADPCM.
 fn decodeAdpcmSource(info: *const AILSOUNDINFO) ?MixSrc {
@@ -630,6 +643,15 @@ fn decodeAdpcmSource(info: *const AILSOUNDINFO) ?MixSrc {
     const dch: u32 = decoder.outputChannels;
     var list: std.ArrayListUnmanaged(i16) = .empty;
     errdefer list.deinit(openmiles.global_allocator);
+    // Reserve the decoder-reported PCM size up front so appendSlice never
+    // realloc-copies the whole buffer mid-decode (same hint as
+    // AIL_decompress_ADPCM; an inflated header only over-reserves).
+    var length_frames: u64 = 0;
+    _ = openmiles.ma.ma_decoder_get_length_in_pcm_frames(&decoder, &length_frames);
+    if (length_frames > 0) {
+        const hint: u64 = @min(length_frames *| @as(u64, dch), std.math.maxInt(usize));
+        list.ensureTotalCapacity(openmiles.global_allocator, @intCast(hint)) catch {};
+    }
     // Heap scratch (16-byte aligned) — avoids the stack-layout-dependent
     // misaligned ma_int16 write inside miniaudio's IMA decoder (see decompress).
     const chunk = openmiles.global_allocator.alignedAlloc(i16, .@"16", 4096 * 4) catch return null;
@@ -657,10 +679,10 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
     const n: usize = @min(@as(usize, @intCast(num_srcs)), 256); // SDK caps at operations[256]
     const srcs: [*]const openmiles.AILMIXINFO = @ptrCast(@alignCast(src.?));
 
-    var mix: [256]MixSrc = undefined;
-    var nmix: usize = 0;
-    defer for (mix[0..nmix]) |m| {
-        if (m.owned) |o| openmiles.global_allocator.free(o);
+    var cur: [256]MixCursor = undefined;
+    var ncur: usize = 0;
+    defer for (cur[0..ncur]) |c| {
+        if (c.src.owned) |o| openmiles.global_allocator.free(o);
     };
 
     var max_points: u64 = 0;
@@ -686,8 +708,14 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
                 ms.points = total / ms.channels;
             }
         }
-        mix[nmix] = ms;
-        nmix += 1;
+        // A zero-point source contributes to no output frame; drop it here so
+        // the mix loop never revisits it (freeing any owned decode buffer now).
+        if (ms.points == 0) {
+            if (ms.owned) |owned| openmiles.global_allocator.free(owned);
+            continue;
+        }
+        cur[ncur] = .{ .src = ms, .step_q = ms.rate / dest_rate, .step_r = ms.rate % dest_rate };
+        ncur += 1;
         const pts: u64 = @as(u64, ms.points) *| dest_rate / ms.rate;
         if (pts > max_points) max_points = pts;
     }
@@ -705,18 +733,27 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
     while (j < dest_points) : (j += 1) {
         var accL: i32 = 0;
         var accR: i32 = 0;
-        for (mix[0..nmix]) |m| {
-            if (m.points == 0) continue;
-            const sp: u64 = @as(u64, j) *| m.rate / dest_rate;
-            if (sp >= m.points) continue;
-            const spi: usize = @intCast(sp);
-            if (m.channels == 2) {
-                accL += m.s16[spi * 2];
-                accR += m.s16[spi * 2 + 1];
+        for (cur[0..ncur]) |*c| {
+            // Exhausted sources stay exhausted (pos only grows), so they can
+            // stop advancing entirely.
+            if (c.pos >= c.src.points) continue;
+            const spi: usize = @intCast(c.pos);
+            if (c.src.channels == 2) {
+                accL += c.src.s16[spi * 2];
+                accR += c.src.s16[spi * 2 + 1];
             } else {
-                const v: i32 = m.s16[spi];
+                const v: i32 = c.src.s16[spi];
                 accL += v;
                 accR += v;
+            }
+            // Advance pos from frame j's position floor(j*rate/dest_rate) to
+            // frame j+1's: add the whole-point quotient, plus one more when
+            // the carried remainder crosses dest_rate.
+            c.pos += c.step_q;
+            c.rem += c.step_r;
+            if (c.rem >= dest_rate) {
+                c.rem -= dest_rate;
+                c.pos += 1;
             }
         }
         const L: i32 = std.math.clamp(accL, -32768, 32767);
