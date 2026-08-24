@@ -32,14 +32,9 @@ pub fn parseSmfTimeSigNumerator(smf: []const u8) i32 {
             if (i >= trk_end) break;
             const meta_type = smf[i];
             i += 1;
-            // Read VLQ meta length
-            var meta_len: u32 = 0;
-            while (i < trk_end) {
-                const b = smf[i];
-                i += 1;
-                meta_len = (meta_len << 7) | (b & 0x7F);
-                if (b & 0x80 == 0) break;
-            }
+            // Read VLQ meta length (readVlq caps at 4 bytes so a corrupt
+            // continuation run cannot overflow)
+            const meta_len = readVlq(smf[0..trk_end], &i);
             if (meta_type == 0x58 and meta_len >= 1 and i < trk_end) {
                 return @max(1, @as(i32, @intCast(smf[i])));
             }

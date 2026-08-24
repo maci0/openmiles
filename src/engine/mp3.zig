@@ -139,8 +139,15 @@ pub fn inspect(es: *MP3_INFO, file_image_in: [*]u8, file_size_in: i32) void {
             (@as(u32, file_image[7]) << 14) | (@as(u32, file_image[6]) << 21)));
         es.ID3v2 = file_image;
         es.ID3v2_size = skip;
-        file_image += @intCast(skip);
-        file_size -= skip;
+        // A tag claiming more bytes than the image holds is malformed; treat the
+        // image as consumed instead of advancing past its end (enumerateFrames
+        // applies the same bound via its bytes_left check).
+        if (skip <= file_size) {
+            file_image += @intCast(skip);
+            file_size -= skip;
+        } else {
+            file_size = 0;
+        }
     }
     es.start_MP3_data = file_image;
 
