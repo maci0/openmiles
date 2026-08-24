@@ -2967,6 +2967,38 @@ test "Timer double stop is safe" {
     try testing.expect(!timer.is_running);
 }
 
+test "Timer concurrent start/stop never runs overlapping loops" {
+    // Detector for the double-spawn race: two threads passing the is_running
+    // check simultaneously used to spawn two run loops, which fire the
+    // callback concurrently (plus one leaked thread handle). A single loop can
+    // never overlap itself, so any nonzero entry count is a proven race.
+    const CB = struct {
+        var active: std.atomic.Value(u32) = .init(0);
+        var overlapped: std.atomic.Value(bool) = .init(false);
+        fn cb(_: u32) callconv(.winapi) void {
+            if (active.fetchAdd(1, .acq_rel) != 0) overlapped.store(true, .release);
+            var spins: u32 = 0;
+            while (spins < 200) : (spins += 1) std.atomic.spinLoopHint();
+            _ = active.fetchSub(1, .acq_rel);
+        }
+        fn worker(t: *openmiles.Timer) void {
+            for (0..200) |_| {
+                t.start();
+                t.stop();
+            }
+        }
+    };
+    const timer = try openmiles.Timer.init(openmiles.global_allocator, CB.cb);
+    defer timer.deinit();
+
+    var handles: [4]std.Thread = undefined;
+    for (&handles) |*h| h.* = try std.Thread.spawn(.{}, CB.worker, .{timer});
+    for (handles) |h| h.join();
+
+    try testing.expect(!CB.overlapped.load(.acquire));
+    try testing.expect(!timer.is_running);
+}
+
 test "Sequence setChannelMap out-of-range physical clamps" {
     const allocator = testing.allocator;
     const driver = try openmiles.MidiDriver.init(allocator);
