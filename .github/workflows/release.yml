@@ -38,7 +38,7 @@ jobs:
         run: zig build test
 
       - name: Cross-compile Windows DLL
-        run: zig build -Dtarget=x86-windows -Doptimize=ReleaseSmall
+        run: zig build -Dtarget=x86-windows -Doptimize=ReleaseFast
 
       - name: Package release
         run: |

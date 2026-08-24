@@ -460,7 +460,7 @@ Verified end-to-end with **Europa 1400 Gold: The Guild** (TL edition) under Wine
 - `AIL_open_stream` → MP3 file streaming confirmed (`KraeuterUndPhiolen.mp3`)
 - `AIL_set_named_sample_file` → WAV sample loading confirmed (RIFF, 252 bytes)
 - Volume, pan, loop count, position seek, pause/resume all exercised
-- Build: `zig build -Dtarget=x86-windows -Doptimize=ReleaseSmall`
+- Build: `zig build -Dtarget=x86-windows -Doptimize=ReleaseFast`
 
 ## Toolchain Notes (2026-05-29, Zig 0.16)
 - Ported to Zig 0.16. `std.DynLib` dropped its Windows backend (the inner-type
@@ -469,7 +469,7 @@ Verified end-to-end with **Europa 1400 Gold: The Guild** (TL edition) under Wine
   plugin DLLs into games. Replaced with `src/utils/dynlib.zig`: a Win32
   `LoadLibraryA`/`GetProcAddress`/`FreeLibrary` loader on Windows, delegating to
   `std.DynLib` on other targets. Plugin/addon loading is functional again.
-- Windows (`x86-windows` ReleaseSmall) and native `libmss32.so` both build clean.
+- Windows (`x86-windows` ReleaseFast) and native `libmss32.so` both build clean.
   The native test suite runs 300+ unit tests plus a multi-seed fuzz harness that
   invokes every exported function with adversarial inputs; all pass. Run native
   tests with `-Dtarget=x86_64-linux-musl -Dcpu=baseline` to avoid a

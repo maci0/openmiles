@@ -47,10 +47,10 @@ zig build
 zig build test
 
 # Cross-compile for Windows (game deployment)
-zig build -Dtarget=x86-windows -Doptimize=ReleaseSmall
+zig build -Dtarget=x86-windows -Doptimize=ReleaseFast
 
 # Target a specific MSS version's API surface (ABI-shape the export table)
-zig build -Dtarget=x86-windows -Doptimize=ReleaseSmall -Dmss-version=5
+zig build -Dtarget=x86-windows -Doptimize=ReleaseFast -Dmss-version=5
 ```
 
 ### Targeting an MSS version
@@ -98,7 +98,7 @@ The output DLL is at `zig-out/bin/mss32.dll`.
 
 ## Usage
 
-1. Build the Windows DLL with `zig build -Dtarget=x86-windows -Doptimize=ReleaseSmall`
+1. Build the Windows DLL with `zig build -Dtarget=x86-windows -Doptimize=ReleaseFast`
 2. Back up the original `mss32.dll` / `MSS32.DLL` in your game directory
 3. Copy `zig-out/bin/mss32.dll` to the game directory (as both `mss32.dll` and `MSS32.DLL` on case-sensitive filesystems)
 4. Run the game (natively on Windows, or via Wine on Linux/macOS)

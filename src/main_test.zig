@@ -2,6 +2,23 @@ const std = @import("std");
 const testing = std.testing;
 const openmiles = @import("openmiles");
 
+// Fixture: a Sample on a 44100 Hz stereo driver, preloaded with pcm_len zero
+// bytes as a mono/stereo 16-bit WAV. The caller owns the driver (s.driver)
+// and the sample; deinit the driver after the sample.
+fn loadedSample(allocator: std.mem.Allocator, pcm_len: usize, channels: u16, rate: u32) !*openmiles.Sample {
+    const drv = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    errdefer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    errdefer s.deinit();
+    const pcm = try allocator.alloc(u8, pcm_len);
+    defer allocator.free(pcm);
+    @memset(pcm, 0);
+    const wav = try openmiles.buildWavFromPcm(allocator, pcm, channels, rate, 16);
+    defer allocator.free(wav);
+    try s.loadFromMemory(wav, true);
+    return s;
+}
+
 test "DigitalDriver init and deinit" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
@@ -1149,14 +1166,10 @@ test "Sample end sets done status" {
 test "AIL_stop_sample is a no-op unless the sample is SMP_PLAYING (SDK)" {
     // SDK wavefile.cpp AIL_API_stop_sample early-outs unless status==SMP_PLAYING,
     // so stopping a never-played or finished sample must NOT report SMP_STOPPED.
-    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
-    defer driver.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(driver);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
+    defer drv.deinit();
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
 
     // Never started -> SMP_DONE; stop must leave it DONE (not STOPPED).
     try testing.expectEqual(@as(u32, 2), dg.AIL_sample_status(s)); // SMP_DONE
@@ -2393,14 +2406,10 @@ test "AIL_file_type_named delegates to file_type, special-cases voice suffixes" 
 }
 
 test "AIL_sample_loaded_len reports remaining unplayed bytes" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 16000, 1, 8000); // mono16 -> 8000 frames
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm = [_]u8{0} ** 16000; // mono16 -> 8000 frames
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
     // Whole sample loaded, cursor at 0 -> 8000 frames * 2 bytes = 16000.
     try testing.expectEqual(@as(i32, 16000), api_v9.AIL_sample_loaded_len(s));
     // Seek to the middle (byte 8000 -> frame 4000) -> 4000 frames remaining = 8000 bytes.
@@ -2411,14 +2420,10 @@ test "AIL_sample_loaded_len reports remaining unplayed bytes" {
 }
 
 test "AIL_sample_ms_lookup converts ms to a byte position (SDK)" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 8000, 1, 8000); // 8000 Hz mono16, bpf=2
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm = [_]u8{0} ** 8000;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16); // 8000 Hz mono16, bpf=2
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
     // datarate = 8000 * 2 = 16000 bytes/sec; 1000 ms -> 16000 bytes.
     var actual: i32 = 0;
     try testing.expectEqual(@as(u32, 16000), api_v9.AIL_sample_ms_lookup(s, 1000, &actual));
@@ -2430,14 +2435,10 @@ test "AIL_sample_ms_lookup converts ms to a byte position (SDK)" {
 }
 
 test "ms_position uses the effective playback rate (rate*factor) round-trip" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 32000, 1, 8000); // 16000 mono-16 frames
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm = [_]u8{0} ** 32000; // 16000 mono-16 frames
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16); // native 8000
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
 
     // Play at 2x native (16000 Hz). 500 ms of output -> 8000 source frames.
     dg.AIL_set_sample_playback_rate(s, 16000);
@@ -2454,14 +2455,10 @@ test "ms_position uses the effective playback rate (rate*factor) round-trip" {
 }
 
 test "AIL_set_sample_position rounds to the granularity boundary (SDK)" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 4096, 2, 44100); // stereo16, bpf=4
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [4096]u8 align(2) = [_]u8{0} ** 4096;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 2, 44100, 16); // stereo16, bpf=4
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
     // 102 rounds to the nearest 4-byte boundary -> 104 (frame 26), not 100.
     dg.AIL_set_sample_position(s, 102);
     try testing.expectEqual(@as(u32, 104), dg.AIL_sample_position(s));
@@ -2473,14 +2470,10 @@ test "AIL_set_sample_position rounds to the granularity boundary (SDK)" {
 test "AIL_start_sample rewinds to the beginning (SDK buf[tail].pos = 0)" {
     // SDK AIL_API_start_sample resets position to 0 before playing -- it does
     // not continue from where the sample was (that is AIL_resume_sample's job).
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 4096, 2, 44100);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [4096]u8 align(2) = [_]u8{0} ** 4096;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 2, 44100, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
 
     dg.AIL_set_sample_position(s, 200); // seek partway in
     try testing.expectEqual(@as(u32, 200), dg.AIL_sample_position(s));
@@ -3105,14 +3098,10 @@ test "Sample setPlaybackRate ignores rate <= 0 (SDK behavior)" {
 }
 
 test "playback rate and rate_factor compose into the pitch (not overwrite)" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
 
     // native = 8000. rate 4000 -> pitch 0.5.
     dg.AIL_set_sample_playback_rate(s, 4000);
@@ -3129,14 +3118,10 @@ test "playback rate and rate_factor compose into the pitch (not overwrite)" {
 }
 
 test "loop_block setter: -2 keeps current offset, start>end swaps (SDK)" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 4096, 1, 8000); // mono 16-bit, bpf=2
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [4096]u8 align(2) = [_]u8{0} ** 4096;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16); // mono 16-bit, bpf=2
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
 
     var ls: i32 = 0;
     var le: i32 = 0;
@@ -3159,14 +3144,10 @@ test "loop_block setter: -2 keeps current offset, start>end swaps (SDK)" {
 }
 
 test "AIL_sample_playback_rate defaults to the file's native rate" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
     // No explicit rate set: the getter must report the file's 8000 Hz (like the
     // SDK's original_playback_rate set at load), not a hardcoded 44100.
     try testing.expectEqual(@as(i32, 8000), dg.AIL_sample_playback_rate(s));
@@ -4178,14 +4159,10 @@ test "AIL_lock_channel/release_channel take the MIDI driver handle (SDK)" {
     try testing.expectEqual(@as(?*anyopaque, null), openmiles.locked_channels[@intCast(ch)]);
 }
 test "v9 update_sample_3D_position dead-reckons by velocity" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
     api_v7.AIL_set_sample_3D_position(s, 0, 0, 0);
     api_v7.AIL_set_sample_3D_velocity(s, 10, 0, 0, 1); // 10 units/ms on +x (magnitude 1)
     // SDK m3d.cpp: position += velocity * dt_ms (velocity is per-millisecond, so
@@ -4206,14 +4183,10 @@ test "v9 update_sample_3D_position dead-reckons by velocity" {
 }
 
 test "v7 set_sample_3D_velocity scales the direction by magnitude" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
     // SDK multiplies each component by magnitude before storing. Unit +x dir × 7.
     api_v7.AIL_set_sample_3D_velocity(s, 1, 0, 0, 7);
     var vx: f32 = 0;
@@ -4228,14 +4201,10 @@ test "v7 set_sample_3D_velocity scales the direction by magnitude" {
 }
 
 test "v7 unified 3D pos/vel/orient round-trip in MSS left-handed space" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
 
     // Position: set MSS-space (1,2,3), the getter returns the same values.
     api_v7.AIL_set_sample_3D_position(s, 1, 2, 3);
@@ -4358,14 +4327,10 @@ test "AIL_sample_3D_cone round-trips inner/outer degrees + verbatim outer_volume
 }
 
 test "v7/v8 is_3D: position enables it, getter & set_sample_is_3D return it (SDK)" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
     var a: f32 = 0;
     // Fresh sample is not yet 3D: getter returns 0.
     try testing.expectEqual(@as(i32, 0), api_v7.AIL_sample_3D_position(s, &a, &a, &a));
@@ -4383,14 +4348,10 @@ test "v7/v8 is_3D: position enables it, getter & set_sample_is_3D return it (SDK
 }
 
 test "v7 set_sample_3D_orientation normalizes face & up and round-trips both" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
     // Non-unit face (0,0,5) -> (0,0,1); non-unit, non-axis up (0,3,4) -> (0,0.6,0.8).
     api_v7.AIL_set_sample_3D_orientation(s, 0, 0, 5, 0, 3, 4);
     var fx: f32 = 0;
@@ -4409,14 +4370,10 @@ test "v7 set_sample_3D_orientation normalizes face & up and round-trips both" {
 }
 
 test "v7 sample_volume_levels returns the L/R scalars verbatim (SDK)" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
 
     // The SDK stores left_volume/right_volume verbatim and the getter returns
     // them exactly -- no quantization through volume+pan.
@@ -4489,14 +4446,10 @@ test "v7 master reverb decay/predelay/damping all round-trip" {
 }
 
 test "6.5/6.6 stream volume/reverb/low-pass round-trip" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
 
     // Stream volume levels reconstruct like the sample form.
     api_stream.AIL_set_stream_volume_levels(s, 0.8, 0.2);
@@ -4607,14 +4560,10 @@ test "3D distance/doppler/rolloff factors: 1.0 default, 0.0 on null handle (SDK)
 }
 
 test "occlusion drives the low-pass cutoff (m3d.cpp model), obstruction does not" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
 
     // A null handle returns 1.0 (fully open), never 0 (SDK wavefile.cpp).
     try testing.expectEqual(@as(f32, 1.0), api_v7.AIL_sample_low_pass_cut_off(null, 0));
@@ -4714,14 +4663,10 @@ test "AIL_DLS_get_info writes AILDLSINFO to param 2 and PercentCPU to param 3 (S
 }
 
 test "v7 set_sample_3D_distances orders the min/max pair (SDK swap)" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
     api_v7.AIL_set_sample_3D_position(s, 0, 0, 0);
     // Normal order (max=100, min=3) is preserved.
     api_v7.AIL_set_sample_3D_distances(s, 100.0, 3.0, 0);
@@ -4746,14 +4691,10 @@ test "v7 set_sample_3D_distances orders the min/max pair (SDK swap)" {
 }
 
 test "v9 set_sample_3D_volume_falloff maps graph range to distance attenuation" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
     api_v7.AIL_set_sample_3D_position(s, 0, 0, 0);
     // Graph: near=2.0, far=50.0 (X = distance).
     var graph = [_]api_v9.MSSGraphPoint{
@@ -4796,14 +4737,10 @@ test "v9 falloff setters store all four graphs and honor the SDK pointcount guar
 }
 
 test "v9 bus mixer allocates, routes samples, and frees" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [64]u8 align(2) = [_]u8{0} ** 64;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16);
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
     // Allocate a bus and route the sample to it.
     const bus = api_v9.AIL_allocate_bus(drv) orelse return error.NoBus;
     try testing.expectEqual(@as(usize, 1), drv.buses.items.len);
@@ -4820,14 +4757,10 @@ test "v9 bus mixer allocates, routes samples, and frees" {
 
 const api_v8b = @import("api/v8.zig");
 test "v8 sample channel_count and loop_block report real state" {
-    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    const s = try loadedSample(testing.allocator, 128, 1, 8000); // mono
+    const drv = s.driver;
     defer drv.deinit();
-    const pcm: [128]u8 align(2) = [_]u8{0} ** 128;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 16); // mono
-    defer testing.allocator.free(wav);
-    const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    try s.loadFromMemory(wav, false);
     var mask: u32 = 0;
     try testing.expectEqual(@as(i32, 1), api_v8b.AIL_sample_channel_count(s, &mask)); // mono
     // SDK: standard WAVs report channel_mask = ~0U ("default mapping"), not a
