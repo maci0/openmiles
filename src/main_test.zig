@@ -1060,6 +1060,31 @@ test "loadApplicationProviders skips corrupt plugins and missing directories" {
     try testing.expectEqual(@as(i32, 0), openmiles.loadApplicationProviders(dirname ++ "/missing"));
 }
 
+test "RIB plugin loading registers the mock provider's interface end to end" {
+    // The only automated coverage of the dynamic-plugin path (dlopen/LoadLibrary
+    // + RIB_Main + interface registration). The fixture is installed by
+    // `zig build` into zig-out/bin/plugins/mock.asi; skip quietly when absent
+    // (e.g. running tests without a prior install), like the soundfont fixture.
+    const img_path = "zig-out/bin/plugins/mock.asi";
+    std.Io.Dir.cwd().access(openmiles.io, img_path, .{}) catch return;
+
+    const p = try openmiles.Provider.load(testing.allocator, img_path);
+    defer p.deinit();
+
+    try testing.expectEqualStrings("mock.asi", p.name);
+    var found_engine = false;
+    for (p.interfaces.items) |iface| {
+        if (!std.mem.eql(u8, iface.name, "ASI digital audio engine")) continue;
+        found_engine = true;
+        // mock_asi.c registers exactly one entry; its token must survive the
+        // load intact (a broken segment copy or missing relocation pass used
+        // to crash or corrupt this data before registration completed).
+        const token = iface.entries.get("Input data type") orelse return error.MissingEntry;
+        try testing.expectEqual(@as(usize, 0x1234), token);
+    }
+    try testing.expect(found_engine);
+}
+
 test "panToMss converts linear pan to MSS range" {
     try testing.expectEqual(@as(i32, 64), openmiles.panToMss(0.0));
     try testing.expectEqual(@as(i32, 0), openmiles.panToMss(-1.0));

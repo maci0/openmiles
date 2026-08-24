@@ -263,14 +263,17 @@ pub fn build(b: *std.Build) void {
         b.installArtifact(exe);
     }
 
-    // Mock ASI (Audio Stream Interface) plugin for testing plugin discovery/loading
+    // Mock ASI (Audio Stream Interface) plugin for testing plugin discovery/loading.
+    // Built for test_target (not the user-selected target): its only consumers
+    // are the musl-resolved test executables below, and a libc mismatch shows
+    // up as unrelocated data pointers crashing inside RIB_Main callbacks.
     const mock_root_step = b.addWriteFile("mock_root.zig", "");
     const mock_asi = b.addLibrary(.{
         .name = "mock",
         .linkage = .dynamic,
         .root_module = b.createModule(.{
             .root_source_file = mock_root_step.add("mock_root.zig", ""),
-            .target = target,
+            .target = test_target,
             .optimize = optimize,
             .link_libc = true,
         }),
@@ -279,9 +282,12 @@ pub fn build(b: *std.Build) void {
         .file = b.path("src/bindings/mock_asi.c"),
         .flags = &c_flags,
     });
-    // Install to bin/plugins/ (output name depends on platform: mock.dll, libmock.so, etc.)
+    // Install as mock.asi (renamed via dest_sub_path): plugin discovery only
+    // considers *.asi/*.m3d/*.flt names (isPluginExtension), so the platform
+    // default output name (libmock.so / mock.dll) would never even be probed.
     const install_mock = b.addInstallArtifact(mock_asi, .{
         .dest_dir = .{ .override = .{ .custom = "bin/plugins" } },
+        .dest_sub_path = "mock.asi",
     });
     b.getInstallStep().dependOn(&install_mock.step);
 
