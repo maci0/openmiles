@@ -199,7 +199,15 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
         std.Io.Dir.cwd().deleteFile(io, path) catch {};
         return null;
     };
-    p.temp_path = openmiles.global_allocator.dupeZ(u8, path) catch null;
+    p.temp_path = openmiles.global_allocator.dupeZ(u8, path) catch {
+        // Without the recorded path the temp image can never be deleted (the
+        // provider would otherwise leak one loaded-DLL file per call), so fail
+        // the open rather than leave the file behind.
+        p.deinit();
+        std.Io.Dir.deleteFileAbsolute(io, path) catch {};
+        std.Io.Dir.cwd().deleteFile(io, path) catch {};
+        return null;
+    };
     return p;
 }
 pub fn AIL_close_ASI_provider(provider_opt: ?*Provider) callconv(.winapi) void {

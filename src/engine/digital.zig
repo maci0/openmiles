@@ -998,7 +998,11 @@ pub const Sample = struct {
         const size: usize = @intCast(file_len);
         const buf = try self.driver.allocator.alloc(u8, size);
         errdefer self.driver.allocator.free(buf);
-        _ = file.readPositionalAll(io, buf, 0) catch return error.FileNotFound;
+        const n = file.readPositionalAll(io, buf, 0) catch return error.ReadFailed;
+        // A short read means the file shrank or became unreadable mid-load; the
+        // truncated image would decode as garbage (or fail confusingly inside
+        // miniaudio), so refuse it like readWholeFile does.
+        if (n < size) return error.ReadFailed;
         // loadFromOwnedMemory takes ownership of buf directly, avoiding a redundant copy
         try self.loadFromOwnedMemory(buf);
     }

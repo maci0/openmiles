@@ -99,18 +99,18 @@ pub const Provider = struct {
 
     pub fn load(allocator: std.mem.Allocator, path: []const u8) !*Provider {
         const self = try allocator.create(Provider);
+        // Cover every fallible step from here on: the dupeZ below can fail while
+        // self is allocated but uninitialized, so the guard must precede it.
+        errdefer allocator.destroy(self);
+        const name = try allocator.dupeZ(u8, std.fs.path.basename(path));
+        errdefer allocator.free(name);
         self.* = .{
             .handle = @ptrCast(self),
             .lib = null,
-            .name = try allocator.dupeZ(u8, std.fs.path.basename(path)),
+            .name = name,
             .allocator = allocator,
             .interfaces = .empty,
         };
-        errdefer {
-            self.interfaces.deinit(allocator);
-            allocator.free(self.name);
-            allocator.destroy(self);
-        }
 
         const prev = current_loading_provider;
         current_loading_provider = self;

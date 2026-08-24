@@ -655,7 +655,13 @@ pub fn MilesSetSoundLabelLimits(system: ?*anyopaque, sound_limits: ?[*:0]const u
 pub fn MilesAddSoundBank(filename: ?[*:0]const u8, name: ?[*:0]const u8) callconv(.winapi) ?*anyopaque {
     _ = name;
     const fname = std.mem.span(filename orelse return null);
-    const image = openmiles.readWholeFile(fname) catch return null;
+    const image = openmiles.readWholeFile(fname) catch |err| {
+        // Same signal as AIL_open_soundbank: a silent null here would leave the
+        // game (and the log) with no reason for the failed bank load.
+        log("MilesAddSoundBank: read '{s}' failed ({any})\n", .{ fname, err });
+        openmiles.setLastError("Failed to read sound bank file");
+        return null;
+    };
     defer openmiles.global_allocator.free(image);
     const bank = openmiles.soundbank.loadFromMemory(openmiles.global_allocator, fname, image) catch {
         openmiles.setLastError("Failed to add sound bank");
