@@ -152,7 +152,7 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
                 return null;
             }
         else
-            std.fmt.bufPrintZ(&path_buf, ".\\om_asi_{x:016}.dll", .{id}) catch |err| {
+            std.fmt.bufPrintZ(&path_buf, "./om_asi_{x:016}.dll", .{id}) catch |err| {
                 log("Error: {any}\n", .{err});
                 return null;
             };

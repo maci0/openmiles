@@ -290,6 +290,11 @@ pub fn build(b: *std.Build) void {
         .dest_sub_path = "mock.asi",
     });
     b.getInstallStep().dependOn(&install_mock.step);
+    // The plugin-loading test reads zig-out/bin/plugins/mock.asi from disk. A
+    // cross-compile (-Dtarget=x86-windows) installs a PE image under that same
+    // path, so the test step must re-install its own-target copy first or the
+    // dlopen fails with NotElfFile after any Windows build.
+    test_step.dependOn(&install_mock.step);
 
     // Native RIB test. Reuses the musl-resolved test bundle (tb) so on a glibc
     // host it avoids the crt1.o .sframe relocation the linker can't handle.
