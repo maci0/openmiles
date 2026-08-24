@@ -149,7 +149,7 @@ pub const XmidiLoopEntry = struct {
 /// ms_per_beat can be as small as 0.001 (a crafted 1-us-per-beat tempo event),
 /// pushing time/ms_per_beat far past i32 range where @intFromFloat would panic.
 fn satBeats(v: f64) i32 {
-    return @min(root.satI32F64(v), std.math.maxInt(i32) - 1);
+    return @min(root.satI32(v), std.math.maxInt(i32) - 1);
 }
 
 pub const Sequence = struct {
@@ -758,8 +758,8 @@ pub const Sequence = struct {
         return .{
             // Saturating: total_ms comes from TML u32 event times and can
             // exceed maxInt(i32); time_ms accumulates unbounded in playback.
-            .current = root.satI32F64(self.time_ms),
-            .total = root.satI32F64(self.total_ms),
+            .current = root.satI32(self.time_ms),
+            .total = root.satI32(self.total_ms),
         };
     }
 

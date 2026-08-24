@@ -118,10 +118,11 @@ fn readBits(data: []const u8, bitpos: *i32, n: i32) u32 {
 
 fn fetchU32(p: []const u8) u32 {
     if (p.len < 4) return 0;
-    return (@as(u32, p[0]) << 24) | (@as(u32, p[1]) << 16) | (@as(u32, p[2]) << 8) | @as(u32, p[3]);
+    return std.mem.readInt(u32, p[0..4], .big);
 }
 
-fn isId3v2(p: [*]const u8) bool {
+/// ID3v2 tag header: "ID3", non-0xff size-of-tag bytes, syncsafe size bytes.
+pub fn isId3v2(p: [*]const u8) bool {
     return p[0] == 0x49 and p[1] == 0x44 and p[2] == 0x33 and
         p[3] < 0xff and p[4] < 0xff and p[6] < 0x80 and p[7] < 0x80 and p[8] < 0x80 and p[9] < 0x80;
 }

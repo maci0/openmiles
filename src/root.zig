@@ -725,20 +725,12 @@ const volume_to_gain_table: [128]f32 = blk: {
     break :blk table;
 };
 
-/// Saturating f32 -> i32 (NaN -> 0, out-of-range -> clamped). Guards the
-/// `@intFromFloat` panic when callers feed adversarial floats — including the
-/// i32 -> f32 -> i32 round trip where INT_MAX rounds up to 2^31 (out of range).
-pub fn satI32(v: f32) i32 {
-    if (std.math.isNan(v)) return 0;
-    if (v >= 2147483647.0) return std.math.maxInt(i32);
-    if (v <= -2147483648.0) return std.math.minInt(i32);
-    return @intFromFloat(v);
-}
-
-/// Saturating f64 -> i32 (NaN -> 0, out-of-range -> clamped). Same contract as
-/// satI32 for sources wider than f32 -- e.g. TML event times are u32
-/// milliseconds and can exceed maxInt(i32) on long/crafted sequences.
-pub fn satI32F64(v: f64) i32 {
+/// Saturating float -> i32 (NaN -> 0, out-of-range -> clamped). Guards the
+/// `@intFromFloat` panic when callers feed adversarial floats -- including the
+/// i32 -> f32 -> i32 round trip where INT_MAX rounds up to 2^31 (out of range),
+/// and TML event times (u32 milliseconds) that can exceed maxInt(i32) on
+/// long/crafted sequences. f32 arguments widen losslessly.
+pub fn satI32(v: f64) i32 {
     if (std.math.isNan(v)) return 0;
     if (v >= 2147483647.0) return std.math.maxInt(i32);
     if (v <= -2147483648.0) return std.math.minInt(i32);

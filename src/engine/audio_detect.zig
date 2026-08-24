@@ -71,9 +71,7 @@ fn eqi(buf: []const u8, off: usize, lit: []const u8) bool {
 // AIL_API_file_type (miscutil.cpp). Returns the MPEG layer file type or null.
 fn detectMpeg(in: []const u8) ?i32 {
     var s = in;
-    if (s.len >= 10 and s[0] == 'I' and s[1] == 'D' and s[2] == '3' and
-        s[3] < 0xff and s[4] < 0xff and s[6] < 0x80 and s[7] < 0x80 and s[8] < 0x80 and s[9] < 0x80)
-    {
+    if (s.len >= 10 and root.mp3.isId3v2(s.ptr)) {
         const skip: u32 = 10 + (@as(u32, s[9]) | (@as(u32, s[8]) << 7) | (@as(u32, s[7]) << 14) | (@as(u32, s[6]) << 21));
         if (skip < s.len) s = s[skip..] else return null;
     }
