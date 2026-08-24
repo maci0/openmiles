@@ -177,7 +177,8 @@ pub fn AIL_3D_sample_playback_rate(s: ?*anyopaque) callconv(.winapi) i32 {
     // then the loaded decoder's native rate (original_playback_rate is set to the
     // file rate at load), then the 11025 init default for a fresh sample.
     if (sample.target_rate) |tr| return openmiles.satI32(tr);
-    if (sample.decoder) |d| return @intCast(d.outputSampleRate);
+    // Saturate: outputSampleRate is a u32 file-header value that can exceed i32.
+    if (sample.decoder) |d| return std.math.cast(i32, d.outputSampleRate) orelse std.math.maxInt(i32);
     return 11025;
 }
 pub fn AIL_set_3D_sample_playback_rate(s: ?*anyopaque, rate: i32) callconv(.winapi) void {

@@ -51,7 +51,11 @@ fn wavImageLen(p: [*]const u8) ?usize {
     if (p[0] != 'R' or p[1] != 'I' or p[2] != 'F' or p[3] != 'F') return null;
     if (p[8] != 'W' or p[9] != 'A' or p[10] != 'V' or p[11] != 'E') return null;
     const riff = std.mem.readInt(u32, p[4..8], .little);
-    return @as(usize, riff) + 8;
+    // Reject sizes that overflow the address width (usize is u32 on the
+    // shipped x86 build): riff+8 must be representable.
+    const sum = @addWithOverflow(@as(usize, riff), 8);
+    if (sum[1] != 0) return null;
+    return sum[0];
 }
 
 const WavCue = struct { id: u32, offset: u32 };
@@ -102,8 +106,10 @@ fn wavCueAt(img: []const u8, n: usize) ?WavCue {
     if (cue.len < 4) return null;
     const count = std.mem.readInt(u32, img[cue.off..][0..4], .little);
     if (n >= count) return null;
-    const rec = cue.off + 4 + n * 24; // each cue point is 24 bytes
-    if (rec + 24 > img.len) return null;
+    // Saturating so a huge file-supplied count cannot wrap the record offset
+    // past the bounds check (usize is u32 on the shipped x86 build).
+    const rec = cue.off +| 4 +| n *| 24; // each cue point is 24 bytes
+    if (rec >= img.len or img.len - rec < 24) return null;
     return .{
         .id = std.mem.readInt(u32, img[rec..][0..4], .little),
         .offset = std.mem.readInt(u32, img[rec + 20 ..][0..4], .little), // dwSampleOffset
@@ -675,6 +681,13 @@ fn recon51Volume(save_pan: f32, save_fb_pan: f32, f_left: f32, f_right: f32, b_l
             f_left;
     }
 }
+// r/(r+1) with the overflow limit taken explicitly: a level ratio whose
+// ^(10/3) power overflows to +inf means an extreme pan (1.0), not NaN.
+fn panFromRatio(r: f32) f32 {
+    if (std.math.isInf(r)) return if (r > 0) 1.0 else 0.0;
+    if (std.math.isNan(r)) return 0.5; // non-finite input levels stay neutral
+    return r / (r + 1);
+}
 // SDK header order: (S, f_left, f_right, b_left, b_right, center, sub).
 pub fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, f_left: f32, f_right: f32, b_left: f32, b_right: f32, center: f32, sub: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
@@ -687,20 +700,15 @@ pub fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, f_left: f32, f_right: f3
     var save_fb_pan: f32 = 0.5;
     var save_volume: f32 = 0;
     if (f_left > 0.0001) {
-        const r1 = std.math.pow(f32, f_right / f_left, 10.0 / 3.0);
-        save_pan = r1 / (r1 + 1);
-        const r2 = std.math.pow(f32, b_left / f_left, 10.0 / 3.0);
-        save_fb_pan = r2 / (r2 + 1);
+        save_pan = panFromRatio(std.math.pow(f32, f_right / f_left, 10.0 / 3.0));
+        save_fb_pan = panFromRatio(std.math.pow(f32, b_left / f_left, 10.0 / 3.0));
         save_volume = recon51Volume(save_pan, save_fb_pan, f_left, f_right, b_left, b_right);
     } else if (b_left > 0.0001) {
-        const r1 = std.math.pow(f32, b_right / b_left, 10.0 / 3.0);
-        save_pan = r1 / (r1 + 1);
-        const r2 = std.math.pow(f32, f_left / b_left, 10.0 / 3.0);
-        save_fb_pan = 1.0 - (r2 / (r2 + 1));
+        save_pan = panFromRatio(std.math.pow(f32, b_right / b_left, 10.0 / 3.0));
+        save_fb_pan = 1.0 - panFromRatio(std.math.pow(f32, f_left / b_left, 10.0 / 3.0));
         save_volume = recon51Volume(save_pan, save_fb_pan, f_left, f_right, b_left, b_right);
     } else if (f_right > 0.0001) {
-        const r1 = std.math.pow(f32, b_right / f_right, 10.0 / 3.0);
-        save_fb_pan = r1 / (r1 + 1);
+        save_fb_pan = panFromRatio(std.math.pow(f32, b_right / f_right, 10.0 / 3.0));
         save_pan = 1.0;
         save_volume = if (save_fb_pan > 0.0001) b_right * std.math.pow(f32, save_fb_pan, -0.3) else f_right;
     } else if (b_right > 0.0001) {
@@ -733,9 +741,11 @@ pub fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, f_left: f32, f_right: f3
 // SDK order (wavefile.cpp): (S, volume, pan, fb_pan, center_level, sub_level).
 pub fn AIL_set_sample_51_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32, fb_pan: f32, center_level: f32, sub_level: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    const v = std.math.clamp(volume, 0.0, 1.0);
-    const p = std.math.clamp(pan, 0.0, 1.0);
-    const fb = std.math.clamp(fb_pan, 0.0, 1.0);
+    // NaN fails safe (silence, centre): clamp() alone maps NaN to the upper
+    // bound, i.e. garbage input -> full volume / hard pan.
+    const v = if (std.math.isNan(volume)) 0.0 else std.math.clamp(volume, 0.0, 1.0);
+    const p = if (std.math.isNan(pan)) 0.5 else std.math.clamp(pan, 0.0, 1.0);
+    const fb = if (std.math.isNan(fb_pan)) 0.5 else std.math.clamp(fb_pan, 0.0, 1.0);
     // Compute the 6 channel levels exactly as AIL_API_set_sample_51_volume_pan
     // does. (v51_fb_pan/center/sub are stored after setVolumePanF below, which
     // resets them to the 2D-neutral defaults.)

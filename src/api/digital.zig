@@ -124,7 +124,9 @@ pub fn AIL_sample_playback_rate(s_opt: ?*Sample) callconv(.winapi) i32 {
     // loaded decoder's native rate, then the 11025 init default for a fresh,
     // unloaded sample (NOT 44100).
     if (s.target_rate) |tr| return openmiles.satI32(tr);
-    if (s.decoder) |d| return @intCast(d.outputSampleRate);
+    // File-header rate is u32 from untrusted input; a value above i32 max
+    // must saturate rather than panic the @intCast.
+    if (s.decoder) |d| return std.math.cast(i32, d.outputSampleRate) orelse std.math.maxInt(i32);
     return 11025;
 }
 // SDK: AIL_set_sample_volume_pan(HSAMPLE, F32 volume, F32 pan) — floats in 0.0..1.0,
@@ -545,7 +547,10 @@ pub fn AIL_digital_latency(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
             // device buffer = all internalPeriods of internalPeriodSizeInFrames, so
             // multiply by the period count (was reporting a single period, ~N times
             // too low).
-            return (period * periods * 1000) / rate;
+            // 64-bit intermediate: period*periods*1000 overflows u32 for
+            // large-device configs (e.g. 384000-frame periods x 32).
+            const total_frames = @as(u64, period) * periods;
+            return @intCast(@min(total_frames *| 1000 / rate, std.math.maxInt(u32)));
         }
     }
     // Fallback for no-device engines (tests) or if period info unavailable

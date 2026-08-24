@@ -409,7 +409,9 @@ pub fn AIL_room_type(dig_opt: ?*DigitalDriver, bus_index: i32) callconv(.winapi)
 pub fn AIL_redbook_set_volume_level(hand: ?*Redbook, volume: f32) callconv(.winapi) f32 {
     const rb = hand orelse return 0;
     const old = @as(f32, @floatFromInt(rb.volume)) / 127.0;
-    rb.volume = @intFromFloat(std.math.clamp(volume, 0.0, 1.0) * 127.0);
+    // NaN fails safe to silence; clamp() alone maps NaN to full volume.
+    const cv = if (std.math.isNan(volume)) 0.0 else std.math.clamp(volume, 0.0, 1.0);
+    rb.volume = @intFromFloat(cv * 127.0);
     return old;
 }
 pub fn AIL_redbook_volume_level(hand: ?*Redbook) callconv(.winapi) f32 {
@@ -493,7 +495,10 @@ fn srcChanOf(s: *Sample, spk: i32) i32 {
     const bit = @as(u32, 1) << @intCast(spk);
     if (s.channel_mask & bit == 0) return -1;
     const idx: u32 = @popCount(s.channel_mask & (bit - 1));
-    return if (idx >= sampleSourceChannels(s)) -1 else @intCast(idx);
+    // The channel-level matrix is [9][9]: source lanes beyond it are unroutable
+    // even when set_sample_info accepted a wider channel count.
+    const routed = @min(sampleSourceChannels(s), 9);
+    return if (idx >= routed) -1 else @intCast(idx);
 }
 // Default mono/stereo routing (set_user_channel_defaults) used until the matrix
 // is explicitly set: stereo source is identity; mono source feeds outputs 0 & 1.

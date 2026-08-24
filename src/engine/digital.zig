@@ -1301,8 +1301,10 @@ pub const Sample = struct {
     // setters. Map linearly onto the same engine path so the perceptual volume
     // curve and pan handling stay consistent.
     pub fn setVolumePanF(self: *Sample, volume: f32, pan: f32) void {
-        const v = std.math.clamp(volume, 0.0, 1.0);
-        const p = std.math.clamp(pan, 0.0, 1.0);
+        // NaN fails safe (silence, centre): clamp() would map NaN to the upper
+        // bound (@min/@max skip NaN), i.e. garbage input -> full volume.
+        const v = if (std.math.isNan(volume)) 0.0 else std.math.clamp(volume, 0.0, 1.0);
+        const p = if (std.math.isNan(pan)) 0.5 else std.math.clamp(pan, 0.0, 1.0);
         self.original_volume = @intFromFloat(v * 127.0);
         self.original_pan = @intFromFloat(p * 127.0);
         // SDK AIL_API_set_sample_volume_pan stores save_volume = pow(volume,10/6)
@@ -1363,9 +1365,18 @@ pub const Sample = struct {
         var save_pan: f32 = 0.5;
         var save_volume: f32 = 0;
         if (left > 0.0001) {
-            const ratio = std.math.pow(f32, right / left, 10.0 / 3.0);
-            save_pan = ratio / (ratio + 1);
-            save_volume = if (save_pan < 0.0001) left else right * std.math.pow(f32, save_pan, -0.3);
+            const rl = right / left;
+            const ratio = std.math.pow(f32, rl, 10.0 / 3.0);
+            if (std.math.isInf(ratio) and rl > 0) {
+                // right/left^10/3 overflowed: the exact limit of
+                // ratio/(ratio+1) is 1 and pow(pan,-0.3) -> 1, so pin both.
+                save_pan = 1.0;
+                save_volume = right;
+            } else if (!std.math.isNan(ratio)) {
+                save_pan = ratio / (ratio + 1);
+                save_volume = if (save_pan < 0.0001) left else right * std.math.pow(f32, save_pan, -0.3);
+            }
+            // NaN ratio (non-finite input levels): keep the neutral defaults.
         } else if (right > 0.0001) {
             save_pan = 1.0;
             save_volume = right;
@@ -1402,8 +1413,10 @@ pub const Sample = struct {
         // can't overflow the @intFromFloat conversion or exceed the delay node.
         const max_delay: u64 = @as(u64, sample_rate);
         const delay_frames: u32 = @intCast(@max(@as(u64, 1), @min(satU64(reflect_time * @as(f32, @floatFromInt(sample_rate))), max_delay)));
-        // Map room_type to decay: higher room_type = longer decay tail
-        const decay: f32 = @min(0.95, room_type * 0.15);
+        // Map room_type to decay: higher room_type = longer decay tail.
+        // Clamp below too: a negative decay inverts the feedback phase
+        // (clamp() also bounds NaN to 0.95 instead of passing it through).
+        const decay: f32 = std.math.clamp(room_type * 0.15, 0.0, 0.95);
 
         if (self.reverb_node) |node| {
             ma.ma_delay_node_set_wet(node, level);
