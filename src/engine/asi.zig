@@ -11,12 +11,12 @@ const ASI_Stream_Impl = struct {
     is_initialized: bool = false,
     pub fn open(filename: []const u8) !*ASI_Stream_Impl {
         const self = try root.global_allocator.create(ASI_Stream_Impl);
+        errdefer root.global_allocator.destroy(self);
         var config = ma.ma_decoder_config_init(ma.ma_format_s16, 2, 44100);
         const resolved = try fs_compat.dupeResolvedPathZ(root.global_allocator, filename);
         defer root.global_allocator.free(resolved);
         const result = ma.ma_decoder_init_file(resolved.ptr, &config, &self.decoder);
         if (result != ma.MA_SUCCESS) {
-            root.global_allocator.destroy(self);
             return error.DecoderInitFailed;
         }
         self.is_initialized = true;

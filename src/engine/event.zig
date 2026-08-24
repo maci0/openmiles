@@ -171,24 +171,39 @@ pub const StartSoundArgs = struct {
 pub const EventConstruct = struct {
     bytes: std.ArrayListUnmanaged(u8) = .empty,
     allocator: std.mem.Allocator,
+    // Set when an append runs out of memory mid-build. The step builders keep
+    // appending after that, but close() must refuse to hand out the result: a
+    // truncated event string would decode as garbage inside the event VM with
+    // no signal at all.
+    failed: bool = false,
 
     pub fn create(allocator: std.mem.Allocator) ?*EventConstruct {
         const self = allocator.create(EventConstruct) catch return null;
         self.* = .{ .allocator = allocator };
         self.printType(.version);
         self.print(";{d};", .{CURRENT_EVENT_VERSION});
+        if (self.failed) {
+            self.deinit();
+            return null;
+        }
         return self;
     }
     fn printType(self: *EventConstruct, t: StepType) void {
-        self.bytes.append(self.allocator, @intCast(@as(i32, @intFromEnum(t)) + '0')) catch {};
+        self.bytes.append(self.allocator, @intCast(@as(i32, @intFromEnum(t)) + '0')) catch {
+            self.failed = true;
+        };
     }
     fn print(self: *EventConstruct, comptime fmt: []const u8, args: anytype) void {
         var buf: [64]u8 = undefined;
         const s = std.fmt.bufPrint(&buf, fmt, args) catch return;
-        self.bytes.appendSlice(self.allocator, s) catch {};
+        self.bytes.appendSlice(self.allocator, s) catch {
+            self.failed = true;
+        };
     }
     fn raw(self: *EventConstruct, s: []const u8) void {
-        self.bytes.appendSlice(self.allocator, s) catch {};
+        self.bytes.appendSlice(self.allocator, s) catch {
+            self.failed = true;
+        };
     }
     pub fn addComment(self: *EventConstruct, text: []const u8) bool {
         self.printType(.comment);
@@ -228,21 +243,35 @@ pub const EventConstruct = struct {
     }
     // A single nibble field (decoder copyDigit: one hex char + ';').
     fn fieldDigit(self: *EventConstruct, v: anytype) void {
-        self.bytes.append(self.allocator, hexChar(@as(u8, @intCast(@as(i64, v) & 0xf)))) catch {};
+        self.bytes.append(self.allocator, hexChar(@as(u8, @intCast(@as(i64, v) & 0xf)))) catch {
+            self.failed = true;
+        };
         self.raw(";");
     }
     // A byte field as two hex chars + ';' (decoder copyUChar; SDK "%02x"-style).
     fn fieldUChar(self: *EventConstruct, v: u8) void {
-        self.bytes.append(self.allocator, hexChar(v >> 4)) catch {};
-        self.bytes.append(self.allocator, hexChar(v & 0xf)) catch {};
+        self.bytes.append(self.allocator, hexChar(v >> 4)) catch {
+            self.failed = true;
+        };
+        self.bytes.append(self.allocator, hexChar(v & 0xf)) catch {
+            self.failed = true;
+        };
         self.raw(";");
     }
     // A u16 field as four hex chars + ';' (decoder copyUShort; SDK "%04x").
     fn fieldUShort(self: *EventConstruct, v: u16) void {
-        self.bytes.append(self.allocator, hexChar(@intCast((v >> 12) & 0xf))) catch {};
-        self.bytes.append(self.allocator, hexChar(@intCast((v >> 8) & 0xf))) catch {};
-        self.bytes.append(self.allocator, hexChar(@intCast((v >> 4) & 0xf))) catch {};
-        self.bytes.append(self.allocator, hexChar(@intCast(v & 0xf))) catch {};
+        self.bytes.append(self.allocator, hexChar(@intCast((v >> 12) & 0xf))) catch {
+            self.failed = true;
+        };
+        self.bytes.append(self.allocator, hexChar(@intCast((v >> 8) & 0xf))) catch {
+            self.failed = true;
+        };
+        self.bytes.append(self.allocator, hexChar(@intCast((v >> 4) & 0xf))) catch {
+            self.failed = true;
+        };
+        self.bytes.append(self.allocator, hexChar(@intCast(v & 0xf))) catch {
+            self.failed = true;
+        };
         self.raw(";");
     }
     // A float field, C "%f" (six decimals) + ';' (decoder copyFloat: parse to ';').
@@ -397,7 +426,16 @@ pub const EventConstruct = struct {
         return true;
     }
     pub fn close(self: *EventConstruct) ?[*]u8 {
-        self.bytes.append(self.allocator, 0) catch {};
+        // A build that hit an allocation failure is structurally truncated;
+        // returning it would look like success while the VM decodes garbage.
+        if (self.failed) {
+            self.deinit();
+            return null;
+        }
+        self.bytes.append(self.allocator, 0) catch {
+            self.deinit();
+            return null;
+        };
         const len = self.bytes.items.len;
         const out: [*]u8 = @ptrCast(std.c.malloc(len) orelse {
             self.deinit();

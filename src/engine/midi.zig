@@ -602,11 +602,15 @@ pub const Sequence = struct {
             break :blk data;
         };
 
+        // Parse into a local first: only swap (and free the old sequence) once
+        // the new data has parsed. Failing mid-swap would leave current_msg
+        // pointing at freed TML memory while a playing sequence kept rendering.
+        const loaded = tsf.tml_load_memory(smf_data.ptr, @intCast(smf_data.len));
+        if (loaded == null) return error.MidiLoadFailed;
         if (self.midi) |m| {
             tsf.tml_free(m);
         }
-        self.midi = tsf.tml_load_memory(smf_data.ptr, @intCast(smf_data.len));
-        if (self.midi == null) return error.MidiLoadFailed;
+        self.midi = loaded;
         self.current_msg = self.midi;
         self.time_ms = 0;
         // Extract time signature from SMF data
@@ -660,7 +664,13 @@ pub const Sequence = struct {
     pub fn start(self: *Sequence) void {
         self.state_mutex.lockUncancelable(io);
         defer self.state_mutex.unlock(io);
-        if (!self.is_initialized) self.ensureSoundInitialized() catch return;
+        if (!self.is_initialized) {
+            self.ensureSoundInitialized() catch |err| {
+                // Say why: the caller sees SEQ_DONE forever otherwise.
+                log("Sequence.start: sound init failed ({any}); sequence will not play\n", .{err});
+                return;
+            };
+        }
         self.resetToBeginning();
         _ = ma.ma_sound_start(&self.sound);
         self.is_playing = true;

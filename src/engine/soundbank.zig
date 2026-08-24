@@ -32,10 +32,14 @@ fn regUnlock() void {
     g_registry_lock.store(false, .release);
 }
 
-fn registryAdd(bank: *Bank) void {
+/// Track a loaded bank in the global registry. Fails only on OOM; the caller
+/// must treat that as a failed load, since an untracked bank would be invisible
+/// to every containerFindEvent/containerSoundDurationMs lookup while still
+/// holding its memory.
+fn registryAdd(bank: *Bank) !void {
     regLock();
     defer regUnlock();
-    g_registry.append(registry_alloc, bank) catch {};
+    try g_registry.append(registry_alloc, bank);
 }
 fn registryRemove(bank: *Bank) void {
     regLock();
@@ -343,6 +347,9 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
             if (base == 0 or end > msz) return error.BadAssetTable;
         }
     }
-    registryAdd(self);
+    // A bank that cannot be registered must fail the whole load: the registry is
+    // the only lookup path (MilesFindEvent / Container_GetSound), so returning a
+    // success here would hand out a handle whose assets can never be found.
+    try registryAdd(self);
     return self;
 }

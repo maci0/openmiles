@@ -85,6 +85,7 @@ pub const Provider = struct {
     pub fn init(allocator: std.mem.Allocator, module: ?*anyopaque) !*Provider {
         log("Provider.init called\n", .{});
         const self = try allocator.create(Provider);
+        errdefer allocator.destroy(self);
         self.* = .{
             .handle = @ptrCast(self),
             .lib = null,
@@ -171,6 +172,10 @@ pub const Provider = struct {
         if (count < 0) return;
         const entry_count: usize = @intCast(count);
         const iface = try Interface.init(self.allocator, name);
+        // Own the interface until it is safely appended to the provider list:
+        // an OOM partway through the entry loop must not leak it (or the entry
+        // keys duped so far).
+        errdefer iface.deinit();
         const rib_entries: [*]RIB_INTERFACE_ENTRY = @ptrCast(@alignCast(entries));
         var i: usize = 0;
         while (i < entry_count) : (i += 1) {
@@ -179,6 +184,7 @@ pub const Provider = struct {
             if (entry.name != null) {
                 const name_span = std.mem.span(entry.name);
                 const duped = try self.allocator.dupeZ(u8, name_span);
+                errdefer self.allocator.free(duped);
                 try iface.entries.put(self.allocator, duped, entry.token);
             }
         }

@@ -33,6 +33,7 @@ pub const Timer = struct {
 
     pub fn init(allocator: std.mem.Allocator, callback: *const fn (u32) callconv(.winapi) void) !*Timer {
         const self = try allocator.create(Timer);
+        errdefer allocator.destroy(self);
         self.* = .{
             .callback = callback,
             .allocator = allocator,
@@ -73,8 +74,12 @@ pub const Timer = struct {
         if (@atomicLoad(bool, &self.is_running, .acquire)) return;
         @atomicStore(bool, &self.is_running, true, .release);
         self.thread_id.store(0, .release);
-        self.thread = std.Thread.spawn(.{}, run, .{self}) catch {
+        self.thread = std.Thread.spawn(.{}, run, .{self}) catch |err| {
             @atomicStore(bool, &self.is_running, false, .release);
+            // A dead timer thread means the app's callbacks never fire; that
+            // must not fail silently (games poll via timer callbacks and would
+            // hang waiting for state that is never produced).
+            root.log("Timer.start: thread spawn failed ({any}); timer callbacks will not run\n", .{err});
             return;
         };
     }

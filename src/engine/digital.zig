@@ -751,6 +751,7 @@ pub const Sample = struct {
 
     pub fn init(driver: *DigitalDriver) !*Sample {
         const self = try driver.allocator.create(Sample);
+        errdefer driver.allocator.destroy(self);
         self.* = .{
             .driver = driver,
             .sound = undefined,
@@ -1680,6 +1681,7 @@ pub const Sample3D = struct {
 
     pub fn init(driver: *DigitalDriver) !*Sample3D {
         const self = try driver.allocator.create(Sample3D);
+        errdefer driver.allocator.destroy(self);
         self.* = .{ .driver = driver, .sound = undefined };
         try driver.samples_3d.append(driver.allocator, self);
         return self;

@@ -313,7 +313,11 @@ pub fn AIL_push_system_state(dig: ?*DigitalDriver, flags: u32, crossfade_ms: i32
     _ = crossfade_ms;
     // Save the current driver state so it can be restored by pop. (We snapshot
     // the master volume; the level counter mirrors the real push/pop depth.)
-    d.system_state_stack.append(d.allocator, d.getMasterVolume()) catch {};
+    // A failed save must be visible: a later pop would otherwise restore the
+    // wrong level's volume with nothing in the log to explain it.
+    d.system_state_stack.append(d.allocator, d.getMasterVolume()) catch {
+        openmiles.log("AIL_push_system_state: allocation failed; this state level will not be restored\n", .{});
+    };
 }
 pub fn AIL_pop_system_state(dig: ?*DigitalDriver, crossfade_ms: i32) callconv(.winapi) void {
     const d = dig orelse return;

@@ -46,8 +46,14 @@ pub const Input = struct {
         self.is_initialized = true;
         self.max_buffer_bytes = self.sample_rate * self.channels * (self.bits / 8);
         // Pre-allocate so the audio-thread callback never hits the allocator.
-        self.buffer.ensureTotalCapacity(self.allocator, self.max_buffer_bytes) catch {};
-        self.snapshot.ensureTotalCapacity(self.allocator, self.max_buffer_bytes) catch {};
+        // Failure here only degrades to dropping captured chunks (the callback
+        // never grows the buffer), but say so in the log.
+        self.buffer.ensureTotalCapacity(self.allocator, self.max_buffer_bytes) catch {
+            log("Input.init: capture ring pre-allocation failed; captured audio may be dropped\n", .{});
+        };
+        self.snapshot.ensureTotalCapacity(self.allocator, self.max_buffer_bytes) catch {
+            log("Input.init: snapshot pre-allocation failed; captured audio may be dropped\n", .{});
+        };
         return self;
     }
 
@@ -63,13 +69,21 @@ pub const Input = struct {
 
     pub fn start(self: *Input) void {
         if (!self.is_initialized) return;
-        _ = ma.ma_device_start(&self.device);
-        @atomicStore(i32, &self.state, 1, .release);
+        // Only report "recording" if the device actually started; otherwise
+        // getInfo would hand the app an empty buffer while state claimed live
+        // capture.
+        if (ma.ma_device_start(&self.device) == ma.MA_SUCCESS) {
+            @atomicStore(i32, &self.state, 1, .release);
+        } else {
+            log("Input.start: ma_device_start failed; capture stays stopped\n", .{});
+        }
     }
 
     pub fn stop(self: *Input) void {
         if (!self.is_initialized) return;
-        _ = ma.ma_device_stop(&self.device);
+        if (ma.ma_device_stop(&self.device) != ma.MA_SUCCESS) {
+            log("Input.stop: ma_device_stop failed\n", .{});
+        }
         @atomicStore(i32, &self.state, 0, .release);
     }
 
