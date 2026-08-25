@@ -103,6 +103,23 @@ const off_name = 56; // char SoundBankName[4]
 const header_size = 60;
 const asset_entry_size = 8; // { U32 NameOffset; U32 DataOffset; }
 
+/// Case-insensitive asset-name index for one table: lowercased name -> entry
+/// index. Keys are owned lowercase copies (freed with the Bank); values are
+/// table entry indices so all offset validation stays with the callers.
+/// `complete == false` (the build ran out of memory) makes lookups fall back
+/// to the original linear scan.
+const NameIndex = struct {
+    map: std.StringHashMapUnmanaged(u32) = .empty,
+    complete: bool = false,
+
+    fn deinit(self: *NameIndex, allocator: std.mem.Allocator) void {
+        var it = self.map.keyIterator();
+        while (it.next()) |k| allocator.free(k.*);
+        self.map.deinit(allocator);
+        self.* = .{};
+    }
+};
+
 pub const Bank = struct {
     meta: []u8,
     // SoundBankName[4] copied out NUL-terminated at load: the on-disk field is
@@ -112,6 +129,11 @@ pub const Bank = struct {
     name_buf: [5]u8 = [_]u8{0} ** 5,
     filename: [:0]u8,
     allocator: std.mem.Allocator,
+    // Name indexes for the two queried tables (events, sounds). Built once at
+    // load, before the bank joins the global registry, so concurrent lookups
+    // never race the build; immutable afterwards.
+    event_index: NameIndex = .{},
+    sound_index: NameIndex = .{},
 
     fn rdU32(self: *const Bank, off: usize) u32 {
         if (off + 4 > self.meta.len) return 0;
@@ -161,24 +183,93 @@ pub const Bank = struct {
         return self.countFor(which);
     }
 
+    /// Resolve `target` to an entry index in `which`: the load-time hash index
+    /// when available, else (or when the key cannot be lowered) the original
+    /// linear scan. First match in table order wins on both paths, matching
+    /// the SDK FindAsset.
+    fn findEntry(self: *const Bank, which: AssetKind, target: []const u8) ?u32 {
+        const ix: ?*const NameIndex = switch (which) {
+            .events => &self.event_index,
+            .sounds => &self.sound_index,
+            else => null,
+        };
+        if (ix) |index| {
+            if (index.complete) {
+                switch (self.indexGet(index, target)) {
+                    .entry => |e| return e,
+                    .absent => return null,
+                    .unavailable => {}, // could not lower the key; scan instead
+                }
+            }
+        }
+        const count = self.countFor(which);
+        var i: u32 = 0;
+        while (i < count) : (i += 1) {
+            if (self.entryNameAt(which, i)) |nm| {
+                if (std.ascii.eqlIgnoreCase(nm, target)) return i;
+            }
+        }
+        return null;
+    }
+
+    const IndexHit = union(enum) { entry: u32, absent, unavailable };
+
+    /// Hash-index lookup of a case-lowered `target`.
+    fn indexGet(self: *const Bank, ix: *const NameIndex, target: []const u8) IndexHit {
+        var buf: [128]u8 = undefined;
+        if (target.len > buf.len) {
+            const heap = self.allocator.alloc(u8, target.len) catch return .unavailable;
+            defer self.allocator.free(heap);
+            for (target, 0..) |c, i| heap[i] = std.ascii.toLower(c);
+            return if (ix.map.get(heap)) |e| .{ .entry = e } else .absent;
+        }
+        const k = buf[0..target.len];
+        for (target, 0..) |c, i| k[i] = std.ascii.toLower(c);
+        return if (ix.map.get(k)) |e| .{ .entry = e } else .absent;
+    }
+
+    /// Name of table entry `i`, or null when the offset escapes the metadata.
+    fn entryNameAt(self: *const Bank, which: AssetKind, i: u32) ?[]const u8 {
+        const entry = @as(usize, self.tableOff(which)) + @as(usize, i) * asset_entry_size;
+        const name_off = self.rdU32(entry);
+        if (name_off == 0 or name_off >= self.meta.len) return null;
+        return std.mem.sliceTo(self.meta[name_off..], 0);
+    }
+
+    /// Build one table's name index. First occurrence wins, matching the scan
+    /// in findEntry. Any allocation failure discards the partial index so
+    /// lookups take the linear-scan path.
+    fn buildNameIndex(self: *Bank, which: AssetKind) !NameIndex {
+        var idx: NameIndex = .{};
+        errdefer idx.deinit(self.allocator);
+        const count = self.countFor(which);
+        var i: u32 = 0;
+        while (i < count) : (i += 1) {
+            const nm = self.entryNameAt(which, i) orelse continue;
+            const key = try self.allocator.dupe(u8, nm);
+            for (key) |*c| c.* = std.ascii.toLower(c.*);
+            if (idx.map.contains(key)) {
+                self.allocator.free(key);
+            } else {
+                idx.map.put(self.allocator, key, i) catch |err| {
+                    self.allocator.free(key);
+                    return err;
+                };
+            }
+        }
+        idx.complete = true;
+        return idx;
+    }
+
     /// Find an asset by (case-insensitive) name and return a pointer to its data
     /// at DataOffset, or null if not found / the data offset escapes the metadata.
     /// Mirrors the SDK FindAsset + AIL_ptr_add(bank, pAsset->DataOffset).
     pub fn assetData(self: *const Bank, which: AssetKind, target: []const u8) ?[*]const u8 {
-        const count = self.countFor(which);
-        var i: u32 = 0;
-        while (i < count) : (i += 1) {
-            const entry = @as(usize, self.tableOff(which)) + @as(usize, i) * asset_entry_size;
-            const name_off = self.rdU32(entry);
-            if (name_off == 0 or name_off >= self.meta.len) continue;
-            const nm = std.mem.sliceTo(self.meta[name_off..], 0);
-            if (std.ascii.eqlIgnoreCase(nm, target)) {
-                const data_off = self.rdU32(entry + 4);
-                if (data_off == 0 or data_off >= self.meta.len) return null;
-                return @ptrCast(self.meta.ptr + data_off);
-            }
-        }
-        return null;
+        const i = self.findEntry(which, target) orelse return null;
+        const entry = @as(usize, self.tableOff(which)) + @as(usize, i) * asset_entry_size;
+        const data_off = self.rdU32(entry + 4);
+        if (data_off == 0 or data_off >= self.meta.len) return null;
+        return @ptrCast(self.meta.ptr + data_off);
     }
 
     /// The event-step bytecode for a named event (MilesFindEvent / AIL_find_event).
@@ -190,15 +281,9 @@ pub const Bank = struct {
     /// name offset escapes the metadata. Callers validate the offset against
     /// whatever they read from the record.
     fn findSoundDataOffset(self: *const Bank, sound_name: []const u8) ?u32 {
-        var i: u32 = 0;
-        while (i < self.countFor(.sounds)) : (i += 1) {
-            const entry = @as(usize, self.tableOff(.sounds)) + @as(usize, i) * asset_entry_size;
-            const name_off = self.rdU32(entry);
-            if (name_off == 0 or name_off >= self.meta.len) continue;
-            const nm = std.mem.sliceTo(self.meta[name_off..], 0);
-            if (std.ascii.eqlIgnoreCase(nm, sound_name)) return self.rdU32(entry + 4);
-        }
-        return null;
+        const i = self.findEntry(.sounds, sound_name) orelse return null;
+        const entry = @as(usize, self.tableOff(.sounds)) + @as(usize, i) * asset_entry_size;
+        return self.rdU32(entry + 4);
     }
 
     /// Resolve a sound asset's source filename into `out` as the SDK formats it:
@@ -313,6 +398,8 @@ pub const Bank = struct {
 
     pub fn deinit(self: *Bank) void {
         registryRemove(self);
+        self.event_index.deinit(self.allocator);
+        self.sound_index.deinit(self.allocator);
         self.allocator.free(self.meta);
         self.allocator.free(self.filename);
         self.allocator.destroy(self);
@@ -362,9 +449,93 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
             if (base == 0 or end > msz) return error.BadAssetTable;
         }
     }
+    // Build the events/sounds name indexes before the bank joins the registry:
+    // until registryAdd publishes it, no other thread can reach the Bank, so
+    // the build needs no lock and lookups never race it. A failed build leaves
+    // that table on the linear-scan path.
+    self.event_index = self.buildNameIndex(.events) catch .{};
+    self.sound_index = self.buildNameIndex(.sounds) catch .{};
     // A bank that cannot be registered must fail the whole load: the registry is
     // the only lookup path (MilesFindEvent / Container_GetSound), so returning a
     // success here would hand out a handle whose assets can never be found.
     try registryAdd(self);
     return self;
+}
+
+test "asset lookup: index parity with scan semantics" {
+    const testing = std.testing;
+    var img: [2048]u8 = undefined;
+    @memset(&img, 0);
+
+    const w32 = struct {
+        fn f(buf: []u8, off: usize, v: u32) void {
+            std.mem.writeInt(u32, buf[off..][0..4], v, .little);
+        }
+    }.f;
+    const putStr = struct {
+        fn f(buf: []u8, at: usize, s: []const u8) usize {
+            @memcpy(buf[at .. at + s.len], s);
+            buf[at + s.len] = 0;
+            return at + s.len + 1;
+        }
+    }.f;
+
+    // Header: two event entries + one sound entry, tables right after it.
+    const ev_off: u32 = header_size;
+    const snd_off: u32 = ev_off + 3 * asset_entry_size;
+    w32(&img, off_events, ev_off);
+    w32(&img, off_sounds, snd_off);
+    w32(&img, off_event_count, 3);
+    w32(&img, off_sound_count, 1);
+
+    // String/data pool after both tables.
+    var pool: usize = snd_off + asset_entry_size;
+    const d0: u32 = @intCast(pool);
+    pool = putStr(&img, pool, "E0DATA");
+    const d1: u32 = @intCast(pool);
+    pool = putStr(&img, pool, "E1DATA");
+    const n0: u32 = @intCast(pool);
+    pool = putStr(&img, pool, "Boom");
+    const n1: u32 = @intCast(pool); // duplicate name, different case
+    pool = putStr(&img, pool, "BOOM");
+    const n2: u32 = @intCast(pool); // >128 bytes to exercise the heap key path
+    var long_buf: [200]u8 = undefined;
+    @memset(&long_buf, 'x');
+    long_buf[199] = 'Z';
+    pool = putStr(&img, pool, &long_buf);
+    const s0: u32 = @intCast(pool);
+    pool = putStr(&img, pool, "kick");
+
+    // events: e0 "Boom" (first match must win over e1), e1 "BOOM", e2 long name.
+    w32(&img, ev_off, n0);
+    w32(&img, ev_off + 4, d0);
+    w32(&img, ev_off + 8, n1);
+    w32(&img, ev_off + 12, d1);
+    w32(&img, ev_off + 16, n2);
+    w32(&img, ev_off + 20, d1);
+    // sounds: one entry.
+    w32(&img, snd_off, s0);
+    w32(&img, snd_off + 4, d0);
+
+    w32(&img, off_meta_size, @intCast(pool));
+    const bank = try loadFromMemory(testing.allocator, "idx.mbnk", img[0..pool]);
+    defer bank.deinit();
+
+    try testing.expect(bank.event_index.complete);
+    try testing.expect(bank.sound_index.complete);
+
+    const p_first = bank.findEventContents("boom") orelse return error.NoEvent;
+    try testing.expectEqual(@as(usize, d0), @intFromPtr(p_first) - @intFromPtr(bank.meta.ptr));
+    // Case-insensitive hit resolves to the SAME (first) entry.
+    const p_upper = bank.findEventContents("BOOM") orelse return error.NoEvent;
+    try testing.expectEqual(@intFromPtr(p_first), @intFromPtr(p_upper));
+    // Long name (> stack key buffer) still hits through the heap path.
+    var long_query: [200]u8 = undefined;
+    @memset(&long_query, 'x');
+    long_query[199] = 'z'; // case-insensitive against the stored 'Z'
+    try testing.expect(bank.findEventContents(&long_query) != null);
+    // Miss is a definitive miss on the indexed path too.
+    try testing.expect(bank.findEventContents("nope") == null);
+    // Sounds table lookups go through their own index.
+    try testing.expectEqual(d0, bank.findSoundDataOffset("KICK") orelse return error.NoSound);
 }

@@ -239,12 +239,13 @@ pub fn AIL_stream_info(s_opt: ?*Sample, datarate: ?*i32, sndtype: ?*i32, length:
             1 => if (b == 8) 0 else 1,
             else => if (b == 8) 2 else 3,
         };
-        var length_frames: u64 = 0;
-        _ = openmiles.ma.ma_sound_get_length_in_pcm_frames(&s.sound, &length_frames);
+        // cached_length_frames was captured once at load (finishDecoderLoad).
+        // Re-querying ma_sound_get_length_in_pcm_frames here would rescan the
+        // compressed stream on every poll of this API.
         const bpf: u64 = bps64 * ch;
         // Saturate the multiply: length_frames is decoder/header-derived, so the
         // product could otherwise overflow u64 before the clamp.
-        if (length) |p| p.* = @intCast(@min(length_frames *| bpf, std.math.maxInt(i32)));
+        if (length) |p| p.* = @intCast(@min(s.cached_length_frames *| bpf, std.math.maxInt(i32)));
         if (memory) |p| p.* = 0; // working-buffer size not separately tracked
     } else {
         if (datarate) |p| p.* = 44100 * 2 * 2;
