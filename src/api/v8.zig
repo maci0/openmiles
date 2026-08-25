@@ -493,7 +493,7 @@ pub fn AIL_mem_write(mem: ?*anyopaque, src: ?*anyopaque, n: i32) callconv(.winap
     return @intCast(take);
 }
 // AIL_next_event_step(eventString, &stepInfo, buffer, bufferSize) — decode the
-// next step of the serialized event text. Writes a decoded EventStepInfo into
+// next step of the serialized event text. Writes a decoded EVENT_STEP_INFO into
 // the caller's scratch buffer and returns the pointer past this step, or null at
 // the end (the event string is NUL-terminated).
 pub fn AIL_next_event_step(event_string: ?*const anyopaque, step_out: ?*?*openmiles.event.EVENT_STEP_INFO, buffer: ?*anyopaque, buffer_size: i32) callconv(.winapi) ?*const anyopaque {

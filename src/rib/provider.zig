@@ -9,17 +9,6 @@ const tsf = root.tsf;
 const log = root.log;
 const fs_compat = root.fs_compat;
 
-pub const RIB_DATA_TYPE = enum(u32) {
-    RIB_NONE = 0,
-    RIB_DEC = 1,
-    RIB_HEX = 2,
-    RIB_FLOAT = 3,
-    RIB_PERCENT = 4,
-    RIB_BOOL = 5,
-    RIB_STRING = 6,
-    RIB_READONLY = 0x80000000,
-};
-
 pub const RIB_ENTRY_TYPE = enum(u32) {
     RIB_FUNCTION = 0,
     RIB_ATTRIBUTE = 1,

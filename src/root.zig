@@ -61,7 +61,6 @@ pub const getCurrentLoadingProvider = rib_mod.getCurrentLoadingProvider;
 pub const Interface = rib_mod.Interface;
 pub const RIB_INTERFACE_ENTRY = rib_mod.RIB_INTERFACE_ENTRY;
 pub const RIB_ENTRY_TYPE = rib_mod.RIB_ENTRY_TYPE;
-pub const RIB_DATA_TYPE = rib_mod.RIB_DATA_TYPE;
 pub const HPROVIDER = rib_mod.HPROVIDER;
 pub const RIB_alloc_provider_handle_ptr = rib_mod.RIB_alloc_provider_handle_ptr;
 pub const RIB_register_interface_ptr = rib_mod.RIB_register_interface_ptr;

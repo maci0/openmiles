@@ -135,8 +135,6 @@ pub const EVENT_STEP_INFO = extern struct {
     type: i32 = 0,
     u: StepUnion = undefined,
 };
-// Back-compat alias used by older call sites/tests.
-pub const EventStepInfo = EVENT_STEP_INFO;
 
 // ---------------------------------------------------------------------------
 // Constructor (byte-faithful write side)

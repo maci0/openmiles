@@ -259,18 +259,6 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
         const etype = status & 0xF0;
 
         switch (etype) {
-            0x80 => {
-                // Note Off
-                if (pos + 1 >= evnt.len) break;
-                var ev: SmfEvent = undefined;
-                ev.abs_time = abs_time;
-                ev.len = 3;
-                ev.data[0] = status;
-                ev.data[1] = evnt[pos];
-                ev.data[2] = evnt[pos + 1];
-                pos += 2;
-                try events.append(allocator, ev);
-            },
             0x90 => {
                 // Note On — XMIDI appends a VLQ note-duration after velocity
                 if (pos + 1 >= evnt.len) break;
@@ -298,8 +286,8 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
                     try events.append(allocator, off);
                 }
             },
-            0xA0, 0xB0, 0xE0 => {
-                // Aftertouch / Control Change / Pitch Bend (2 data bytes)
+            0x80, 0xA0, 0xB0, 0xE0 => {
+                // Note Off / Aftertouch / Control Change / Pitch Bend (2 data bytes)
                 if (pos + 1 >= evnt.len) break;
                 var ev: SmfEvent = undefined;
                 ev.abs_time = abs_time;
