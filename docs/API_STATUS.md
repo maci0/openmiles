@@ -471,8 +471,9 @@ Verified end-to-end with **Europa 1400 Gold: The Guild** (TL edition) under Wine
   `std.DynLib` on other targets. Plugin/addon loading is functional again.
 - Windows (`x86-windows` ReleaseFast) and native `libmss32.so` both build clean.
   The native test suite runs 300+ unit tests plus a multi-seed fuzz harness that
-  invokes every exported function with adversarial inputs; all pass. Run native
-  tests with `-Dtarget=x86_64-linux-musl -Dcpu=baseline` to avoid a
+  invokes every exported function with adversarial inputs; all pass. On a glibc
+  host, plain `zig build test` is enough: build.zig automatically retargets the
+  native test executables to musl (same arch, `-Dcpu=baseline`) to avoid a
   host-toolchain linker error (gcc `crt1.o` `.sframe` relocations the Zig
   self-linker rejects); this affects only native test-exe linking, not the
   library or any source code.
