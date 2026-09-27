@@ -50,8 +50,17 @@ is quiet by default; set `OPENMILES_DEBUG=1` to get the engine trace and the
 `make check` runs `make lint`, `make build`, `make test`, and the
 x86-windows cross-compile, which is what `.github/workflows/ci.yml` runs on
 Ubuntu. CI additionally runs the build and tests on Windows; nothing in the
-tree is Linux-only, but a change that only builds on one host shows up there
+library is Linux-only, but a change that only builds on one host shows up there
 rather than locally.
+
+The library builds and tests on any host Zig supports, through `zig build` and
+`zig build test`. The `make` targets and the two `scripts/*.sh` gates need more:
+a POSIX shell (`sh`, GNU make, `sed`, `command -v`), plus `shellcheck` and a
+Python 3 interpreter named either `python3` or `python`. On Windows that means
+MSYS2, Cygwin, or Git Bash, none of which the Windows runner has, which is why
+CI runs `make lint` on Ubuntu only. The gates themselves are ordinary Python and
+are invoked as `$(PYTHON) scripts/<name>.py`, so they run unchanged under a
+Windows Python; only their launcher is platform-specific.
 
 `make lint` is `zig fmt --check`, `ruff check`, `ruff format --check`,
 `shellcheck scripts/*.sh`, `yamllint .github/workflows`, plus the header-parity,

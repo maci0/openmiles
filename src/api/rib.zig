@@ -209,7 +209,7 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
                 return null;
             }
         else
-            std.fmt.bufPrintZ(&path_buf, "./om_asi_{x:016}.dll", .{id}) catch |err| {
+            std.fmt.bufPrintZ(&path_buf, ".{c}om_asi_{x:016}.dll", .{ std.fs.path.sep, id }) catch |err| {
                 log("AIL_open_ASI_provider: cannot format temp path: {any}\n", .{err});
                 openmiles.setLastError("Failed to format temp path for ASI provider");
                 return null;

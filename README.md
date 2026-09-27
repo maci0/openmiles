@@ -65,7 +65,8 @@ zig build -Dtarget=x86-windows -Doptimize=ReleaseFast -Dmss-version=5
 `make check` runs every check CI runs, in CI's order: `make lint`, `make build`,
 `make test`, and the Windows cross-compile. Run it before pushing.
 
-`make lint` needs `shellcheck`, `python3` (the `scripts/*.py` gates),
+`make lint` needs `shellcheck`, a Python 3 interpreter (the gates run under
+`python3`, or `python` where that is the name on PATH),
 [ruff](https://docs.astral.sh/ruff/) 0.16.4 and
 [yamllint](https://github.com/adrienverge/yamllint) 1.38.0 (the pinned
 versions, checked before they run) besides Zig, since the `scripts/` gate and

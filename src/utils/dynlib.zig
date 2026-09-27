@@ -49,6 +49,18 @@ const StdDynLib = struct {
     }
 };
 
+/// Whether the program header table named by `eh` lies inside the image.
+///
+/// The three fields are file-controlled, so the sum is computed in u64 and
+/// compared there: a crafted e_phoff plus e_phentsize * e_phnum overflows u64,
+/// and narrowing the wrapped result to usize (an unchecked @intCast in
+/// ReleaseFast) would pass a table that starts far outside the map.
+fn programHeaderTableFits(eh: *const std.elf.Ehdr, img_len: usize) bool {
+    if (eh.e_phoff == 0) return false;
+    const end = @as(u64, eh.e_phoff) + @as(u64, eh.e_phentsize) * @as(u64, eh.e_phnum);
+    return end <= @as(u64, img_len);
+}
+
 /// Repair std.DynLib's ElfDynLib map: re-copy writable segments from their real
 /// file offsets and apply R_X86_64_RELATIVE relocations against the load base.
 fn applyElfFixups(lib: *std.DynLib, path: []const u8) !void {
@@ -57,8 +69,7 @@ fn applyElfFixups(lib: *std.DynLib, path: []const u8) !void {
     if (img.len < @sizeOf(std.elf.Ehdr)) return error.ImageFixupFailed;
     const eh: *const std.elf.Ehdr = @ptrCast(img.ptr);
     if (!std.mem.eql(u8, eh.e_ident[0..4], std.elf.MAGIC)) return error.ImageFixupFailed;
-    const phdr_end: usize = @intCast(eh.e_phoff + @as(u64, eh.e_phentsize) * eh.e_phnum);
-    if (eh.e_phoff == 0 or phdr_end > img.len) return error.ImageFixupFailed;
+    if (!programHeaderTableFits(eh, img.len)) return error.ImageFixupFailed;
 
     const path_z = try std.heap.page_allocator.dupeZ(u8, path);
     defer std.heap.page_allocator.free(path_z);
@@ -168,3 +179,40 @@ const WindowsDynLib = struct {
         return @as(T, @ptrCast(@alignCast(addr)));
     }
 };
+
+const testing = std.testing;
+
+test "a program header table inside the image is accepted" {
+    var eh: std.elf.Ehdr = std.mem.zeroes(std.elf.Ehdr);
+    eh.e_phoff = 64;
+    eh.e_phentsize = @sizeOf(std.elf.Phdr);
+    eh.e_phnum = 4;
+    try testing.expect(programHeaderTableFits(&eh, 64 + 4 * @sizeOf(std.elf.Phdr)));
+    try testing.expect(programHeaderTableFits(&eh, 4096));
+}
+
+test "a program header table past the end of the image is rejected" {
+    var eh: std.elf.Ehdr = std.mem.zeroes(std.elf.Ehdr);
+    eh.e_phoff = 4096;
+    eh.e_phentsize = @sizeOf(std.elf.Phdr);
+    eh.e_phnum = 4;
+    try testing.expect(!programHeaderTableFits(&eh, 4096));
+}
+
+test "a program header table whose end overflows u64 is rejected" {
+    var eh: std.elf.Ehdr = std.mem.zeroes(std.elf.Ehdr);
+    // e_phoff + e_phentsize * e_phnum wraps to 0x2001, which fits in a 16 KiB
+    // image, so a bound computed after the wrap would accept a table that in
+    // fact starts 2^64 bytes before it.
+    eh.e_phoff = 0xffffffff00002000;
+    eh.e_phentsize = 0xffff;
+    eh.e_phnum = 0xffff;
+    try testing.expect(!programHeaderTableFits(&eh, 0x4000));
+}
+
+test "an image with no program header table is rejected" {
+    var eh: std.elf.Ehdr = std.mem.zeroes(std.elf.Ehdr);
+    eh.e_phentsize = @sizeOf(std.elf.Phdr);
+    eh.e_phnum = 4;
+    try testing.expect(!programHeaderTableFits(&eh, 4096));
+}

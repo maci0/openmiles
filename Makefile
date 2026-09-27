@@ -7,6 +7,12 @@
 # workflow read the same field, and nothing has to be kept in sync by hand.
 ZIG_VERSION := $(shell sed -n 's/^[[:space:]]*\.minimum_zig_version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' build.zig.zon)
 
+# The gate interpreter, resolved rather than assumed: `python3` is the name on
+# Linux and macOS, `python` the one a Windows install puts on PATH, and a
+# shebang line is not honoured by every shell that can run make. The gates are
+# invoked as `$(PYTHON) scripts/...` so one resolution covers every call site.
+PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
+
 all: build
 
 # Fail before any compile work, with a clear message, rather than letting an
@@ -37,18 +43,18 @@ cross:
 # agree with, and src/root.zig the struct layouts, for every -Dmss-version.
 # See scripts/check_header.py.
 check-header:
-	./scripts/check_header.py
+	$(PYTHON) scripts/check_header.py
 
 # Every -Dmss-version value must be swept against a reference DLL or declared
 # unswept with a reason, and the three places that list the values must agree.
 # See scripts/check_versions.py.
 check-versions:
-	./scripts/check_versions.py
+	$(PYTHON) scripts/check_versions.py
 
 # deps/ holds vendored upstream headers, not package-manager downloads, so
 # deps/SHA256SUMS is the only record of which bytes were reviewed.
 check-vendored:
-	./scripts/check_vendored.py
+	$(PYTHON) scripts/check_vendored.py
 
 # The gate scripts are the linter, so ruff checks them too: ruff.toml pins the
 # rule set, and a script that crashes or stops reporting fails the gate
@@ -64,14 +70,14 @@ YAMLLINT_VERSION := 1.38.0
 # build.zig.zon; a stale one in CI installs the old tool and the gate quietly
 # stops matching.
 check-pins:
-	./scripts/check_toolchain_pins.py
+	$(PYTHON) scripts/check_toolchain_pins.py
 
 # The threat model names a file:line and an anchor for every control it claims
 # exists. Edits move those lines, so a stale reference is a mitigation claim
 # nobody re-verified, which reads the same as a real one. Assert the anchors
 # still sit where the model says they do.
 check-threat-model:
-	./scripts/check_threat_model_refs.py
+	$(PYTHON) scripts/check_threat_model_refs.py
 
 check-python:
 	@command -v ruff >/dev/null 2>&1 || { echo "error: ruff $(RUFF_VERSION) not found on PATH" >&2; exit 1; }
@@ -88,22 +94,23 @@ check-yaml:
 check-host-tools:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "error: shellcheck not found on PATH; 'make lint' shellchecks scripts/*.sh" >&2; exit 1; }
 	@command -v yamllint >/dev/null 2>&1 || { echo "error: yamllint $(YAMLLINT_VERSION) not found on PATH; 'make lint' checks .github/workflows with it" >&2; exit 1; }
-	@command -v python3 >/dev/null 2>&1 || { echo "error: python3 not found on PATH; the scripts/*.py gates need it" >&2; exit 1; }
+	@[ -n "$(PYTHON)" ] || { echo "error: neither python3 nor python found on PATH; the scripts/*.py gates need one" >&2; exit 1; }
 
 # The parity sweep alone needs a third-party package. `make lint` deliberately
 # does not depend on it, so CI and a contributor without the reference DLLs
 # never have to install anything; `make parity` checks for it here instead of
 # failing later on an import.
 check-parity-tools:
-	@python3 -c 'import pefile' 2>/dev/null || { echo "error: pefile not found; uv pip install -r scripts/requirements-dev.txt" >&2; exit 1; }
+	@[ -n "$(PYTHON)" ] || { echo "error: neither python3 nor python found on PATH; the scripts/*.py gates need one" >&2; exit 1; }
+	@$(PYTHON) -c 'import pefile' 2>/dev/null || { echo "error: pefile not found; uv pip install -r scripts/requirements-dev.txt" >&2; exit 1; }
 
 lint: check-host-tools
 	zig fmt --check .
 	shellcheck scripts/*.sh
-	./scripts/check_header.py
-	./scripts/check_versions.py
-	./scripts/check_vendored.py
-	./scripts/check_threat_model_refs.py
+	$(PYTHON) scripts/check_header.py
+	$(PYTHON) scripts/check_versions.py
+	$(PYTHON) scripts/check_vendored.py
+	$(PYTHON) scripts/check_threat_model_refs.py
 	@$(MAKE) --no-print-directory check-python
 	@$(MAKE) --no-print-directory check-yaml
 	@$(MAKE) --no-print-directory check-pins

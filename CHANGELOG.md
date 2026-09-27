@@ -119,6 +119,11 @@ everything below is unreleased.
   so a crafted plugin image could have the loader write anywhere in the address
   space. The scan now stops on complete pairs, and a fixup slot outside the
   image or not 8-byte aligned fails the load.
+- The ELF fixup bounded the program header table with a `u64` sum narrowed to
+  `usize`, which in a ReleaseFast build is an unchecked truncation: a crafted
+  `e_phoff` plus `e_phentsize * e_phnum` wrapping `u64` passed the bound and
+  walked a table starting far outside the mapping. The sum is compared in `u64`
+  now, so a wrapped table fails the load.
 - `Timer.start` blocked on the state mutex, which the self-stop path joins: a
   callback that restarted its own timer deadlocked against the run loop it was
   running on. A restart over a live handle now retires the old loop first (and
@@ -242,6 +247,12 @@ everything below is unreleased.
   run does not append engine trace to `openmiles.log` in the repository root
   or bury a failing test in it. `OPENMILES_DEBUG=1` turns it back on for a
   run; a Debug build of the library still logs by default.
+- The `make` gates resolve the Python interpreter (`python3`, or `python` where
+  that is the name on PATH) and run the `scripts/*.py` gates through it,
+  instead of executing each one through its shebang, so they run on a host
+  where the `python3` name does not exist.
+- The temp ASI image falls back to the platform separator when no temp
+  directory can be determined, instead of a literal `/`.
 
 ### Known gaps
 
