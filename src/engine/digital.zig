@@ -139,6 +139,40 @@ pub const LimiterNode = extern struct {
     base: ma.ma_node_base,
 
     const knee: f32 = 0.7;
+    /// tanh(8) is 0.9999998, so the shaped output has already reached 1.0 in f32
+    /// by there: input past this point can saturate instead of being tabulated.
+    const clip_max: f32 = 8.0;
+    const clip_table_bits: comptime_int = 10;
+    const clip_table_len: usize = 1 << clip_table_bits;
+    /// tanh sampled over [0, clip_max]. softClip runs on the audio thread for
+    /// every sample above the knee, where the libm call was the entire cost of
+    /// the node; the curve is smooth enough that linear interpolation across
+    /// these intervals stays far below an f32 ULP of the shaped output.
+    const clip_table: [clip_table_len + 1]f32 = blk: {
+        @setEvalBranchQuota(1_000_000);
+        var t: [clip_table_len + 1]f32 = undefined;
+        for (0..clip_table_len + 1) |i| {
+            // tanh via its exponential form: std.math.tanh is not comptime-
+            // evaluable, so the table could not be built as a constant.
+            const x: f64 = @as(f64, @floatFromInt(i)) * clip_max / clip_table_len;
+            const e2x = std.math.pow(f64, std.math.e, 2.0 * x);
+            t[i] = @floatCast((e2x - 1.0) / (e2x + 1.0));
+        }
+        break :blk t;
+    };
+
+    /// tanh over [0, clip_max], interpolated from clip_table. Saturates to 1.0
+    /// above the table and passes NaN through, so a non-finite input still
+    /// reaches the output as non-finite instead of becoming full scale.
+    fn tanhClip(over: f32) f32 {
+        if (!(over <= clip_max)) return if (over > clip_max) 1.0 else std.math.nan(f32);
+        const pos = over * @as(f32, @floatFromInt(clip_table_len)) / clip_max;
+        const idx: usize = @intFromFloat(@min(pos, @as(f32, @floatFromInt(clip_table_len - 1))));
+        const frac = pos - @as(f32, @floatFromInt(idx));
+        const lo = clip_table[idx];
+        return lo + (clip_table[idx + 1] - lo) * frac;
+    }
+
     /// ma_node_init zeroes the node allocation; this one has no state to restore.
     pub fn postInit(node: *LimiterNode) void {
         _ = node;
@@ -147,7 +181,7 @@ pub const LimiterNode = extern struct {
         const a = @abs(x);
         if (a <= knee) return x;
         const over = (a - knee) / (1.0 - knee);
-        const shaped = knee + (1.0 - knee) * std.math.tanh(over);
+        const shaped = knee + (1.0 - knee) * tanhClip(over);
         return if (x < 0) -shaped else shaped;
     }
     fn process(node: ?*ma.ma_node, ppIn: [*c][*c]const f32, pInCount: [*c]u32, ppOut: [*c][*c]f32, pOutCount: [*c]u32) callconv(.c) void {

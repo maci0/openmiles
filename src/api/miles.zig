@@ -212,35 +212,44 @@ fn instanceHasLabel(inst: *const SoundInstance, label: []const u8) bool {
     }
     return false;
 }
-fn countWithLabel(label: []const u8) u32 {
-    var n: u32 = 0;
-    for (g_instances.items) |inst| {
-        if (instanceHasLabel(inst, label)) n += 1;
-    }
-    return n;
-}
-// Evict the oldest (lowest instance_id) instance carrying `label`; returns false
-// if none found.
-fn evictOldestWithLabel(label: []const u8) bool {
-    var oldest: ?usize = null;
+// Evict the oldest instances carrying `label` until a slot is free under `lim`
+// (a cap of 0 evicts every one of them). The matching indices are gathered in
+// one pass and ordered by instance_id once, rather than rescanning the whole
+// list to recount and re-find the minimum after each eviction: the old loop
+// was O(instances) per evicted instance, so a cap of 0 over N instances cost
+// O(N^2) label tokenizations on a single start-sound step.
+fn evictOldestWithLabel(label: []const u8, lim: u32) void {
+    var matches: std.ArrayListUnmanaged(usize) = .empty;
+    defer matches.deinit(openmiles.global_allocator);
     for (g_instances.items, 0..) |inst, i| {
         if (!instanceHasLabel(inst, label)) continue;
-        if (oldest == null or inst.instance_id < g_instances.items[oldest.?].instance_id) oldest = i;
+        matches.append(openmiles.global_allocator, i) catch return;
     }
-    if (oldest) |i| {
-        destroyInstance(g_instances.swapRemove(i));
-        return true;
+    // Already under the cap: nothing to evict.
+    const cap: usize = lim;
+    if (matches.items.len < cap) return;
+    std.sort.block(usize, matches.items, g_instances.items, struct {
+        fn lt(items: []const *SoundInstance, a: usize, b: usize) bool {
+            return items[a].instance_id < items[b].instance_id;
+        }
+    }.lt);
+    // One slot short of the cap is enough room for the sound being added; a cap
+    // of 0 has no slot, so it evicts all matches.
+    const victims = @min(matches.items.len, matches.items.len - cap + 1);
+    // Highest index first: swapRemove shifts the tail down, which leaves every
+    // lower (not yet removed) index valid.
+    var v: usize = victims;
+    while (v > 0) {
+        v -= 1;
+        destroyInstance(g_instances.swapRemove(matches.items[v]));
     }
-    return false;
 }
 // Make room under each limited label of a new sound before it is added.
 fn enforceLimits(labels_in: []const u8) void {
     var lit = std.mem.tokenizeAny(u8, labels_in, ", ");
     while (lit.next()) |lbl| {
         const lim = limitFor(lbl) orelse continue;
-        while (countWithLabel(lbl) >= lim) {
-            if (!evictOldestWithLabel(lbl)) break;
-        }
+        evictOldestWithLabel(lbl, lim);
     }
 }
 // Apply a cache/purge step's namelist (built by the decoder) to the cache set.

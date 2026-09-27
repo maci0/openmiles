@@ -5140,6 +5140,18 @@ test "v9 bus limiter: soft-clip math + attach/detach lifecycle" {
     const hi = openmiles.LimiterNode.softClip(2.0);
     try testing.expect(hi > 0.7 and hi < 1.0);
     try testing.expect(@abs(openmiles.LimiterNode.softClip(-2.0) + hi) < 0.0001); // odd symmetry
+    // The tabulated curve must still track tanh over its whole useful range: the
+    // table replaces a libm call per sample, and this is what bounds that cost.
+    var step: usize = 0;
+    while (step <= 400) : (step += 1) {
+        const x = 0.7 + @as(f32, @floatFromInt(step)) * 0.01; // 0.7 .. 4.7
+        const shaped = openmiles.LimiterNode.softClip(x);
+        const want = 0.7 + 0.3 * @as(f32, @floatCast(std.math.tanh(@as(f64, @floatFromInt(step)) * 0.01 / 0.3)));
+        try testing.expect(@abs(shaped - want) < 1e-5);
+    }
+    // Past the table the curve saturates at unity, and NaN stays non-finite.
+    try testing.expectEqual(@as(f32, 1.0), openmiles.LimiterNode.softClip(1e6));
+    try testing.expect(std.math.isNan(openmiles.LimiterNode.softClip(std.math.nan(f32))));
 
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
@@ -6004,6 +6016,55 @@ test "label wildcard '?' spans a whole multi-byte character" {
     try testing.expectEqual(@as(i32, 1), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("caf?"), 0, @ptrCast(&info)));
     nx = @ptrFromInt(std.math.maxInt(usize));
     try testing.expectEqual(@as(i32, 0), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("caf"), 0, @ptrCast(&info)));
+}
+
+test "label limits evict the oldest instances by id after the list is shuffled" {
+    api_miles_t.MilesShutdownEventSystem();
+    defer api_miles_t.MilesShutdownEventSystem();
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesSetSoundLabelLimits(null, cstr2("music 2")));
+
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("m1"), 0, 0, cstr2("music"), null, 0, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("m2"), 0, 0, cstr2("music"), null, 0, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("x1"), 0, 0, cstr2("other"), null, 0, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("m3"), 0, 0, cstr2("music"), null, 0, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("m4"), 0, 0, cstr2("music"), null, 0, 0);
+    // Stopping the middle entry moves the last one into its slot, so the list
+    // order no longer tracks instance_id.
+    try testing.expectEqual(@as(u64, 1), api_miles_t.MilesStopSoundInstances(cstr2("other"), 0));
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("m5"), 0, 0, cstr2("music"), null, 0, 0);
+
+    // Cap 2 over 4 music instances: the three oldest by id (m1, m2, m3) go.
+    var seen_m1 = false;
+    var seen_m2 = false;
+    var seen_m3 = false;
+    var seen_m4 = false;
+    var seen_m5 = false;
+    var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
+    var count: i32 = 0;
+    while (api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("music"), 0, @ptrCast(&info)) == 1) {
+        count += 1;
+        const used = std.mem.span(info.UsedSound.?);
+        if (std.mem.eql(u8, used, "m1")) seen_m1 = true;
+        if (std.mem.eql(u8, used, "m2")) seen_m2 = true;
+        if (std.mem.eql(u8, used, "m3")) seen_m3 = true;
+        if (std.mem.eql(u8, used, "m4")) seen_m4 = true;
+        if (std.mem.eql(u8, used, "m5")) seen_m5 = true;
+    }
+    try testing.expectEqual(@as(i32, 2), count);
+    try testing.expect(!seen_m1);
+    try testing.expect(!seen_m2);
+    try testing.expect(!seen_m3);
+    try testing.expect(seen_m4);
+    try testing.expect(seen_m5);
+
+    // A cap of 0 evicts every existing instance carrying the label before the new
+    // one is added, so only the sound just started survives.
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesSetSoundLabelLimits(null, cstr2("music 0")));
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("m6"), 0, 0, cstr2("music"), null, 0, 0);
+    nx = @ptrFromInt(std.math.maxInt(usize));
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("music"), 0, @ptrCast(&info)));
+    try testing.expectEqualStrings("m6", std.mem.span(info.UsedSound.?));
 }
 
 test "zero-duration instances complete on processing instead of accumulating" {
