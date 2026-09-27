@@ -146,8 +146,13 @@ pub const Provider = struct {
         // (Deleting before FreeLibrary would fail on Windows, which locks loaded
         // DLLs — the leak that accumulated one temp file per AIL_open_ASI_provider.)
         if (self.temp_path) |tmp| {
+            // Both deletes failing leaves the extracted image on disk for the
+            // life of the host process, and the path is freed below, so nothing
+            // can ever retry it. Say so instead of dropping the file silently.
             std.Io.Dir.deleteFileAbsolute(root.io, tmp) catch {
-                std.Io.Dir.cwd().deleteFile(root.io, tmp) catch {};
+                std.Io.Dir.cwd().deleteFile(root.io, tmp) catch |err| {
+                    root.log("Provider.deinit: cannot delete temp image '{s}' ({any}); the file stays on disk\n", .{ tmp, err });
+                };
             };
             self.allocator.free(tmp);
             self.temp_path = null;

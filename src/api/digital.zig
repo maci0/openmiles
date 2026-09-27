@@ -657,7 +657,14 @@ fn decodeAdpcmSource(info: *const AILSOUNDINFO) ?MixSrc {
     const cap_frames: u64 = chunk.len / @max(dch, 1);
     while (true) {
         var fr: u64 = 0;
-        _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk.ptr, cap_frames, &fr);
+        const read_result = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk.ptr, cap_frames, &fr);
+        // A decoder error leaves fr at 0, indistinguishable from a clean end of
+        // stream. Fail the decode instead of returning a silently truncated
+        // image, and name the status the caller cannot see.
+        if (read_result != openmiles.ma.MA_SUCCESS and read_result != openmiles.ma.MA_AT_END) {
+            log("decodeAdpcmSource: ma_decoder_read_pcm_frames failed with {d}\n", .{read_result});
+            return null;
+        }
         if (fr == 0) break;
         // An OOM abandons the decode; the errdefer frees the partial list.
         list.appendSlice(openmiles.global_allocator, chunk[0..@intCast(fr * dch)]) catch return null;
@@ -999,7 +1006,15 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
     const chunk_frames: u64 = chunk_bytes / @as(usize, bpf);
     while (true) {
         var fr: u64 = 0;
-        _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk_buf.ptr, chunk_frames, &fr);
+        const read_result = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk_buf.ptr, chunk_frames, &fr);
+        // As above: a decoder error also reports 0 frames, and returning the
+        // partial image here would hand back a short file that decodes as a
+        // normal-length one.
+        if (read_result != openmiles.ma.MA_SUCCESS and read_result != openmiles.ma.MA_AT_END) {
+            log("AIL_decompress_ADPCM: ma_decoder_read_pcm_frames failed with {d}\n", .{read_result});
+            openmiles.setLastError("ADPCM decode failed mid-stream");
+            return 0;
+        }
         if (fr == 0) break;
         const nbytes: usize = @intCast(fr * @as(u64, bpf));
         pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..nbytes]) catch return 0;
@@ -1018,7 +1033,12 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
         if (pcm.items.len > target_bytes) {
             pcm.items.len = target_bytes;
         } else if (pcm.items.len < target_bytes) {
-            pcm.appendNTimes(openmiles.global_allocator, 0, target_bytes - pcm.items.len) catch {};
+            // The zero-extension is what makes the output exactly the declared
+            // sample count. Losing it to an allocation failure would hand back a
+            // shorter image than info->samples promises, with nothing to say so.
+            pcm.appendNTimes(openmiles.global_allocator, 0, target_bytes - pcm.items.len) catch {
+                log("AIL_decompress_ADPCM: cannot zero-extend to {d} bytes (short by {d})\n", .{ target_bytes, target_bytes - pcm.items.len });
+            };
         }
     }
 

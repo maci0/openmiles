@@ -149,6 +149,18 @@ fn appendSeparator(buf: []u8, dir: []const u8) ?[]const u8 {
     return buf[0..n];
 }
 
+/// Drop a temp image written for a provider that is being abandoned. Tries the
+/// absolute form first, then the cwd-relative one. A file that survives both
+/// attempts is never retried, because the caller's only record of the path is
+/// about to go away, so the leak is reported.
+fn deleteTempImage(path: []const u8) void {
+    std.Io.Dir.deleteFileAbsolute(io, path) catch {
+        std.Io.Dir.cwd().deleteFile(io, path) catch |err| {
+            log("AIL_open_ASI_provider: cannot delete temp image '{s}' ({any}); it stays on disk\n", .{ path, err });
+        };
+    };
+}
+
 pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.winapi) ?*Provider {
     log("AIL_open_ASI_provider(buffer={*}, size={d})\n", .{ buffer, size });
     if (size < 2) {
@@ -234,7 +246,7 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     wf.writeStreamingAll(io, raw) catch |err| {
         log("AIL_open_ASI_provider: writing {d} bytes to '{s}' failed ({any})\n", .{ size, path, err });
         wf.close(io);
-        std.Io.Dir.deleteFileAbsolute(io, path) catch {};
+        deleteTempImage(path);
         openmiles.setLastError("Failed to write temp file for ASI provider");
         return null;
     };
@@ -246,8 +258,7 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     // file must outlive the provider here — Windows cannot delete a loaded DLL.
     const p = openmiles.Provider.load(openmiles.global_allocator, path) catch |err| {
         log("AIL_open_ASI_provider: loading '{s}' failed ({any})\n", .{ path, err });
-        std.Io.Dir.deleteFileAbsolute(io, path) catch {};
-        std.Io.Dir.cwd().deleteFile(io, path) catch {};
+        deleteTempImage(path);
         openmiles.setLastError("Failed to load ASI provider image");
         return null;
     };
@@ -257,8 +268,7 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
         // the open rather than leave the file behind.
         log("AIL_open_ASI_provider: cannot record temp path '{s}' ({any})\n", .{ path, err });
         p.deinit();
-        std.Io.Dir.deleteFileAbsolute(io, path) catch {};
-        std.Io.Dir.cwd().deleteFile(io, path) catch {};
+        deleteTempImage(path);
         openmiles.setLastError("Failed to record temp path for ASI provider");
         return null;
     };
@@ -466,7 +476,15 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
     defer openmiles.global_allocator.free(chunk_buf);
     while (true) {
         var fr: u64 = 0;
-        _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk_buf.ptr, 4096, &fr);
+        const read_result = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk_buf.ptr, 4096, &fr);
+        // A decoder error also reports 0 frames and would end the loop as if
+        // the stream had finished; fail the call instead of returning a
+        // truncated image under a success return code.
+        if (read_result != openmiles.ma.MA_SUCCESS and read_result != openmiles.ma.MA_AT_END) {
+            log("AIL_decompress_ASI: ma_decoder_read_pcm_frames failed with {d}\n", .{read_result});
+            openmiles.setLastError("AIL_decompress_ASI: decode failed mid-stream");
+            return 0;
+        }
         if (fr == 0) break;
         // A partial decode must be reported as a failure, not wrapped in a WAV
         // and handed back as a complete one.
