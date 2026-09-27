@@ -43,9 +43,7 @@ Requires [Zig 0.16.0](https://ziglang.org/download/). The version is declared
 once, as `.minimum_zig_version` in `build.zig.zon`; the Makefile, CI, and the
 release workflow all read it from there. `make build` and `make test` run a
 version check first and refuse to build on any other Zig; the raw `zig build`
-commands below do not. `make lint` additionally needs `shellcheck`
-and [ruff](https://docs.astral.sh/ruff/) 0.16.4 (the pinned version, checked
-before it runs), since the `scripts/` gate is linted too.
+commands below do not.
 
 ```bash
 # Native build (Linux/Windows -- for tests)
@@ -67,10 +65,11 @@ zig build -Dtarget=x86-windows -Doptimize=ReleaseFast -Dmss-version=5
 `make check` runs every check CI runs, in CI's order: `make lint`, `make build`,
 `make test`, and the Windows cross-compile. Run it before pushing.
 
-`make lint` needs `shellcheck` and `python3` on `PATH` besides Zig; CI installs
-them through the runner image. It checks `zig fmt`, shellchecks `scripts/*.sh`,
-and asserts `src/mss.h` declares every symbol the export table exports, for each
-`-Dmss-version`.
+`make lint` needs `shellcheck` and [ruff](https://docs.astral.sh/ruff/) 0.16.4
+(the pinned version, checked before it runs) besides Zig, since the `scripts/`
+gate is linted too; CI installs them through the runner image. It checks
+`zig fmt`, shellchecks `scripts/*.sh`, and asserts `src/mss.h` declares every
+symbol the export table exports, for each `-Dmss-version`.
 
 ### Running a subset of the tests
 

@@ -78,6 +78,61 @@ fn applyLoopBlock(self: anytype, start_bytes: i32, end_bytes: i32) void {
     }
 }
 
+/// Rate factor for sample types that carry no v7 playback-rate factor: the 3D
+/// handles, whose datarate is the effective rate unscaled.
+const no_rate_factor: f32 = 1.0;
+
+/// Byte playback position, shared by Sample.getPosition and Sample3D.getOffset.
+/// Works on any sample type exposing `is_initialized`, `sound` and
+/// `bytesPerFrame`.
+fn bytePosition(self: anytype) u32 {
+    if (!self.is_initialized) return 0;
+    var cursor: u64 = 0;
+    _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
+    const bpf = self.bytesPerFrame();
+    return @as(u32, @intCast(@min(cursor * @as(u64, bpf), std.math.maxInt(u32))));
+}
+
+/// Seek to a byte position. The SDK (AIL_API_set_sample_position) rounds the
+/// offset to the nearest granularity (= bytes-per-frame) boundary, not floors.
+fn seekBytePosition(self: anytype, pos: u32) void {
+    if (!self.is_initialized) return;
+    const bpf = self.bytesPerFrame();
+    const frame: u64 = if (bpf > 0) (@as(u64, pos) + bpf / 2) / bpf else 0;
+    _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
+}
+
+/// Millisecond position, shared by both sample types. The SDK's datarate is the
+/// effective playback rate (an explicitly set target rate overrides the decoder
+/// native rate) times the v7 rate factor, which only 2D samples carry, so 3D
+/// passes `no_rate_factor`. f64 for the position math: a 64-bit frame counter
+/// loses whole frames in f32 past 2^24 (about six minutes at 44.1 kHz), which
+/// shows up as a jittery ms position and a broken seek round trip.
+fn msPosition(self: anytype, rate_factor: f32) Sample.MsPosition {
+    var pos = Sample.MsPosition{ .total = 0, .current = 0 };
+    if (self.is_initialized and self.decoder != null) {
+        var cursor: u64 = 0;
+        _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
+        const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
+        const effective = (self.target_rate orelse native) * rate_factor;
+        const ms_per_frame: f64 = if (effective > 0) 1000.0 / @as(f64, effective) else 0;
+        pos.current = satI32(@as(f64, @floatFromInt(cursor)) * ms_per_frame);
+        pos.total = satI32(@as(f64, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
+    }
+    return pos;
+}
+
+/// Seek to a millisecond position. Negative values clamp to the start (satU64
+/// maps <0/NaN to 0). f64 so a large ms value keeps whole-frame accuracy (f32
+/// spacing is already 256 at a one-day offset).
+fn seekMsPosition(self: anytype, ms: i32, rate_factor: f32) void {
+    if (!self.is_initialized or self.decoder == null) return;
+    const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
+    const effective = (self.target_rate orelse native) * rate_factor;
+    const frame = satU64(@as(f64, @floatFromInt(ms)) * @as(f64, effective) / 1000.0);
+    _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
+}
+
 /// A peak soft-limiter as a custom miniaudio node: passes audio below the knee
 /// untouched and saturates peaks toward unity so a bus can't clip.
 pub const LimiterNode = extern struct {
@@ -1577,59 +1632,21 @@ pub const Sample = struct {
     }
 
     pub fn getPosition(self: *Sample) u32 {
-        if (self.is_initialized) {
-            var cursor: u64 = 0;
-            _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
-            const bpf = self.bytesPerFrame();
-            return @as(u32, @intCast(@min(cursor * @as(u64, bpf), std.math.maxInt(u32))));
-        }
-        return 0;
+        return bytePosition(self);
     }
 
     pub fn setPosition(self: *Sample, pos: u32) void {
-        if (self.is_initialized) {
-            const bpf = self.bytesPerFrame();
-            // SDK (AIL_API_set_sample_position) rounds the byte offset to the
-            // nearest granularity (= bytes-per-frame here) boundary, not floors.
-            const frame: u64 = if (bpf > 0) (@as(u64, pos) + bpf / 2) / bpf else 0;
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
-        }
+        seekBytePosition(self, pos);
     }
 
     pub const MsPosition = struct { total: i32, current: i32 };
 
     pub fn getMsPosition(self: *Sample) MsPosition {
-        var pos = MsPosition{ .total = 0, .current = 0 };
-        if (self.is_initialized and self.decoder != null) {
-            var cursor: u64 = 0;
-            _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
-            // ms uses the effective playback rate (rate*factor), matching the SDK's
-            // datarate and AIL_set_sample_ms_position, so the round-trip holds.
-            const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
-            const effective = (self.target_rate orelse native) * self.v7_rate_factor;
-            // f64 for the position math: a 64-bit frame counter loses whole
-            // frames in f32 past 2^24 (about six minutes at 44.1 kHz), which
-            // shows up as a jittery ms position and a broken seek round trip.
-            const ms_per_frame: f64 = if (effective > 0) 1000.0 / @as(f64, effective) else 0;
-            pos.current = satI32(@as(f64, @floatFromInt(cursor)) * ms_per_frame);
-            pos.total = satI32(@as(f64, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
-        }
-        return pos;
+        return msPosition(self, self.v7_rate_factor);
     }
 
     pub fn setMsPosition(self: *Sample, ms: i32) void {
-        if (self.is_initialized and self.decoder != null) {
-            // SDK uses effective_rate = original_playback_rate * playback_rate_
-            // factor (wavefile.cpp), not the native rate, so an explicitly-set
-            // playback rate/factor maps ms onto the source position correctly.
-            const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
-            const effective = (self.target_rate orelse native) * self.v7_rate_factor;
-            // Negative positions clamp to the start (satU64 maps <0/NaN to 0).
-            // f64 so a large ms value keeps whole-frame accuracy (f32 spacing is
-            // already 256 at a one-day offset).
-            const frame = satU64(@as(f64, @floatFromInt(ms)) * @as(f64, effective) / 1000.0);
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
-        }
+        seekMsPosition(self, ms, self.v7_rate_factor);
     }
 };
 
@@ -2013,24 +2030,11 @@ pub const Sample3D = struct {
     }
 
     pub fn getOffset(self: *Sample3D) u32 {
-        if (self.is_initialized) {
-            var cursor: u64 = 0;
-            _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
-            const bpf = self.bytesPerFrame();
-            return @as(u32, @intCast(@min(cursor * @as(u64, bpf), std.math.maxInt(u32))));
-        }
-        return 0;
+        return bytePosition(self);
     }
 
     pub fn setOffset(self: *Sample3D, pos: u32) void {
-        if (self.is_initialized) {
-            const bpf = self.bytesPerFrame();
-            // Round to the nearest frame boundary, matching the 2D
-            // Sample.setPosition (AIL_API_set_sample_position rounds, not floors)
-            // so the offset round-trip via getOffset holds.
-            const frame: u64 = if (bpf > 0) (@as(u64, pos) + bpf / 2) / bpf else 0;
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
-        }
+        seekBytePosition(self, pos);
     }
 
     pub fn getLength(self: *Sample3D) u32 {
@@ -2044,32 +2048,11 @@ pub const Sample3D = struct {
     }
 
     pub fn getMsPosition(self: *Sample3D) Sample.MsPosition {
-        var pos = Sample.MsPosition{ .total = 0, .current = 0 };
-        if (self.is_initialized and self.decoder != null) {
-            var cursor: u64 = 0;
-            _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
-            // Use the effective playback rate (an explicitly-set rate overrides
-            // native), matching the 2D Sample.getMsPosition so the ms round-trip
-            // holds when a 3D sample's playback rate was changed.
-            const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
-            const effective = self.target_rate orelse native;
-            const ms_per_frame: f64 = if (effective > 0) 1000.0 / @as(f64, effective) else 0;
-            pos.current = satI32(@as(f64, @floatFromInt(cursor)) * ms_per_frame);
-            pos.total = satI32(@as(f64, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
-        }
-        return pos;
+        return msPosition(self, no_rate_factor);
     }
 
     pub fn setMsPosition(self: *Sample3D, ms: i32) void {
-        if (self.is_initialized and self.decoder != null) {
-            // Effective rate (explicit playback rate overrides native), matching
-            // the 2D Sample.setMsPosition so an explicitly-set rate maps ms onto
-            // the source position correctly.
-            const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
-            const effective = self.target_rate orelse native;
-            const frame = satU64(@as(f64, @floatFromInt(ms)) * @as(f64, effective) / 1000.0);
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
-        }
+        seekMsPosition(self, ms, no_rate_factor);
     }
 
     pub fn setMinMaxDistance(self: *Sample3D, min_dist: f32, max_dist: f32) void {

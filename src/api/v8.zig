@@ -331,11 +331,10 @@ pub fn AIL_find_marker_in_list(a0: i32, a1: ?*anyopaque, a2: ?*anyopaque) callco
 pub fn AIL_ftoa(v: f32, buf: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const b = buf orelse return null;
     const out = @as([*]u8, @ptrCast(b));
-    const slice = std.fmt.bufPrint(out[0..32], "{d}\x00", .{v}) catch {
+    _ = std.fmt.bufPrint(out[0..32], "{d}\x00", .{v}) catch {
         out[0] = 0;
         return b;
     };
-    _ = slice;
     return b;
 }
 pub fn AIL_get_event_contents(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque) callconv(.winapi) i32 {

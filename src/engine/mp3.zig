@@ -78,6 +78,20 @@ pub const MP3_INFO = extern struct {
     check_mode: i32 = 0,
     check_copyright: i32 = 0,
     check_original: i32 = 0,
+
+    /// Copy the just-parsed frame header into the continuity-check fields, so
+    /// the next frame can be compared against it.
+    fn latchHeader(self: *MP3_INFO) void {
+        self.check_valid = 1;
+        self.check_MPEG25 = self.MPEG25;
+        self.check_MPEG1 = self.MPEG1;
+        self.check_layer = self.layer;
+        self.check_protection_bit = self.protection_bit;
+        self.check_sampling_frequency = self.sampling_frequency;
+        self.check_mode = self.mode;
+        self.check_copyright = self.copyright;
+        self.check_original = self.original;
+    }
 };
 
 comptime {
@@ -234,26 +248,11 @@ pub fn enumerateFrames(es: *MP3_INFO) i32 {
         if (es.layer != 1) continue :read_frame_header; // Layer III only
 
         if (es.check_valid == 0) {
-            es.check_valid = 1;
-            es.check_MPEG25 = es.MPEG25;
-            es.check_MPEG1 = es.MPEG1;
-            es.check_layer = es.layer;
-            es.check_protection_bit = es.protection_bit;
-            es.check_sampling_frequency = es.sampling_frequency;
-            es.check_mode = es.mode;
-            es.check_copyright = es.copyright;
-            es.check_original = es.original;
+            es.latchHeader();
         } else if (es.MPEG1 != es.check_MPEG1 or es.MPEG25 != es.check_MPEG25 or
             es.layer != es.check_layer or es.sampling_frequency != es.check_sampling_frequency)
         {
-            es.check_MPEG25 = es.MPEG25;
-            es.check_MPEG1 = es.MPEG1;
-            es.check_layer = es.layer;
-            es.check_protection_bit = es.protection_bit;
-            es.check_sampling_frequency = es.sampling_frequency;
-            es.check_mode = es.mode;
-            es.check_copyright = es.copyright;
-            es.check_original = es.original;
+            es.latchHeader();
             continue :read_frame_header;
         }
 
