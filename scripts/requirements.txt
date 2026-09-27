@@ -3,9 +3,11 @@
 # read only by scripts/check_exports.py, which scripts/check_all_versions.sh
 # (`make parity`) drives. Install with:
 #
-#   uv pip install -r scripts/requirements-dev.txt
+#   uv pip install -r scripts/requirements.txt
 #
 # Pinned so a parity verdict is comparable across machines; pefile parses the
 # reference DLLs' export tables, and a different release could read them
-# differently.
+# differently. The filename is plain requirements.txt because Dependabot's pip
+# ecosystem only discovers that name, so the pin gets security and release
+# updates proposed; it will not follow a floating range on its own.
 pefile==2024.8.26

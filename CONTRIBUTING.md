@@ -20,10 +20,10 @@ dependency is a vendored header under `deps/`, verified by
 `make parity` is the one exception. It diffs each `-Dmss-version` build against
 a reference DLL under `references/`, which is copyrighted and not distributed,
 so it never runs in CI and is not part of `make check`. It also needs one
-third-party Python package, declared in `scripts/requirements-dev.txt`:
+third-party Python package, declared in `scripts/requirements.txt`:
 
 ```bash
-uv pip install -r scripts/requirements-dev.txt
+uv pip install -r scripts/requirements.txt
 ```
 
 Optional: a `test_media/` directory holding `test.wav`, `test.mid`, and

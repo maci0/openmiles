@@ -113,7 +113,7 @@ check-host-tools:
 # failing later on an import.
 check-parity-tools:
 	@[ -n "$(PYTHON)" ] || { echo "error: neither python3 nor python found on PATH; the scripts/*.py gates need one" >&2; exit 1; }
-	@$(PYTHON) -c 'import pefile' 2>/dev/null || { echo "error: pefile not found; uv pip install -r scripts/requirements-dev.txt" >&2; exit 1; }
+	@$(PYTHON) -c 'import pefile' 2>/dev/null || { echo "error: pefile not found; uv pip install -r scripts/requirements.txt" >&2; exit 1; }
 
 lint: check-host-tools
 	zig fmt --check .
@@ -147,7 +147,7 @@ help:
 	@echo "  lint       zig fmt, ruff, shellcheck, yamllint, header/vendored parity, pin agreement"
 	@echo "  format     apply zig fmt and ruff format"
 	@echo "  cross      cross-compile the shipped x86-windows DLL"
-	@echo "  parity     diff every -Dmss-version export table against its reference DLL (needs scripts/requirements-dev.txt)"
+	@echo "  parity     diff every -Dmss-version export table against its reference DLL (needs scripts/requirements.txt)"
 	@echo "  clean      remove zig-out and .zig-cache"
 	@echo "  help       show this message"
 	@echo ""
@@ -156,7 +156,7 @@ help:
 	@echo "  check-host-tools    assert shellcheck and python3 are installed"
 	@echo "  check-header        assert src/mss.h matches the export table and struct layouts per -Dmss-version"
 	@echo "  check-versions      assert every -Dmss-version is parity-swept or declared unswept"
-	@echo "  check-vendored      assert deps/ matches the digests in deps/SHA256SUMS"
+	@echo "  check-vendored      assert deps/ matches the digests in deps/SHA256SUMS, and that each vendored entry names its upstream commit"
 	@echo "  check-threat-model  assert every file:line anchor in docs/THREAT_MODEL.md resolves"
 	@echo "  check-python        assert ruff on PATH is the pinned version, then lint and format-check"
 	@echo "  check-yaml          assert yamllint on PATH is the pinned version, then lint .github/workflows"

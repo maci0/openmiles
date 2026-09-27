@@ -5,18 +5,21 @@ OpenMiles minimizes its dependency footprint by utilizing single-file, header-on
 ## miniaudio.h
 - **Version:** v0.11.25
 - **Source:** https://github.com/mackron/miniaudio
+- **Commit:** `9634bedb5b5a2ca38c1ee7108a9358a4e233f14d` (tag `0.11.25`)
 - **Purpose:** Cross-platform audio playback, mixing, and 3D spatialization.
 - **License:** MIT-0 / Public Domain (Dual-licensed)
 
 ## tsf.h (TinySoundFont)
 - **Version:** v0.9
 - **Source:** https://github.com/schellingb/TinySoundFont
+- **Commit:** `790a219810cb0fca5defa8cdbd88e2487e5efc7a`
 - **Purpose:** SoundFont (SF2) software synthesis.
 - **License:** MIT
 
 ## tml.h (TinyMidiLoader)
 - **Version:** v0.7
 - **Source:** https://github.com/schellingb/TinySoundFont
+- **Commit:** `472abcff8be97ff23f8196412041624fc3e34ce4`
 - **Purpose:** MIDI file parsing.
 - **License:** Zlib
 
@@ -35,7 +38,14 @@ upstream commit it came from is recorded with the version.
 `SHA256SUMS` holds the SHA-256 of every file in this directory, and
 `scripts/check_vendored.py` verifies them. `make lint` runs it, so CI rejects a
 header swapped in without a matching digest, or a digest edited to match a
-header that arrived from somewhere unexpected.
+header that arrived from somewhere unexpected. The same script requires every
+vendored entry above to name a 40-character upstream commit, since a digest
+alone says which bytes shipped but not which release they came from.
+
+The two TinySoundFont headers carry no version macro: their `v0.9` and `v0.7`
+entries are the version banner on line 1 of each file, and the commits above are
+the last upstream commits to touch them, each verified byte-for-byte against
+the copy in this directory.
 
 Update checklist:
 1. Fetch by commit id, never by branch or tag, and record that id in the entry

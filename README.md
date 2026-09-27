@@ -399,9 +399,10 @@ All dependencies are vendored single-header C libraries in `deps/`:
 | [TinyMidiLoader](https://github.com/schellingb/TinySoundFont) | v0.7 | Zlib | MIDI parsing |
 
 There is nothing to install and nothing a package manager resolves. The exact
-bytes of each vendored file are pinned in [`deps/SHA256SUMS`](deps/SHA256SUMS)
-and verified by `make check-vendored`, which `make lint` and CI run. See
-[`deps/README.md`](deps/README.md) for provenance and the update procedure.
+bytes of each vendored file are pinned in [`deps/SHA256SUMS`](deps/SHA256SUMS),
+and the upstream commit each was fetched from is recorded in
+[`deps/README.md`](deps/README.md); `make check-vendored`, which `make lint` and
+CI run, verifies both. See that file for the update procedure.
 
 ## License
 

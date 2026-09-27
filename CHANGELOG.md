@@ -93,7 +93,7 @@ everything below is unreleased.
 - Vendored dependency checksums are documented for `deps/`.
 - `CONTRIBUTING.md`: pinned-tool setup, the edit-test loop, what a change is
   expected to carry, and how the vendored and generated files are checked.
-- `scripts/requirements-dev.txt` pins the one third-party Python package the
+- `scripts/requirements.txt` pins the one third-party Python package the
   gates need, `pefile`, which `scripts/check_exports.py` imports to read a
   reference DLL's export table. `make parity` checked for it up front and
   named the install command, and `CONTRIBUTING.md` documents it as the single
@@ -127,6 +127,18 @@ everything below is unreleased.
   code point, but that function reads a sequence's first byte, so a code point
   above U+FFFF reported 1 and the space check stopped protecting
   `utf8Encode`. The suite aborted on the first run that drew one.
+- `docs/THREAT_MODEL.md` named file:line anchors that no longer resolved: 31
+  references pointed at lines an edit had moved, so every mitigation it claims
+  was a claim nobody re-checked. All 101 references resolve again, and
+  `make check-threat-model` (in `make lint`) is what keeps them honest.
+- A vendored header's origin was recorded as a version string alone, so
+  `deps/SHA256SUMS` proved which bytes shipped without proving which upstream
+  release they came from, and the update checklist in `deps/README.md` asked
+  for a commit id no entry carried. Each vendored entry now names the commit
+  it was fetched from (miniaudio `0.11.25`, TinySoundFont `tsf.h` and
+  `tml.h`, each verified byte-for-byte against upstream), and
+  `scripts/check_vendored.py` fails a vendored file whose entry names no
+  commit and does not claim the file first-party.
 - `mss.h` declared the pre-8.0 `AILSOUNDINFO` (9 fields, 36 bytes) for every
   version, so a v8 or v9 build read `channel_mask` at +0x18 and `block_size` at
   +0x20 out of a 36-byte caller struct. `channel_mask` is now declared from
@@ -273,6 +285,10 @@ everything below is unreleased.
   another release.
 - Every release-archive entry is staged with mode 0644, so a build output's
   executable bit cannot reach the zip bytes.
+- `scripts/requirements-dev.txt` is `scripts/requirements.txt`. Dependabot's
+  pip ecosystem only discovers the plain name, so the one third-party package
+  the project declares (`pefile`) had no update path at all; `.github/dependabot.yml`
+  now watches `/scripts` for it alongside the GitHub Actions.
 - Unknown-size sample loads go through bounded callbacks.
 - MIDI sequence beat and millisecond conversions saturate instead of
   overflowing `i32`.

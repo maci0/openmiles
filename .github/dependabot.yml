@@ -7,3 +7,15 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+  # pefile is the only third-party package the project declares, and the pin in
+  # scripts/requirements.txt is the only thing that keeps it from drifting to a
+  # release that parses a reference DLL differently. Dependabot only discovers
+  # the file when it is named requirements.txt, so the file is called that
+  # rather than requirements-dev.txt.
+  - package-ecosystem: "pip"
+    directory: "/scripts"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore"
+      include: "scope"

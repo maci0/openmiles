@@ -7,8 +7,10 @@ A header swapped in without a matching line in SHA256SUMS, or a line edited to
 match a header that arrived from somewhere unexpected, both compile and both
 ship. This check closes that gap: `make lint` runs it, so CI rejects either.
 
-deps/README.md documents where each file comes from and under which license;
-this script is the machine-readable half of the same record.
+deps/README.md documents where each file comes from and under which license,
+including the upstream commit each vendored header was taken from; this script
+is the machine-readable half of the same record, and rejects a vendored header
+whose entry names no commit.
 
 --update rewrites deps/SHA256SUMS from the files on disk, for a deliberate
 header swap. Review the diff before committing it: the point of the check is
@@ -19,6 +21,7 @@ Exit code 0 when deps/ and SHA256SUMS agree.
 
 import argparse
 import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -43,6 +46,41 @@ NOT_VENDORED = {SUMS.name, "README.md"}
 # field is the full 64 hex characters of a SHA-256.
 SUMS_FIELDS = 2
 DIGEST_HEX_CHARS = 64
+
+README = DEPS / "README.md"
+
+# deps/README.md records an upstream commit per vendored header as
+# "**Commit:** `<40 hex>`" in that file's section. The first-party files
+# (tsf_tml.h, windows_stub.h) have no upstream and so carry no commit.
+COMMIT_RE = re.compile(r"^[-*]\s+\*\*Commit:\*\*\s*`([0-9a-f]{40})`", re.MULTILINE)
+SECTION_RE = re.compile(r"^##\s+(.+)$", re.MULTILINE)
+NAME_RE = re.compile(r"[A-Za-z0-9_.-]+\.h")
+FIRST_PARTY_RE = re.compile(r"first-party")
+
+
+def readme_sections():
+    """Map each deps/ file named in a README section to how it is claimed.
+
+    A file reaches this check one of two ways: a section recording the upstream
+    commit it was vendored from, or a section saying it is first-party. A
+    section that claims neither leaves the origin of the bytes unrecorded.
+    """
+    text = README.read_text()
+    sections = {}
+    for m in SECTION_RE.finditer(text):
+        rest = text[m.end() :]
+        nxt = rest.find("\n## ")
+        body = rest if nxt < 0 else rest[:nxt]
+        found = COMMIT_RE.search(body)
+        if found:
+            claim = found.group(1)
+        elif FIRST_PARTY_RE.search(body):
+            claim = "first-party"
+        else:
+            claim = None
+        for name in NAME_RE.findall(m.group(1)):
+            sections[name] = claim
+    return sections
 
 
 def vendored_files():
@@ -98,6 +136,16 @@ def main():
         for name in sorted(recorded)
         if name not in on_disk
     ]
+
+    sections = readme_sections()
+    for name in sorted(on_disk):
+        if name not in sections:
+            problems.append(f"{name} UNDOCUMENTED  no section in {README.relative_to(ROOT)}")
+        elif sections[name] is None:
+            problems.append(
+                f"{name} NOPROVENANCE  its {README.relative_to(ROOT)} section names no upstream "
+                f"commit and does not claim the file first-party"
+            )
 
     for p in problems:
         print(p)
