@@ -137,11 +137,17 @@ var g_next_id: u64 = 1;
 
 // Sounds cached into memory by cache_sounds event steps (deduped); reported as
 // MILESEVENTSTATE.LoadedSoundCount and removed by purge_sounds steps.
+// Names are keyed case-insensitively, the way the bank container resolves them
+// (soundbank's name index is lowercased). A case-sensitive key let
+// cache_sounds("kick") and cache_sounds("KICK") both be stored, and left
+// purge_sounds("KICK") unable to remove a cached "kick": the entry survived its
+// own invalidation, so LoadedSoundCount never fell and the name was never
+// freed.
 var g_cached: std.ArrayListUnmanaged([:0]u8) = .empty;
 
 fn cacheIndexOf(name: []const u8) ?usize {
     for (g_cached.items, 0..) |n, i| {
-        if (std.mem.eql(u8, n, name)) return i;
+        if (std.ascii.eqlIgnoreCase(n, name)) return i;
     }
     return null;
 }

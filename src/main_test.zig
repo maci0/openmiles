@@ -6235,6 +6235,15 @@ test "cache_sounds/purge_sounds events update LoadedSoundCount" {
     api_miles_t.MilesGetEventSystemState(null, &state);
     try testing.expectEqual(base + 3, state.LoadedSoundCount);
 
+    // So is the same name in another case: the container resolves sound names
+    // case-insensitively, so "BEE" is the sound already cached as "bee".
+    const ev2b = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v8b.AIL_add_cache_sounds_event_step(ev2b, cstr("lib"), cstr("BEE:a"));
+    const e2b = api_v8b.AIL_close_event(ev2b) orelse return error.NoStr;
+    _ = api_miles_t.MilesEnqueueEvent(@ptrCast(e2b), null, 0, 0x2, 0);
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(base + 3, state.LoadedSoundCount);
+
     // Purge two.
     const ev3 = api_v8b.AIL_create_event() orelse return error.NoEvent;
     _ = api_v8b.AIL_add_uncache_sounds_event_step(ev3, cstr("lib"), cstr("a:cee"));
@@ -6242,6 +6251,14 @@ test "cache_sounds/purge_sounds events update LoadedSoundCount" {
     _ = api_miles_t.MilesEnqueueEvent(@ptrCast(e3), null, 0, 0x2, 0);
     api_miles_t.MilesGetEventSystemState(null, &state);
     try testing.expectEqual(base + 1, state.LoadedSoundCount);
+
+    // A purge that differs only in case still evicts the cached sound.
+    const ev4 = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v8b.AIL_add_uncache_sounds_event_step(ev4, cstr("lib"), cstr("BEE"));
+    const e4 = api_v8b.AIL_close_event(ev4) orelse return error.NoStr;
+    _ = api_miles_t.MilesEnqueueEvent(@ptrCast(e4), null, 0, 0x2, 0);
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(base, state.LoadedSoundCount);
 
     api_miles_t.MilesShutdownEventSystem();
 }
