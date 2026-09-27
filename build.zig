@@ -95,6 +95,15 @@ pub fn build(b: *std.Build) void {
     else
         target;
 
+    // The shipped DLL is stripped in every mode (see the lib module below).
+    // The other installed artifacts, the C test executables, native_rib_test
+    // and the mock plugin, are stripped only outside Debug: an unstripped PE
+    // carries a CodeView directory pointing at a PDB whose GUID is derived from
+    // the compile directory, so the same source built from two different paths
+    // yields different bytes and the build path lands in the CI artifact. A
+    // Debug build keeps its symbols so a test panic still names a function.
+    const strip_installed = optimize != .Debug;
+
     // Target MSS version: gates which API groups are compiled/exported so the
     // DLL is ABI-shaped like a specific Miles release. Encoded major*10+minor:
     // 30=3.x, 40=4.x, 50=5.x, 60=6.0, 61=6.1, 65=6.5, 66=6.6, 70=7.x, 80=8.x,
@@ -304,6 +313,7 @@ pub fn build(b: *std.Build) void {
                 .target = test_target,
                 .optimize = optimize,
                 .link_libc = true,
+                .strip = strip_installed,
             }),
         });
         exe.root_module.addObject(obj);
@@ -323,6 +333,7 @@ pub fn build(b: *std.Build) void {
             .target = test_target,
             .optimize = optimize,
             .link_libc = true,
+            .strip = strip_installed,
         }),
     });
     mock_asi.root_module.addCSourceFile(.{
@@ -352,6 +363,7 @@ pub fn build(b: *std.Build) void {
             .target = test_target,
             .optimize = optimize,
             .link_libc = true,
+            .strip = strip_installed,
             .imports = &.{
                 .{ .name = "openmiles", .module = tb.mod },
             },

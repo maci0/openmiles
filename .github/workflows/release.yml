@@ -149,6 +149,31 @@ jobs:
             fi
           done
 
+      # The archive check below re-packages the DLL that is already on disk, so
+      # it proves zip determinism and nothing about the compile. This step is
+      # the one that proves the compile: a pristine copy of the tag is built
+      # again under a different absolute path, timezone and locale, and the two
+      # DLLs have to match byte for byte. A path, a clock or a collation that
+      # leaked into the image shows up here and nowhere else.
+      - name: Verify the DLL rebuilds identically
+        run: |
+          set -euo pipefail
+          mirror="$RUNNER_TEMP/rebuild"
+          rm -rf "$mirror"; mkdir -p "$mirror"
+          # git ls-files, not a cp of the checkout: the working tree holds
+          # zig-out/ and .zig-cache/, and shipping either into the mirror would
+          # compare a fresh build against a cached one.
+          git ls-files -z | tar --null -T - -cf - | tar -xf - -C "$mirror"
+          # The global cache stays warm on purpose: it is content addressed, so
+          # a hit is a legitimate reproduction, and a cold one would spend the
+          # job's whole timeout rebuilding libc. The local cache is the
+          # working tree's, and this mirror has none.
+          cd "$mirror"
+          TZ=Asia/Tokyo LC_ALL=C.UTF-8 zig build \
+            -Dtarget=x86-windows -Doptimize=ReleaseFast
+          cmp "$mirror/zig-out/bin/mss32.dll" "$GITHUB_WORKSPACE/zig-out/bin/mss32.dll"
+          echo "mss32.dll is byte-identical from a second path, timezone and locale"
+
       # VENDORED.md, DEPS-SHA256SUMS, and SBOM.cdx.json travel with the DLL: the
       # project license covers redistribution of the vendored headers under their
       # own terms, and a consumer who wants to trace that grant back to an
