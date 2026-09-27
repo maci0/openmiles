@@ -736,10 +736,10 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
     var nmono: usize = 0;
     defer {
         for (stereo[0..nstereo]) |c| {
-            if (c.src.owned) |o| openmiles.global_allocator.free(o);
+            if (c.src.owned) |owned_buf| openmiles.global_allocator.free(owned_buf);
         }
         for (mono[0..nmono]) |c| {
-            if (c.src.owned) |o| openmiles.global_allocator.free(o);
+            if (c.src.owned) |owned_buf| openmiles.global_allocator.free(owned_buf);
         }
     }
 
@@ -807,7 +807,12 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
             const c = &stereo[si];
             // Exhausted sources stay exhausted (pos only grows), so they are
             // dropped from the partition instead of being re-tested each frame.
+            // Dropping moves the last cursor into this slot, so the source that
+            // leaves the partition is no longer covered by the deferred sweep
+            // over [0, nstereo): free its owned decode buffer here or it is
+            // leaked on every mix call that outruns the shortest source.
             if (c.pos >= c.src.points) {
+                if (c.src.owned) |owned_buf| openmiles.global_allocator.free(owned_buf);
                 nstereo -= 1;
                 stereo[si] = stereo[nstereo];
                 continue;
@@ -830,6 +835,7 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
         while (mi < nmono) {
             const c = &mono[mi];
             if (c.pos >= c.src.points) {
+                if (c.src.owned) |owned_buf| openmiles.global_allocator.free(owned_buf);
                 nmono -= 1;
                 mono[mi] = mono[nmono];
                 continue;

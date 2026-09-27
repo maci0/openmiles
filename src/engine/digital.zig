@@ -927,12 +927,32 @@ pub const Sample = struct {
         if (self.attached_filter) |f| {
             f.detachSample(self);
         }
-        self.removeReverb();
         self.cleanupPlaybackState();
         self.driver.allocator.destroy(self);
     }
 
+    /// Release everything the current playback mount owns. Every load path
+    /// (loadFromFile, loadFromMemory, loadFromOwnedMemory, loadFromBounded-
+    /// Pointer, loadStreamBuffer) and reset() runs this before mounting the
+    /// next source, so the reverb node is released here too: a sample given
+    /// reverb and then reloaded would otherwise keep the delay node allocated
+    /// and still wired to the engine, leaking one node per reload for as long
+    /// as the game keeps streaming. removeReverb rewires the sound back to the
+    /// endpoint first, so it must run before the sound is uninitialised.
     fn cleanupPlaybackState(self: *Sample) void {
+        const had_reverb = self.reverb_node != null;
+        self.removeReverb();
+        // The sound's output bus is single-slot, so a sample that carries both a
+        // filter and a reverb node was routed through whichever was installed
+        // last. removeReverb puts it on the endpoint, which would dry out the
+        // filter, so hand the slot back to the filter that still lists this
+        // sample on both sides.
+        if (had_reverb) {
+            if (self.attached_filter) |f| {
+                f.detachSample(self);
+                f.attachSample(self);
+            }
+        }
         if (self.is_initialized) {
             ma.ma_sound_uninit(&self.sound);
             self.is_initialized = false;

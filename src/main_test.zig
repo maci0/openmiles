@@ -1765,6 +1765,37 @@ test "Sample setReverb with zero level clears reverb" {
     try testing.expectEqual(@as(f32, 0.0), rev.reflect_time);
 }
 
+test "reloading a reverbed sample frees its delay node (no leaks)" {
+    // A sample given reverb and then reloaded used to keep the delay node
+    // allocated and wired to the engine: every load path tears the playback
+    // state down and remounts, so a game that reloads a streaming sample with
+    // reverb set leaked one node per reload for as long as it kept streaming.
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const sample = try openmiles.Sample.init(driver);
+    defer sample.deinit();
+
+    var pcm: [512]u8 = undefined;
+    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 16);
+    defer allocator.free(wav);
+
+    try sample.loadFromOwnedMemory(try allocator.dupe(u8, wav));
+    sample.setReverb(2.5, 0.7, 0.3);
+    try testing.expect(sample.reverb_node != null);
+    // Reload several times; each mount must release the previous node, so the
+    // leak-checked allocator sees a steady state rather than one node per pass.
+    for (0..4) |_| {
+        const copy = try allocator.dupe(u8, wav);
+        errdefer allocator.free(copy);
+        try sample.loadFromOwnedMemory(copy);
+        try testing.expect(sample.reverb_node == null);
+        sample.setReverb(2.5, 0.7, 0.3);
+        try testing.expect(sample.reverb_node != null);
+    }
+}
+
 test "Sample3D setOrientation stores all components" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
@@ -3285,6 +3316,30 @@ test "AIL_process_digital_audio mixes PCM sources into the dest buffer" {
     try testing.expectEqual(@as(i32, 0), dg.AIL_process_digital_audio(null, 8, 8000, 1, 2, @ptrCast(&srcs)));
     try testing.expectEqual(@as(i32, 0), dg.AIL_process_digital_audio(@ptrCast(&dest), 8, 8000, 1, 0, @ptrCast(&srcs)));
     try testing.expectEqual(@as(i32, 0), dg.AIL_process_digital_audio(@ptrCast(&dest), 8, 0, 1, 2, @ptrCast(&srcs)));
+}
+
+test "AIL_process_digital_audio frees a decode buffer of a source that runs out mid-mix" {
+    // An 8-bit source is promoted to an owned 16-bit buffer the mixer frees
+    // itself. Sources are dropped from the mix partitions the moment they
+    // exhaust, so a short one leaves the partitions before the sweep that frees
+    // the buffers runs: without a free at the drop the buffer leaks once per
+    // mix call, on the caller's most repeated path.
+    const saved = openmiles.global_allocator;
+    openmiles.global_allocator = testing.allocator;
+    defer openmiles.global_allocator = saved;
+
+    // Long 16-bit source sets the output length; the short 8-bit one exhausts
+    // after 2 points and is dropped from the partition.
+    var long_src = [_]i16{ 1, 1, 1, 1, 1, 1, 1, 1 };
+    var short_u8 = [_]u8{ 128, 128, 128, 128 };
+    var srcs = [_]openmiles.AILMIXINFO{ .{}, .{} };
+    srcs[0].Info = .{ .format = 1, .bits = 16, .channels = 1, .rate = 8000, .data_len = long_src.len * 2, .data_ptr = @ptrCast(&long_src) };
+    srcs[1].Info = .{ .format = 1, .bits = 8, .channels = 1, .rate = 8000, .data_len = short_u8.len, .data_ptr = @ptrCast(&short_u8) };
+    var dest: [8]i16 = .{ 0, 0, 0, 0, 0, 0, 0, 0 };
+    // Output runs to the long source's 8 points, so the 4-point 8-bit source
+    // is dropped partway through.
+    const n = dg.AIL_process_digital_audio(@ptrCast(&dest), @intCast(dest.len * 2), 8000, 1, 2, @ptrCast(&srcs));
+    try testing.expectEqual(@as(i32, 16), n);
 }
 
 test "AIL_process_digital_audio resamples at floor(j*src_rate/dest_rate)" {
