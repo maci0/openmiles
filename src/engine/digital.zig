@@ -336,8 +336,15 @@ pub const DigitalDriver = struct {
             ma.ma_spatializer_listener_set_speed_of_sound(&self.engine.listeners[0], mss_speed_of_sound);
         }
 
+        // Track the handle before publishing it: a driver missing from the
+        // table is misclassified as a Sample3D by the 3D setters, which would
+        // write a listener position through the wrong layout.
+        if (!root.registerDriver(self)) {
+            ma.ma_engine_uninit(&self.engine);
+            allocator.destroy(self);
+            return error.DriverHandleUntrackable;
+        }
         root.setLastDigitalDriver(self);
-        root.registerDriver(self);
         return self;
     }
 

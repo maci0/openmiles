@@ -594,32 +594,35 @@ var driver_create_mutex: std.Io.Mutex = .init;
 /// Handles of every live digital driver. `isKnownDriver` uses this table to
 /// tell a driver handle from a Sample3D handle, so a driver that fails to land
 /// in it is misclassified and its handle is written through the wrong layout.
+/// The list is grown on demand rather than capped: a fixed cap turned "one game
+/// opened N drivers" into memory corruption in a 3D setter. Growth can still
+/// fail, and that case is reported rather than logged, because an untracked
+/// driver is exactly as unsafe as no driver at all.
 /// Guarded by driver_table_mutex: register/unregister run on whichever thread
 /// opened or closed the driver, and isKnownDriver is called from every 3D
 /// handle-dispatch entry point.
-var known_drivers_buf: [8]?*DigitalDriver = [_]?*DigitalDriver{null} ** 8;
+var known_drivers: std.ArrayList(*DigitalDriver) = .empty;
 var driver_table_mutex: std.Io.Mutex = .init;
 
-pub fn registerDriver(driver: *DigitalDriver) void {
+/// Returns false when the handle could not be tracked. The caller must then
+/// tear the driver down instead of publishing it: an untracked handle is
+/// misclassified as a Sample3D by the 3D dispatch entry points.
+pub fn registerDriver(driver: *DigitalDriver) bool {
     driver_table_mutex.lockUncancelable(io);
     defer driver_table_mutex.unlock(io);
-    for (&known_drivers_buf) |*slot| {
-        if (slot.* == null) {
-            slot.* = driver;
-            return;
-        }
-    }
-    // Table full: the handle is live but untrackable, so isKnownDriver will
-    // treat it as a sample. Say so instead of dropping it silently.
-    log("registerDriver: more than {d} digital drivers open; this handle is untracked\n", .{known_drivers_buf.len});
+    known_drivers.append(global_allocator, driver) catch {
+        log("registerDriver: driver table allocation failed; this handle cannot be tracked\n", .{});
+        return false;
+    };
+    return true;
 }
 
 pub fn unregisterDriver(driver: *DigitalDriver) void {
     driver_table_mutex.lockUncancelable(io);
     defer driver_table_mutex.unlock(io);
-    for (&known_drivers_buf) |*slot| {
-        if (slot.* == driver) {
-            slot.* = null;
+    for (known_drivers.items, 0..) |d, i| {
+        if (d == driver) {
+            _ = known_drivers.swapRemove(i);
             return;
         }
     }
@@ -628,10 +631,8 @@ pub fn unregisterDriver(driver: *DigitalDriver) void {
 pub fn isKnownDriver(ptr: *anyopaque) bool {
     driver_table_mutex.lockUncancelable(io);
     defer driver_table_mutex.unlock(io);
-    for (known_drivers_buf) |slot| {
-        if (slot) |d| {
-            if (@as(*anyopaque, @ptrCast(d)) == ptr) return true;
-        }
+    for (known_drivers.items) |d| {
+        if (@as(*anyopaque, @ptrCast(d)) == ptr) return true;
     }
     return false;
 }

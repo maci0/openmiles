@@ -3202,6 +3202,20 @@ test "registerDriver fills slots and unregisterDriver frees them" {
     try testing.expect(!openmiles.isKnownDriver(@ptrCast(d2)));
 }
 
+test "a driver handle stays classifiable past any fixed table size" {
+    // isKnownDriver is what tells a driver handle from a Sample3D handle, so a
+    // driver missing from the table would have a listener position written
+    // through the Sample3D layout. There is no cap on how many drivers are live.
+    const allocator = testing.allocator;
+    var drivers: [12]*openmiles.DigitalDriver = undefined;
+    for (&drivers) |*d| {
+        d.* = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    }
+    for (drivers) |d| try testing.expect(openmiles.isKnownDriver(@ptrCast(d)));
+    for (drivers) |d| d.deinit();
+    for (drivers) |d| try testing.expect(!openmiles.isKnownDriver(@ptrCast(d)));
+}
+
 test "Sample setPlaybackRate ignores rate <= 0 (SDK behavior)" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
