@@ -92,9 +92,12 @@ test "coverage: digital.zig exports" {
     const s = try openmiles.Sample.init(drv);
     defer s.deinit();
     s.loadFromMemory(wav, false) catch {};
-    const myprov = openmiles.Provider.init(alloc) catch null;
-    defer if (myprov) |p| p.deinit();
-    const filt: ?*anyopaque = flt.AIL_open_filter(myprov, drv);
+    const myprov = try openmiles.Provider.init(alloc);
+    defer myprov.deinit();
+    // Filter.init appends to the driver and builds a miniaudio node, so a null
+    // here is a real failure; skipping the filter block silently would drop
+    // every filter export from this file's coverage.
+    const filt = flt.AIL_open_filter(myprov, drv) orelse return error.NoFilter;
 
     // Driver-level.
     _ = dg.AIL_primary_digital_driver(drv);
@@ -157,16 +160,14 @@ test "coverage: digital.zig exports" {
     flt.AIL_set_filter_sample_preference(s, "Cutoff", sc());
 
     // Filter-level (real filter handle).
-    if (filt) |f| {
-        flt.AIL_filter_attribute(f, "Cutoff", sc());
-        flt.AIL_set_filter_attribute(f, "Cutoff", sc());
-        flt.AIL_set_filter_preference(f, "Cutoff", sc());
-        _ = flt.AIL_enumerate_filter_attributes(f, &next, &namep);
-        next = null;
-        _ = flt.AIL_enumerate_filter_sample_attributes(f, &next, &namep);
-        flt.AIL_set_sample_filter(s, f, 0);
-        flt.AIL_close_filter(f);
-    }
+    flt.AIL_filter_attribute(filt, "Cutoff", sc());
+    flt.AIL_set_filter_attribute(filt, "Cutoff", sc());
+    flt.AIL_set_filter_preference(filt, "Cutoff", sc());
+    _ = flt.AIL_enumerate_filter_attributes(filt, &next, &namep);
+    next = null;
+    _ = flt.AIL_enumerate_filter_sample_attributes(filt, &next, &namep);
+    flt.AIL_set_sample_filter(s, filt, 0);
+    flt.AIL_close_filter(filt);
     next = null;
     _ = flt.AIL_enumerate_filters(&next, &prov, &namep);
 
@@ -176,7 +177,11 @@ test "coverage: digital.zig exports" {
     _ = mem.AIL_mem_use_malloc(null);
     _ = mem.AIL_mem_use_free(null);
     mem.AIL_set_mem_callbacks(null, null);
-    _ = dg.AIL_allocate_file_sample(drv, @ptrCast(wav.ptr), 0);
+    // Dropping this handle on the floor leaked a driver-owned Sample per run;
+    // assert the allocation happened and hand it back.
+    const fs = dg.AIL_allocate_file_sample(drv, @ptrCast(wav.ptr), 0) orelse return error.NoFileSample;
+    try testing.expect(fs.is_initialized);
+    fs.deinit();
 
     // WAV info / encoders.
     var info: openmiles.AILSOUNDINFO = undefined;
@@ -344,7 +349,10 @@ test "coverage: quick.zig exports" {
 }
 
 test "coverage: redbook.zig exports" {
-    const h = rb.AIL_redbook_open_drive(0) orelse return;
+    // Redbook.init only fails on allocation failure, so a null here means the
+    // allocator is broken; a bare `return` would report a green run with every
+    // redbook export below untested.
+    const h = rb.AIL_redbook_open_drive(0) orelse return error.NoRedbook;
     defer rb.AIL_redbook_close(h);
     _ = rb.AIL_redbook_play(h, 1, 2);
     _ = rb.AIL_redbook_stop(h);
@@ -384,11 +392,24 @@ test "coverage: timer.zig exports" {
 }
 
 test "coverage: file/input.zig exports" {
+    // A missing file is the negative path every one of these has to answer
+    // without inventing a result: size 0, read null, write into a directory
+    // that does not exist -> 0 with a named file error. Asserting that is the
+    // point of the call; discarding the return leaves the guards unverified.
     _ = fl.AIL_file_error();
-    _ = fl.AIL_file_size("/nonexistent_om_test");
-    _ = fl.AIL_file_type(sc(), 16);
-    _ = fl.AIL_file_read("/nonexistent_om_test", null);
-    _ = fl.AIL_file_write("om_cov_test.bin", sc(), 4);
+    try testing.expectEqual(@as(u32, 0), fl.AIL_file_size("/nonexistent_om_test"));
+    try testing.expect(fl.AIL_file_type(sc(), 16) == 0); // all-zero scratch: unknown
+    try testing.expect(fl.AIL_file_read("/nonexistent_om_test", null) == null);
+    try testing.expectEqual(@as(i32, 1), fl.AIL_file_write("om_cov_test.bin", sc(), 4));
+    try testing.expectEqual(@as(u32, 4), fl.AIL_file_size("om_cov_test.bin"));
+    // The read-back path: the file just written must hand back its own bytes.
+    const read_back = fl.AIL_file_read("om_cov_test.bin", null) orelse return error.NoReadBack;
+    defer mem.AIL_mem_free_lock(read_back);
+    // A write into a nonexistent directory is the one failure that must leave a
+    // message behind: a bare 0 with "No error" leaves the caller no way to tell
+    // a missing directory from a full disk.
+    try testing.expectEqual(@as(i32, 0), fl.AIL_file_write("om_cov_missing_dir/x.bin", sc(), 4));
+    try testing.expect(!std.mem.eql(u8, "No error", std.mem.span(fl.AIL_file_error())));
     defer std.Io.Dir.cwd().deleteFile(openmiles.io, "om_cov_test.bin") catch {};
     fl.AIL_set_file_callbacks(null, null, null, null);
     fl.AIL_set_file_async_callbacks(null, null, null, null, null);
@@ -572,13 +593,14 @@ fn dg_request_eob() void {
 }
 
 test "coverage: lifecycle / driver open-close exports" {
-    // Digital driver open/close + sample handle alloc/release.
-    const drv = dg.AIL_open_digital_driver(44100, 16, 2, 0);
-    if (drv) |d| {
-        const sh = dg.AIL_allocate_sample_handle(d);
-        if (sh) |h| dg.AIL_release_sample_handle(h);
-        dg.AIL_close_digital_driver(d);
-    }
+    // Digital driver open/close + sample handle alloc/release. openDigitalDriver
+    // only fails on an engine init failure, and both handles below only fail on
+    // allocation, so a null here is a real defect: swallowing it would report a
+    // green run with the whole open/close pair untested.
+    const drv = dg.AIL_open_digital_driver(44100, 16, 2, 0) orelse return error.NoDriver;
+    const sh = dg.AIL_allocate_sample_handle(drv) orelse return error.NoSample;
+    dg.AIL_release_sample_handle(sh);
+    dg.AIL_close_digital_driver(drv);
 
     // waveOut wrappers.
     var wdrv: ?*openmiles.DigitalDriver = null;

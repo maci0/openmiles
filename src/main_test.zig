@@ -238,6 +238,75 @@ test "detectAudioSize FLAC returns sentinel" {
     try testing.expectEqual(openmiles.streaming_sentinel_size, openmiles.detectAudioSize(&header));
 }
 
+test "a lying RIFF/FORM body size clamps to max_declared_image_size" {
+    // These sniffers take a bare pointer with no length, so the returned extent
+    // is the only thing standing between a crafted header and a read up to
+    // ~4 GiB past the caller's buffer. Every declared-size path must clamp:
+    // 0xFFFFFFFF is the worst a u32 field can carry, and a size just under the
+    // cap is the boundary the clamp must not clip.
+    const lying_le = [_]u8{ 'R', 'I', 'F', 'F', 0xFF, 0xFF, 0xFF, 0xFF } ++ [_]u8{0} ** 8;
+    try testing.expectEqual(openmiles.max_declared_image_size, openmiles.detectAudioSize(&lying_le));
+
+    // detectMidiSize has no RIFF branch: an unrecognized tag reports the
+    // streaming sentinel, which is the same bound reached by a different route.
+    try testing.expectEqual(openmiles.streaming_sentinel_size, openmiles.detectMidiSize(&lying_le));
+
+    // FORM reads the same field big-endian. A small BE body (0x10) is 0x10000000
+    // read little-endian, which the clamp would hide, so the exact 24 proves
+    // the byte order is honored rather than masked by the clamp.
+    const form_be = [_]u8{ 'F', 'O', 'R', 'M', 0x00, 0x00, 0x00, 0x10 } ++ [_]u8{0} ** 8;
+    try testing.expectEqual(@as(usize, 0x10 + 8), openmiles.detectAudioSize(&form_be));
+
+    // The clamp boundary. max_declared_image_size is 0x10000000, so a body of
+    // 0x0FFFFFF8 lands body + 8 exactly on the cap; one byte either side shows
+    // which side of the clamp a given header falls on. LE bytes of 0x0FFFFFF8.
+    const at_cap = [_]u8{ 'R', 'I', 'F', 'F', 0xF8, 0xFF, 0xFF, 0x0F } ++ [_]u8{0} ** 8;
+    try testing.expectEqual(openmiles.max_declared_image_size, openmiles.detectAudioSize(&at_cap));
+    // One byte over the cap clips to the same value rather than growing.
+    const over_cap = [_]u8{ 'R', 'I', 'F', 'F', 0xF9, 0xFF, 0xFF, 0x0F } ++ [_]u8{0} ** 8;
+    try testing.expectEqual(openmiles.max_declared_image_size, openmiles.detectAudioSize(&over_cap));
+    // One byte under the cap is the true declared extent, not the cap.
+    const under_cap = [_]u8{ 'R', 'I', 'F', 'F', 0xF7, 0xFF, 0xFF, 0x0F } ++ [_]u8{0} ** 8;
+    try testing.expectEqual(openmiles.max_declared_image_size - 1, openmiles.detectAudioSize(&under_cap));
+}
+
+test "detectMidiSize returns the sentinel for a MIDI track walk that leaves the image" {
+    // Two ways an MThd header can push the track cursor past what a pointer of
+    // unknown length can safely be walked: a huge header length puts the first
+    // track beyond the streaming sentinel, and a huge track length walks one
+    // track too far. Both must report the sentinel (a bounded read) instead of
+    // summing header-declared sizes into a plausible-looking extent.
+    // hdr_size = 0xFFFFFFFF, 1 track: 8 + hdr_size is already past the sentinel.
+    const huge_hdr = [_]u8{
+        'M',  'T',  'h',  'd',  0xFF, 0xFF, 0xFF, 0xFF,
+        0x00, 0x01, 0x00, 0x01, 0x00, 0x78,
+    } ++ [_]u8{0} ** 16;
+    try testing.expectEqual(openmiles.streaming_sentinel_size, openmiles.detectMidiSize(&huge_hdr));
+
+    // hdr_size = 6 (first track at 14), track length 0xFFFFFFFF: the walk
+    // consumes the 8-byte chunk header and then a length past the sentinel.
+    const huge_track = [_]u8{
+        'M',  'T',  'h',  'd',  0x00, 0x00, 0x00, 0x06,
+        0x00, 0x01, 0x00, 0x01, 0x00, 0x78, 'M',  'T',
+        'r',  'k',  0xFF, 0xFF, 0xFF, 0xFF,
+    } ++ [_]u8{0} ** 16;
+    try testing.expectEqual(openmiles.streaming_sentinel_size, openmiles.detectMidiSize(&huge_track));
+
+    // One byte under the walk limit is still walked, so the result is that exact
+    // extent and not the sentinel. The bound is `trk_len > sentinel - pos - 8`
+    // with pos = 14, so the largest walkable length is sentinel - 23; one more
+    // short-circuits, which the huge_track case above already covers.
+    const just_under = [_]u8{
+        'M',  'T',  'h',  'd',  0x00, 0x00, 0x00, 0x06,
+        0x00, 0x01, 0x00, 0x01, 0x00, 0x78,
+        'M', 'T', 'r', 'k', 0x00, 0xFF, 0xFF, 0xE9, // BE 0x00FFFFE9 = sentinel - 23
+    } ++ [_]u8{0} ** 16;
+    try testing.expectEqual(
+        openmiles.streaming_sentinel_size - 1,
+        openmiles.detectMidiSize(&just_under),
+    );
+}
+
 test "Sequence volume set and get roundtrip" {
     const allocator = testing.allocator;
     const driver = try openmiles.MidiDriver.init(allocator);
@@ -1293,8 +1362,13 @@ test "loading the same plugin path twice is recognised as one provider" {
     // A rescan of a plugin directory must not load a second copy of a module
     // that is already up; the resolved path is the identity, so the same file
     // reached by a second path is skipped too.
+    //
+    // build.zig makes the test step depend on installing mock.asi, so under
+    // `zig build test` the fixture is always present; a missing one is broken
+    // wiring, not an absent optional input, and must not report a green run
+    // with the whole dlopen path untested.
     const img_path = "zig-out/bin/plugins/mock.asi";
-    std.Io.Dir.cwd().access(openmiles.io, img_path, .{}) catch return;
+    std.Io.Dir.cwd().access(openmiles.io, img_path, .{}) catch return error.MissingMockPlugin;
 
     const p = try openmiles.Provider.load(testing.allocator, img_path);
     defer p.deinit();
@@ -1357,7 +1431,7 @@ test "a redist directory startup already scanned loads no second copy" {
     // and a game's AIL_set_redist_directory then names that same directory. The
     // driver must not dlopen a second copy of a module the process already
     // holds: both copies stay loaded until AIL_shutdown.
-    std.Io.Dir.cwd().access(openmiles.io, "zig-out/bin/plugins/mock.asi", .{}) catch return;
+    std.Io.Dir.cwd().access(openmiles.io, "zig-out/bin/plugins/mock.asi", .{}) catch return error.MissingMockPlugin;
     defer {
         if (openmiles.lastDigitalDriver()) |d| openmiles.closeDigitalDriver(d);
         openmiles.setRedistDirectory("");
@@ -1413,10 +1487,11 @@ test "adopting a module already in the plugin list unloads the second copy" {
 test "RIB plugin loading registers the mock provider's interface end to end" {
     // The only automated coverage of the dynamic-plugin path (dlopen/LoadLibrary
     // + RIB_Main + interface registration). The fixture is installed by
-    // `zig build` into zig-out/bin/plugins/mock.asi; skip quietly when absent
-    // (e.g. running tests without a prior install), like the soundfont fixture.
+    // `zig build` into zig-out/bin/plugins/mock.asi, and build.zig makes the
+    // test step depend on that install, so a missing file is broken wiring. A
+    // quiet return here would report a green run with the dlopen path untested.
     const img_path = "zig-out/bin/plugins/mock.asi";
-    std.Io.Dir.cwd().access(openmiles.io, img_path, .{}) catch return;
+    std.Io.Dir.cwd().access(openmiles.io, img_path, .{}) catch return error.MissingMockPlugin;
 
     const p = try openmiles.Provider.load(testing.allocator, img_path);
     defer p.deinit();
@@ -1652,6 +1727,44 @@ test "Sample3D setOrientation stores all components" {
     s.setOrientation(0.0, 0.0, 5.0, 0.0, 3.0, 4.0);
     try testing.expect(@abs(s.orient_fz - 1.0) < 0.001 and @abs(s.orient_fx) < 0.001);
     try testing.expect(@abs(s.orient_uy - 0.6) < 0.001 and @abs(s.orient_uz - 0.8) < 0.001);
+}
+
+test "AIL_set_sample_file loads a whole image and reports failure on garbage" {
+    // The C entry point games call to hand a sample its audio: 1 on success, 0
+    // on a load that failed (with AIL_last_error naming it). Nothing asserted it
+    // before, so a regression to "always return 1" or "always 0" was invisible.
+    const api_digital = @import("api/digital.zig");
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    try testing.expect(!s.is_initialized);
+
+    const wav = try zeroWav(testing.allocator);
+    defer testing.allocator.free(wav);
+    // A negative block means "the whole image"; the size is read from the header.
+    try testing.expectEqual(@as(i32, 1), api_digital.AIL_set_sample_file(s, wav.ptr, -1));
+    try testing.expect(s.is_initialized);
+    try testing.expectEqual(openmiles.SampleStatus.done, s.status()); // loaded, never played
+
+    // An explicit size takes the same path and must agree with the header read.
+    const s2 = try openmiles.Sample.init(driver);
+    defer s2.deinit();
+    try testing.expectEqual(@as(i32, 1), api_digital.AIL_set_sample_file(s2, wav.ptr, @intCast(wav.len)));
+    try testing.expect(s2.is_initialized);
+
+    // Garbage is the negative case: the load fails, the return says so, and the
+    // sample is not left half-initialized claiming a working sound.
+    const s3 = try openmiles.Sample.init(driver);
+    defer s3.deinit();
+    var junk = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF } ** 4;
+    try testing.expectEqual(@as(i32, 0), api_digital.AIL_set_sample_file(s3, @ptrCast(&junk), -1));
+    try testing.expect(!s3.is_initialized);
+    try testing.expect(!std.mem.eql(u8, "No error", std.mem.span(api_digital.AIL_last_error())));
+
+    // A null handle is the SDK null guard, not a load.
+    try testing.expectEqual(@as(i32, 0), api_digital.AIL_set_sample_file(null, wav.ptr, -1));
 }
 
 test "Sample loadFromMemory initializes sample" {
