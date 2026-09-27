@@ -598,27 +598,24 @@ pub fn AIL_set_3D_provider_preference(provider: *anyopaque, name: [*:0]const u8,
         AIL_set_3D_distance_factor(dig, @as(*const f32, @ptrCast(@alignCast(val))).*);
     }
 }
-pub fn AIL_enumerate_3D_provider_attributes(provider: *anyopaque, next: *?*anyopaque, name: *[*:0]const u8) callconv(.winapi) i32 {
-    _ = provider;
+// The cursor in `next` is the table index; 0 on the first call.
+fn enumerateAttrs(next: *?*anyopaque, name: *[*:0]const u8, table: []const [*:0]const u8) i32 {
     const idx: usize = if (next.*) |v| @intFromPtr(v) else 0;
-    if (idx < openmiles.provider_3d_attr_names.len) {
-        name.* = openmiles.provider_3d_attr_names[idx];
+    if (idx < table.len) {
+        name.* = table[idx];
         next.* = @ptrFromInt(idx + 1);
         return 1;
     }
     next.* = null;
     return 0;
 }
+pub fn AIL_enumerate_3D_provider_attributes(provider: *anyopaque, next: *?*anyopaque, name: *[*:0]const u8) callconv(.winapi) i32 {
+    _ = provider;
+    return enumerateAttrs(next, name, &openmiles.provider_3d_attr_names);
+}
 pub fn AIL_enumerate_3D_sample_attributes(s: ?*anyopaque, next: *?*anyopaque, name: *[*:0]const u8) callconv(.winapi) i32 {
     _ = s;
-    const idx: usize = if (next.*) |v| @intFromPtr(v) else 0;
-    if (idx < openmiles.sample_3d_attr_names.len) {
-        name.* = openmiles.sample_3d_attr_names[idx];
-        next.* = @ptrFromInt(idx + 1);
-        return 1;
-    }
-    next.* = null;
-    return 0;
+    return enumerateAttrs(next, name, &openmiles.sample_3d_attr_names);
 }
 pub fn AIL_3D_orientation(obj: *anyopaque, fx: ?*f32, fy: ?*f32, fz: ?*f32, ux: ?*f32, uy: ?*f32, uz: ?*f32) callconv(.winapi) void {
     if (openmiles.isKnownDriver(obj)) {

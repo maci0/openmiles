@@ -603,64 +603,63 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
     return registered;
 }
 
+// Hand-built images for the tests below: a little-endian field write and a
+// NUL-terminated name appended to the string pool.
+fn writeU32(buf: []u8, off: usize, v: u32) void {
+    std.mem.writeInt(u32, buf[off..][0..4], v, .little);
+}
+
+fn putName(buf: []u8, at: usize, s: []const u8) usize {
+    @memcpy(buf[at .. at + s.len], s);
+    buf[at + s.len] = 0;
+    return at + s.len + 1;
+}
+
 test "asset lookup: index parity with scan semantics" {
     const testing = std.testing;
     var img: [2048]u8 = undefined;
     @memset(&img, 0);
 
-    const w32 = struct {
-        fn f(buf: []u8, off: usize, v: u32) void {
-            std.mem.writeInt(u32, buf[off..][0..4], v, .little);
-        }
-    }.f;
-    const putStr = struct {
-        fn f(buf: []u8, at: usize, s: []const u8) usize {
-            @memcpy(buf[at .. at + s.len], s);
-            buf[at + s.len] = 0;
-            return at + s.len + 1;
-        }
-    }.f;
-
     // Header: two event entries + one sound entry, tables right after it.
     const ev_off: u32 = header_size;
     const snd_off: u32 = ev_off + 3 * asset_entry_size;
-    w32(&img, off_tag, BANK_TAG);
-    w32(&img, off_version, @bitCast(BANK_VERSION));
-    w32(&img, off_events, ev_off);
-    w32(&img, off_sounds, snd_off);
-    w32(&img, off_event_count, 3);
-    w32(&img, off_sound_count, 1);
+    writeU32(&img, off_tag, BANK_TAG);
+    writeU32(&img, off_version, @bitCast(BANK_VERSION));
+    writeU32(&img, off_events, ev_off);
+    writeU32(&img, off_sounds, snd_off);
+    writeU32(&img, off_event_count, 3);
+    writeU32(&img, off_sound_count, 1);
 
     // String/data pool after both tables.
     var pool: usize = snd_off + asset_entry_size;
     const d0: u32 = @intCast(pool);
-    pool = putStr(&img, pool, "E0DATA");
+    pool = putName(&img, pool, "E0DATA");
     const d1: u32 = @intCast(pool);
-    pool = putStr(&img, pool, "E1DATA");
+    pool = putName(&img, pool, "E1DATA");
     const n0: u32 = @intCast(pool);
-    pool = putStr(&img, pool, "Boom");
+    pool = putName(&img, pool, "Boom");
     const n1: u32 = @intCast(pool); // duplicate name, different case
-    pool = putStr(&img, pool, "BOOM");
+    pool = putName(&img, pool, "BOOM");
     const n2: u32 = @intCast(pool); // >128 bytes to exercise the heap key path
     var long_buf: [200]u8 = undefined;
     @memset(&long_buf, 'x');
     long_buf[199] = 'Z';
-    pool = putStr(&img, pool, &long_buf);
+    pool = putName(&img, pool, &long_buf);
     const s0: u32 = @intCast(pool);
-    pool = putStr(&img, pool, "kick");
+    pool = putName(&img, pool, "kick");
 
     // events: e0 "Boom" (first match must win over e1), e1 "BOOM", e2 long name.
-    w32(&img, ev_off, n0);
-    w32(&img, ev_off + 4, d0);
-    w32(&img, ev_off + 8, n1);
-    w32(&img, ev_off + 12, d1);
-    w32(&img, ev_off + 16, n2);
-    w32(&img, ev_off + 20, d1);
+    writeU32(&img, ev_off, n0);
+    writeU32(&img, ev_off + 4, d0);
+    writeU32(&img, ev_off + 8, n1);
+    writeU32(&img, ev_off + 12, d1);
+    writeU32(&img, ev_off + 16, n2);
+    writeU32(&img, ev_off + 20, d1);
     // sounds: one entry.
-    w32(&img, snd_off, s0);
-    w32(&img, snd_off + 4, d0);
+    writeU32(&img, snd_off, s0);
+    writeU32(&img, snd_off + 4, d0);
 
-    w32(&img, off_meta_size, @intCast(pool));
+    writeU32(&img, off_meta_size, @intCast(pool));
     const bank = try loadFromMemory(testing.allocator, "idx.mbnk", img[0..pool]);
     defer bank.deinit();
 
@@ -694,25 +693,20 @@ test "container: a duplicated event name resolves by load order, not unload hist
 
         fn build(img: *@This(), tag: u8) void {
             @memset(&img.bytes, 0);
-            const w32 = struct {
-                fn f(buf: []u8, off: usize, v: u32) void {
-                    std.mem.writeInt(u32, buf[off..][0..4], v, .little);
-                }
-            }.f;
-            w32(&img.bytes, off_events, @intCast(header_size));
-            w32(&img.bytes, off_tag, BANK_TAG);
-            w32(&img.bytes, off_version, @bitCast(BANK_VERSION));
-            w32(&img.bytes, off_event_count, 1);
+            writeU32(&img.bytes, off_events, @intCast(header_size));
+            writeU32(&img.bytes, off_tag, BANK_TAG);
+            writeU32(&img.bytes, off_version, @bitCast(BANK_VERSION));
+            writeU32(&img.bytes, off_event_count, 1);
             var pool: usize = header_size + asset_entry_size;
             const name = "Boom";
-            w32(&img.bytes, header_size, @intCast(pool));
+            writeU32(&img.bytes, header_size, @intCast(pool));
             @memcpy(img.bytes[pool..][0..name.len], name[0..name.len]);
             pool += name.len + 1;
             img.data_off = @intCast(pool);
-            w32(&img.bytes, header_size + 4, img.data_off);
+            writeU32(&img.bytes, header_size + 4, img.data_off);
             @memset(img.bytes[pool..][0..4], tag);
             pool += 4;
-            w32(&img.bytes, off_meta_size, @intCast(pool));
+            writeU32(&img.bytes, off_meta_size, @intCast(pool));
             img.len = pool;
         }
     };
@@ -771,18 +765,6 @@ test "sound record: a DataOffset near the top of the 32-bit range is rejected" {
     for (out_of_range) |data_off| {
         var img: [256]u8 = undefined;
         @memset(&img, 0);
-        const w32 = struct {
-            fn f(buf: []u8, off: usize, v: u32) void {
-                std.mem.writeInt(u32, buf[off..][0..4], v, .little);
-            }
-        }.f;
-        const putStr = struct {
-            fn f(buf: []u8, at: usize, s: []const u8) usize {
-                @memcpy(buf[at .. at + s.len], s);
-                buf[at + s.len] = 0;
-                return at + s.len + 1;
-            }
-        }.f;
 
         // A well-formed one-entry sound table whose record lies out of range.
         // The table itself is in bounds, so the bank loads and the lookups below
@@ -790,14 +772,14 @@ test "sound record: a DataOffset near the top of the 32-bit range is rejected" {
         const snd_off: u32 = header_size;
         var pool: usize = snd_off + asset_entry_size;
         const s0: u32 = @intCast(pool);
-        pool = putStr(&img, pool, "kick");
-        w32(&img, off_tag, BANK_TAG);
-        w32(&img, off_version, @bitCast(BANK_VERSION));
-        w32(&img, off_sounds, snd_off);
-        w32(&img, off_sound_count, 1);
-        w32(&img, snd_off, s0);
-        w32(&img, snd_off + 4, data_off);
-        w32(&img, off_meta_size, @intCast(pool));
+        pool = putName(&img, pool, "kick");
+        writeU32(&img, off_tag, BANK_TAG);
+        writeU32(&img, off_version, @bitCast(BANK_VERSION));
+        writeU32(&img, off_sounds, snd_off);
+        writeU32(&img, off_sound_count, 1);
+        writeU32(&img, snd_off, s0);
+        writeU32(&img, snd_off + 4, data_off);
+        writeU32(&img, off_meta_size, @intCast(pool));
 
         const bank = try loadFromMemory(testing.allocator, "bad.mbnk", img[0..pool]);
         defer bank.deinit();

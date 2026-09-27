@@ -4882,6 +4882,21 @@ test "StreamSource ping-pongs two buffers and fires EOB on drain" {
     try testing.expectEqual(@as(i32, 0), ss.bufferReady());
 }
 
+// miniaudio reports MA_AT_END on the read that yields 0 frames, so a source is
+// drained in a loop until it says so; the return value is the frame count read.
+fn drainToEnd(ss: *openmiles.StreamSource, out: []u8, bytes_per_frame: u64) !u64 {
+    var total: u64 = 0;
+    var guard: u32 = 0;
+    while (guard < 8) : (guard += 1) {
+        var read: u64 = 0;
+        const r = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, out[@intCast(total * bytes_per_frame)..].ptr, bytes_per_frame - total, &read);
+        total += read;
+        if (r == openmiles.ma.MA_AT_END) return total;
+        if (read == 0) return error.StreamNeverSignalledEnd;
+    }
+    return error.StreamNeverSignalledEnd;
+}
+
 test "StreamSource zero-length buffer signals end of stream" {
     var ss: openmiles.StreamSource = undefined;
     try ss.init(16, 2, 44100, null, null);
@@ -4891,23 +4906,9 @@ test "StreamSource zero-length buffer signals end of stream" {
     ss.loadBuffer(0, &buf_a, buf_a.len);
     ss.loadBuffer(1, null, 0); // EOF marker
 
-    // miniaudio reports MA_AT_END on the read that yields 0 frames, so drain in
-    // a loop; total decoded frames must be exactly buf_a's 2 before EOF.
+    // Total decoded frames must be exactly buf_a's 2 before EOF.
     var out: [16]u8 = undefined;
-    var total: u64 = 0;
-    var hit_end = false;
-    var guard: u32 = 0;
-    while (guard < 8) : (guard += 1) {
-        var read: u64 = 0;
-        const r = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, out[@intCast(total * 4)..].ptr, 4 - total, &read);
-        total += read;
-        if (r == openmiles.ma.MA_AT_END) {
-            hit_end = true;
-            break;
-        }
-        if (read == 0) break;
-    }
-    try testing.expect(hit_end);
+    const total = try drainToEnd(&ss, &out, 4);
     try testing.expectEqual(@as(u64, 2), total);
     try testing.expectEqualSlices(u8, &buf_a, out[0..8]);
 }
@@ -4946,21 +4947,8 @@ test "StreamSource drains a buffer ending mid-frame" {
     ss.loadBuffer(1, null, 0); // EOF marker
 
     var out: [16]u8 = undefined;
-    var total: u64 = 0;
-    var hit_end = false;
-    var guard: u32 = 0;
-    while (guard < 8) : (guard += 1) {
-        var read: u64 = 0;
-        const r = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, out[@intCast(total * 4)..].ptr, 4 - total, &read);
-        total += read;
-        if (r == openmiles.ma.MA_AT_END) {
-            hit_end = true;
-            break;
-        }
-        if (read == 0) break;
-    }
     // Reached end of stream instead of wedging, and the 2 whole frames survived.
-    try testing.expect(hit_end);
+    const total = try drainToEnd(&ss, &out, 4);
     try testing.expectEqual(@as(u64, 2), total);
     try testing.expectEqualSlices(u8, buf_a[0..8], out[0..8]);
     try testing.expectEqual(@as(u32, 1), ctx.eob_count);

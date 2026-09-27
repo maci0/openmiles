@@ -654,6 +654,18 @@ const MixCursor = struct {
     step_r: u64, // rate % dest_rate: fractional remainder carried between frames
     rem: u64 = 0, // accumulated remainder, always < dest_rate
     pos: u64 = 0, // current source position == floor(j * rate / dest_rate)
+
+    // Move from frame j's position floor(j*rate/dest_rate) to frame j+1's: the
+    // whole-point quotient, plus one more when the carried remainder crosses
+    // dest_rate.
+    fn advance(self: *MixCursor, dest_rate: u64) void {
+        self.pos += self.step_q;
+        self.rem += self.step_r;
+        if (self.rem >= dest_rate) {
+            self.rem -= dest_rate;
+            self.pos += 1;
+        }
+    }
 };
 
 // Decode one IMA-ADPCM source's raw blocks to owned interleaved 16-bit PCM via
@@ -820,15 +832,7 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
             const spi: usize = @intCast(c.pos);
             accL += c.src.s16[spi * 2];
             accR += c.src.s16[spi * 2 + 1];
-            // Advance pos from frame j's position floor(j*rate/dest_rate) to
-            // frame j+1's: add the whole-point quotient, plus one more when
-            // the carried remainder crosses dest_rate.
-            c.pos += c.step_q;
-            c.rem += c.step_r;
-            if (c.rem >= dest_rate) {
-                c.rem -= dest_rate;
-                c.pos += 1;
-            }
+            c.advance(dest_rate);
             si += 1;
         }
         var mi: usize = 0;
@@ -843,12 +847,7 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
             const v: i32 = c.src.s16[@intCast(c.pos)];
             accL += v;
             accR += v;
-            c.pos += c.step_q;
-            c.rem += c.step_r;
-            if (c.rem >= dest_rate) {
-                c.rem -= dest_rate;
-                c.pos += 1;
-            }
+            c.advance(dest_rate);
             mi += 1;
         }
         const L: i32 = std.math.clamp(accL, -32768, 32767);
