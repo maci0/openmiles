@@ -102,6 +102,10 @@ def main():
             with tempfile.TemporaryDirectory() as tmp:
                 unit = Path(tmp) / "example.c"
                 unit.write_text(block)
+                # S603: a fixed argv list with no shell, built here rather than
+                # from input, running the zig resolved by the caller. The only
+                # path handed to it is the temp file this block was just
+                # written to; nothing from a document reaches argv.
                 proc = subprocess.run(  # noqa: S603
                     [
                         zig,

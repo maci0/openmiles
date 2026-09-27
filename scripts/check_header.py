@@ -150,6 +150,9 @@ def eval_guard(expr, version):
 
 # One branch per preprocessor directive, mirroring what cpp does; splitting it
 # would put the #if/#elif/#else/#endif chain apart from the parse it guards.
+# PLR0912: one branch per preprocessor directive, because that is the shape
+# cpp gives the file. Anything smaller has to reconstruct the #if/#elif/#else
+# nesting to stay correct, which is the bug the branch count is protecting.
 def resolve_header(text, version):  # noqa: PLR0912
     """Return the declarations mss.h makes when OPENMILES_MSS_VERSION is `version`."""
     decls = []

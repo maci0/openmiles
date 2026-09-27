@@ -14,10 +14,17 @@ The same drift applies to the C warning set, which build.zig declares once and
 the two gates that compile C on their own repeat: check_header.py for mss.h,
 check_examples.py for the snippets in the documentation.
 
+The gates themselves run on whatever `python3` the host resolves, so the
+interpreter is the fourth pin: ruff.toml names the floor the scripts need, and
+this asserts the one running is at or above it. Below it, a gate dies halfway
+through with a TypeError from its own annotations, and the other gates report
+nothing at all.
+
 So this reads the pins back out of each file and compares them, reporting:
 
   DRIFT     a file that must derive its pin, or names a different version
   UNPINNED  a file that must name a version does not
+  TOO OLD   the interpreter is below the floor ruff.toml declares
 """
 
 import argparse
@@ -33,6 +40,7 @@ ZON = ROOT / "build.zig.zon"
 BUILD_ZIG = ROOT / "build.zig"
 CHECK_HEADER = ROOT / "scripts" / "check_header.py"
 CHECK_EXAMPLES = ROOT / "scripts" / "check_examples.py"
+RUFF_TOML = ROOT / "ruff.toml"
 
 # Makefile variable -> (files that must repeat it, pattern naming the pin).
 PINS = {
@@ -55,7 +63,7 @@ ZIG_WORKFLOWS = (CI_YML, RELEASE_YML)
 # one least worth trusting.
 C_FLAGS_BUILD_ZIG_RE = re.compile(r"const c_flags = \[_\]\[\]const u8\{(?P<body>.*?)\};", re.DOTALL)
 C_FLAGS_HEADER_RE = re.compile(r'"cc",(?P<body>.*?)str\(tu\)', re.DOTALL)
-C_FLAGS_EXAMPLES_RE = re.compile(r"CFLAGS = \[(?P<body>.*?)\n\]", re.DOTALL)
+C_FLAGS_EXAMPLES_RE = re.compile(r"^CFLAGS = \[(?P<body>.*?)^\]", re.DOTALL | re.MULTILINE)
 QUOTED_RE = re.compile(r'"(-W[A-Za-z0-9=-]+|-std=[A-Za-z0-9]+)"')
 
 
@@ -172,6 +180,33 @@ def c_flag_problems():
     return bad
 
 
+def interpreter_problems():
+    """Report an interpreter below the floor ruff.toml declares.
+
+    ruff.toml's target-version is what the scripts are written against; the
+    gate runs on whatever python3 the host resolved. A host under that floor
+    does not fail the way a version check fails: the module importing it dies
+    on its own annotations, part-way through the sweep, having reported
+    nothing, so the tree reads as half-checked rather than rejected.
+    """
+    text = read(RUFF_TOML)
+    if text is None:
+        return ["ruff.toml missing"]
+    m = re.search(r'^target-version\s*=\s*"(?P<major>py)(?P<minor>\d)(\d+)"', text, re.MULTILINE)
+    if not m:
+        print("ruff.toml UNPINNED  no target-version for the scripts to be written against")
+        return ["ruff.toml target-version"]
+    floor = (int(m.group("minor")), int(m.group(3)))
+    if sys.version_info[:2] < floor:
+        running = ".".join(str(n) for n in sys.version_info[:2])
+        print(
+            f"TOO OLD            python {running} cannot import the gates; "
+            f"ruff.toml declares py{floor[0]}{floor[1]}"
+        )
+        return ["interpreter floor"]
+    return []
+
+
 def main():
     argparse.ArgumentParser(
         prog="check_toolchain_pins.py",
@@ -219,10 +254,12 @@ def main():
         problems.extend(zig_workflow_problems(path, text))
 
     problems.extend(c_flag_problems())
+    problems.extend(interpreter_problems())
 
     if problems:
         print(f"{len(problems)} toolchain pin(s) disagree: {', '.join(problems)}")
         print("build.zig.zon pins zig; the Makefile literals pin ruff and yamllint. Match them.")
+        print("ruff.toml pins the Python floor; run the gates on an interpreter that meets it.")
         return 1
 
     print(

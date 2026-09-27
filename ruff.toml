@@ -19,7 +19,13 @@
 # none of them is present.
 
 line-length = 100
-target-version = "py38"
+# The floor the scripts/ gates need, not a guess. Entry, a typing.NamedTuple in
+# check_vendored.py, annotates its fields `str | None`, and a class body's
+# annotations run when the class is created, so importing that module on 3.9
+# raises TypeError. 3.10 is the floor PEP 604 puts on the tree, and naming a
+# lower one had ruff applying 3.8 rules to code that cannot run on 3.8.
+# check_toolchain_pins.py asserts the interpreter is at least this.
+target-version = "py310"
 extend-exclude = ["deps", "zig-out", ".zig-cache", ".scratch"]
 
 [lint]
@@ -41,6 +47,7 @@ select = [
     "EXE",  # shebang/executable-bit agreement
     "FBT",  # boolean positional argument
     "FURB", # refurb
+    "FLY",  # string joins and f-strings that need not be built at runtime
     "G",    # logging format
     "ICN",  # import conventions
     "ISC",  # implicit string concatenation
