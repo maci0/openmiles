@@ -79,6 +79,8 @@ everything below is unreleased.
 - Fuzz targets for the event-step decoder and the XMIDI parser
   (`src/fuzz_native_test.zig`).
 - Vendored dependency checksums are documented for `deps/`.
+- `CONTRIBUTING.md`: pinned-tool setup, the edit-test loop, what a change is
+  expected to carry, and how the vendored and generated files are checked.
 
 ### Fixed
 
@@ -156,6 +158,10 @@ everything below is unreleased.
 - Unknown-size sample loads go through bounded callbacks.
 - MIDI sequence beat and millisecond conversions saturate instead of
   overflowing `i32`.
+- The test build no longer enables the debug log by default, so a `make test`
+  run does not append engine trace to `openmiles.log` in the repository root
+  or bury a failing test in it. `OPENMILES_DEBUG=1` turns it back on for a
+  run; a Debug build of the library still logs by default.
 
 ### Known gaps
 

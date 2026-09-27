@@ -65,23 +65,29 @@ zig build -Dtarget=x86-windows -Doptimize=ReleaseFast -Dmss-version=5
 `make check` runs every check CI runs, in CI's order: `make lint`, `make build`,
 `make test`, and the Windows cross-compile. Run it before pushing.
 
-`make lint` needs `shellcheck` and [ruff](https://docs.astral.sh/ruff/) 0.16.4
-(the pinned version, checked before it runs) besides Zig, since the `scripts/`
-gate is linted too; CI installs them through the runner image. It checks
-`zig fmt`, shellchecks `scripts/*.sh`, and asserts `src/mss.h` declares every
-symbol the export table exports, for each `-Dmss-version`.
+`make lint` needs `shellcheck`, `python3` (the `scripts/*.py` gates), and
+[ruff](https://docs.astral.sh/ruff/) 0.16.4 (the pinned version, checked before
+it runs) besides Zig, since the `scripts/` gate is linted too; `make lint` names
+any of the three that is missing, and CI installs them through the runner
+image. It checks `zig fmt`, shellchecks `scripts/*.sh`, and asserts `src/mss.h`
+declares every symbol the export table exports, for each `-Dmss-version`.
 
 ### Running a subset of the tests
 
-The full suite prints a lot of engine trace output and takes a couple of
-minutes. To run one test, filter by a substring of its name:
+The full suite takes a couple of minutes. To run one test, filter by a
+substring of its name:
 
 ```bash
 make test FILTER=redbook           # or: zig build test -Dtest-filter=redbook
 ```
 
-`OPENMILES_DEBUG=0` silences the engine trace that otherwise fills the test
-output; a Debug build logs by default, and that is what writes `openmiles.log`.
+A test run is quiet: the test build does not enable the debug log by default
+(a Debug library build does), so a run neither floods the terminal nor appends
+to `openmiles.log`. Set `OPENMILES_DEBUG=1` for a run that wants the engine
+trace and the log file.
+
+Contributing setup, the edit-test loop, and what a change is expected to carry
+are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Driving time in tests
 
@@ -307,6 +313,7 @@ section of [docs/API_STATUS.md](docs/API_STATUS.md)).
 
 ## Documentation
 
+- [Contributing](CONTRIBUTING.md) -- setup, the edit-test loop, what a change carries
 - [Changelog](CHANGELOG.md) -- consumer-facing changes per release
 - [API Implementation Status](docs/API_STATUS.md) -- per-function status matrix
 - [API Support Matrix](docs/MSS_API_MATRIX.md) -- version compatibility overview

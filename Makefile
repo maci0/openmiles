@@ -1,4 +1,4 @@
-.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-toolchain check-vendored cross parity help
+.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-toolchain check-host-tools check-vendored cross parity help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -67,7 +67,11 @@ check-python:
 	ruff check .
 	ruff format --check .
 
-lint:
+check-host-tools:
+	@command -v shellcheck >/dev/null 2>&1 || { echo "error: shellcheck not found on PATH; 'make lint' shellchecks scripts/*.sh" >&2; exit 1; }
+	@command -v python3 >/dev/null 2>&1 || { echo "error: python3 not found on PATH; the scripts/*.py gates need it" >&2; exit 1; }
+
+lint: check-host-tools
 	zig fmt --check .
 	shellcheck scripts/*.sh
 	./scripts/check_header.py

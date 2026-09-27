@@ -1,0 +1,66 @@
+# Contributing
+
+## Setup
+
+Two tools, both version-pinned in the tree:
+
+| Tool | Version | Declared in | Install (any equivalent works) |
+|------|---------|-------------|---------------------------------|
+| Zig | 0.16.0 | `.minimum_zig_version` in `build.zig.zon` | <https://ziglang.org/download/> |
+| ruff | 0.16.4 | `RUFF_VERSION` in the `Makefile` | `uv tool install ruff==0.16.4` |
+| shellcheck | any recent | required by `make lint` | your package manager |
+
+`make` reads the Zig version out of `build.zig.zon` and refuses to build on
+any other one; `make check-pins` (part of `make lint`) fails when the Makefile,
+`ci.yml`, and `build.zig.zon` disagree. Nothing else is fetched: every
+dependency is a vendored header under `deps/`, verified by
+`make check-vendored` against `deps/SHA256SUMS`.
+
+Optional: a `test_media/` directory holding `test.wav`, `test.mid`, and
+`test.sf2`. The build installs it next to the test binaries and the fixtures
+that need it skip themselves when it is absent, so a clone without it still
+builds and tests green.
+
+## The loop
+
+```bash
+make build                # zig build
+make test FILTER=redbook  # one test, by substring of its name
+make test                 # the whole suite (minutes)
+make check                # everything CI runs, in CI's order
+```
+
+`make help` lists every target. A filtered run is the edit-test loop: it
+rebuilds only the test artifacts and skips the rest of the suite. Test output
+is quiet by default; set `OPENMILES_DEBUG=1` to get the engine trace and the
+`openmiles.log` it writes.
+
+## Before you push
+
+`make check` runs `make lint`, `make build`, `make test`, and the
+x86-windows cross-compile, which is what `.github/workflows/ci.yml` runs on
+Ubuntu. CI additionally runs the build and tests on Windows; nothing in the
+tree is Linux-only, but a change that only builds on one host shows up there
+rather than locally.
+
+`make lint` is `zig fmt --check`, `ruff check`, `ruff format --check`,
+`shellcheck scripts/*.sh`, plus the header-parity, vendored-checksum, and
+pin-agreement checks. `make format` applies the two formatters.
+
+## What a change is expected to carry
+
+- A changelog entry under `## [Unreleased]` in `CHANGELOG.md`, in the
+  Keep-a-Changelog section for its kind.
+- Tests. A bug fix gets the failing test first; the Zig tests live in the
+  `test` blocks of the module they cover, with the module-level suites in
+  `src/test_root.zig` and `src/engine_test_root.zig`, and the C harnesses in
+  `tests/`.
+- An entry in `docs/API_STATUS.md` when a function's implementation status
+  changes, and the relevant table in `README.md` when a coverage claim does.
+
+## Generated and vendored files
+
+`deps/` is vendored upstream source, pinned by `deps/SHA256SUMS`; the update
+procedure is in `deps/README.md`. `src/mss.h` is checked against the export
+table in `src/main.zig` for every `-Dmss-version` by `make check-header`, so
+adding an export means declaring it in the header in the same change.

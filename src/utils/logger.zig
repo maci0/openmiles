@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const wide = @import("wide.zig");
 
 const io: std.Io = std.Io.Threaded.global_single_threaded.io();
@@ -33,7 +34,12 @@ pub fn init() void {
     defer mutex.unlock(io);
     if (@atomicLoad(bool, &initialized, .acquire)) return;
 
-    debug_enabled = builtin.mode == .Debug;
+    // The shipped library logs by default in a Debug build; the test build does
+    // not (build_options.log_by_default is false there), because the suite runs
+    // in the repository root and an appending debug log there grows to
+    // max_log_bytes on every run and floods the test output. OPENMILES_DEBUG
+    // still turns it on for whichever run wants the trace.
+    debug_enabled = builtin.mode == .Debug and build_options.log_by_default;
 
     if (builtin.os.tag == .windows) {
         // The UTF-8 destination is sized in bytes from the unit count: a value

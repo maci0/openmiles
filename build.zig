@@ -96,7 +96,17 @@ pub fn build(b: *std.Build) void {
 
     const build_opts = b.addOptions();
     build_opts.addOption(u16, "mss_version", mss_version);
+    build_opts.addOption(bool, "log_by_default", true);
     const build_opts_mod = build_opts.createModule();
+
+    // The test bundle gets its own options module so a Debug test run does not
+    // log by default: the suite runs from the repository root, where the
+    // appending debug log would reach its 64 MiB cap on every run and bury the
+    // test output in engine trace. OPENMILES_DEBUG=1 still turns it on.
+    const test_opts = b.addOptions();
+    test_opts.addOption(u16, "mss_version", mss_version);
+    test_opts.addOption(bool, "log_by_default", false);
+    const test_opts_mod = test_opts.createModule();
 
     // Translate C headers into Zig modules (replaces inline @cImport).
     const translate_ma = b.addTranslateC(.{
@@ -175,10 +185,10 @@ pub fn build(b: *std.Build) void {
     // linker can't process. Build them against the musl test_target instead
     // (same rationale as the C test exes / native_rib_test above), which needs
     // an openmiles module + translate-C + c_impl resolved for that target.
-    const tb = if (host_is_glibc_linux)
-        addOpenmilesModule(b, test_target, optimize, build_opts_mod)
-    else
-        OpenmilesModule{ .mod = mod, .c_impl = c_impl, .ma = ma_mod, .tsf = tsf_mod };
+    // The module is built for the test bundle on every host, not just a glibc
+    // one: it is what gives the tests their own build_options (log_by_default
+    // off), which reusing the library module would silently skip.
+    const tb = addOpenmilesModule(b, test_target, optimize, test_opts_mod);
 
     const mod_tests = b.addTest(.{
         .filters = test_filters,
@@ -193,7 +203,7 @@ pub fn build(b: *std.Build) void {
                 // Share the same openmiles module the api wrappers import, so
                 // test code and AIL_* exports exchange identical types.
                 .{ .name = "openmiles", .module = tb.mod },
-                .{ .name = "build_options", .module = build_opts_mod },
+                .{ .name = "build_options", .module = test_opts_mod },
             },
         }),
     });
@@ -233,7 +243,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "ma_c", .module = tb.ma },
                 .{ .name = "tsf_c", .module = tb.tsf },
-                .{ .name = "build_options", .module = build_opts_mod },
+                .{ .name = "build_options", .module = test_opts_mod },
             },
         }),
     });
