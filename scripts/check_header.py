@@ -25,12 +25,10 @@ each resulting declaration, reports:
 Symbols the header does not declare are listed at the end as a coverage count.
 The header is a documented core subset, so that part is informational.
 
-Usage:
-    scripts/check_header.py [--verbose]
-
 Exit code 0 when the header and the export table agree for every version.
 """
 
+import argparse
 import re
 import subprocess
 import sys
@@ -480,7 +478,19 @@ def compile_problems():
 
 
 def main():
-    verbose = "--verbose" in sys.argv[1:]
+    parser = argparse.ArgumentParser(
+        prog="check_header.py",
+        description=__doc__,
+        epilog="Exit status: 0 header and export table agree, 1 they disagree, 2 bad invocation.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="report the undeclared-symbol count per version too",
+    )
+    args = parser.parse_args()
+    verbose = args.verbose
+
     main_zig = MAIN_ZIG.read_text()
     exports = parse_exports(main_zig)
     never_export = parse_never_export(main_zig)

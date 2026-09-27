@@ -10,16 +10,14 @@ ship. This check closes that gap: `make lint` runs it, so CI rejects either.
 deps/README.md documents where each file comes from and under which license;
 this script is the machine-readable half of the same record.
 
-Usage:
-    scripts/check_vendored.py [--update]
-
-    --update  rewrite deps/SHA256SUMS from the files on disk, for a deliberate
-              header swap. Review the diff before committing it: the point of
-              the check is that changing a digest is a conscious act.
+--update rewrites deps/SHA256SUMS from the files on disk, for a deliberate
+header swap. Review the diff before committing it: the point of the check is
+that changing a digest is a conscious act.
 
 Exit code 0 when deps/ and SHA256SUMS agree.
 """
 
+import argparse
 import hashlib
 import sys
 from pathlib import Path
@@ -66,11 +64,22 @@ def read_sums():
 
 
 def main():
-    update = "--update" in sys.argv[1:]
+    parser = argparse.ArgumentParser(
+        prog="check_vendored.py",
+        description=__doc__,
+        epilog="Exit status: 0 deps/ matches SHA256SUMS, 1 they disagree, 2 bad invocation.",
+    )
+    parser.add_argument(
+        "--update",
+        action="store_true",
+        help="rewrite deps/SHA256SUMS from the files on disk, for a deliberate header swap",
+    )
+    args = parser.parse_args()
+
     files = vendored_files()
     on_disk = {p.name: digest(p) for p in files}
 
-    if update:
+    if args.update:
         SUMS.write_text("".join(f"{on_disk[n]}  {n}\n" for n in sorted(on_disk)))
         print(f"updated {SUMS.relative_to(ROOT)} with {len(on_disk)} entries")
         return 0

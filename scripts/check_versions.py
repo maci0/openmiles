@@ -21,6 +21,7 @@ Exit code 0 when every accepted value is either swept against a reference DLL
 or declared unswept with a reason.
 """
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -84,6 +85,13 @@ def parse_script_entries(text: str, name: str) -> dict[str, str | None]:
 
 
 def main():
+    argparse.ArgumentParser(
+        prog="check_versions.py",
+        description=__doc__,
+        epilog="Exit status: 0 every value is swept or declared unswept, 1 a value is not, "
+        "2 bad invocation.",
+    ).parse_args()
+
     build_versions = parse_build_versions(BUILD_ZIG.read_text())
     header_versions = parse_header_versions(CHECK_HEADER.read_text())
     sweep_text = CHECK_ALL_VERSIONS.read_text()
@@ -133,4 +141,4 @@ if __name__ == "__main__":
         sys.exit(main())
     except (OSError, ValueError) as exc:
         print(f"check_versions: {exc}", file=sys.stderr)
-        sys.exit(2)
+        sys.exit(1)

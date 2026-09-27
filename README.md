@@ -72,6 +72,11 @@ any of the three that is missing, and CI installs them through the runner
 image. It checks `zig fmt`, shellchecks `scripts/*.sh`, and asserts `src/mss.h`
 declares every symbol the export table exports, for each `-Dmss-version`.
 
+Every gate under `scripts/` follows one contract: `-h`/`--help` prints its own
+usage, findings go to stdout when they are the result and to stderr when they
+are the failure, and it exits 0 for a pass, 1 for a check failure, 2 for a bad
+invocation. `make help` lists each one and what it asserts.
+
 ### Running a subset of the tests
 
 The full suite takes a couple of minutes. To run one test, filter by a
@@ -113,7 +118,8 @@ same run, which is what makes a failing sequence reproducible.
 `scripts/package_release.sh <out.zip> [sha256sums]` packages
 `zig-out/bin/mss32.dll` with the license, this README, the changelog, and the
 vendored-dependency attribution (`VENDORED.md`, `DEPS-SHA256SUMS`). It needs
-`zip` on PATH and says so if it is missing. The optional second argument writes
+`zip` on PATH and says so if it is missing. `--help` prints the same usage.
+The optional second argument writes
 a `SHA256SUMS` naming exactly the archive entries, so `sha256sum -c` passes on
 an unpacked download. The archive is reproducible: entry order is fixed, every
 entry takes one timestamp (`SOURCE_DATE_EPOCH`, defaulting to the HEAD commit

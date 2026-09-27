@@ -16,9 +16,6 @@ here rather than silently misdirecting the next pass.
   UNPARSED     a backticked `path:line` reference carries no anchor
 
 Exit code 0 when every reference resolves.
-
-Usage:
-    scripts/check_threat_model_refs.py [--verbose]
 """
 
 from __future__ import annotations
@@ -41,12 +38,21 @@ REF_RE = re.compile(
 # so a half-written reference is reported rather than skipped.
 CANDIDATE_RE = re.compile(r"`(?P<path>[\w./-]+\.(?:zig|py|sh|h|yml|yaml|zon)):\d[^`]*`")
 
-DOC = Path("docs/THREAT_MODEL.md")
+ROOT = Path(__file__).resolve().parent.parent
+DOC = ROOT / "docs" / "THREAT_MODEL.md"
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--verbose", action="store_true")
+    parser = argparse.ArgumentParser(
+        prog="check_threat_model_refs.py",
+        description=__doc__,
+        epilog="Exit status: 0 every reference resolves, 1 one does not, 2 bad invocation.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print each reference that resolves, not just the summary",
+    )
     args = parser.parse_args()
 
     if not DOC.exists():
@@ -71,7 +77,7 @@ def main() -> int:
         line_no = int(match.group("line"))
         anchor = match.group("anchor")
 
-        target = Path(path)
+        target = ROOT / path
         if not target.exists():
             problems.append(f"MISSINGFILE {path}:{line_no} {anchor}: {path} does not exist")
             continue
@@ -83,11 +89,8 @@ def main() -> int:
 
         if anchor not in lines[line_no - 1]:
             problems.append(f"NOMATCH {path}:{line_no} {anchor}: anchor is not on that line")
-
-    if args.verbose:
-        for problem in problems:
-            print(problem)
-        print(f"{checked} reference(s) checked, {len(problems)} problem(s)")
+        elif args.verbose:
+            print(f"ok {path}:{line_no} {anchor}")
 
     if problems:
         print(f"{len(problems)} threat model reference problem(s):", file=sys.stderr)

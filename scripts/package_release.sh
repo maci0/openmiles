@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Package the built Windows DLL into the release archive.
 #
-# Usage: scripts/package_release.sh <output.zip> [<sha256sums>]
-#   Reads zig-out/bin/mss32.dll (build it first with
-#   `zig build -Dtarget=x86-windows -Doptimize=ReleaseFast`).
+#   Usage: scripts/package_release.sh <output.zip> [<sha256sums>]
+#
+# Reads zig-out/bin/mss32.dll (build it first with
+# `zig build -Dtarget=x86-windows -Doptimize=ReleaseFast`).
 #
 # The second argument, when given, receives a SHA256SUMS listing every entry of
 # the archive, in archive order, and nothing else: a checksum file naming files
@@ -15,8 +16,43 @@
 # takes one mtime (SOURCE_DATE_EPOCH, defaulting to the HEAD commit time), and
 # `zip -X` omits the uid/gid and extended-timestamp extra fields that would
 # otherwise record the packaging host.
+#
+# Exit status: 0 archive written, 1 packaging failed, 2 bad invocation.
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 1
+
+usage() {
+  cat <<EOF
+Usage: scripts/package_release.sh <output.zip> [<sha256sums>]
+
+Packages zig-out/bin/mss32.dll and its licence and attribution files into
+<release>.zip, stamped with SOURCE_DATE_EPOCH so the bytes are reproducible.
+
+Arguments:
+  <output.zip>    archive to write, replaced if it exists
+  [<sha256sums>]  optional SHA256SUMS listing every archive entry, in
+                  archive order
+
+Options:
+  -h, --help  show this help
+EOF
+}
+
+case "${1:-}" in
+  -h | --help) usage; exit 0 ;;
+esac
+
+if [ "$#" -eq 0 ]; then
+  printf '%s: missing <output.zip>\n' "${0##*/}" >&2
+  usage >&2
+  exit 2
+fi
+
+if [ "$#" -gt 2 ]; then
+  printf '%s: expected at most 2 arguments, got %s\n' "${0##*/}" "$#" >&2
+  usage >&2
+  exit 2
+fi
 
 # zip renders each entry's mtime as an MS-DOS *local* date and time, so the
 # host timezone lands in the archive bytes: the same epoch packaged under
@@ -31,7 +67,7 @@ command -v zip >/dev/null 2>&1 || {
   exit 1
 }
 
-OUT=${1:?"usage: scripts/package_release.sh <output.zip> [<sha256sums>]"}
+OUT=$1
 SUMS=${2:-}
 
 # archive entry name : path in the build tree, in the order they go into the zip

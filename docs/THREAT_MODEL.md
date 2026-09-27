@@ -127,19 +127,18 @@ choke point, loading every file with a plugin extension through the OS loader.
 
 1. `AIL_startup` (`src/api/digital.zig:17 AIL_startup`) reaches `startup()`,
    which scans the current working directory: `loadApplicationProviders(".")`
-   (`src/root.zig:1067 loadApplicationProviders`, defined at
+   (`src/root.zig:1061 loadApplicationProviders`, defined at
    `src/root.zig:467 loadApplicationProviders`).
 2. `AIL_set_redist_directory` (`src/api/digital.zig:29 AIL_set_redist_directory`)
    records a game-supplied directory, and `loadAllAsi` scans it
    (`src/engine/digital.zig:527 loadAllAsi`), called on a directory change
    (`src/root.zig:706 loadAllAsi`) and again when a digital driver opens
-   (`src/root.zig:1108 loadAllAsi`). The directory is not restricted to the game
+   (`src/root.zig:1102 loadAllAsi`). The directory is not restricted to the game
    directory: the game names any path, so a redist directory pointing at a
    download or per-user shared folder extends plugin execution to every plugin
    extension found there.
 
 Controls present, on both scans:
-
 - Extension allowlist `.asi`, `.m3d`, `.flt` (`src/root.zig:443 isPluginExtension`).
 - Filename rejection of `..`, `/`, `\` so a directory entry cannot escape the
   scan directory (`src/root.zig:449 isSafePluginFilename`).

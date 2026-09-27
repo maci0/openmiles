@@ -14,12 +14,10 @@ So this reads the pins back out of each file and compares them, reporting:
   DRIFT     a file that must derive its pin, or names a different version
   UNPINNED  a file that must name a version does not
 
-Usage:
-    scripts/check_toolchain_pins.py
-
 Exit code 0 when every pin agrees.
 """
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -114,6 +112,12 @@ def zig_workflow_problems(path, text):
 
 
 def main():
+    argparse.ArgumentParser(
+        prog="check_toolchain_pins.py",
+        description=__doc__,
+        epilog="Exit status: 0 every pin agrees, 1 they disagree, 2 bad invocation.",
+    ).parse_args()
+
     makefile = read(MAKEFILE)
     if makefile is None:
         return 1
