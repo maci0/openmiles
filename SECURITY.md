@@ -38,12 +38,20 @@ No disclosure deadline or embargo policy is defined by this project yet.
   that variable chooses where the image lands.
 - Anything reachable from `AIL_startup`'s scan of the game directory for
   plugin files.
+- Anything reachable from the scan of the redist directory the game sets with
+  `AIL_set_redist_directory`. That directory is not restricted to the game
+  directory, so it is in scope wherever the game is pointed.
+- A path traversal or an unexpected overwrite reached through `AIL_WAV_file_write`
+  or `AIL_file_write`, which take a caller-named path and create or truncate it
+  with no validation. The report is still worth sending, since the module is the
+  write primitive, but the caller chooses the path.
 
 ## What is out of scope
 
-- Loading an unsigned `.asi`/`.m3d`/`.flt` plugin from the game directory. The
-  original MSS behaves the same way, and the plugin is native code the user
-  deliberately installed. Keep the game directory writable only by the user.
+- Loading an unsigned `.asi`/`.m3d`/`.flt` plugin from the game directory or from
+  the redist directory. The original MSS behaves the same way, and the plugin is
+  native code the user deliberately installed. Keep the game directory, and any
+  directory the game points the redist search at, writable only by the user.
 - A bug in miniaudio, TinySoundFont, or `tml.h`; report those upstream.
 - Crafted arguments passed to the exports by a buggy host game. The C ABI
   cannot validate a caller's pointers, and a caller inside the process already
