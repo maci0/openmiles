@@ -24,7 +24,7 @@ to set both.
 
 | # | Threat | Boundary | Impact | Status |
 |---|--------|----------|--------|--------|
-| 1 | Untrusted plugin image written to the temp directory and `LoadLibrary`'d | file/env to process | Code execution as the game user | Mitigated: unpredictable name, exclusive create (`src/api/rib.zig:220 randomSecure`, `src/api/rib.zig:240 exclusive`) |
+| 1 | Untrusted plugin image written to the temp directory and `LoadLibrary`'d | file/env to process | Code execution as the game user | Mitigated: unpredictable name, exclusive create (`src/api/rib.zig:222 randomNameBytes`, `src/api/rib.zig:242 exclusive`) |
 | 2 | `.asi`/`.m3d`/`.flt` files in the game directory, or in a game-named redist directory, loaded and executed at startup | file to process | Code execution as the game user | Unmitigated by design: the host game's own directory is trusted. Listed in [Deployment](#4-deployment-artifact-boundary) |
 | 3 | A plugin image parsed by the ELF fixup on a static-musl Linux build (`applyElfFixups`) | file to process | Crash, in-process memory corruption | Partial: program header table and `DT_RELA` slots bounded in `u64`/image space (`src/utils/dynlib.zig:58 programHeaderTableFits`) |
 | 4 | `AIL_WAV_file_write` creates or truncates a game-named path | game to DLL, DLL to disk | Overwrite of any file the game user can write | Unmitigated by ABI necessity (`src/api/digital.zig:953 AIL_WAV_file_write`) |
@@ -122,7 +122,7 @@ rejected one is reported on stderr with the reason.
   A `TMPDIR` that is empty, too long, or relative is refused
   (`src/api/rib.zig:166 reportTempDir`), and a set one that does not exist falls
   through to the cwd-relative `./om_asi_*.dll` form
-  (`src/api/rib.zig:229 om_asi_`), which lands in the game directory instead.
+  (`src/api/rib.zig:237 om_asi_`), which lands in the game directory instead.
   Unmitigated.
 - `GetTempPathW` (`src/api/rib.zig:128 GetTempPathW`): on Windows, `TEMP` is
   per-user, so the write is confined to the user's own profile.
@@ -136,13 +136,12 @@ choke point, loading every file with a plugin extension through the OS loader.
 
 1. `AIL_startup` (`src/api/digital.zig:18 AIL_startup`) reaches `startup()`,
    which scans the current working directory: `loadApplicationProviders(".")`
-   (`src/root.zig:606 loadApplicationProviders`, defined at
-   `src/root.zig:606 loadApplicationProviders`).
+   (`src/root.zig:606 loadApplicationProviders`).
 2. `AIL_set_redist_directory` (`src/api/digital.zig:55 AIL_set_redist_directory`)
    records a game-supplied directory, and `loadAllAsi` scans it
    (`src/engine/digital.zig:552 loadAllAsi`), called on a directory change
    (`src/root.zig:935 loadAllAsi`) and again when a digital driver opens
-   (`src/root.zig:1360 loadAllAsi`). The directory is not restricted to the game
+   (`src/root.zig:1410 loadAllAsi`). The directory is not restricted to the game
    directory: the game names any path, so a redist directory pointing at a
    download or per-user shared folder extends plugin execution to every plugin
    extension found there.
@@ -183,9 +182,9 @@ image in memory, writes it to a temporary file, and loads it.
 Controls present:
 
 - The file name is `om_asi_<random>.dll` with 64 bits of entropy from
-  `io.randomSecure`; failure to obtain entropy fails closed rather than falling
-  back to a guessable name (`src/api/rib.zig:220 randomSecure`).
-- The file is created with `.exclusive = true` (`src/api/rib.zig:240 exclusive`),
+  `openmiles.randomNameBytes`; failure to obtain entropy fails closed rather
+  than falling back to a guessable name (`src/api/rib.zig:222 randomNameBytes`).
+- The file is created with `.exclusive = true` (`src/api/rib.zig:242 exclusive`),
   so a planted name cannot be opened for overwrite and a race replacement loses.
 - The file is deleted after the module is unloaded (`src/rib/provider.zig:156 deinit`).
 
@@ -196,7 +195,7 @@ Gaps:
   `LOCKFILE_EXCLUSIVE` handle kept open across the load to close this.
 - The `TMPDIR` environment input above chooses the directory.
 - The non-Windows fallback writes `./om_asi_*.dll` into the current directory
-  (`src/api/rib.zig:235 om_asi_`), which is the game directory and therefore a
+  (`src/api/rib.zig:237 om_asi_`), which is the game directory and therefore a
   more visible location than a temp directory.
 - The image is only checked for an `MZ` signature before being written and loaded
   (`src/api/rib.zig:197 raw`); no further validation is possible, since
@@ -231,7 +230,7 @@ Gaps:
 | Bounds-checked offset read | `src/engine/soundbank.zig:222 rdU32` | Every BANK offset and count |
 | Saturating cursor arithmetic and clamped chunk ends | `src/engine/xmidi.zig:384 xmidiToSmf` | Lying XMIDI chunk sizes |
 | Fixed loop stack with depth check | `src/engine/midi.zig:355 xmidi_loop_stack` | XMIDI FOR/NEXT recursion |
-| Unpredictable exclusive temp file | `src/api/rib.zig:214 exclusive` | Temp-file pre-planting and name race |
+| Unpredictable exclusive temp file | `src/api/rib.zig:242 exclusive` | Temp-file pre-planting and name race |
 | Plugin extension allowlist and separator rejection | `src/root.zig:542 isPluginExtension` | Directory traversal in the CWD plugin scan |
 | Step-type range check, header depth limit, `wlimit`-bounded string copies | `src/engine/event.zig:492 copyString` | Crafted event bytecode |
 | Log cap, 64 MiB | `src/utils/logger.zig:14 max_log_bytes` | Unbounded debug log growth |

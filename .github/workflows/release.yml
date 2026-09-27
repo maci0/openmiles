@@ -186,13 +186,18 @@ jobs:
       - name: Verify the archive is reproducible
         run: |
           set -euo pipefail
-          # Repackaged under a different timezone and locale. The archive must
-          # depend on the staged entries and their epoch alone; a host timezone
-          # reaching the MS-DOS entry timestamps is exactly the difference this
-          # run exists to catch. The script cd's to the repository root itself,
-          # so the output path has to be absolute to land outside the tree.
-          TZ=Asia/Tokyo LC_ALL=C.UTF-8 ./scripts/package_release.sh \
-            "$RUNNER_TEMP/repeat.zip"
+          # Packaged a second time and compared byte for byte. The archive must
+          # depend on the staged entries and their epoch alone, so anything the
+          # packaging host contributes (a timezone reaching the MS-DOS entry
+          # timestamps, a locale reordering a sort, a filesystem directory
+          # order rather than the explicit entry list) shows up as a diff here.
+          # package_release.sh exports TZ=UTC and LC_ALL=C for itself and every
+          # child it spawns, so a caller cannot reintroduce host dependence by
+          # exporting its own; the step that does vary the timezone and locale
+          # is the rebuild above, which wraps zig build rather than the script.
+          # The script cd's to the repository root itself, so the output path
+          # has to be absolute to land outside the tree.
+          ./scripts/package_release.sh "$RUNNER_TEMP/repeat.zip"
           cmp "openmiles-${TAG}-win32.zip" "$RUNNER_TEMP/repeat.zip"
           rm "$RUNNER_TEMP/repeat.zip"
 

@@ -40,6 +40,22 @@ ROOT = Path(__file__).resolve().parent.parent
 DOC = ROOT / "docs" / "THREAT_MODEL.md"
 
 
+def anchor_re(anchor: str) -> re.Pattern[str]:
+    """Match `anchor` as a whole identifier, not as a piece of a longer one.
+
+    A plain substring test is a false pass waiting to happen: `exclusive`
+    matches a comment saying a name is "created exclusively", so the reference
+    keeps resolving after the code it points at has moved off that line, which
+    is the exact drift this check exists to catch. The boundaries are word
+    characters only, so a qualified call still resolves: `loadAllAsi` is found
+    in `driver.loadAllAsi(scan_path)`.
+
+    The anchor is the document's own text, never the source's, so it is quoted
+    rather than interpolated as a pattern.
+    """
+    return re.compile(rf"(?<!\w){re.escape(anchor)}(?!\w)")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="check_threat_model_refs.py",
@@ -91,7 +107,7 @@ def main() -> int:
             problems.append(f"BADLINE {path}:{line_no} {anchor}: file has {len(lines)} lines")
             continue
 
-        if anchor not in lines[line_no - 1]:
+        if not anchor_re(anchor).search(lines[line_no - 1]):
             problems.append(f"NOMATCH {path}:{line_no} {anchor}: anchor is not on that line")
         elif args.verbose:
             print(f"ok {path}:{line_no} {anchor}")
