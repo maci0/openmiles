@@ -231,14 +231,20 @@ jobs:
       - name: Build the release notes from the changelog section
         run: |
           set -euo pipefail
+          # The changelog heading names the version, not the tag, so the 'v' the
+          # tag carries is stripped here exactly as the tag check above strips
+          # it. The heading also carries its release date ("## [0.1.0] - ..."),
+          # so the section is matched on its prefix rather than on the whole
+          # line, which is why the version alone used to extract an empty body.
+          version="${TAG#v}"
           mkdir -p release
-          awk -v tag="${TAG}" '
-            $0 == "## [" tag "]" { body = 1; next }
+          awk -v heading="## [${version}]" '
+            substr($0, 1, length(heading)) == heading { body = 1; next }
             body && /^## \[/ { exit }
             body { print }
           ' CHANGELOG.md > release/NOTES.md
           if [ ! -s release/NOTES.md ]; then
-            echo "CHANGELOG.md section for ${TAG} is empty"
+            echo "CHANGELOG.md section for ${version} is empty"
             exit 1
           fi
           head -1 release/NOTES.md
