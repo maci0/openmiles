@@ -27,6 +27,13 @@ All notable changes to OpenMiles are recorded here. The format follows
   value is neither swept nor listed as unswept with a reason.
 - ABI parity is checked by `scripts/check_all_versions.sh` against reference
   DLLs under `references/` (not committed; supply them locally to run it).
+- The first tagged release decides the stability promise. While the version is
+  `0.x`, SemVer promises nothing: a minor bump may carry a behavioural break,
+  and the export table, not the version number, is the compatibility contract a
+  consumer checks (`make check-header`, `make check-versions`). Reaching `1.0`
+  means every `-Dmss-version` surface, and the struct layouts `mss.h` declares,
+  are stable from there, and any later change to one is a major bump with a
+  Breaking section naming the version it affects.
 
 ## [Unreleased]
 
@@ -55,17 +62,12 @@ everything below is unreleased.
 - `make check-header` now compares the `AILSOUNDINFO` field order in `mss.h`
   against `src/root.zig` for every `-Dmss-version`.
 - `AIL_set_timer_divisor` for the legacy 8254 PIT timer rate.
-
-### Fixed
-
-- `mss.h` declared the pre-8.0 `AILSOUNDINFO` (9 fields, 36 bytes) for every
-  version, so a v8 or v9 build read `channel_mask` at +0x18 and `block_size` at
-  +0x20 out of a 36-byte caller struct. `channel_mask` is now declared from
-  8.0 on, and the x86 layout is pinned with `_Static_assert`.
-- `DigitalDriver.init` dereferenced `pDevice.pContext` to name the audio backend
-  after checking only `pDevice`. `ma_engine_init` succeeds with a null
-  `pContext` on a machine with no output device, so the diagnostic line crashed
-  the process on the one machine most likely to have no device.
+- `openmiles.releaseAllChannels(owner)` drops every MIDI channel lock held by
+  `owner` (`MidiDriver` and `Sequence` call it from their teardown). A lock
+  outlived the handle that took it, so a game that closed a MIDI driver, or
+  freed a sequence that had locked a channel, permanently spent one of the 15
+  lockable channels until `AIL_lock_channel` answered -1 for the rest of the
+  process.
 - CI runs the project's own `make lint` (zig fmt + ruff + shellcheck) and
   compiles C with warnings as errors.
 - `ruff check` and `ruff format` over `scripts/`, so the lint gate's own
@@ -78,8 +80,9 @@ everything below is unreleased.
   is not parity-swept, is not declared unswept with a reason, or is missing
   from the version set `scripts/check_header.py` resolves the header for.
   `scripts/check_all_versions.sh` prints the values it did not build.
-- Fuzz targets for the event-step decoder and the XMIDI parser
-  (`src/fuzz_native_test.zig`).
+- Fuzz targets for the event-step decoder, the XMIDI parser, the SoundBank
+  loader, and the WAV container readers (`src/fuzz_native_test.zig`), the last
+  two with size and count invariants checked after every input.
 - Vendored dependency checksums are documented for `deps/`.
 - `CONTRIBUTING.md`: pinned-tool setup, the edit-test loop, what a change is
   expected to carry, and how the vendored and generated files are checked.
@@ -96,6 +99,24 @@ everything below is unreleased.
 
 ### Fixed
 
+- `mss.h` declared the pre-8.0 `AILSOUNDINFO` (9 fields, 36 bytes) for every
+  version, so a v8 or v9 build read `channel_mask` at +0x18 and `block_size` at
+  +0x20 out of a 36-byte caller struct. `channel_mask` is now declared from
+  8.0 on, and the x86 layout is pinned with `_Static_assert`.
+- `DigitalDriver.init` dereferenced `pDevice.pContext` to name the audio backend
+  after checking only `pDevice`. `ma_engine_init` succeeds with a null
+  `pContext` on a machine with no output device, so the diagnostic line crashed
+  the process on the one machine most likely to have no device.
+- The ELF fixup walk read one dynamic entry past the mapped image whenever the
+  entry count was odd, and applied a `DT_RELA` `r_offset` without checking it,
+  so a crafted plugin image could have the loader write anywhere in the address
+  space. The scan now stops on complete pairs, and a fixup slot outside the
+  image or not 8-byte aligned fails the load.
+- `Timer.start` blocked on the state mutex, which the self-stop path joins: a
+  callback that restarted its own timer deadlocked against the run loop it was
+  running on. A restart over a live handle now retires the old loop first (and
+  from inside that loop, resumes it rather than joining the current thread), and
+  a concurrent start is dropped instead of queued behind the join.
 - The timer run loop, the Redbook clock, and `AIL_delay` / `AIL_sleep` read
   `std.Io.Timestamp` and slept on the real clock directly, so their timing did
   not pass through the library's elapsed-time base. They read the central
@@ -162,7 +183,22 @@ everything below is unreleased.
   sample rates, WAV parsing, and the stream ring size from the configured
   sample buffer count.
 - Load failures that were previously swallowed are now reported, with the
-  VFS handle leak and dangling filter pointer on the error path fixed.
+  VFS handle leak and dangling filter pointer on the error path fixed. A
+  mid-stream decoder error also reports zero frames, indistinguishable from a
+  clean end of file, so `AIL_decompress_ADPCM` and the ADPCM source decode
+  failed the load instead of handing back a silently short image, and an ASI
+  stream reports a failed read or seek as a failure rather than as the end of
+  the stream or a position it never reached.
+- Repeated `AIL_stream_*Buffer` submits and a soundfont load that failed part
+  way through left the stream in a state where a retry could not complete, so
+  both are re-run safe now.
+- Soundbank name resolution picked a hash-map winner rather than load order, and
+  a bank that failed to load left its index entries allocated. Names resolve in
+  load order and the indexes are freed on the failure path.
+- MIDI and digital driver state shared with the audio thread (sequence status,
+  3D handles, quick-sample slots, driver channels) was read and written without
+  synchronization; those accesses are atomic and the last-driver handles are
+  published with a release store.
 - `openmiles.log` and mock plugin loading after Windows cross-builds.
 - 26 `file:line` anchors in `docs/THREAT_MODEL.md` pointed at lines the named
   symbol had since moved off, so `make check-threat-model` (run by
@@ -173,12 +209,23 @@ everything below is unreleased.
   was on PATH, so a parity verdict could be produced by a compiler nobody
   audited. It refuses any version other than the one `build.zig.zon` declares,
   as `make check-toolchain` already does for the rest of the build.
+- The release archive and its `SHA256SUMS` were built from two separate file
+  lists, so the checksums could name an entry the archive did not contain (or
+  miss one it did), and packaging the same inputs on two machines produced
+  different bytes because the MS-DOS entry timestamps followed the host
+  timezone. Both are written from the same entry list now, and the archive is
+  byte-identical across hosts; the release workflow repackages under a different
+  `TZ` and `LC_ALL` and compares.
 
 ### Changed
 
 - Unknown-size sample loads go through bounded callbacks.
 - MIDI sequence beat and millisecond conversions saturate instead of
   overflowing `i32`.
+- The v9 bus limiter interpolates a 1024-entry `tanh` table, saturating above
+  the input 8.0 where the shaped output has already reached 1.0 in `f32`, instead
+  of calling `tanh` per sample above the knee. The per-label sound-cap eviction
+  no longer scans the instance list on every insert.
 - The test build no longer enables the debug log by default, so a `make test`
   run does not append engine trace to `openmiles.log` in the repository root
   or bury a failing test in it. `OPENMILES_DEBUG=1` turns it back on for a
