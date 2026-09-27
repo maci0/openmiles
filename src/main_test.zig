@@ -83,6 +83,64 @@ test "MidiDriver a failed soundfont load keeps the loaded bank" {
     try testing.expectEqual(sentinel, driver.soundfont.?);
 }
 
+// A bank handle stays valid until it is unloaded, so loading a file the driver
+// already has must hand back that bank. Reloading it closed the one the game
+// was still holding and returned a second copy, so every repeat of the load
+// (a retry after a read error, a scene reloaded, a "is it loaded?" check) left
+// one more dangling handle behind.
+test "MidiDriver loading the same soundfont file twice keeps one bank" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.MidiDriver.init(allocator);
+    defer driver.deinit();
+
+    // Stand in for the bank a first load left behind: the sentinel stands in
+    // for the tsf it returned, and owns_soundfont is false so deinit does not
+    // close it. The recorded path is the resolved form loadSoundfont records.
+    const sentinel: *openmiles.tsf.tsf = @ptrFromInt(0x1000);
+    const resolved = try openmiles.fs_compat.dupeResolvedPathZ(allocator, "level1.sf2");
+    defer allocator.free(resolved);
+    driver.soundfont = sentinel;
+    driver.owns_soundfont = false;
+    driver.soundfont_path = try allocator.dupeZ(u8, resolved);
+    driver.soundfont_refs = 1;
+
+    try driver.loadSoundfont("level1.sf2");
+    try testing.expectEqual(sentinel, driver.soundfont.?);
+    // Two loads of one bank, so the first unload only answers one of them.
+    driver.unloadDLS(sentinel);
+    try testing.expectEqual(sentinel, driver.soundfont.?);
+
+    // The last unload drops the bank and the record with it, so a load of the
+    // same file afterwards is a real load rather than a repeat of a finished
+    // one.
+    driver.unloadDLS(sentinel);
+    try testing.expectEqual(@as(?*openmiles.tsf.tsf, null), driver.soundfont);
+    try testing.expectEqual(@as(?[:0]u8, null), driver.soundfont_path);
+    try testing.expectError(error.SoundFontLoadFailed, driver.loadSoundfont("level1.sf2"));
+}
+
+// The same for an image load, keyed on the buffer: a retry that hands the same
+// image back is still the same bank.
+test "MidiDriver loading the same soundfont image twice keeps one bank" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.MidiDriver.init(allocator);
+    defer driver.deinit();
+
+    const sentinel: *openmiles.tsf.tsf = @ptrFromInt(0x2000);
+    const image = "RIFF\x24\x00\x00\x00sfbkLIST";
+    driver.soundfont = sentinel;
+    driver.owns_soundfont = false;
+    driver.soundfont_image_ptr = @intFromPtr(image.ptr);
+    driver.soundfont_image_size = @intCast(image.len);
+    driver.soundfont_refs = 1;
+
+    const first = try driver.loadSoundfontImage(image.ptr, @intCast(image.len));
+    try testing.expectEqual(sentinel, first);
+    try testing.expectEqual(sentinel, driver.soundfont.?);
+    // The same buffer, so the second load is the bank already in place.
+    try testing.expectEqual(sentinel, try driver.loadSoundfontImage(image.ptr, @intCast(image.len)));
+}
+
 test "MidiDriver ms-per-frame stays finite for any output rate" {
     const allocator = testing.allocator;
     const driver = try openmiles.MidiDriver.init(allocator);

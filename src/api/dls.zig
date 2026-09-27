@@ -25,23 +25,18 @@ pub fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flag
     if (openmiles.cb_file_open != null) {
         if (openmiles.fileCallbackReadAll(filename)) |b| {
             defer openmiles.global_allocator.free(b);
-            const tsf_mod = openmiles.tsf;
             // tsf_load_memory takes a C `int`; see AIL_DLS_load_memory for why a
             // buffer past that is bogus rather than something to truncate.
             if (b.len > std.math.maxInt(c_int)) {
                 openmiles.setLastError("DLS/SoundFont file exceeds the addressable size");
                 return null;
             }
-            const loaded = tsf_mod.tsf_load_memory(b.ptr, @intCast(b.len));
-            if (loaded == null) {
+            const loaded = driver.loadSoundfontImage(b.ptr, @intCast(b.len)) catch |err| {
+                log("AIL_DLS_load_file: loading '{s}' through the file callbacks failed ({any})\n", .{ std.mem.span(filename), err });
                 openmiles.setLastError("Failed to load DLS/SF2 from callback");
                 return null;
-            }
-            if (driver.soundfont) |sf| if (driver.owns_soundfont) tsf_mod.tsf_close(sf);
-            driver.soundfont = loaded;
-            driver.owns_soundfont = true;
-            tsf_mod.tsf_set_output(driver.soundfont, tsf_mod.TSF_STEREO_INTERLEAVED, 44100, 0);
-            return @ptrCast(driver.soundfont.?);
+            };
+            return @ptrCast(loaded);
         } else |err| {
             // Not fatal on its own: fall through to a direct filesystem read,
             // but record why the VFS path failed or the later failure below
@@ -115,7 +110,6 @@ pub fn AIL_DLS_load_memory(driver_opt: ?*MidiDriver, mem: *anyopaque, flags: u32
     const driver = driver_opt orelse return null;
     _ = flags;
     // No size parameter provided — detect buffer size from the file header to avoid OOB reads.
-    const tsf_mod = openmiles.tsf;
     const data: [*c]const u8 = @ptrCast(@alignCast(mem));
     const detected = openmiles.detectAudioSize(data);
     if (detected == 0) {
@@ -135,17 +129,14 @@ pub fn AIL_DLS_load_memory(driver_opt: ?*MidiDriver, mem: *anyopaque, flags: u32
     }
     // Load before releasing the current bank, the order AIL_DLS_load_file uses:
     // a rejected image must leave the driver holding the bank it already had.
-    const loaded = tsf_mod.tsf_load_memory(data, @intCast(size));
-    if (loaded == null) {
+    // An image already loaded is kept as it is, so a retried load hands back
+    // the bank the first one returned instead of a second copy of it.
+    const loaded = driver.loadSoundfontImage(data, @intCast(size)) catch |err| {
+        log("AIL_DLS_load_memory: loading the {d}-byte image failed ({any})\n", .{ size, err });
         openmiles.setLastError("Failed to load DLS/SF2 from memory");
         return null;
-    }
-    if (driver.soundfont) |sf| if (driver.owns_soundfont) tsf_mod.tsf_close(sf);
-    driver.soundfont = loaded;
-    driver.owns_soundfont = true;
-    driver.soundfont_size_bytes = @intCast(@min(size, std.math.maxInt(u32)));
-    tsf_mod.tsf_set_output(driver.soundfont, tsf_mod.TSF_STEREO_INTERLEAVED, 44100, 0);
-    return @ptrCast(driver.soundfont.?);
+    };
+    return @ptrCast(loaded);
 }
 pub fn AIL_DLS_unload(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.winapi) void {
     const driver = driver_opt orelse return;
@@ -456,6 +447,7 @@ pub fn DLSUnloadAll(driver_opt: ?*MidiDriver) callconv(.c) void {
         driver.soundfont = null;
         driver.owns_soundfont = true;
         driver.soundfont_size_bytes = 0;
+        driver.clearSoundfontSource();
     }
 }
 pub fn DLSUnloadFile(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.c) void {

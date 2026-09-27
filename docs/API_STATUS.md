@@ -213,9 +213,9 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_close_midi_driver` | 🟢 Implemented | |
 | `AIL_open_XMIDI_driver` | 🟢 Implemented | Alias for `AIL_open_midi_driver` |
 | `AIL_close_XMIDI_driver` | 🟢 Implemented | Alias for `AIL_close_midi_driver` |
-| `AIL_DLS_load_file` | 🟢 Implemented | Loads SF2 soundfont banks |
+| `AIL_DLS_load_file` | 🟢 Implemented | Loads SF2 soundfont banks; a repeat of a load already in place keeps that bank and returns the same handle |
 | `AIL_DLS_unload_file` | 🟢 Implemented | Closes and clears the loaded soundfont |
-| `AIL_DLS_load_memory` | 🟢 Implemented | Loads SF2 soundfont from memory |
+| `AIL_DLS_load_memory` | 🟢 Implemented | Loads SF2 soundfont from memory; an image already loaded keeps that bank and returns the same handle |
 | `AIL_DLS_unload` | 🟢 Implemented | Alias for unload_file |
 | `AIL_DLS_compact` | ⚪ Stub | No-op (miniaudio handles memory management) |
 | `AIL_DLS_get_info` | 🟢 Implemented | Returns soundfont memory footprint + preset/instrument counts (via `tsf_get_presetcount`) in the `AILDLSINFO` struct |

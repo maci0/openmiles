@@ -33,6 +33,27 @@ pub const MidiDriver = struct {
     dls_reverb_dry_level: f32 = 1.0,
     // Approximate soundfont memory footprint, captured at load time
     soundfont_size_bytes: u32 = 0,
+    // Identity of the soundfont in `soundfont`, so a load naming the same
+    // source again is answered with the bank already in place. A bank handle
+    // stays valid until it is unloaded, so a second load of one file (a retry
+    // after a read error, a scene reloaded, a "is it loaded?" check) used to
+    // close the bank the game was still holding and hand back a second copy,
+    // leaving one dangling handle per repeat. `soundfont_path` is the resolved
+    // path, owned; the image pair records a load from memory. A borrowed bank
+    // (AIL_create_wave_synthesizer) records neither, so a borrow never answers
+    // a load of its own.
+    soundfont_path: ?[:0]u8 = null,
+    // Address and length of the image the bank was loaded from, so a retry
+    // that hands the same buffer back is recognised. Keyed on the address
+    // rather than the bytes: the length comes from a header the caller
+    // controls, so hashing it would read memory the image does not own.
+    soundfont_image_ptr: usize = 0,
+    soundfont_image_size: u32 = 0,
+    // Loads of the bank in `soundfont` that no unload has answered yet. A
+    // repeated load of the same source takes one, so N loads of one bank need
+    // N unloads before it closes: the state after load/load/unload/unload is
+    // the state one load and one unload left.
+    soundfont_refs: u32 = 0,
     // DLS processor callback (stored but not invoked; TSF has its own pipeline)
     dls_processor: usize = 0,
     // Driver-level MIDI callbacks (MSS registers these on HMDIDRIVER, not a
@@ -61,7 +82,36 @@ pub const MidiDriver = struct {
         if (self.soundfont) |sf| {
             if (self.owns_soundfont) tsf.tsf_close(sf);
         }
+        self.clearSoundfontSource();
         self.allocator.destroy(self);
+    }
+
+    /// Forget which source the loaded soundfont came from, so the next load of
+    /// that source is a real load rather than a repeat of this one.
+    pub fn clearSoundfontSource(self: *MidiDriver) void {
+        if (self.soundfont_path) |p| self.allocator.free(p);
+        self.soundfont_path = null;
+        self.soundfont_image_ptr = 0;
+        self.soundfont_image_size = 0;
+        self.soundfont_refs = 0;
+    }
+
+    /// The bank already loaded from `path`, or null. A load that finds one
+    /// keeps it: the handle the earlier load returned is still the live bank.
+    pub fn soundfontFromPath(self: *const MidiDriver, path: []const u8) ?*tsf.tsf {
+        const p = self.soundfont_path orelse return null;
+        if (!std.mem.eql(u8, p, path)) return null;
+        const sf = self.soundfont orelse return null;
+        return sf;
+    }
+
+    /// The bank already loaded from the image at `data` of `size` bytes, or
+    /// null.
+    pub fn soundfontFromImage(self: *const MidiDriver, data: [*c]const u8, size: u32) ?*tsf.tsf {
+        if (self.soundfont_image_ptr != @intFromPtr(data)) return null;
+        if (self.soundfont_image_size != size) return null;
+        const sf = self.soundfont orelse return null;
+        return sf;
     }
 
     /// Milliseconds of MIDI time one output frame carries. A driver with no
@@ -77,33 +127,82 @@ pub const MidiDriver = struct {
 
     pub fn loadSoundfont(self: *MidiDriver, filename: []const u8) !void {
         const path_z = try fs_compat.dupeResolvedPathZ(self.allocator, filename);
-        defer self.allocator.free(path_z);
+        if (self.soundfontFromPath(path_z)) |_| {
+            // The same file is already loaded. Keep the bank: replacing it
+            // closed the handle the first load returned while the game was
+            // still holding it, so every repeat of the load cost one dangling
+            // handle and a second copy of the bank's memory. Nothing else the
+            // load does applies here either, the bank already has it.
+            log("loadSoundfont: '{s}' is already loaded; the bank in place is kept\n", .{filename});
+            self.allocator.free(path_z);
+            self.soundfont_refs += 1;
+            return;
+        }
         // Load the replacement before releasing the one in use: a load that
         // fails leaves the driver exactly as a single run left it, still
         // playing the previous soundfont, rather than silent with no bank.
         const loaded = tsf.tsf_load_filename(path_z.ptr);
-        if (loaded == null) return error.SoundFontLoadFailed;
+        if (loaded == null) {
+            self.allocator.free(path_z);
+            return error.SoundFontLoadFailed;
+        }
         if (self.soundfont) |sf| {
             if (self.owns_soundfont) tsf.tsf_close(sf);
         }
+        self.clearSoundfontSource();
+        self.soundfont_path = path_z;
+        self.soundfont_refs = 1;
         self.owns_soundfont = true;
         self.soundfont = loaded;
-        // Capture file size for AIL_DLS_get_info
+        self.captureSoundfontSize(filename);
+        self.adoptOutputRate();
+        tsf.tsf_set_output(self.soundfont, tsf.TSF_STEREO_INTERLEAVED, @intCast(self.sample_rate), 0);
+    }
+
+    /// Load a DLS/SF2 image, or hand back the bank already loaded from this
+    /// same buffer. The handle the first load returned stays the live bank, so
+    /// a retried memory load cannot leave the game holding a closed one.
+    pub fn loadSoundfontImage(self: *MidiDriver, data: [*c]const u8, size: u32) !*tsf.tsf {
+        if (self.soundfontFromImage(data, size)) |sf| {
+            log("loadSoundfontImage: this image is already loaded; the bank in place is kept\n", .{});
+            self.soundfont_refs += 1;
+            return sf;
+        }
+        const loaded = tsf.tsf_load_memory(data, @intCast(size));
+        if (loaded == null) return error.SoundFontLoadFailed;
+        const bank = loaded.?;
+        if (self.soundfont) |sf| {
+            if (self.owns_soundfont) tsf.tsf_close(sf);
+        }
+        self.clearSoundfontSource();
+        self.soundfont = bank;
+        self.owns_soundfont = true;
+        self.soundfont_image_ptr = @intFromPtr(data);
+        self.soundfont_image_size = size;
+        self.soundfont_refs = 1;
+        self.soundfont_size_bytes = @intCast(@min(size, std.math.maxInt(u32)));
+        tsf.tsf_set_output(self.soundfont, tsf.TSF_STEREO_INTERLEAVED, 44100, 0);
+        return bank;
+    }
+
+    fn captureSoundfontSize(self: *MidiDriver, filename: []const u8) void {
         if (fs_compat.openFile(io, filename, .{})) |f| {
             defer f.close(io);
             if (f.length(io)) |len| {
                 self.soundfont_size_bytes = @intCast(@min(len, std.math.maxInt(u32)));
             } else |_| {}
         } else |_| {}
+    }
+
+    /// Take the output rate from the open playback device, if it has one. An
+    /// engine with no device reports a rate of 0, and adopting it would leave
+    /// every ms-per-frame conversion dividing by zero on the audio thread, so
+    /// keep the last rate that can actually time anything.
+    fn adoptOutputRate(self: *MidiDriver) void {
         if (root.lastDigitalDriver()) |dig| {
-            // An engine with no playback device reports a rate of 0. Adopting
-            // it would leave every ms-per-frame conversion dividing by zero on
-            // the audio thread, so keep the last rate that can actually time
-            // anything.
             const rate = ma.ma_engine_get_sample_rate(&dig.engine);
             if (rate > 0) self.sample_rate = rate;
         }
-        tsf.tsf_set_output(self.soundfont, tsf.TSF_STEREO_INTERLEAVED, @intCast(self.sample_rate), 0);
     }
 
     pub fn loadDLS(self: *MidiDriver, filename: []const u8) !*anyopaque {
@@ -115,9 +214,17 @@ pub const MidiDriver = struct {
         const sf: *tsf.tsf = @ptrCast(@alignCast(bank));
         if (self.soundfont) |current_sf| {
             if (current_sf == sf) {
+                // A load of this bank that no unload has answered yet keeps it
+                // loaded: the game may still be holding the handle the first
+                // load returned.
+                if (self.soundfont_refs > 1) {
+                    self.soundfont_refs -= 1;
+                    return;
+                }
                 if (self.owns_soundfont) tsf.tsf_close(sf);
                 self.soundfont = null;
                 self.owns_soundfont = true;
+                self.clearSoundfontSource();
             }
         }
     }
