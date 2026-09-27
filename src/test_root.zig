@@ -13,6 +13,7 @@ comptime {
     _ = @import("fuzz_test.zig");
     _ = @import("api_coverage_test.zig");
     _ = @import("fuzz_all_test.zig");
+    _ = @import("rib_test.zig");
 
     // C-ABI surface — mirrors src/main.zig so the exports are part of the test
     // binary and their logic is exercised.

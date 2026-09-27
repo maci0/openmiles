@@ -65,7 +65,7 @@ them; `make check-header` enforces that.
 | Function | Status | Notes |
 |----------|--------|-------|
 | `AIL_request_EOB_ASI_reset` | 🟢 Implemented | |
-| `RIB_enumerate_interface` | 🟢 Implemented | |
+| `RIB_enumerate_interface` | 🟢 Implemented | Yields entries in the provider's registration order; name pointers stay valid until the provider is freed |
 | `RIB_error` | 🟢 Implemented | |
 | `RIB_find_file_dec_provider` | 🟢 Implemented | |
 | `RIB_find_file_provider` | 🟢 Implemented | |

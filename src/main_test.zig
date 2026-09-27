@@ -76,7 +76,7 @@ test "Provider registry and finding" {
     var found = false;
     for (provider.interfaces.items) |iface| {
         if (std.mem.eql(u8, iface.name, "TestInterface")) {
-            if (iface.entries.get("TestFunction")) |token| {
+            if (iface.tokenFor("TestFunction")) |token| {
                 try testing.expectEqual(@as(usize, 0x1234), token);
                 found = true;
             }
@@ -1096,7 +1096,7 @@ test "RIB plugin loading registers the mock provider's interface end to end" {
         // mock_asi.c registers exactly one entry; its token must survive the
         // load intact (a broken segment copy or missing relocation pass used
         // to crash or corrupt this data before registration completed).
-        const token = iface.entries.get("Input data type") orelse return error.MissingEntry;
+        const token = iface.tokenFor("Input data type") orelse return error.MissingEntry;
         try testing.expectEqual(@as(usize, 0x1234), token);
     }
     try testing.expect(found_engine);

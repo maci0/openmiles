@@ -88,7 +88,7 @@ pub fn RIB_request_interface(provider_opt: ?*Provider, name: [*:0]const u8, coun
         if (std.mem.eql(u8, iface.name, iface_name)) {
             for (dest[0..n]) |*entry| {
                 const ename = std.mem.span(entry.name);
-                if (iface.entries.get(ename)) |tok| {
+                if (iface.tokenFor(ename)) |tok| {
                     entry.token = tok;
                 }
             }
@@ -268,7 +268,7 @@ pub fn AIL_ASI_provider_attribute(provider_opt: ?*Provider, name: [*:0]const u8)
     log("AIL_ASI_provider_attribute(provider={*}, name={s})\n", .{ provider, name });
     const attr_name = std.mem.span(name);
     for (provider.interfaces.items) |iface| {
-        if (iface.entries.get(attr_name)) |token| return @ptrFromInt(token);
+        if (iface.tokenFor(attr_name)) |token| return @ptrFromInt(token);
     }
     return null;
 }
@@ -298,7 +298,7 @@ pub fn RIB_request_interface_entry(provider_opt: ?*Provider, name: [*:0]const u8
     const provider = provider_opt orelse return 0;
     for (provider.interfaces.items) |iface| {
         if (std.mem.eql(u8, iface.name, std.mem.span(name))) {
-            if (iface.entries.get(std.mem.span(entry_name))) |tok| {
+            if (iface.tokenFor(std.mem.span(entry_name))) |tok| {
                 if (token) |t| t.* = tok;
                 return 1;
             }
@@ -315,21 +315,15 @@ pub fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const u8, en
     for (provider.interfaces.items) |iface| {
         if (!std.mem.eql(u8, iface.name, iface_name)) continue;
         const idx: usize = if (next.*) |v| @intFromPtr(v) else 0;
-        var i: usize = 0;
-        var it = iface.entries.iterator();
-        while (it.next()) |kv| {
-            if (i == idx) {
-                // Keys were stored with dupeZ, so key.ptr is null-terminated.
-                dest.* = .{
-                    .entry_type = if (entry_type == 1) .RIB_ATTRIBUTE else .RIB_FUNCTION,
-                    .name = @ptrCast(kv.key_ptr.*.ptr),
-                    .token = kv.value_ptr.*,
-                    .subtype = 0,
-                };
-                next.* = @ptrFromInt(idx + 1);
-                return 1;
-            }
-            i += 1;
+        if (iface.entryAt(idx)) |entry| {
+            dest.* = .{
+                .entry_type = if (entry_type == 1) .RIB_ATTRIBUTE else .RIB_FUNCTION,
+                .name = entry.name.ptr,
+                .token = entry.token,
+                .subtype = 0,
+            };
+            next.* = @ptrFromInt(idx + 1);
+            return 1;
         }
         break;
     }

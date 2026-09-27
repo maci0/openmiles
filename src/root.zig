@@ -60,6 +60,7 @@ const rib_mod = @import("rib/provider.zig");
 pub const Provider = rib_mod.Provider;
 pub const getCurrentLoadingProvider = rib_mod.getCurrentLoadingProvider;
 pub const Interface = rib_mod.Interface;
+pub const InterfaceEntry = rib_mod.InterfaceEntry;
 pub const RIB_INTERFACE_ENTRY = rib_mod.RIB_INTERFACE_ENTRY;
 pub const RIB_ENTRY_TYPE = rib_mod.RIB_ENTRY_TYPE;
 pub const HPROVIDER = rib_mod.HPROVIDER;

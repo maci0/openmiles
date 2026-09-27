@@ -41,9 +41,9 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("Provider: {s}\n", .{p.name});
         for (p.interfaces.items) |iface| {
             std.debug.print("  Interface: {s}\n", .{iface.name});
-            var eit = iface.entries.iterator();
-            while (eit.next()) |e| {
-                std.debug.print("    Entry: {s} (token 0x{x})\n", .{ e.key_ptr.*, e.value_ptr.* });
+            var i: usize = 0;
+            while (iface.entryAt(i)) |e| : (i += 1) {
+                std.debug.print("    Entry: {s} (token 0x{x})\n", .{ e.name, e.token });
             }
         }
     }
@@ -53,7 +53,7 @@ pub fn main(init: std.process.Init) !void {
     for (driver.providers.items) |p| {
         for (p.interfaces.items) |iface| {
             if (!std.mem.eql(u8, iface.name, "ASI digital audio engine")) continue;
-            const token = iface.entries.get("Input data type") orelse continue;
+            const token = iface.tokenFor("Input data type") orelse continue;
             if (token != 0x1234) {
                 std.debug.print("FAIL: 'Input data type' token is 0x{x}, expected 0x1234\n", .{token});
                 return error.WrongMockToken;

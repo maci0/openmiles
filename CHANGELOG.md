@@ -36,6 +36,14 @@ everything below is unreleased.
 
 ### Fixed
 
+- `RIB_enumerate_interface` yields a provider's entries in registration order.
+  It previously walked a hash map, so the order a game saw depended on the key
+  bytes and the map's rehash history rather than on what the provider
+  registered, and the `name` pointer it handed out was freed by the next
+  registration that grew the map. Entry names now live in the interface and
+  stay readable until the provider is freed.
+- `Interface` and `Provider.init` leaked the interface name / provider name when
+  the allocation that followed it failed.
 - Sample and stream behaviour brought in line with the MSS SDK: state machines
   and callback ordering for `AIL_start_sample`, `AIL_stop_sample`,
   `AIL_end_sample`, `AIL_end_3D_sample`, `AIL_stream_status`,
