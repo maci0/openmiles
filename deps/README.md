@@ -81,8 +81,17 @@ Update checklist:
    have no version macro at all, so theirs is the banner on line 1 and the
    commit id recorded in step 1.
 4. Diff against the current vendored copy to spot unexpected changes.
-5. Run `scripts/check_vendored.py --update` in the same commit as the header
+5. Check the **License** field against the project license before anything
+   else, because every other step passes on a header the project is not
+   allowed to ship. The vendored headers are compiled into the DLL, so their
+   grant travels inside a distribution made under GPL-3.0-only.
+   `scripts/gen_sbom.py` holds the ids that license can carry in
+   `GPL_COMPATIBLE` and rejects anything else, so a header arriving under a
+   non-commercial or source-available term fails the gate with the license
+   named. Adding an id to that set is a deliberate act, not a way to make a
+   failing gate green.
+6. Run `scripts/check_vendored.py --update` in the same commit as the header
    swap, and read the diff: a changed digest is a reviewed change, not a
    formality.
-6. Run `scripts/gen_sbom.py` in that same commit, and read its diff too: the
+7. Run `scripts/gen_sbom.py` in that same commit, and read its diff too: the
    inventory a consumer reads has to change when the bytes behind it do.

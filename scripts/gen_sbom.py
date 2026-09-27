@@ -14,6 +14,11 @@ the pip component from scripts/requirements.txt, and the project version from
 build.zig.zon. A vendored file that stops recording its provenance fails here
 the same way it fails check_vendored.py.
 
+A vendored license is also checked against the project license, not just
+recorded. Those headers are compiled into the shipped DLL, so a grant the
+project cannot redistribute under GPL-3.0-only is a compliance failure, and
+without this check it would reach the inventory looking like any other entry.
+
 The output is byte-identical for identical inputs: no timestamp, no serial
 number, components in a fixed order. The release archive is compared byte for
 byte across two timezones, and a generated timestamp would make that comparison
@@ -51,6 +56,14 @@ PROJECT_LICENSE_BANNER = "GNU GENERAL PUBLIC LICENSE"
 # SPDX half carries the grant, so the alternative is dropped. A grant name
 # outside KNOWN_NON_SPDX, or an id outside SPDX_IDS, stops the build rather than
 # going into the inventory as something no scanner resolves.
+#
+# The ids a vendored header realistically arrives under, both the ones the
+# project can redistribute and the ones it cannot. The incompatible ones are
+# listed deliberately: they are real licenses that turn up in the wild, and
+# naming them here is what lets GPL_COMPATIBLE below reject one with "not one
+# GPL-3.0-only can redistribute" rather than the misleading "neither an SPDX id
+# nor a known grant name", which sends a maintainer hunting a typo in a file
+# that has none.
 KNOWN_NON_SPDX = {
     "Public Domain",
 }
@@ -58,9 +71,47 @@ KNOWN_NON_SPDX = {
 SPDX_IDS = {
     "0BSD",
     "Apache-2.0",
+    "Artistic-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "BSL-1.0",
+    "BUSL-1.1",
+    "CC-BY-NC-4.0",
+    "CC0-1.0",
+    "Elastic-2.0",
+    "GPL-2.0-only",
     "ISC",
+    "LGPL-2.1-only",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "SSPL-1.0",
+    "Unlicense",
+    "Zlib",
+}
+
+# The ids out of the ones above that GPL-3.0-only can carry. The vendored
+# headers are compiled into the shipped DLL and redistributed under the project
+# license, so the grant has to be one the project can pass on: a non-commercial
+# or source-available term is not redistributable at all, and a permissive id
+# carrying a patent grant hands the recipient a license the project never chose
+# to give.
+#
+# An id outside this set stops the build rather than reaching the inventory.
+# Adding one is a deliberate act: check it against the project license first,
+# the way PIP_LICENSES below is checked. The test is one-directional on purpose.
+# GPL-2.0-only is absent because the compatibility does not run the other way:
+# the combined work cannot be distributed under GPL-3.0-only.
+GPL_COMPATIBLE = {
+    "0BSD",
+    "Apache-2.0",
+    "Artistic-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "LGPL-2.1-only",
     "MIT",
     "MIT-0",
     "MPL-2.0",
@@ -70,7 +121,10 @@ SPDX_IDS = {
 
 # The license of each package scripts/requirements.txt declares, from that
 # release's own metadata. A new package has no entry here, and adding one
-# without checking it defeats the purpose of the SBOM.
+# without checking it defeats the purpose of the SBOM. These are not gated on
+# GPL_COMPATIBLE: nothing in scripts/requirements.txt is compiled into the DLL,
+# it is read by a developer-side parity gate, so its grant is not the one the
+# project redistributes.
 PIP_LICENSES = {"pefile": "MIT"}
 
 # "pefile==2024.8.26" with an exact pin, or a range the file does not use.
@@ -101,6 +155,23 @@ def spdx_ids(declared, where):
     return ids
 
 
+def check_redistributable(ids, where):
+    """Fail unless every grant is one the project can redistribute under GPL-3.0.
+
+    The vocabulary check in spdx_ids only says the id resolves; this says the
+    grant is passable on. A header vendored under a term the project license
+    cannot carry compiles, hashes, and lands in the inventory, and the only
+    record that it may not ship is this exit.
+    """
+    for token in ids:
+        if token not in GPL_COMPATIBLE:
+            sys.exit(
+                f"error: {where}: license {token!r} is not one {PROJECT_LICENSE} can "
+                f"redistribute; check it against the project license before adding it to "
+                f"GPL_COMPATIBLE"
+            )
+
+
 def vendored_components(sums):
     """One CycloneDX component per third-party header in deps/, README order.
 
@@ -122,6 +193,8 @@ def vendored_components(sums):
         if name not in sums:
             sys.exit(f"error: {name}: no digest in deps/SHA256SUMS")
         version = entry.version.removeprefix("v")
+        licenses = spdx_ids(entry.license, f"{name} license")
+        check_redistributable(licenses, f"{DEPS.name}/{name}")
         components.append(
             {
                 "type": "library",
@@ -132,9 +205,7 @@ def vendored_components(sums):
                 "version": version,
                 "description": entry.purpose,
                 "purl": f"pkg:generic/{entry.package}@{version}",
-                "licenses": [
-                    {"license": {"id": i}} for i in spdx_ids(entry.license, f"{name} license")
-                ],
+                "licenses": [{"license": {"id": i}} for i in licenses],
                 "hashes": [{"alg": "SHA-256", "content": sums[name]}],
                 "externalReferences": [
                     {"type": "website", "url": entry.source},
