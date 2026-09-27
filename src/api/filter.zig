@@ -77,10 +77,11 @@ pub fn AIL_enumerate_filter_sample_attributes(filter: *anyopaque, next: *?*anyop
 }
 pub fn AIL_filter_sample_attribute(s_opt: ?*Sample, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const s = s_opt orelse return;
-    if (s.attached_filter) |filter| {
-        const out: *f32 = @ptrCast(@alignCast(val));
-        out.* = filter.getAttribute(std.mem.span(name));
-    }
+    const out: *f32 = @ptrCast(@alignCast(val));
+    // No attached filter reads as 0, the same value Filter.getAttribute gives an
+    // unknown attribute; leaving the caller's buffer untouched hands back
+    // whatever was on its stack.
+    out.* = if (s.attached_filter) |filter| filter.getAttribute(std.mem.span(name)) else 0.0;
 }
 pub fn AIL_set_filter_sample_preference(s_opt: ?*Sample, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const s = s_opt orelse return;

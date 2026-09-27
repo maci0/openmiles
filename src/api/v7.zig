@@ -890,13 +890,35 @@ pub fn AIL_enumerate_sample_stage_attributes_v7(s_opt: ?*Sample, stage_index: i3
     return AIL_enumerate_sample_stage_attributes(s_opt, next, dest);
 }
 // channel levels: v7 @8/@12 lacked the src/dst speaker-matrix pointers v8 added.
+// The v7 arrays are indexed by logical output channel, so the identity matrix
+// reproduces the old call: forwarding null src/dst would land in the v8 reset
+// branch and discard the caller's levels.
+fn v7ChannelMatrix(buf: *[9]i32, n: usize) [*]const i32 {
+    for (0..n) |i| buf[i] = @intCast(i);
+    return @ptrCast(&buf[0]);
+}
 pub fn AIL_sample_channel_levels_v7(s_opt: ?*Sample, levels: ?*f32) callconv(.winapi) void {
-    AIL_sample_channel_levels(s_opt, null, null, levels, 0);
+    const s = s_opt orelse return;
+    const lv = levels orelse return;
+    const n = @min(logicalChannels(s), 9);
+    var ids: [9]i32 = undefined;
+    const idx = v7ChannelMatrix(&ids, n);
+    AIL_sample_channel_levels(s, idx, idx, lv, @intCast(n));
 }
 pub fn AIL_set_sample_channel_levels_v7(s_opt: ?*Sample, levels: ?*const f32, n_levels: i32) callconv(.winapi) void {
-    AIL_set_sample_channel_levels(s_opt, null, null, levels, n_levels);
+    const s = s_opt orelse return;
+    const lv = levels orelse return AIL_set_sample_channel_levels(s, null, null, null, n_levels);
+    const n: usize = @min(@as(usize, @intCast(@max(n_levels, 0))), @min(logicalChannels(s), 9));
+    if (n == 0) return;
+    var ids: [9]i32 = undefined;
+    const idx = v7ChannelMatrix(&ids, n);
+    AIL_set_sample_channel_levels(s, idx, idx, lv, @intCast(n));
 }
-// speaker reverb levels: v7 @16 lacked the per-speaker index array v8 added.
+// speaker reverb levels: v7 @16 lacked the per-speaker index array v8 added, so
+// its arrays are already in driver-channel order; forward the driver row.
 pub fn AIL_set_speaker_reverb_levels_v7(dig_opt: ?*DigitalDriver, wet_array: ?*f32, dry_array: ?*f32, n_levels: i32) callconv(.winapi) void {
-    AIL_set_speaker_reverb_levels(dig_opt, wet_array, dry_array, null, n_levels);
+    const d = dig_opt orelse return;
+    const logical = drvLogical(d);
+    if (logical == 0) return;
+    AIL_set_speaker_reverb_levels(dig_opt, wet_array, dry_array, @ptrCast(&output_speaker_order[logical][0]), n_levels);
 }

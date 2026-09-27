@@ -1401,8 +1401,11 @@ pub const Sample = struct {
     }
 
     pub fn setVolume(self: *Sample, volume: i32) void {
-        self.original_volume = volume;
-        self.save_vol_f = @as(f32, @floatFromInt(std.math.clamp(volume, 0, 127))) / 127.0;
+        // The getters (AIL_sample_volume / AIL_stream_volume) report the 0..127
+        // domain, so the stored value is clamped: an out-of-range app value would
+        // otherwise be handed straight back to a UI slider or persisted verbatim.
+        self.original_volume = std.math.clamp(volume, 0, 127);
+        self.save_vol_f = @as(f32, @floatFromInt(self.original_volume)) / 127.0;
         self.volume = root.mssVolumeToGain(volume);
         log("Sample.setVolume: s={*}, i32={d}, gain={d}\n", .{ self, volume, self.volume });
         if (self.is_initialized) ma.ma_sound_set_volume(&self.sound, self.volume);
@@ -2033,7 +2036,9 @@ pub const Sample3D = struct {
     }
 
     pub fn setVolume(self: *Sample3D, volume: i32) void {
-        self.original_volume = volume;
+        // Clamped for the same reason as Sample.setVolume: AIL_3D_sample_volume
+        // reports this field in the 0..127 domain.
+        self.original_volume = std.math.clamp(volume, 0, 127);
         self.volume = root.mssVolumeToGain(volume);
         self.applyVolume();
     }

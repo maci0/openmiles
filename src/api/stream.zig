@@ -294,10 +294,8 @@ pub fn AIL_set_stream_processor(s_opt: ?*Sample, stage: i32, processor: ?*anyopa
 }
 pub fn AIL_filter_stream_attribute(s_opt: ?*Sample, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const s = s_opt orelse return;
-    if (s.attached_filter) |filter| {
-        const out: *f32 = @ptrCast(@alignCast(val));
-        out.* = filter.getAttribute(std.mem.span(name));
-    }
+    const out: *f32 = @ptrCast(@alignCast(val));
+    out.* = if (s.attached_filter) |filter| filter.getAttribute(std.mem.span(name)) else 0.0;
 }
 pub fn AIL_set_filter_stream_preference(s_opt: ?*Sample, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const s = s_opt orelse return;

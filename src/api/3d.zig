@@ -427,7 +427,15 @@ pub fn AIL_3D_sample_attribute(s: ?*anyopaque, name: [*:0]const u8, val: *anyopa
         v.* = sample.cone_outer_volume;
     } else if (std.mem.eql(u8, n, "Frequency") or std.mem.eql(u8, n, "Playback rate")) {
         const v: *i32 = @ptrCast(@alignCast(val));
-        v.* = openmiles.satI32(sample.target_rate orelse 44100.0);
+        // Same resolution order as AIL_3D_sample_playback_rate: the app-set rate,
+        // then the loaded decoder's native rate, then the 11025 AIL_init_sample
+        // default. A hardcoded 44100 made a 22050 Hz sample report double its
+        // real rate, disagreeing with AIL_3D_sample_ms_position.
+        if (sample.target_rate) |tr| {
+            v.* = openmiles.satI32(tr);
+        } else if (sample.decoder) |d| {
+            v.* = std.math.cast(i32, d.outputSampleRate) orelse std.math.maxInt(i32);
+        } else v.* = 11025;
     } else if (std.mem.eql(u8, n, "Volume")) {
         const v: *i32 = @ptrCast(@alignCast(val));
         v.* = sample.original_volume;
