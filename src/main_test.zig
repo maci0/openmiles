@@ -83,6 +83,21 @@ test "MidiDriver a failed soundfont load keeps the loaded bank" {
     try testing.expectEqual(sentinel, driver.soundfont.?);
 }
 
+test "MidiDriver ms-per-frame stays finite for any output rate" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.MidiDriver.init(allocator);
+    defer driver.deinit();
+
+    driver.sample_rate = 44100;
+    try testing.expectApproxEqAbs(@as(f64, 1000.0 / 44100.0), driver.msPerFrame(), 1e-12);
+
+    // An engine with no playback device reports a rate of 0. The unguarded
+    // 1000/rate is +inf, and one added to Sequence.time_ms on the audio thread
+    // turns every later position read into INF and every diff into NaN.
+    driver.sample_rate = 0;
+    try testing.expectEqual(@as(f64, 0), driver.msPerFrame());
+}
+
 test "Provider registry and finding" {
     const allocator = testing.allocator;
     const provider = try openmiles.Provider.init(allocator, null);

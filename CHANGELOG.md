@@ -116,6 +116,17 @@ everything below is unreleased.
   test name, so a typo read as a green run. A filter that matches nothing is
   now refused, naming the filter.
 - `make help` did not list `check-yaml` or `check-parity-tools`.
+- A soundfont load adopted the digital engine's sample rate unchecked, and the
+  MIDI render loop computed its milliseconds-per-frame as `1000.0 / rate` with
+  no guard. An engine with no playback device reports a rate of 0, so
+  `time_ms` gained an infinity on the first buffer and every position read
+  after it was INF, NaN, or saturated to the counter maximum. The rate is only
+  adopted when it is non-zero, and the conversion is
+  `MidiDriver.msPerFrame`, which reports 0 for a rate-less driver.
+- The UTF-8 round-trip fuzz asked `utf8ByteSequenceLength` for the length of a
+  code point, but that function reads a sequence's first byte, so a code point
+  above U+FFFF reported 1 and the space check stopped protecting
+  `utf8Encode`. The suite aborted on the first run that drew one.
 - `mss.h` declared the pre-8.0 `AILSOUNDINFO` (9 fields, 36 bytes) for every
   version, so a v8 or v9 build read `channel_mask` at +0x18 and `block_size` at
   +0x20 out of a 36-byte caller struct. `channel_mask` is now declared from

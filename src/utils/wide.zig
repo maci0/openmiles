@@ -174,13 +174,13 @@ test "fuzz: valid utf-8 survives the round trip whatever it contains" {
                 else => rand.intRangeAtMost(u21, 0xE000, 0x10FFFF),
             };
             // utf8CodepointSequenceLength, not the ByteSequenceLength variant:
-            // that one takes a lead BYTE, so feeding it a truncated codepoint
-            // reported the wrong width and utf8Encode then asserted on a
-            // destination sized from it.
+            // that one takes a lead BYTE, so feeding it a code point reports
+            // the width of the low byte's lead pattern (0xE000 -> 1) and the
+            // space check below stops protecting utf8Encode.
             const len: usize = std.unicode.utf8CodepointSequenceLength(cp) catch continue;
             if (k + len > n) break;
-            // Encode into a scratch buffer, then copy at k: utf8Encode writes at
-            // the START of its output slice, so handing it bytes[0..n] overwrote
+            // utf8Encode writes at the START of its output slice, so encode into
+            // a scratch buffer and copy at k: handing it bytes[0..n] overwrote
             // the code points already written, and handing it bytes[k..n]
             // returned a length that had to be added to k by hand. Either way
             // the string ended up a mix of the last code point and stale bytes

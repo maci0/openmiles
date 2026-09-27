@@ -64,6 +64,17 @@ pub const MidiDriver = struct {
         self.allocator.destroy(self);
     }
 
+    /// Milliseconds of MIDI time one output frame carries. A driver with no
+    /// output rate has no frame time at all, and the unguarded 1000/rate it
+    /// would otherwise yield is an infinity: the render loop would add it to
+    /// `time_ms`, and every position read afterwards would be INF, NaN, or
+    /// saturated to the counter maximum. Reports 0, which renders the buffer
+    /// without advancing MIDI time.
+    pub fn msPerFrame(self: *const MidiDriver) f64 {
+        if (self.sample_rate == 0) return 0;
+        return 1000.0 / @as(f64, @floatFromInt(self.sample_rate));
+    }
+
     pub fn loadSoundfont(self: *MidiDriver, filename: []const u8) !void {
         const path_z = try fs_compat.dupeResolvedPathZ(self.allocator, filename);
         defer self.allocator.free(path_z);
@@ -85,7 +96,12 @@ pub const MidiDriver = struct {
             } else |_| {}
         } else |_| {}
         if (root.lastDigitalDriver()) |dig| {
-            self.sample_rate = ma.ma_engine_get_sample_rate(&dig.engine);
+            // An engine with no playback device reports a rate of 0. Adopting
+            // it would leave every ms-per-frame conversion dividing by zero on
+            // the audio thread, so keep the last rate that can actually time
+            // anything.
+            const rate = ma.ma_engine_get_sample_rate(&dig.engine);
+            if (rate > 0) self.sample_rate = rate;
         }
         tsf.tsf_set_output(self.soundfont, tsf.TSF_STEREO_INTERLEAVED, @intCast(self.sample_rate), 0);
     }
@@ -418,8 +434,7 @@ pub const Sequence = struct {
         }
         defer self.state_mutex.unlock(io);
 
-        const sampleRate = @as(f64, @floatFromInt(self.driver.sample_rate));
-        const msPerFrame = 1000.0 / sampleRate;
+        const msPerFrame = self.driver.msPerFrame();
         var framesProcessed: ma.ma_uint64 = 0;
         const buffer: [*]f32 = @ptrCast(@alignCast(pFramesOut.?));
 
