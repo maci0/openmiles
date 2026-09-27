@@ -101,15 +101,18 @@ pub const Timer = struct {
         root.removeFirst(&root.global_timers, self);
         if (free_self) self.allocator.destroy(self);
     }
-
     pub fn start(self: *Timer) void {
-        // tryLock, not lock: the retire branch below joins a run loop that is
-        // still unwinding inside the callback, and that callback is free to
-        // call back into the API, including start on this same timer. Blocking
-        // here would put that callback on the other side of the join it is
-        // waiting for. A concurrent start is dropped instead: whichever caller
-        // holds the lock leaves the timer running, and start is idempotent.
-        if (!self.state_mutex.tryLock()) return;
+        // Starting from inside the run loop's own callback is a plain resume:
+        // the same loop keeps running once the callback returns, and joining it
+        // here would join the current thread. Checking before taking state_mutex
+        // also ensures the callback never blocks against an external start or
+        // stop that is waiting to join this thread.
+        if (self.thread_id.load(.acquire) == std.Thread.getCurrentId()) {
+            if (self.retiring.load(.acquire)) return;
+            @atomicStore(bool, &self.is_running, true, .release);
+            return;
+        }
+        self.state_mutex.lockUncancelable(io);
         defer self.state_mutex.unlock(io);
         if (self.retiring.load(.acquire)) return;
         if (@atomicLoad(bool, &self.is_running, .acquire)) return;
@@ -118,13 +121,7 @@ pub const Timer = struct {
             // with is_running cleared and the handle still owned here. Spawning
             // over that handle would give two loops firing the callback
             // concurrently and drop the old handle unjoined, so the old loop is
-            // retired first. Starting from inside that loop's own callback is a
-            // plain resume: the same loop keeps running once the callback
-            // returns, and joining it here would join the current thread.
-            if (self.thread_id.load(.acquire) == std.Thread.getCurrentId()) {
-                @atomicStore(bool, &self.is_running, true, .release);
-                return;
-            }
+            // retired first.
             @atomicStore(bool, &self.is_running, false, .release);
             stale.join();
             self.thread = null;
