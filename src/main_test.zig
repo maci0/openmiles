@@ -4839,6 +4839,47 @@ test "dls_container DLS-only and XMI-only images" {
     try testing.expectEqual(@as(usize, 24), d.len);
 }
 
+test "AIL_list_DLS reads a lying header for the size but not past the scan window" {
+    const mem = @import("api/memory.zig");
+    // The bank header declares far more than the buffer holds, which is what a
+    // hostile DLS image looks like: the size is reported to the caller, but the
+    // colh scan stays inside a window the ABI's length-less pointer can support.
+    var img: [256]u8 = undefined;
+    @memset(&img, 0);
+    @memcpy(img[0..4], "RIFF");
+    std.mem.writeInt(u32, img[4..8], 0xFFFF_FFF0, .little);
+    @memcpy(img[8..12], "sfbk");
+    // colh near the front: a real bank puts it there, and it must still be found.
+    @memcpy(img[12..16], "colh");
+    std.mem.writeInt(u32, img[16..20], 4, .little);
+    std.mem.writeInt(u32, img[20..24], 7, .little);
+
+    var lst: ?*anyopaque = null;
+    var lsz: u32 = 0;
+    try testing.expectEqual(@as(i32, 1), api_dls.AIL_list_DLS(&img, &lst, &lsz, 0, null));
+    defer if (lst) |p| mem.AIL_mem_free_lock(p);
+    try testing.expect(lsz > 0);
+
+    // The same bank with colh pushed past the scan window is not read: the
+    // listing reports no instruments rather than walking off the caller's buffer.
+    var far: [128 * 1024 + 64]u8 = undefined;
+    @memset(&far, 0);
+    @memcpy(far[0..4], "RIFF");
+    std.mem.writeInt(u32, far[4..8], 0xFFFF_FFF0, .little);
+    @memcpy(far[8..12], "sfbk");
+    const far_colh = 128 * 1024 + 16;
+    @memcpy(far[far_colh..][0..4], "colh");
+    std.mem.writeInt(u32, far[far_colh + 4 ..][0..4], 4, .little);
+    std.mem.writeInt(u32, far[far_colh + 8 ..][0..4], 99, .little);
+
+    var lst2: ?*anyopaque = null;
+    var lsz2: u32 = 0;
+    try testing.expectEqual(@as(i32, 1), api_dls.AIL_list_DLS(&far, &lst2, &lsz2, 0, null));
+    defer if (lst2) |p| mem.AIL_mem_free_lock(p);
+    const text = std.mem.span(@as([*:0]const u8, @ptrCast(lst2.?)));
+    try testing.expect(std.mem.indexOf(u8, text, "0 instrument") != null);
+}
+
 // ---------------------------------------------------------------------------
 // Double-buffered streaming source (AIL_load_sample_buffer ping-pong)
 // ---------------------------------------------------------------------------

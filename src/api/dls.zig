@@ -340,6 +340,13 @@ pub fn AIL_find_DLS(data_ptr: ?*const anyopaque, size: u32, xmi_out: ?*?*anyopaq
     return ok;
 }
 
+/// Largest prefix of a DLS image `AIL_list_DLS` reads. The listing pulls one
+/// u32 out of the `colh` chunk, which in any well-formed bank sits in the first
+/// few hundred bytes; scanning the whole declared image would read up to
+/// `openmiles.max_declared_image_size` past a pointer the ABI gives no length
+/// for, which is an out-of-bounds read rather than a wider search.
+const list_dls_scan_limit: usize = 64 * 1024;
+
 /// AIL_list_DLS(dls, lst, lst_size, flags, title)
 /// Build a human-readable listing of a DLS bank (instrument count from the
 /// `colh` chunk). Output text is C-allocated; free with AIL_mem_free_lock.
@@ -351,7 +358,9 @@ pub fn AIL_list_DLS(dls: ?*const anyopaque, lst: ?*?*anyopaque, lst_size: ?*u32,
     const raw: [*]const u8 = @ptrCast(dp);
     const sz = openmiles.detectAudioSize(raw);
     if (sz == 0) return 0;
-    const data = raw[0..sz];
+    // `sz` is the size the header declares, and it is reported as such below, but
+    // only the bounded prefix is ever dereferenced.
+    const data = raw[0..@min(sz, list_dls_scan_limit)];
 
     var instruments: u32 = 0;
     if (std.mem.indexOf(u8, data, "colh")) |idx| {

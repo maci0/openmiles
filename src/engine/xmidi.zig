@@ -75,6 +75,12 @@ fn readBe32(data: []const u8, pos: usize) u32 {
 /// a value needing a fifth would be truncated on write instead of encoded.
 const max_vlq_bytes = 4;
 
+/// Most events the EVNT conversion reserves room for up front, chosen so the
+/// reservation stays around a megabyte no matter how large the declared chunk
+/// is. It is a starting size for a growable list, not a limit on the events a
+/// sequence may hold.
+const max_preallocated_events: usize = 64 * 1024;
+
 fn readVlq(data: []const u8, pos: *usize) u32 {
     var result: u32 = 0;
     var bytes_read: u8 = 0;
@@ -207,8 +213,14 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
 
     var events: std.ArrayListUnmanaged(SmfEvent) = .empty;
     defer events.deinit(allocator);
-    // Pre-allocate: each event is ~3 bytes minimum, note-on generates 2 events (on + synthetic off)
-    try events.ensureTotalCapacity(allocator, evnt.len / 2);
+    // Pre-allocate: each event is ~3 bytes minimum, note-on generates 2 events (on + synthetic off).
+    // The reservation is only a hint, so it is capped rather than sized straight
+    // from evnt.len. An EVNT chunk is file-controlled and the whole-file load cap
+    // still admits a 256 MiB image, which this ratio turns into a multi-gigabyte
+    // reservation (16 bytes per event) — and a failed reservation aborts the load
+    // of a file that would otherwise convert. Past the cap the list grows on
+    // demand, which is what it already does whenever the estimate is short.
+    try events.ensureTotalCapacity(allocator, @min(evnt.len / 2, max_preallocated_events));
 
     var pos: usize = 0;
     var abs_time: u32 = 0;
@@ -343,7 +355,7 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
     var track: std.ArrayListUnmanaged(u8) = .empty;
     defer track.deinit(allocator);
     // Pre-allocate: each event contributes ~4-8 bytes (VLQ delta + data), plus header/footer
-    track.ensureTotalCapacity(allocator, events.items.len * 6 + 11) catch {};
+    track.ensureTotalCapacity(allocator, events.items.len *| 6 +| 11) catch {};
 
     // XMIDI uses 120 ticks/second.  With PPQ=120, tempo must be 60 BPM = 1 000 000 µs/beat
     // so that 1 SMF tick = 1 000 000/120 µs = 8 333 µs = 1/120 second.
