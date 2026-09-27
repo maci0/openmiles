@@ -12,6 +12,9 @@
 //! This implements that contract as a custom `ma_data_source`: buffers are
 //! referenced in place (never copied — the app owns them until its EOB fires) and
 //! the engine's resampler/converter handles format adaptation to the device.
+//!
+//! A slot is single-assignment: see `loadBuffer` for what a repeated submission
+//! into a slot that still holds a buffer does.
 
 const std = @import("std");
 const root = @import("../root.zig");
@@ -85,10 +88,24 @@ pub const StreamSource = struct {
     }
 
     /// Submit a buffer into slot `index`. A zero `len` marks end-of-stream.
+    ///
+    /// A slot that still holds an unplayed submission is not overwritten: the
+    /// app only ever gets an index back from `bufferReady`, so a submission for
+    /// an occupied slot is the same buffer handed over twice (a retried load
+    /// call, a double-clicked buffer feed). Taking the second one would drop
+    /// the queued samples without draining them and would never fire their EOB,
+    /// so the first submission stands and the repeat is reported instead. A
+    /// drained slot (`data == null`, `eof == false`) is free and takes the new
+    /// buffer as normal.
     pub fn loadBuffer(self: *StreamSource, index: usize, data: ?*const anyopaque, len: usize) void {
         if (index >= self.slot_count) return;
         self.mutex.lockUncancelable(io);
         defer self.mutex.unlock(io);
+        const held = self.slots[index];
+        if (held.data != null or held.eof) {
+            root.log("StreamSource.loadBuffer: slot {d} still holds an unsubmitted buffer; the repeat is ignored\n", .{index});
+            return;
+        }
         if (len == 0 or data == null) {
             self.slots[index] = .{ .eof = true };
         } else {

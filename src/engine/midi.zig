@@ -64,12 +64,18 @@ pub const MidiDriver = struct {
     }
 
     pub fn loadSoundfont(self: *MidiDriver, filename: []const u8) !void {
+        const path_z = try fs_compat.dupeResolvedPathZ(self.allocator, filename);
+        defer self.allocator.free(path_z);
+        // Load the replacement before releasing the one in use: a load that
+        // fails leaves the driver exactly as a single run left it, still
+        // playing the previous soundfont, rather than silent with no bank.
+        const loaded = tsf.tsf_load_filename(path_z.ptr);
+        if (loaded == null) return error.SoundFontLoadFailed;
         if (self.soundfont) |sf| {
             if (self.owns_soundfont) tsf.tsf_close(sf);
         }
         self.owns_soundfont = true;
-        const path_z = try fs_compat.dupeResolvedPathZ(self.allocator, filename);
-        defer self.allocator.free(path_z);
+        self.soundfont = loaded;
         // Capture file size for AIL_DLS_get_info
         if (fs_compat.openFile(io, filename, .{})) |f| {
             defer f.close(io);
@@ -77,8 +83,6 @@ pub const MidiDriver = struct {
                 self.soundfont_size_bytes = @intCast(@min(len, std.math.maxInt(u32)));
             } else |_| {}
         } else |_| {}
-        self.soundfont = tsf.tsf_load_filename(path_z.ptr);
-        if (self.soundfont == null) return error.SoundFontLoadFailed;
         if (root.lastDigitalDriver()) |dig| {
             self.sample_rate = ma.ma_engine_get_sample_rate(&dig.engine);
         }

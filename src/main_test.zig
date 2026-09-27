@@ -64,6 +64,25 @@ test "MidiDriver init and deinit" {
     try testing.expectEqual(@as(?*openmiles.tsf.tsf, null), driver.soundfont);
 }
 
+// A soundfont load that fails must leave the driver as one run left it: the
+// bank already loaded stays loaded. Releasing it before the replacement was
+// known to be good made a retried load (a level change re-reading the bank, a
+// retry after a transient read error) silence every sequence.
+test "MidiDriver a failed soundfont load keeps the loaded bank" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.MidiDriver.init(allocator);
+    defer driver.deinit();
+
+    // Stand in for an already-loaded bank: owns_soundfont is false so the
+    // driver does not try to tsf_close the sentinel on deinit.
+    const sentinel: *openmiles.tsf.tsf = @ptrFromInt(0x1000);
+    driver.soundfont = sentinel;
+    driver.owns_soundfont = false;
+
+    try testing.expectError(error.SoundFontLoadFailed, driver.loadSoundfont("no-such-bank.sf2"));
+    try testing.expectEqual(sentinel, driver.soundfont.?);
+}
+
 test "Provider registry and finding" {
     const allocator = testing.allocator;
     const provider = try openmiles.Provider.init(allocator, null);
@@ -4067,6 +4086,46 @@ test "StreamSource honors a 4-slot ring end to end" {
     try testing.expectEqual(@as(i32, 3), ctx.last_idx);
     // All four slots are free again.
     try testing.expectEqual(@as(i32, 0), ss.bufferReady());
+}
+
+// A buffer handed to loadBuffer twice must leave the ring as one submission
+// left it: the queued samples are played and their EOB fires once. Overwriting
+// an occupied slot would drop those samples without an EOB, so a retried feed
+// would truncate the stream.
+test "StreamSource a repeated submit into a live slot keeps the first buffer" {
+    var ctx = StreamTestCtx{};
+    var ss: openmiles.StreamSource = undefined;
+    try ss.init(16, 2, 44100, streamTestHook, &ctx); // 16-bit stereo → 4 bytes/frame
+    defer ss.deinit();
+
+    const buf_a = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 }; // 2 frames
+    const buf_b = [_]u8{ 9, 9, 9, 9, 9, 9, 9, 9 }; // the repeat
+    ss.loadBuffer(0, &buf_a, buf_a.len);
+    ss.loadBuffer(0, &buf_b, buf_b.len);
+    // The repeat did not free the slot, and did not replace the queued data:
+    // the other slot is still the only one the app may fill.
+    try testing.expectEqual(@as(i32, 1), ss.bufferReady());
+
+    var out: [16]u8 = undefined;
+    var read: u64 = 0;
+    // 4 frames requested: 2 from buf_a, then the drain, then underrun padding.
+    const r = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, &out, 4, &read);
+    try testing.expectEqual(openmiles.ma.MA_SUCCESS, r);
+    try testing.expectEqual(@as(u64, 4), read);
+    try testing.expectEqualSlices(u8, &buf_a, out[0..8]);
+    try testing.expectEqualSlices(u8, &([_]u8{0} ** 8), out[8..16]);
+    try testing.expectEqual(@as(u32, 1), ctx.eob_count);
+    try testing.expectEqual(@as(i32, 0), ctx.last_idx);
+    // Drained: the slot is free again and takes a new buffer, which plays.
+    try testing.expectEqual(@as(i32, 0), ss.bufferReady());
+    ss.loadBuffer(0, &buf_b, buf_b.len);
+    var out2: [16]u8 = undefined;
+    var read2: u64 = 0;
+    const r2 = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, &out2, 4, &read2);
+    try testing.expectEqual(openmiles.ma.MA_SUCCESS, r2);
+    try testing.expectEqual(@as(u64, 4), read2);
+    try testing.expectEqualSlices(u8, &buf_b, out2[0..8]);
+    try testing.expectEqual(@as(u32, 2), ctx.eob_count);
 }
 
 // --- MSS v8/v9 implemented utilities ----------------------------------------
