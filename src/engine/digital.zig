@@ -571,23 +571,28 @@ pub const DigitalDriver = struct {
                 log("loadAllAsi: cannot build a path for '{s}' in '{s}' ({any})\n", .{ name, redist_dir, err });
                 continue;
             };
-            defer alloc.free(full_path);
-            // One copy of a plugin per process: a rescan (a second
-            // AIL_set_redist_directory, a re-open) must not load the same module
-            // again and leave both copies in self.providers, and a redist
-            // directory that startup already scanned must not pull in a second
-            // copy beside the one the application list holds.
-            var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const resolved = fs_compat.maybeResolveCaseInsensitivePath(full_path, &resolved_buf) orelse full_path;
-            if (root.isPluginLoadedAnywhere(self.providers.items, resolved)) continue;
-            const p = root.Provider.load(alloc, full_path) catch |err| {
-                log("loadAllAsi: failed to load plugin '{s}': {any}\n", .{ name, err });
-                continue;
-            };
-            // Identity is re-checked under the lock that guards both plugin
-            // lists, so a scan running alongside this one that registered the
-            // same module in between is not answered with a second copy of it.
-            _ = root.adoptPlugin(p, &self.providers);
+            // Scoped so the path is released at the end of this entry rather than
+            // at the end of the scan: a defer directly in the loop body is scoped
+            // to the function, so a directory of N plugins held N path copies.
+            {
+                defer alloc.free(full_path);
+                // One copy of a plugin per process: a rescan (a second
+                // AIL_set_redist_directory, a re-open) must not load the same module
+                // again and leave both copies in self.providers, and a redist
+                // directory that startup already scanned must not pull in a second
+                // copy beside the one the application list holds.
+                var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
+                const resolved = fs_compat.maybeResolveCaseInsensitivePath(full_path, &resolved_buf) orelse full_path;
+                if (root.isPluginLoadedAnywhere(self.providers.items, resolved)) continue;
+                const p = root.Provider.load(alloc, full_path) catch |err| {
+                    log("loadAllAsi: failed to load plugin '{s}': {any}\n", .{ name, err });
+                    continue;
+                };
+                // Identity is re-checked under the lock that guards both plugin
+                // lists, so a scan running alongside this one that registered the
+                // same module in between is not answered with a second copy of it.
+                _ = root.adoptPlugin(p, &self.providers);
+            }
         }
     }
 

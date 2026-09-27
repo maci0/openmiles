@@ -600,21 +600,26 @@ pub fn loadApplicationProviders(dir: []const u8) i32 {
             log("loadApplicationProviders: cannot build a path for '{s}' in '{s}' ({any})\n", .{ name, dir, err });
             continue;
         };
-        defer alloc.free(full_path);
-        // A second scan of a directory that is already loaded (the game's own
-        // RIB_load_application_providers after our startup() already scanned it)
-        // must not register the same module twice: the duplicate would answer
-        // provider enumeration with the same codecs twice and keep a second
-        // copy of the module loaded for as long as the process runs.
-        var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const resolved = fs_compat.maybeResolveCaseInsensitivePath(full_path, &resolved_buf) orelse full_path;
-        if (isProviderPathLoaded(resolved)) continue;
-        const p = Provider.load(alloc, full_path) catch |err| {
-            log("loadApplicationProviders: failed to load plugin '{s}': {any}\n", .{ name, err });
-            continue;
-        };
-        if (!adoptPlugin(p, null)) continue;
-        count += 1;
+        // Scoped so the path is released at the end of this entry rather than at
+        // the end of the scan: a defer directly in the loop body is scoped to the
+        // function, so a directory of N plugins held N path copies at once.
+        {
+            defer alloc.free(full_path);
+            // A second scan of a directory that is already loaded (the game's own
+            // RIB_load_application_providers after our startup() already scanned it)
+            // must not register the same module twice: the duplicate would answer
+            // provider enumeration with the same codecs twice and keep a second
+            // copy of the module loaded for as long as the process runs.
+            var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
+            const resolved = fs_compat.maybeResolveCaseInsensitivePath(full_path, &resolved_buf) orelse full_path;
+            if (isProviderPathLoaded(resolved)) continue;
+            const p = Provider.load(alloc, full_path) catch |err| {
+                log("loadApplicationProviders: failed to load plugin '{s}': {any}\n", .{ name, err });
+                continue;
+            };
+            if (!adoptPlugin(p, null)) continue;
+            count += 1;
+        }
     }
     return count;
 }
