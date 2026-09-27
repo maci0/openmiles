@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Package the built Windows DLL into the release archive.
 #
-# Usage: scripts/package_release.sh <output.zip>
+# Usage: scripts/package_release.sh <output.zip> [<sha256sums>]
 #   Reads zig-out/bin/mss32.dll (build it first with
 #   `zig build -Dtarget=x86-windows -Doptimize=ReleaseFast`).
+#
+# The second argument, when given, receives a SHA256SUMS listing every entry of
+# the archive, in archive order, and nothing else: a checksum file naming files
+# the archive does not contain fails `sha256sum -c` on the consumer side, so the
+# two are written from the same list.
 #
 # The archive is byte-identical for identical inputs: entries are staged in the
 # explicit order below rather than the filesystem order of a glob, every entry
@@ -13,13 +18,20 @@
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
-OUT=${1:?"usage: scripts/package_release.sh <output.zip>"}
+OUT=${1:?"usage: scripts/package_release.sh <output.zip> [<sha256sums>]"}
+SUMS=${2:-}
 
 # archive entry name : path in the build tree, in the order they go into the zip
 entries=(
   "mss32.dll:zig-out/bin/mss32.dll"
   "LICENSE:LICENSE"
   "README.md:README.md"
+  "CHANGELOG.md:CHANGELOG.md"
+  # The vendored headers are compiled into the DLL, not shipped as source, but
+  # the project license covers redistributing them under their own terms, so
+  # the attribution and the reviewed digests travel with the binary.
+  "VENDORED.md:deps/README.md"
+  "DEPS-SHA256SUMS:deps/SHA256SUMS"
 )
 for e in "${entries[@]}"; do
   src=${e#*:}
@@ -32,8 +44,14 @@ for e in "${entries[@]}"; do
   fi
 done
 
-# Stamped once, so every entry shares it.
-epoch=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}
+# Stamped once, so every entry shares it. Outside a git checkout there is no
+# commit time to read, and a fallback to the host clock would quietly make two
+# packagings differ, so say what to set instead.
+epoch=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || true)}
+if [ -z "$epoch" ]; then
+  echo "error: no commit time available; set SOURCE_DATE_EPOCH" >&2
+  exit 1
+fi
 
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
@@ -45,6 +63,15 @@ for e in "${entries[@]}"; do
   touch -d "@$epoch" "$stage/$name"
   names+=("$name")
 done
+
+if [ -n "$SUMS" ]; then
+  mkdir -p "$(dirname "$SUMS")"
+  # Absolute before the cd below, which is relative to the staging directory.
+  sums_abs=$(cd "$(dirname "$SUMS")" && pwd)/$(basename "$SUMS")
+  # Digests of the staged copies, which are byte-for-byte the archive entries.
+  (cd "$stage" && sha256sum "${names[@]}" > "$sums_abs")
+  echo "wrote $sums_abs ($(wc -l < "$sums_abs") entries)"
+fi
 
 rm -f "$OUT"
 # -X: no extra file attributes. -9: max compression, deterministic for a given

@@ -52,6 +52,11 @@ jobs:
             echo "set .version = \"${tag}\" in build.zig.zon and re-tag"
             exit 1
           fi
+          if ! grep -qF "## [${tag}]" CHANGELOG.md; then
+            echo "CHANGELOG.md has no '## [${tag}]' section"
+            echo "move the Unreleased notes under one before tagging"
+            exit 1
+          fi
           echo "releasing ${declared}"
 
       # build.zig.zon declares the toolchain once; CI and the Makefile read the
@@ -92,6 +97,12 @@ jobs:
       - name: Verify vendored dependencies
         run: ./scripts/check_vendored.py
 
+      # The published DLL is a drop-in for the C surface src/mss.h declares, so
+      # the export table is checked against that header here too, not only on
+      # the merge that produced the tag.
+      - name: Verify C header matches the export table
+        run: ./scripts/check_header.py
+
       - name: Cross-compile Windows DLL
         run: zig build -Dtarget=x86-windows -Doptimize=ReleaseFast
 
@@ -117,21 +128,14 @@ jobs:
       # covers redistribution of the vendored headers under their own terms, and
       # a consumer who wants to trace that grant back to an upstream release
       # needs the attribution and the digests, not just this repository's URL.
+      # The checksums are written from the packaging script's own entry list, so
+      # they name exactly the files the archive holds.
       - name: Package release
-        run: ./scripts/package_release.sh "openmiles-${TAG}-win32.zip"
+        run: ./scripts/package_release.sh "openmiles-${TAG}-win32.zip" release/SHA256SUMS
 
       - name: Verify the archive is reproducible
         run: |
           set -euo pipefail
-          mkdir -p release
-          cp zig-out/bin/mss32.dll release/
-          cp LICENSE release/
-          cp README.md release/
-          cp CHANGELOG.md release/
-          cp deps/README.md release/VENDORED.md
-          cp deps/SHA256SUMS release/DEPS-SHA256SUMS
-          (cd release && sha256sum LICENSE README.md CHANGELOG.md VENDORED.md \
-            DEPS-SHA256SUMS mss32.dll > SHA256SUMS)
           ./scripts/package_release.sh repeat.zip
           cmp "openmiles-${TAG}-win32.zip" repeat.zip
           rm repeat.zip
@@ -145,4 +149,7 @@ jobs:
           files: |
             openmiles-${{ env.TAG }}-win32.zip
             release/SHA256SUMS
+          # A release published with no assets is a silent failure: the action
+          # skips a glob that matched nothing and reports success.
+          fail_on_unmatched_files: true
           generate_release_notes: true

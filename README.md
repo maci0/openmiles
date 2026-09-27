@@ -110,11 +110,15 @@ same run, which is what makes a failing sequence reproducible.
 
 ### Release archive
 
-`scripts/package_release.sh <out.zip>` packages `zig-out/bin/mss32.dll` with
-the license and this README. The archive is reproducible: entry order is
-fixed, every entry takes one timestamp (`SOURCE_DATE_EPOCH`, defaulting to the
-HEAD commit time), and no host metadata is stored. Packaging it twice yields
-byte-identical files, which the release workflow checks with `cmp`.
+`scripts/package_release.sh <out.zip> [sha256sums]` packages
+`zig-out/bin/mss32.dll` with the license, this README, the changelog, and the
+vendored-dependency attribution (`VENDORED.md`, `DEPS-SHA256SUMS`). The
+optional second argument writes a `SHA256SUMS` naming exactly the archive
+entries, so `sha256sum -c` passes on an unpacked download. The archive is
+reproducible: entry order is fixed, every entry takes one timestamp
+(`SOURCE_DATE_EPOCH`, defaulting to the HEAD commit time), and no host metadata
+is stored. Packaging it twice yields byte-identical files, which the release
+workflow checks with `cmp`.
 
 Publishing is a tag push: set `.version` in `build.zig.zon`, push `v<version>`,
 and the workflow builds, smoke-tests the DLL, verifies the archive is

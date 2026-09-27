@@ -10,7 +10,9 @@ All notable changes to OpenMiles are recorded here. The format follows
   version. Bump it in the same commit as the change, never on the tag itself.
 - A release is a git tag `v<version>` matching that version exactly. The release
   workflow fails if the tag and `.version` disagree, so a build can never be
-  published under a name the package does not claim.
+  published under a name the package does not claim. It fails the same way when
+  `CHANGELOG.md` has no `## [<version>]` section, so a version cannot be tagged
+  with its notes still sitting under `## [Unreleased]`.
 - The release workflow runs the test suite, cross-compiles the DLL, and smoke
   tests the produced binary (32-bit PE, core exports present) before packaging.
 - Compatibility is per `-Dmss-version`, not per OpenMiles release. Each value
