@@ -7,9 +7,12 @@ build must export the same names with the same decoration.
 
 ## Tooling
 
-`scripts/check_exports.py <ours.dll> <reference.dll> [--names-only]` diffs the
-two export tables and reports MISSING / DECORATION-MISMATCH / EXTRA. Its exit
-code is `missing + mismatch`, so it can gate CI and track progress.
+`scripts/check_exports.py <ours.dll> <reference.dll> [--names-only] [--strict]` diffs the
+two export tables and reports MISSING / DECORATION-MISMATCH / EXTRA on stdout.
+It exits `0` when the tables match, `1` when discrepancies were found, and `2`
+on a bad invocation (unknown flag, missing file, non-PE input), so it gates CI
+on the status alone; `scripts/check_all_versions.sh [--strict]` sweeps every
+version.
 
 Reference DLLs in-tree:
 - v5: `references/MSS-5.x/nolf-sdk-plugins/mss32.dll` (332 exports)

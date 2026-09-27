@@ -85,8 +85,9 @@ pub fn build(b: *std.Build) void {
     // 90=9.x (default 9, the newest).
     const mss_version_str = b.option([]const u8, "mss-version", "Target MSS version (3,4,5,6,6.0,6.1,6.5,6.6,7,8,9)") orelse "9";
     const mss_version: u16 = parseMssVersion(mss_version_str) orelse {
-        std.debug.print("invalid -Dmss-version='{s}' (use 3,4,5,6,6.0,6.1,6.5,6.6,7,8,9)\n", .{mss_version_str});
-        std.process.exit(1);
+        std.debug.print("error: invalid -Dmss-version='{s}'\n", .{mss_version_str});
+        std.debug.print("       valid values: 3,4,5,6,6.0,6.1,6.5,6.6,7,8,9\n", .{});
+        std.process.exit(2);
     };
     const build_opts = b.addOptions();
     build_opts.addOption(u16, "mss_version", mss_version);

@@ -53,6 +53,11 @@ zig build -Dtarget=x86-windows -Doptimize=ReleaseFast
 zig build -Dtarget=x86-windows -Doptimize=ReleaseFast -Dmss-version=5
 ```
 
+`make` wraps the same commands: `make help` lists the targets, `make test`,
+`make lint`, and `make parity` runs the per-version export-table sweep
+(`scripts/check_all_versions.sh`, which needs the reference DLLs under
+`references/`, not checked in).
+
 ### Targeting an MSS version
 
 `-Dmss-version=<3|4|5|6|6.0|6.1|6.5|6.6|7|8|9>` (default `9`) selects which Miles

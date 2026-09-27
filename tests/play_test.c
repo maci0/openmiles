@@ -3,8 +3,13 @@
 #include "test_utils.h"
 
 int play_test_main(int argc, char** argv) {
+    if (argc < 2) {
+        fprintf(stderr, "Usage: %s <audio_file.wav>\n", argv[0]);
+        return 2;
+    }
+
     printf("OpenMiles Dynamic Play Test\n");
-    
+
     HMODULE mss = LoadLibrary("mss32.dll");
     if (!mss) {
         printf("Failed to load mss32.dll (Error %d)\n", (int)GetLastError());
@@ -42,13 +47,6 @@ int play_test_main(int argc, char** argv) {
     printf("Digital driver opened.\n");
 
     p_AIL_set_redist_directory("./plugins");
-
-    if (argc < 2) {
-        printf("Usage: %s <audio_file.wav>\n", argv[0]);
-        p_AIL_close_digital_driver(dig);
-        p_AIL_shutdown();
-        return 1;
-    }
 
     void* stream = p_AIL_open_stream(dig, argv[1], 0);
     if (!stream) {

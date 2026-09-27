@@ -2,7 +2,7 @@ const std = @import("std");
 
 extern fn play_test_main(argc: c_int, argv: [*]const [*]const u8) c_int;
 
-pub fn main(init: std.process.Init) !void {
+pub fn main(init: std.process.Init) !u8 {
     const gpa = init.gpa;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     const c_args = try gpa.alloc([*c]const u8, args.len);
@@ -10,5 +10,6 @@ pub fn main(init: std.process.Init) !void {
     for (args, 0..) |arg, i| {
         c_args[i] = @ptrCast(arg.ptr);
     }
-    _ = play_test_main(@intCast(args.len), @ptrCast(c_args.ptr));
+    const rc = play_test_main(@intCast(args.len), @ptrCast(c_args.ptr));
+    return @intCast(rc);
 }

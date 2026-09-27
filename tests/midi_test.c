@@ -4,12 +4,12 @@
 #include "test_utils.h"
 
 int play_test_main(int argc, char** argv) {
-    printf("OpenMiles MIDI Dynamic Test\n");
-    
     if (argc < 3) {
-        printf("Usage: %s <midi_file.mid> <soundfont.sf2>\n", argv[0]);
-        return 1;
+        fprintf(stderr, "Usage: %s <midi_file.mid> <soundfont.sf2>\n", argv[0]);
+        return 2;
     }
+
+    printf("OpenMiles MIDI Dynamic Test\n");
 
     HMODULE mss = LoadLibrary("mss32.dll");
     if (!mss) {
