@@ -102,7 +102,8 @@ pub const Input = struct {
         if (!self.mutex.tryLock()) return;
         defer self.mutex.unlock(io);
 
-        // Ring-buffer behavior: drop oldest data if we exceed max_buffer_bytes
+        // Keep the newest max_buffer_bytes: drop from the front, or clear
+        // outright when the incoming chunk alone fills the ring.
         if (self.buffer.items.len + incoming.len > self.max_buffer_bytes) {
             const overflow = (self.buffer.items.len + incoming.len) - self.max_buffer_bytes;
             if (overflow >= self.buffer.items.len) {

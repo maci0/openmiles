@@ -180,7 +180,6 @@ pub fn AIL_stream_volume(s_opt: ?*Sample) callconv(.winapi) i32 {
 }
 pub fn AIL_stream_pan(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    // Return the 0..127 pan the app set; s.pan holds the balance-panner value.
     return s.original_pan;
 }
 pub fn AIL_stream_loop_count(s_opt: ?*Sample) callconv(.winapi) i32 {

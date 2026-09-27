@@ -114,12 +114,10 @@ pub const Filter = struct {
     /// Attach a sample's audio output to route through this filter.
     pub fn attachSample(self: *Filter, sample: *root.Sample) void {
         if (!self.lpf_initialized or !sample.is_initialized) return;
-        // Idempotent: if already attached to this filter, no-op.
         if (sample.attached_filter == self) return;
         // If attached to a different filter, detach from that one first so
         // the attached_samples lists stay consistent.
         if (sample.attached_filter) |prev| prev.detachSample(sample);
-        // Route sample output → filter input (detaches from previous endpoint)
         const result = ma.ma_node_attach_output_bus(
             @ptrCast(&sample.sound),
             0,

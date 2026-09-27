@@ -1,7 +1,5 @@
 # Miles Sound System (MSS) API Evolution & Version History
 
-This document provides a comprehensive overview of the different versions of the Miles Sound System API, highlighting key additions and architectural changes.
-
 ## Version Overview Table
 
 | Version | Era | Key Architectural Changes | Target Platforms |
@@ -30,7 +28,7 @@ Focus was on low-level hardware abstraction (Sound Blaster, AdLib) and early Win
 
 - **Core API:** `AIL_open_digital_driver`, `AIL_open_XMIDI_driver`.
 - **Memory:** Strict use of `AIL_mem_alloc_lock` due to 16-bit segmented memory legacy.
-- **Features:** 
+- **Features:**
   - Basic 2D sample playback.
   - XMIDI sequence management.
   - Red Book (CD-Audio) control.

@@ -23,12 +23,9 @@ pub const redbook_status_error: u32 = 3;
 ///
 /// Modern systems rarely have CD drives, so OpenMiles emulates a Redbook
 /// handle that tracks play/pause state and track positions without doing
-/// actual audio. This lets legacy games that call Redbook APIs proceed
-/// normally (check tracks, request playback) even though no audio will play.
-///
-/// Games that treat "Redbook unavailable" as fatal will be able to
-/// initialise and continue; games that expected audio feedback will
-/// behave as if the CD drive is present but silent.
+/// actual audio. Games that check tracks or request playback proceed
+/// normally; games that wait for audio feedback see a present but silent
+/// drive.
 pub const Redbook = struct {
     allocator: std.mem.Allocator,
     drive: u32 = 0,

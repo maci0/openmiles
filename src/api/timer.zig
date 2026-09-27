@@ -52,7 +52,6 @@ pub fn AIL_stop_all_timers() callconv(.winapi) void {
 pub fn AIL_get_timer_highest_delay() callconv(.winapi) u32 {
     return 10;
 }
-// Timer divisor is not applicable in our implementation (single-rate timers).
 pub fn AIL_set_timer_divisor(timer_opt: ?*openmiles.Timer, divisor: u32) callconv(.winapi) void {
     const timer = timer_opt orelse return;
     log("AIL_set_timer_divisor(timer={*}, divisor={d})\n", .{ timer, divisor });

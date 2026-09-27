@@ -223,8 +223,7 @@ pub fn AIL_quick_load_and_play(filename: [*:0]const u8, loop_count: i32, start_p
     return null;
 }
 pub fn AIL_quick_type(s_opt: ?*Sample) callconv(.winapi) i32 {
-    const s = s_opt orelse return 0;
-    _ = s;
+    if (s_opt == null) return 0;
     return 1; // AILFMT_PCM
 }
 pub fn AIL_quick_handles(quick_ptr: ?*?*Sample, dig_ptr: ?*?*DigitalDriver, midi_ptr: ?*?*openmiles.MidiDriver) callconv(.winapi) void {
