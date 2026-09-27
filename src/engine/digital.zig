@@ -1417,11 +1417,6 @@ pub const Sample = struct {
         if (self.is_initialized) ma.ma_sound_set_pan(&self.sound, self.pan);
     }
 
-    pub fn setVolumePan(self: *Sample, volume: i32, pan: i32) void {
-        self.setVolume(volume);
-        self.setPan(pan);
-    }
-
     // The combined AIL_set_sample_volume_pan / AIL_set_stream_volume_pan take F32
     // volume and pan in 0.0..1.0 (0.5 = centre), unlike the separate S32 0..127
     // setters. Map linearly onto the same engine path so the perceptual volume

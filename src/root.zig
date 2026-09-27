@@ -888,12 +888,6 @@ pub fn satU32(v: anytype) u32 {
     return @intFromFloat(v);
 }
 
-/// Convert a linear pan (-1.0 left .. +1.0 right) to MSS 0-127 range.
-/// Clamps the float first so NaN/huge inputs cannot panic `@intFromFloat`.
-pub fn panToMss(pan: f32) i32 {
-    return satI32(@min(127.0, @max(0.0, (pan * 64.0) + 64.0)));
-}
-
 // --- Clock ---
 
 /// The library's only source of monotonic time. Every deadline, period, and

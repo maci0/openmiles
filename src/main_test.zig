@@ -1317,14 +1317,6 @@ test "RIB plugin loading registers the mock provider's interface end to end" {
     try testing.expect(found_engine);
 }
 
-test "panToMss converts linear pan to MSS range" {
-    try testing.expectEqual(@as(i32, 64), openmiles.panToMss(0.0));
-    try testing.expectEqual(@as(i32, 0), openmiles.panToMss(-1.0));
-    try testing.expectEqual(@as(i32, 127), openmiles.panToMss(1.0));
-    try testing.expectEqual(@as(i32, 0), openmiles.panToMss(-2.0));
-    try testing.expectEqual(@as(i32, 127), openmiles.panToMss(5.0));
-}
-
 test "DigitalDriver setMasterVolume and getMasterVolume" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
@@ -1359,7 +1351,7 @@ test "DigitalDriver get3DActiveSampleCount" {
     try testing.expectEqual(@as(u32, 0), driver.get3DActiveSampleCount());
 }
 
-test "Sample setVolumePan sets both" {
+test "Sample setVolume and setPan land on the engine fields" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
     defer driver.deinit();
@@ -1367,7 +1359,8 @@ test "Sample setVolumePan sets both" {
     const sample = try openmiles.Sample.init(driver);
     defer sample.deinit();
 
-    sample.setVolumePan(64, 32);
+    sample.setVolume(64);
+    sample.setPan(32);
     try testing.expect(sample.volume > 0.30 and sample.volume < 0.33); // MSS curve ^(10/6)
     try testing.expectEqual(@as(f32, -0.5), sample.pan);
 }
