@@ -8,7 +8,6 @@ const fs_compat = root.fs_compat;
 /// Decodes MP3, OGG, WAV, and FLAC to 16-bit stereo PCM at 44100 Hz.
 const ASI_Stream_Impl = struct {
     decoder: ma.ma_decoder,
-    is_initialized: bool = false,
     pub fn open(filename: []const u8) !*ASI_Stream_Impl {
         const self = try root.global_allocator.create(ASI_Stream_Impl);
         errdefer root.global_allocator.destroy(self);
@@ -23,13 +22,10 @@ const ASI_Stream_Impl = struct {
             log("ASI_Stream_Impl.open: ma_decoder_init_file('{s}') failed with {d}\n", .{ filename, result });
             return error.DecoderInitFailed;
         }
-        self.is_initialized = true;
         return self;
     }
     pub fn close(self: *ASI_Stream_Impl) void {
-        if (self.is_initialized) {
-            _ = ma.ma_decoder_uninit(&self.decoder);
-        }
+        _ = ma.ma_decoder_uninit(&self.decoder);
         root.global_allocator.destroy(self);
     }
 };
