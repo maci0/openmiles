@@ -2,7 +2,7 @@ name: Release
 
 on:
   push:
-    tags: [ "v*" ]
+    tags: ["v*"]
   # Re-run a release for a tag that already exists, without deleting and
   # re-pushing it. A failed run (runner outage, a flaky download) is otherwise
   # only retryable by moving the tag.
@@ -31,7 +31,7 @@ jobs:
       # The tag being released, on a push and on a manual re-run alike.
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: ${{ env.TAG }}
 
@@ -70,12 +70,12 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406 # v2.2.1
+        uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406  # v2.2.1
         with:
           version: ${{ steps.zig.outputs.version }}
 
       - name: Cache Zig global cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5.0.5
         with:
           path: |
             ~/.cache/zig
@@ -147,7 +147,7 @@ jobs:
           rm "$RUNNER_TEMP/repeat.zip"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631  # v2.2.2
         with:
           # Named explicitly: on a manual re-run github.ref is the branch the
           # workflow was dispatched from, not the tag being released.

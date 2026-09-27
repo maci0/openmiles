@@ -1,0 +1,23 @@
+# Lint config for the GitHub Actions workflows. They are the one place a
+# mistake is invisible until the release it guards is already running, and
+# nothing else in the tree parses them, so `make lint` runs yamllint over them
+# and CI runs the same gate.
+#
+# Enforced by `make lint` (yamllint .github/workflows).
+#
+# Deviations from the default set, and why:
+#   line-length 120: the default 80 is shorter than the pinned-action lines
+#     (`uses:` with a 40-character SHA and a version comment) and every long
+#     line in the tree is one of those.
+#   truthy check-keys off: the `on:` key is the truthy value, and GitHub
+#     Actions spells it that way; rewriting it would break the workflow.
+#   document-start off: a leading `---` in a workflow file is noise.
+
+extends: default
+
+rules:
+  line-length:
+    max: 120
+  truthy:
+    check-keys: false
+  document-start: disable

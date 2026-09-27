@@ -65,11 +65,13 @@ zig build -Dtarget=x86-windows -Doptimize=ReleaseFast -Dmss-version=5
 `make check` runs every check CI runs, in CI's order: `make lint`, `make build`,
 `make test`, and the Windows cross-compile. Run it before pushing.
 
-`make lint` needs `shellcheck`, `python3` (the `scripts/*.py` gates), and
-[ruff](https://docs.astral.sh/ruff/) 0.16.4 (the pinned version, checked before
-it runs) besides Zig, since the `scripts/` gate is linted too; `make lint` names
-any of the three that is missing, and CI installs them through the runner
-image. It checks `zig fmt`, shellchecks `scripts/*.sh`, and asserts `src/mss.h`
+`make lint` needs `shellcheck`, `python3` (the `scripts/*.py` gates),
+[ruff](https://docs.astral.sh/ruff/) 0.16.4 and
+[yamllint](https://github.com/adrienverge/yamllint) 1.38.0 (the pinned
+versions, checked before they run) besides Zig, since the `scripts/` gate and
+the workflows are linted too; `make lint` names any of the four that is
+missing, and CI installs them through the runner image. It checks `zig fmt`,
+shellchecks `scripts/*.sh`, lints `.github/workflows`, and asserts `src/mss.h`
 declares every symbol the export table exports, for each `-Dmss-version`.
 
 Every gate under `scripts/` follows one contract: `-h`/`--help` prints its own

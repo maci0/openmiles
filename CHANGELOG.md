@@ -68,6 +68,13 @@ everything below is unreleased.
   freed a sequence that had locked a channel, permanently spent one of the 15
   lockable channels until `AIL_lock_channel` answered -1 for the rest of the
   process.
+- `make lint` runs yamllint over `.github/workflows`, with the rule set in
+  `.yamllint` and the version pinned by `YAMLLINT_VERSION` the same way ruff
+  is. `make check-pins` now fails when the Makefile and `ci.yml` disagree on
+  it.
+- ruff's `S` (flake8-bandit) group is selected in `ruff.toml`, so the gate
+  scripts are checked for the insecure patterns bandit names, not only for
+  style and correctness.
 - CI runs the project's own `make lint` (zig fmt + ruff + shellcheck) and
   compiles C with warnings as errors.
 - `ruff check` and `ruff format` over `scripts/`, so the lint gate's own

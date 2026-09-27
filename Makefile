@@ -1,4 +1,4 @@
-.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-threat-model check-toolchain check-host-tools check-parity-tools check-vendored cross parity help
+.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-yaml check-threat-model check-toolchain check-host-tools check-parity-tools check-vendored cross parity help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -56,8 +56,13 @@ check-vendored:
 # cannot turn the tree red against a green CI.
 RUFF_VERSION := 0.16.4
 
-# The Zig and ruff pins live in the Makefile, ci.yml, and build.zig.zon; a
-# stale one in CI installs the old tool and the gate quietly stops matching.
+# Same reasoning for yamllint over the workflows. A workflow is the one file
+# whose mistakes stay invisible until CI or a release is already running.
+YAMLLINT_VERSION := 1.38.0
+
+# The Zig, ruff, and yamllint pins live in the Makefile, ci.yml, and
+# build.zig.zon; a stale one in CI installs the old tool and the gate quietly
+# stops matching.
 check-pins:
 	./scripts/check_toolchain_pins.py
 
@@ -74,8 +79,15 @@ check-python:
 	ruff check .
 	ruff format --check .
 
+# .yamllint carries the rule set, so the gate reads the same file CI does.
+check-yaml:
+	@command -v yamllint >/dev/null 2>&1 || { echo "error: yamllint $(YAMLLINT_VERSION) not found on PATH; 'make lint' checks the workflows with it" >&2; exit 1; }
+	@v=`yamllint --version | cut -d' ' -f2`; [ "$$v" = "$(YAMLLINT_VERSION)" ] || { echo "error: yamllint $(YAMLLINT_VERSION) required, found $$v" >&2; exit 1; }
+	yamllint .github/workflows
+
 check-host-tools:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "error: shellcheck not found on PATH; 'make lint' shellchecks scripts/*.sh" >&2; exit 1; }
+	@command -v yamllint >/dev/null 2>&1 || { echo "error: yamllint $(YAMLLINT_VERSION) not found on PATH; 'make lint' checks .github/workflows with it" >&2; exit 1; }
 	@command -v python3 >/dev/null 2>&1 || { echo "error: python3 not found on PATH; the scripts/*.py gates need it" >&2; exit 1; }
 
 # The parity sweep alone needs a third-party package. `make lint` deliberately
@@ -93,6 +105,7 @@ lint: check-host-tools
 	./scripts/check_vendored.py
 	./scripts/check_threat_model_refs.py
 	@$(MAKE) --no-print-directory check-python
+	@$(MAKE) --no-print-directory check-yaml
 	@$(MAKE) --no-print-directory check-pins
 
 format:
@@ -113,7 +126,7 @@ help:
 	@echo "  build      build the library and the test binaries (zig build)"
 	@echo "  test       run the test suite (zig build test); FILTER=<substr> runs a subset"
 	@echo "  check      run every CI check in order: lint, build, test, cross"
-	@echo "  lint       zig fmt, ruff, shellcheck, header/vendored parity, pin agreement"
+	@echo "  lint       zig fmt, ruff, shellcheck, yamllint, header/vendored parity, pin agreement"
 	@echo "  format     apply zig fmt and ruff format"
 	@echo "  cross      cross-compile the shipped x86-windows DLL"
 	@echo "  parity     diff every -Dmss-version export table against its reference DLL (needs scripts/requirements-dev.txt)"

@@ -2,12 +2,13 @@
 """Check that every toolchain pin in the tree names the same version.
 
 `make check-toolchain` and `make check-python` refuse to run against a Zig or
-ruff other than the one the tree declares, so a developer's green run and CI's
-green run only mean the same thing if the pins agree. build.zig.zon names the
-zig version once, and the Makefile and the CI workflow read it from there; the
-ruff version is a Makefile literal that CI repeats. Nothing otherwise keeps
-them in step, and a stale CI pin is invisible: CI installs the old tool, the
-old tool is happy with the old tree, and the merge goes green.
+ruff or yamllint other than the one the tree declares, so a developer's green
+run and CI's green run only mean the same thing if the pins agree.
+build.zig.zon names the zig version once, and the Makefile and the CI workflow
+read it from there; the ruff and yamllint versions are Makefile literals that CI
+repeats. Nothing otherwise keeps them in step, and a stale CI pin is invisible:
+CI installs the old tool, the old tool is happy with the old tree, and the merge
+goes green.
 
 So this reads the pins back out of each file and compares them, reporting:
 
@@ -31,6 +32,7 @@ ZON = ROOT / "build.zig.zon"
 # Makefile variable -> (files that must repeat it, pattern naming the pin).
 PINS = {
     "RUFF_VERSION": (CI_YML, r"uv tool install ruff=={v}"),
+    "YAMLLINT_VERSION": (CI_YML, r"uv tool install yamllint=={v}"),
 }
 
 # Workflows that build the tree, so each has to take its zig from build.zig.zon
@@ -156,10 +158,13 @@ def main():
 
     if problems:
         print(f"{len(problems)} toolchain pin(s) disagree: {', '.join(problems)}")
-        print("build.zig.zon pins zig; the Makefile literal pins ruff. Match them.")
+        print("build.zig.zon pins zig; the Makefile literals pin ruff and yamllint. Match them.")
         return 1
 
-    print(f"toolchain pins agree: zig {zig}, ruff {pins['RUFF_VERSION']}")
+    print(
+        f"toolchain pins agree: zig {zig}, ruff {pins['RUFF_VERSION']}, "
+        f"yamllint {pins['YAMLLINT_VERSION']}"
+    )
     return 0
 
 

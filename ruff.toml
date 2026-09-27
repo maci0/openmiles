@@ -7,11 +7,12 @@
 #   ruff check . && ruff format --check .
 #
 # Not selected, and why: COM (COM812/COM819 fight the formatter over trailing
-# commas, and the formatter wins), S (the scripts read vendored headers and a
-# local DLL, never network input), T20 (printing the report is the job), ANN
+# commas, and the formatter wins), T20 (printing the report is the job), ANN
 # and D (annotating 60-line scripts and documenting every three-line accessor
 # is a separate pass), TCH and ASYNC (no typing-only imports and no async yet,
-# so both are no-ops until ANN lands).
+# so both are no-ops until ANN lands). S is selected: the scripts parse vendored
+# C headers and a DLL, which is exactly the untrusted-shape input worth
+# checking, and the tree passes it.
 
 line-length = 100
 target-version = "py38"
@@ -48,6 +49,7 @@ select = [
     "Q",    # quotes
     "RET",  # return statements
     "RUF",  # ruff-specific
+    "S",    # flake8-bandit
     "SIM",  # simplify
     "TID",  # tidy imports
     "TRY",  # tryceratops

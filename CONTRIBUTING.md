@@ -2,12 +2,13 @@
 
 ## Setup
 
-Three tools, the first two version-pinned in the tree:
+Four tools, the first three version-pinned in the tree:
 
 | Tool | Version | Declared in | Install (any equivalent works) |
 |------|---------|-------------|---------------------------------|
 | Zig | 0.16.0 | `.minimum_zig_version` in `build.zig.zon` | <https://ziglang.org/download/> |
 | ruff | 0.16.4 | `RUFF_VERSION` in the `Makefile` | `uv tool install ruff==0.16.4` |
+| yamllint | 1.38.0 | `YAMLLINT_VERSION` in the `Makefile` | `uv tool install yamllint==1.38.0` |
 | shellcheck | any recent | required by `make lint` | your package manager |
 
 `make` reads the Zig version out of `build.zig.zon` and refuses to build on
@@ -53,8 +54,9 @@ tree is Linux-only, but a change that only builds on one host shows up there
 rather than locally.
 
 `make lint` is `zig fmt --check`, `ruff check`, `ruff format --check`,
-`shellcheck scripts/*.sh`, plus the header-parity, vendored-checksum, and
-pin-agreement checks. `make format` applies the two formatters.
+`shellcheck scripts/*.sh`, `yamllint .github/workflows`, plus the header-parity,
+vendored-checksum, and pin-agreement checks. `make format` applies the two
+formatters.
 
 ## What a change is expected to carry
 
