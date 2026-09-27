@@ -27,10 +27,10 @@ to set both.
 | 1 | Untrusted plugin image written to the temp directory and `LoadLibrary`'d | file/env to process | Code execution as the game user | Mitigated: unpredictable name, exclusive create (`src/api/rib.zig:222 randomNameBytes`, `src/api/rib.zig:242 exclusive`) |
 | 2 | `.asi`/`.m3d`/`.flt` files in the game directory, or in a game-named redist directory, loaded and executed at startup | file to process | Code execution as the game user | Unmitigated by design: the host game's own directory is trusted. Listed in [Deployment](#4-deployment-artifact-boundary) |
 | 3 | A plugin image parsed by the ELF fixup on a static-musl Linux build (`applyElfFixups`) | file to process | Crash, in-process memory corruption | Partial: program header table and `DT_RELA` slots bounded in `u64`/image space (`src/utils/dynlib.zig:58 programHeaderTableFits`) |
-| 4 | `AIL_WAV_file_write` creates or truncates a game-named path | game to DLL, DLL to disk | Overwrite of any file the game user can write | Unmitigated by ABI necessity (`src/api/digital.zig:953 AIL_WAV_file_write`) |
+| 4 | `AIL_WAV_file_write` creates or truncates a game-named path | game to DLL, DLL to disk | Overwrite of any file the game user can write | Unmitigated by ABI necessity (`src/api/digital.zig:958 AIL_WAV_file_write`) |
 | 5 | Malformed soundbank / event bytecode (`.BANK`) | file to process | Crash, in-process memory corruption, audio DoS | Partial: bounds chokepoint in `src/engine/soundbank.zig:222 rdU32`, step decode bounded in `src/engine/event.zig:492 copyString`) |
 | 6 | Malformed XMIDI / MIDI sequence | file to process | Crash, memory exhaustion | Partial: saturating cursor arithmetic, fixed loop stack (`src/engine/xmidi.zig:384 xmidiToSmf`, `src/engine/midi.zig:355 xmidi_loop_stack`) |
-| 7 | Malformed or oversized audio file (MP3/OGG/WAV/FLAC) | file to process | Crash, memory exhaustion | Partial: declared-size caps in `src/engine/audio_detect.zig:15 max_declared_image_size`, whole-file cap in `src/engine/digital.zig:1152 root.max_file_load_bytes`; the decode itself is delegated to miniaudio and TinySoundFont (`src/engine/digital.zig:1147 loadFromFile`) |
+| 7 | Malformed or oversized audio file (MP3/OGG/WAV/FLAC) | file to process | Crash, memory exhaustion | Partial: declared-size caps in `src/engine/audio_detect.zig:15 max_declared_image_size`, whole-file cap in `src/engine/digital.zig:1172 root.max_file_load_bytes`; the decode itself is delegated to miniaudio and TinySoundFont (`src/engine/digital.zig:1167 loadFromFile`) |
 | 8 | App VFS callback reports an arbitrary file size | game to DLL | Heap exhaustion in the game process | Mitigated: same 256 MiB cap as the direct path (`src/root.zig:330 max_file_load_bytes`) |
 | 9 | Caller-supplied pointer/length pairs trusted verbatim | game to DLL | Read/write of game memory on a bad call | Unmitigated by ABI necessity (see [Game process boundary](#1-game-process-boundary)) |
 | 10 | Debug logging enabled by environment variable | environment to process | Verbose internal logging to disk, paths and asset names disclosed | Mitigated: opt-in, 64 MiB cap (`src/utils/logger.zig:14 max_log_bytes`) |
@@ -68,10 +68,10 @@ these are not remote attack vectors, they are the ABI contract.
 - Path inputs: `AIL_set_redist_directory` (`src/api/digital.zig:55 AIL_set_redist_directory`),
   `AIL_quick_load` (`src/api/quick.zig:21 AIL_quick_load`), `RIB_load_application_providers`
   (`src/api/rib.zig:41 RIB_load_application_providers`).
-- `AIL_WAV_file_write` (`src/api/digital.zig:953 AIL_WAV_file_write`) takes a
+- `AIL_WAV_file_write` (`src/api/digital.zig:958 AIL_WAV_file_write`) takes a
   game-supplied filename and creates or truncates the file at that path, then
   writes a WAV built from a game-supplied `(data, len)` pair
-  (`src/api/digital.zig:987 createFile`). It is the only export that writes
+  (`src/api/digital.zig:992 createFile`). It is the only export that writes
   audio output to disk, and the write is a truncating create rather than an
   append, so a caller-chosen name destroys whatever was there. No path
   validation, no extension check, no prompt. The `AIL_file_write` export
@@ -88,8 +88,8 @@ hostile file, download, or mod pack reaches.
 
 | Input | Entry point | Notes |
 |-------|-------------|-------|
-| Audio file | `AIL_load_sample` / `AIL_open_stream` / `AIL_quick_load` -> `Sample.loadFromFile` (`src/engine/digital.zig:1147 loadFromFile`) | Rejects a zero length and anything above the shared 256 MiB cap (`src/engine/digital.zig:1152 root.max_file_load_bytes`, `src/root.zig:342 max_file_load_bytes`), then allocates the whole file. |
-| Audio in memory | `Sample.load` (`src/engine/digital.zig:1167 load`) | A positive caller length is used as a slice length with no cap; a zero or negative length falls to `loadFromUnownedMemoryUnknownSize`, which derives a bounded image from the header. The uncapped case is the in-process ABI, not a file input. |
+| Audio file | `AIL_load_sample` / `AIL_open_stream` / `AIL_quick_load` -> `Sample.loadFromFile` (`src/engine/digital.zig:1167 loadFromFile`) | Rejects a zero length and anything above the shared 256 MiB cap (`src/engine/digital.zig:1172 root.max_file_load_bytes`, `src/root.zig:342 max_file_load_bytes`), then allocates the whole file. |
+| Audio in memory | `Sample.load` (`src/engine/digital.zig:1187 load`) | A positive caller length is used as a slice length with no cap; a zero or negative length falls to `loadFromUnownedMemoryUnknownSize`, which derives a bounded image from the header. The uncapped case is the in-process ABI, not a file input. |
 | XMIDI / MIDI | `AIL_init_sequence` -> `xmidiToSmf` (`src/engine/xmidi.zig:384 xmidiToSmf`) | Declared extents clamped to the buffer with saturating arithmetic; VLQ continuation capped at 4 bytes (`src/engine/xmidi.zig:80 bytes_read`); FOR/NEXT loop stack fixed at 8 with a depth check (`src/engine/midi.zig:354 xmidi_loop_depth`). |
 | BANK soundbank | `AIL_open_soundbank` (`src/api/v8.zig:537 AIL_open_soundbank`), `AIL_open_soundbank_v8` (`src/api/v8.zig:938 AIL_open_soundbank_v8`) -> `loadFromMemory` (`src/engine/soundbank.zig:525 loadFromMemory`) | Tag, version, and `meta_size` validated before any allocation; every offset read passes through the bounds-checked `rdU32` (`src/engine/soundbank.zig:222 rdU32`); metadata is NUL-terminated by an allocated sentinel. |
 | Event bytecode | `AIL_next_event_step` (`src/api/v8.zig:521 AIL_next_event_step`) -> `nextStep` (`src/engine/event.zig:635 nextStep`) | Step type is range-checked before the enum conversion, the header chain is depth-limited, and string copies refuse to pass `wlimit` (`src/engine/event.zig:492 copyString`). |
@@ -224,7 +224,7 @@ Gaps:
 | Control | Where | Covers |
 |---------|-------|--------|
 | Whole-file read cap, 256 MiB | `src/root.zig:342 max_file_load_bytes` | Oversized file allocation on every whole-file read path, direct (`src/root.zig:357 max_file_load_bytes`) and VFS (`src/root.zig:330 max_file_load_bytes`) |
-| Whole-file read cap on the sample loader | `src/engine/digital.zig:1152 root.max_file_load_bytes` | Oversized audio file through `AIL_load_sample` / `AIL_open_stream` |
+| Whole-file read cap on the sample loader | `src/engine/digital.zig:1172 root.max_file_load_bytes` | Oversized audio file through `AIL_load_sample` / `AIL_open_stream` |
 | Declared container size cap, 256 MiB | `src/engine/audio_detect.zig:15 max_declared_image_size` | Lying RIFF/FORM headers |
 | Pointer image cap, 256 MiB | `src/engine/dls_container.zig:74 max_ptr_image_size` | Lying DLS container sizes over bare pointers |
 | Bounds-checked offset read | `src/engine/soundbank.zig:222 rdU32` | Every BANK offset and count |
@@ -322,7 +322,7 @@ something other than a control in this tree.
    (`src/engine/digital.zig:552 loadAllAsi`). Inherent to the compatibility
    target; a documented deployment note is the available mitigation.
 2. `AIL_WAV_file_write` truncates and overwrites a caller-named path
-   (`src/api/digital.zig:987 createFile`) with no extension check, no path
+   (`src/api/digital.zig:992 createFile`) with no extension check, no path
    validation, and no append. A hostile in-process caller already has the
    game's authority, so the exposure is to a buggy or confused game writing
    over a file it did not mean to name.

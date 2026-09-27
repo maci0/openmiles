@@ -201,6 +201,25 @@ jobs:
           cmp "openmiles-${TAG}-win32.zip" "$RUNNER_TEMP/repeat.zip"
           rm "$RUNNER_TEMP/repeat.zip"
 
+      # The release body a consumer reads is the curated `## [<version>]`
+      # section the tag check above already required, not the commit list
+      # GitHub generates: a generated body names commits and never says which
+      # export table changed or what a consumer has to do about it.
+      - name: Build the release notes from the changelog section
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          awk -v tag="${TAG}" '
+            $0 == "## [" tag "]" { body = 1; next }
+            body && /^## \[/ { exit }
+            body { print }
+          ' CHANGELOG.md > release/NOTES.md
+          if [ ! -s release/NOTES.md ]; then
+            echo "CHANGELOG.md section for ${TAG} is empty"
+            exit 1
+          fi
+          head -1 release/NOTES.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631  # v2.2.2
         with:
@@ -210,7 +229,7 @@ jobs:
           files: |
             openmiles-${{ env.TAG }}-win32.zip
             release/SHA256SUMS
+          body_path: release/NOTES.md
           # A release published with no assets is a silent failure: the action
           # skips a glob that matched nothing and reports success.
           fail_on_unmatched_files: true
-          generate_release_notes: true

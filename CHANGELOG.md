@@ -15,6 +15,10 @@ All notable changes to OpenMiles are recorded here. The format follows
   with its notes still sitting under `## [Unreleased]`.
 - The release workflow runs the test suite, cross-compiles the DLL, and smoke
   tests the produced binary (32-bit PE, core exports present) before packaging.
+- The published release notes are that `## [<version>]` section verbatim, not
+  a generated commit list: the tag check already fails without it, and an
+  empty section fails the publish rather than shipping a release whose notes
+  say nothing.
 - A published version is immutable. A `workflow_dispatch` re-run of a tag is the
   retry for a run that failed before it published, and the workflow refuses one
   for a tag that already has a release, so a retry cannot replace the archive a
@@ -173,6 +177,23 @@ everything below is unreleased.
 
 ### Fixed
 
+- A second `AIL_DLS_load_file` or `AIL_DLS_load_memory` of the source already
+  loaded closed the bank the game was still holding and returned a second copy
+  of it, so a retried load left one dangling handle per repeat. A load naming
+  the bank already in place keeps it and returns that same handle, and the
+  loads it took are counted: N loads of one bank need N unloads before it
+  closes, so the state after load, load, unload, unload is the state one load
+  and one unload left. A game that loaded a bank and then reloaded the same
+  file and unloaded once no longer has a valid bank.
+- `AIL_process_digital_audio` freed an exhausted source's decode buffer only
+  when the source stayed in the stereo or mono partition. A mix call that
+  outran the shortest source dropped it from the partition first, so its owned
+  buffer was never freed and leaked on every such call.
+- Reloading a sample leaked its reverb node: only `Sample.deinit` released it,
+  so a game that gave a sample reverb and then reloaded the stream kept the
+  delay node allocated and still wired to the engine, one per reload, for as
+  long as it kept streaming. Every load path and `reset()` release it now, and
+  the sound is rewired before it is uninitialised.
 - `AIL_sequence_position` reported beat 1, measure 1 for the whole of a playing
   sequence unless the game had also registered a beat callback: the beat clock
   only advanced on the callback path. It now advances on its own, and resyncs to
