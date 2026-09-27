@@ -1,8 +1,9 @@
-//! Coverage-guided fuzz targets (std.testing.fuzz) for the two parsers that
-//! take the most untrusted bytes per input: the SoundBank event-step decoder
+//! Coverage-guided fuzz targets (std.testing.fuzz) for the parsers that take
+//! the most untrusted bytes per input: the SoundBank event-step decoder
 //! (`event.nextStep`, a hand-written recursive-descent bytecode reader that
-//! copies names into a caller scratch buffer) and the XMIDI IFF → SMF
-//! converter (`xmidiToSmf` / `xmidiBareToSmf`).
+//! copies names into a caller scratch buffer), the XMIDI IFF → SMF converter
+//! (`xmidiToSmf` / `xmidiBareToSmf`), the BANK image loader behind the bank
+//! query API, and the WAV container readers that classify a file.
 //!
 //! fuzz_test.zig drives these with fixed-seed PRNG bytes. These targets add
 //! what a PRNG loop cannot: `Smith` picks the shapes (which ASCII a field may
@@ -381,4 +382,500 @@ const xmidi_corpus = [_][]const u8{
 test "fuzz: XMIDI to SMF conversion" {
     var ctx: xmidi_ctx = .{};
     try std.testing.fuzz(&ctx, fuzzXmidiOne, .{ .corpus = &xmidi_corpus });
+}
+
+// --- Target 3: the SoundBank (BANK) image loader ----------------------------
+//
+// A .mbnk file arrives from the game's data directory, so the header, the four
+// asset tables and every name/data offset in it are untrusted. fuzz_test.zig
+// only proves the loader survives random bytes; this target builds banks whose
+// *shape* is a real one (a header, four tables, a string/data pool) and then
+// lies about individual fields, which is the mutation that reaches the offset
+// arithmetic. Every accessor is then checked against the metadata it claims to
+// have been copied out of.
+
+const BankAssetKind = openmiles.soundbank.AssetKind;
+const all_asset_kinds = [_]BankAssetKind{ .events, .environments, .presets, .sounds };
+
+// Header field offsets of the 32-bit on-disk layout (soundbank.zig).
+const bank_header_size: usize = 60;
+const bank_entry_size: u32 = 8;
+
+const bank_ctx = struct {
+    img: [768]u8 = undefined,
+    pool: [256]u8 = undefined,
+    fname: [16]u8 = undefined,
+};
+
+const bank_name_weights: []const Weight = &.{
+    w('a', 'z', 40), // asset names
+    w('A', 'Z', 20), // case that the name index must fold
+    w('0', '9', 10),
+    w(' ', ' ', 5), // a name with embedded space, and an empty one
+    w(0, 0, 10), // the terminator itself
+};
+
+/// A u32 the fuzzer may either keep honest or push somewhere the bounds checks
+/// have to reject: inside the image, one past it, at zero (the "no name" and
+/// "no table" sentinel), and at the top of the 32-bit range where the 32-bit
+/// DLL target's `off + n > len` check would wrap.
+fn bankOffset(smith: *std.testing.Smith, honest: u32, img_len: usize) u32 {
+    return switch (smith.index(6)) {
+        0 => honest,
+        1 => @intCast(img_len),
+        2 => @intCast(img_len + 1),
+        3 => 0,
+        4 => std.math.maxInt(u32),
+        else => @intCast(honest +| @as(u32, @intCast(smith.index(64)))),
+    };
+}
+
+fn fuzzSoundBankOne(ctx: *bank_ctx, smith: *std.testing.Smith) anyerror!void {
+    @memset(&ctx.img, 0);
+    @memset(&ctx.pool, 0);
+
+    // A string/data pool the tables can legitimately point into.
+    const name_count: usize = 1 + smith.index(6);
+    var name_offs: [8]u32 = undefined;
+    var data_offs: [8]u32 = undefined;
+    var pool: usize = 0;
+    for (0..name_count) |i| {
+        const len: usize = smith.index(8); // 0 gives an empty name
+        const n: usize = @intCast(smith.sliceWeighted(
+            ctx.pool[pool..][0..len],
+            &.{.{ .min = len, .max = len, .weight = 1 }},
+            bank_name_weights,
+        ));
+        name_offs[i] = @intCast(pool);
+        @memcpy(ctx.pool[pool..][0..n], ctx.pool[pool..][0..n]);
+        pool += n;
+        ctx.pool[pool] = 0;
+        pool += 1;
+        data_offs[i] = @intCast(pool);
+        pool += len; // payload bytes follow, so a data offset is in bounds too
+    }
+    // The pool lives after the header and the tables.
+    const table_bytes: usize = all_asset_kinds.len * 3 * bank_entry_size;
+    const pool_at: usize = bank_header_size + table_bytes;
+    @memcpy(ctx.img[pool_at..][0..pool], ctx.pool[0..pool]);
+    const img_len: usize = pool_at + pool;
+
+    // Four tables back to back, each with its own count and base.
+    const table_off_at = [_]usize{ 20, 24, 28, 32 };
+    const count_off_at = [_]usize{ 40, 44, 48, 52 };
+    for (all_asset_kinds, 0..) |_, ki| {
+        const count: u32 = @intCast(smith.index(4));
+        const base: u32 = @intCast(bank_header_size + ki * 3 * bank_entry_size);
+        std.mem.writeInt(u32, ctx.img[table_off_at[ki]..][0..4], bankOffset(smith, base, img_len), .little);
+        std.mem.writeInt(u32, ctx.img[count_off_at[ki]..][0..4], count, .little);
+        for (0..count) |e| {
+            const at = bank_header_size + ki * 3 * bank_entry_size + e * bank_entry_size;
+            std.mem.writeInt(u32, ctx.img[at..][0..4], bankOffset(smith, name_offs[smith.index(name_count)], img_len), .little);
+            std.mem.writeInt(u32, ctx.img[at + 4 ..][0..4], bankOffset(smith, data_offs[smith.index(name_count)], img_len), .little);
+        }
+    }
+
+    // The bank name is copied into a fixed 4-byte on-disk field; a name of any
+    // length is legal input, and the filename length is what the sound-record
+    // formatting must account for.
+    const fname_len: usize = smith.index(ctx.fname.len);
+    const fname_n: usize = @intCast(smith.sliceWeighted(
+        ctx.fname[0..fname_len],
+        &.{.{ .min = fname_len, .max = fname_len, .weight = 1 }},
+        bank_name_weights,
+    ));
+    const fname = ctx.fname[0..fname_n];
+
+    // meta_size decides how much is copied; a lie here either truncates the
+    // image or claims more than was passed.
+    const honest_meta: u32 = @intCast(img_len);
+    const meta_size: u32 = switch (smith.index(5)) {
+        0 => honest_meta,
+        1 => bank_header_size,
+        2 => honest_meta / 2,
+        3 => honest_meta +| @as(u32, @intCast(1 + smith.index(4096))),
+        else => @intCast(smith.index(80)), // below header_size: always rejected
+    };
+    std.mem.writeInt(u32, ctx.img[0..4], openmiles.soundbank.BANK_TAG, .little);
+    std.mem.writeInt(i32, ctx.img[4..8], openmiles.soundbank.BANK_VERSION, .little);
+    std.mem.writeInt(i32, ctx.img[8..12], @bitCast(meta_size), .little);
+    @memcpy(ctx.img[56..60], "ABNK");
+
+    const before = openmiles.soundbank.loadedCount();
+    const bank = openmiles.soundbank.loadFromMemory(testing.allocator, fname, ctx.img[0..img_len]) catch |err| switch (err) {
+        error.OutOfMemory => return err,
+        else => {
+            // A rejected image must leave the container exactly as it was.
+            try testing.expectEqual(before, openmiles.soundbank.loadedCount());
+            return;
+        },
+    };
+    try testing.expectEqual(before + 1, openmiles.soundbank.loadedCount());
+
+    // The load copied exactly meta_size bytes plus the sentinel that keeps a
+    // C-string consumer of a fixed-width field inside the allocation.
+    try testing.expectEqual(@as(usize, @intCast(meta_size)) + 1, bank.meta.len);
+    try testing.expectEqual(@as(u8, 0), bank.meta[bank.meta.len - 1]);
+    try testing.expectEqual(meta_size, @as(u32, @bitCast(bank.metaSize())));
+    // The 4-byte on-disk name field is handed out as a C string, so it must be
+    // terminated within those 4 bytes whatever they contain.
+    const bank_name = std.mem.span(bank.name());
+    try testing.expect(bank_name.len <= 4);
+    try testing.expectEqualStrings(bank_name, std.mem.sliceTo(ctx.img[56..][0..4], 0));
+
+    var out: [1024]u8 = undefined;
+    for (all_asset_kinds) |kind| {
+        const cnt = bank.assetCount(kind);
+        const limit = @min(cnt, 24);
+        var i: u32 = 0;
+        while (i < limit) : (i += 1) {
+            const name_ptr = bank.assetName(kind, i) orelse continue;
+            try expectInBank(bank, name_ptr);
+            const name = std.mem.span(name_ptr);
+            // The same entry queried twice must answer twice the same way, or a
+            // consumer that re-reads a bank mid-game sees it change underfoot.
+            try testing.expectEqual(@intFromPtr(name_ptr), @intFromPtr(bank.assetName(kind, i).?));
+            // A name the table reports must be resolvable by that same name,
+            // and the data it hands back must live in the metadata.
+            if (bank.assetData(kind, name)) |data| {
+                try expectInBank(bank, data);
+                try testing.expectEqual(@intFromPtr(data), @intFromPtr(bank.assetData(kind, name).?));
+            }
+            // The sound record is the one accessor that formats into a caller
+            // buffer, so its declared size and its written string must agree.
+            if (kind == .sounds) try expectSoundRecord(bank, name, &out);
+        }
+        // Index past the declared count is out of range whatever the table says.
+        try testing.expect(bank.assetName(kind, cnt) == null);
+        try testing.expect(bank.assetName(kind, std.math.maxInt(u32)) == null);
+    }
+
+    bank.deinit();
+    try testing.expectEqual(before, openmiles.soundbank.loadedCount());
+}
+
+fn expectInBank(bank: *const openmiles.soundbank.Bank, p: [*]const u8) !void {
+    const lo = @intFromPtr(bank.meta.ptr);
+    const addr = @intFromPtr(p);
+    if (addr < lo or addr - lo >= bank.meta.len) return error.PointerOutsideMetadata;
+}
+
+/// `soundAssetInfo` returns the buffer size it needs, and `soundAssetFilename`
+/// returns the record's DataLen. Both format "*" + bank filename + the sound's
+/// own file name into a buffer the C API hands out with no size, so the number
+/// it returns and the string it wrote have to be the same length, and the sound
+/// record it copied out has to be the bytes at that offset.
+fn expectSoundRecord(bank: *const openmiles.soundbank.Bank, name: []const u8, out: []u8) !void {
+    @memset(out, 0xAA);
+    var info: [44]u8 = undefined;
+    @memset(&info, 0xAA);
+    const req = bank.soundAssetInfo(name, out.ptr, &info);
+    if (req == 0) {
+        try testing.expectEqual(@as(u8, 0), out[0]);
+        return;
+    }
+    try testing.expect(req >= 2);
+    const written = std.mem.span(@as([*:0]u8, @ptrCast(out.ptr)));
+    try testing.expectEqual(@as(usize, @intCast(req)) - 1, written.len);
+    try testing.expectEqual(@as(u8, '*'), written[0]);
+
+    // data_off is where assetData resolved the record. Where the record is
+    // long enough, the info copy and the duration must be exactly the bytes at
+    // that offset; where it is truncated, the accessors must report the short
+    // record without reaching past the metadata.
+    const data = bank.assetData(.sounds, name) orelse return;
+    const off = @intFromPtr(data) - @intFromPtr(bank.meta.ptr);
+    if (bank.meta.len -| off >= 12 + info.len) {
+        try testing.expectEqualSlices(u8, bank.meta[off + 12 ..][0..info.len], &info);
+    }
+    if (bank.meta.len -| off >= 40) {
+        try testing.expectEqual(
+            std.mem.readInt(u32, bank.meta[off + 24 ..][0..4], .little),
+            bank.soundDurationMs(name).?,
+        );
+    }
+
+    @memset(out, 0xAA);
+    const dlen = bank.soundAssetFilename(name, out.ptr);
+    if (dlen == -1) {
+        try testing.expectEqual(@as(u8, 0), out[0]);
+    } else {
+        try testing.expectEqual(@as(u8, '*'), out[0]);
+    }
+    // A sound that resolves has a duration; one that does not has none.
+    try testing.expectEqual(bank.assetData(.sounds, name) != null, bank.soundDurationMs(name) != null);
+}
+
+// A loadable bank: header, one event entry, one sound entry, a 44-byte sound
+// record, and the string pool they point at. Every seed below is a mutation
+// of this one, so a fuzz run starts from an image the accessors actually
+// answer for instead of from a header the loader rejects on the first field.
+const seed_meta_size: u32 = 181;
+fn makeBankSeed() [seed_meta_size]u8 {
+    var s: [seed_meta_size]u8 = [_]u8{0} ** seed_meta_size;
+    @memcpy(s[0..4], "BANK");
+    std.mem.writeInt(i32, s[4..8], openmiles.soundbank.BANK_VERSION, .little);
+    std.mem.writeInt(i32, s[8..12], @bitCast(seed_meta_size), .little);
+    // Events table at the header, sounds table after it; environments and
+    // presets left empty, which is the shape of a bank that ships one library.
+    std.mem.writeInt(u32, s[20..24], bank_header_size, .little);
+    std.mem.writeInt(u32, s[32..36], bank_header_size + bank_entry_size, .little);
+    std.mem.writeInt(u32, s[40..44], 1, .little);
+    std.mem.writeInt(u32, s[52..56], 1, .little);
+    // Entry 0 (event "kick"): name and the event-step text after it.
+    std.mem.writeInt(u32, s[60..64], 168, .little);
+    std.mem.writeInt(u32, s[64..68], 178, .little);
+    // Entry 1 (sound "KICK"): name and the sound record.
+    std.mem.writeInt(u32, s[68..72], 173, .little);
+    std.mem.writeInt(u32, s[72..76], 128, .little);
+    // The sound record: FileNameOffset is relative to the record, and the
+    // MILESBANKSOUNDINFO that soundAssetInfo copies verbatim follows at +12.
+    std.mem.writeInt(u32, s[132..136], 40, .little);
+    std.mem.writeInt(i32, s[140..144], 1, .little); // ChannelCount
+    std.mem.writeInt(i32, s[152..156], 22050, .little); // Rate
+    std.mem.writeInt(i32, s[156..160], 4096, .little); // DataLen
+    std.mem.writeInt(u32, s[164..168], 1500, .little); // DurationMs
+    // The pool: the sound's file name, the same name in another case, the
+    // event's text.
+    @memcpy(s[168..173], "kick\x00");
+    @memcpy(s[173..178], "KICK\x00");
+    @memcpy(s[178..181], "E0\x00");
+    return s;
+}
+
+/// The same image with one header field replaced, which is how each malformed
+/// seed below is derived from the loadable one.
+fn withU32(img: [seed_meta_size]u8, at: usize, v: u32) [seed_meta_size]u8 {
+    var s = img;
+    std.mem.writeInt(u32, s[at..][0..4], v, .little);
+    return s;
+}
+fn withI32(img: [seed_meta_size]u8, at: usize, v: i32) [seed_meta_size]u8 {
+    var s = img;
+    std.mem.writeInt(i32, s[at..][0..4], v, .little);
+    return s;
+}
+
+const bank_seed_arr = makeBankSeed();
+const bank_seed: []const u8 = &bank_seed_arr;
+// The sound record's DataOffset pushed to the top of the 32-bit range, where
+// the bounds checks have to reject it instead of wrapping into a small
+// in-bounds offset.
+const bank_seed_wrapping: []const u8 = &withU32(bank_seed_arr, 72, std.math.maxInt(u32));
+// A meta_size that stops inside the tables.
+const bank_seed_short_meta: []const u8 = &withI32(bank_seed_arr, 8, 61);
+// A table count that overruns the metadata.
+const bank_seed_overrun: []const u8 = &withU32(bank_seed_arr, 40, 0x10000);
+// A sound name that resolves to a data offset past the end of the metadata.
+const bank_seed_unterminated: []const u8 = &withU32(bank_seed_arr, 68, 173);
+
+const bank_corpus = [_][]const u8{
+    bank_seed,
+    bank_seed_wrapping,
+    bank_seed_short_meta,
+    bank_seed_overrun,
+    bank_seed_unterminated,
+    // Not a bank at all: a RIFF image and a plain SMF, which is what a game
+    // ships beside the .mbnk files.
+    "RIFF" ++ "\x10\x00\x00\x00" ++ "DLS " ++ "LIST" ++ "\x04\x00\x00\x00" ++ "INFO",
+    "MThd" ++ "\x00\x00\x00\x06" ++ "\x00\x00\x00\x01\x00\x78" ++ "MTrk" ++ "\x00\x00\x00\x04" ++ "\x00\xFF\x2F\x00",
+    "",
+};
+
+test "fuzz: SoundBank image loader and asset queries" {
+    var ctx: bank_ctx = .{};
+    try std.testing.fuzz(&ctx, fuzzSoundBankOne, .{ .corpus = &bank_corpus });
+}
+
+// --- Target 4: the WAV container readers and file classification ------------
+//
+// `wavInfoBounded` walks attacker-declared chunk sizes and hands its caller a
+// data pointer and a length that every downstream consumer (a decode, a copy, a
+// sample count) then trusts, and `detectFileType` runs the same bytes through a
+// second, independent classification. This target writes a well-formed IMA ADPCM
+// WAV, reads it back with both, then corrupts it and reads it back again, so
+// the two parsers are cross-checked against each other and against the bytes
+// actually present.
+
+const wav_ctx = struct {
+    adpcm: [512]u8 = undefined,
+    wav: [1024]u8 = undefined,
+};
+
+/// Bytes a WAV file is built from: the chunk ids and RIFF magic the readers
+/// look for, plus the noise a truncated or mislabelled file carries between
+/// them.
+const wav_byte_weights: []const Weight = &.{
+    w('R', 'W', 5), // "RIFF" / "WAVE"
+    w('A', 'E', 5),
+    w('f', 'm', 10), // "fmt ", "fact"
+    w('d', 'd', 5), // "data"
+    w('t', 't', 5),
+    w(' ', ' ', 20), // the space in "fmt " and "data"
+    w(0, 0xFF, 20), // chunk sizes, sample bytes, everything else
+};
+
+fn fuzzWavOne(ctx: *wav_ctx, smith: *std.testing.Smith) anyerror!void {
+    // A block-aligned ADPCM payload: wrapAdpcmInWav copies these bytes through
+    // untouched, so they are the untrusted half of the round trip.
+    const adpcm_len: usize = smith.sliceWeighted(
+        &ctx.adpcm,
+        &.{.{ .min = 1, .max = ctx.adpcm.len, .weight = 1 }},
+        wav_byte_weights,
+    );
+    const adpcm = ctx.adpcm[0..adpcm_len];
+    // block_size must be above 4*channels or the encoder rejects it; the
+    // rejection itself is part of the contract, so both outcomes are exercised.
+    const channels: u16 = if (smith.boolWeighted(1, 1)) 1 else 2;
+    const block_size: u32 = switch (smith.index(5)) {
+        0 => if (channels == 1) 256 else 512,
+        1 => 512,
+        2 => 4 * @as(u32, channels), // the boundary the guard rejects
+        3 => 0xFFFF, // the largest a WAV block-alignment field can hold
+        else => 8 * @as(u32, channels) + @as(u32, @intCast(smith.index(2048))),
+    };
+    const rate: u32 = switch (smith.index(4)) {
+        0 => 22050,
+        1 => 11025,
+        2 => 44100,
+        else => smith.valueRangeAtMost(u32, 0, std.math.maxInt(u32)), // absurd: must saturate, never wrap
+    };
+    const total: u32 = @intCast(smith.index(4096));
+
+    const wav = openmiles.wrapAdpcmInWav(testing.allocator, adpcm, block_size, channels, rate, total) catch |err| switch (err) {
+        error.OutOfMemory => return err,
+        else => return,
+    };
+    defer testing.allocator.free(wav);
+    try expectAdpcmRoundTrip(wav, adpcm.len, channels, rate, block_size, total);
+    try expectClassification(wav);
+
+    // Corrupt the file the way a bad download or a hostile pack would: flip a
+    // few bytes, then cut it at an arbitrary point. The readers must still
+    // report a data range that lies inside what they were handed.
+    const flips: u32 = smith.valueRangeAtMost(u32, 0, 6);
+    var f: u32 = 0;
+    while (f < flips) : (f += 1) wav[smith.index(wav.len)] = smith.valueRangeAtMost(u8, 0, 255);
+    try expectClassification(wav);
+    const cut: usize = smith.index(wav.len);
+    try expectBoundedInfo(wav.ptr, cut);
+    try expectClassification(wav[0..cut]);
+
+    // A buffer the readers never saw anything like: random chunk tags and
+    // sizes, including a declared data length far past the end.
+    const noise_len: usize = 12 + smith.index(600);
+    const n: usize = @intCast(smith.sliceWeighted(
+        ctx.wav[0..noise_len],
+        &.{.{ .min = noise_len, .max = noise_len, .weight = 1 }},
+        wav_byte_weights,
+    ));
+    const noise = ctx.wav[0..n];
+    @memcpy(noise[0..4], "RIFF");
+    @memcpy(noise[8..12], "WAVE");
+    try expectBoundedInfo(noise.ptr, n);
+    try expectClassification(noise);
+}
+
+/// Everything the writer put in the header has to come back out of the reader:
+/// the two walk the same chunks independently, so a disagreement is a bug in
+/// whichever one is wrong.
+fn expectAdpcmRoundTrip(
+    wav: []const u8,
+    adpcm_len: usize,
+    channels: u16,
+    rate: u32,
+    block_size: u32,
+    total: u32,
+) !void {
+    var info: openmiles.AILSOUNDINFO = .{};
+    try testing.expectEqual(@as(i32, 1), openmiles.wavInfoBounded(wav.ptr, wav.len, &info));
+    try testing.expectEqual(@as(i32, 0x0011), info.format);
+    try testing.expectEqual(@as(i32, 4), info.bits);
+    try testing.expectEqual(@as(i32, channels), info.channels);
+    try testing.expectEqual(rate, info.rate);
+    try testing.expectEqual(block_size, info.block_size);
+    try testing.expectEqual(@as(u32, @intCast(adpcm_len)), info.data_len);
+    // The fact chunk carries the per-channel sample count the writer was given.
+    try testing.expectEqual(total, info.samples);
+    const lo = @intFromPtr(wav.ptr);
+    const data = @intFromPtr(info.data_ptr.?);
+    try testing.expect(data >= lo + 12);
+    try testing.expect(data - lo + @as(usize, info.data_len) <= wav.len);
+}
+
+/// The clamp the reader exists for: a declared data length may never run past
+/// the bytes the caller actually passed, and the pointer it reports must point
+/// inside them.
+fn expectBoundedInfo(raw: [*]const u8, len: usize) !void {
+    if (len < 12) return;
+    var info: openmiles.AILSOUNDINFO = .{};
+    if (openmiles.wavInfoBounded(raw, len, &info) == 0) return;
+    const lo = @intFromPtr(raw);
+    const data = @intFromPtr(info.data_ptr orelse return);
+    if (data < lo or data - lo > len) return error.DataPointerOutsideImage;
+    try testing.expect(data - lo + @as(usize, info.data_len) <= len);
+}
+
+/// `detectFileType` must agree with the WAV reader it delegates to: an image the
+/// reader accepts as IMA ADPCM classifies as ADPCM_WAV (2) or OTHER_WAV (3), and
+/// an image it rejects never classifies as a WAV type at all.
+fn expectClassification(img: []const u8) !void {
+    if (img.len < 8) return;
+    const kind = openmiles.detectFileType(@constCast(img.ptr), @intCast(img.len));
+    var info: openmiles.AILSOUNDINFO = .{};
+    const parsed = openmiles.wavInfoBounded(img.ptr, img.len, &info) != 0;
+    if (!parsed) {
+        // 1/2/3/15 are the WAV classifications; none may be claimed for an
+        // image the chunk walk rejected.
+        try testing.expect(kind != 1 and kind != 2 and kind != 3 and kind != 15);
+        return;
+    }
+    switch (info.format) {
+        1 => try testing.expectEqual(@as(i32, 1), kind),
+        0x0011 => try testing.expect(kind == 2 or kind == 3),
+        0x0069 => try testing.expect(kind == 15 or kind == 3),
+        0x77 => try testing.expectEqual(@as(i32, 17), kind), // V12_VOICE
+        0x74 => try testing.expectEqual(@as(i32, 18), kind), // V24_VOICE
+        0x75 => try testing.expectEqual(@as(i32, 19), kind), // V29_VOICE
+        // Every other format tag is OTHER_WAV, unless it is an MPEG-wrapped
+        // WAV, which falls through to the MPEG scan and reports an audio type.
+        else => try testing.expect(kind == 3 or kind == 0 or kind > 19),
+    }
+}
+
+const adpcm_seed = [_]u8{ 0x11, 0x22, 0x33, 0x44 } ++ [_]u8{0x55} ** 60;
+const adpcm_wav_seed = "RIFF" ++ "\x4A\x00\x00\x00" ++ "WAVE" ++
+    "fmt " ++ "\x28\x00\x00\x00" ++ "\x11\x00\x01\x00" ++ "\x22\x56\x00\x00" ++
+    "\x00\x2C\x00\x00" ++ "\x00\x01\x04\x00" ++ "\x02\x00" ++
+    "fact" ++ "\x04\x00\x00\x00" ++ "\x40\x00\x00\x00" ++
+    "data" ++ "\x40\x00\x00\x00" ++ adpcm_seed[0..];
+
+const wav_corpus = [_][]const u8{
+    // A complete IMA ADPCM WAV: the shape the wrapper produces and the reader
+    // has to agree on field for field.
+    adpcm_wav_seed,
+    // The same file with a lying RIFF size and a data chunk running past the end.
+    adpcm_wav_seed[0..40] ++ "\xFF\xFF\xFF\xFF" ++ adpcm_seed[0..],
+    // A plain PCM WAV, and an extensible one whose subformat is not PCM.
+    "RIFF" ++ "\x2C\x00\x00\x00" ++ "WAVE" ++ "fmt " ++ "\x10\x00\x00\x00" ++
+        "\x01\x00\x02\x00" ++ "\x44\xAC\x00\x00" ++ "\x88\x58\x01\x00" ++
+        "\x04\x00\x10\x00" ++ "data" ++ "\x00\x00\x00\x00",
+    "RIFF" ++ "\x64\x00\x00\x00" ++ "WAVE" ++ "fmt " ++ "\x28\x00\x00\x00" ++
+        "\xFE\xFF\x02\x00" ++ "\x44\xAC\x00\x00" ++ "\x88\x58\x01\x00" ++ "\x04\x00\x10\x00" ++
+        "\x16\x00\x00\x00" ++ "\x03\x00\x00\x00" ++ "\x00\x00\x10\x00\x80\x00\x00\xAA\x00\x38\x9B\x71" ++
+        "data" ++ "\x00\x00\x00\x00",
+    // Not a WAV at all: the container magics the classifier knows.
+    "FORM" ++ "\x10\x00\x00\x00" ++ "XDIR" ++ "CAT " ++ "\x04\x00\x00\x00" ++ "XMID",
+    "OggS" ++ "\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00" ++ "Speex   " ++ "Speex   " ++ "1.2rc1",
+    "RIFF" ++ "\x10\x00\x00\x00" ++ "DLS ",
+    "MThd" ++ "\x00\x00\x00\x06" ++ "\x00\x00\x00\x01\x00\x78" ++ "MTrk" ++ "\x00\x00\x00\x04" ++ "\x00\xFF\x2F\x00",
+    // Truncated headers and empty input.
+    adpcm_wav_seed[0..12],
+    adpcm_wav_seed[0..4],
+    "",
+};
+
+test "fuzz: WAV container round trip and file classification" {
+    var ctx: wav_ctx = .{};
+    try std.testing.fuzz(&ctx, fuzzWavOne, .{ .corpus = &wav_corpus });
 }
