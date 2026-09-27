@@ -6214,6 +6214,43 @@ test "v8 playback delay + MMX available" {
     try testing.expectEqual(@as(i32, 1), dg.AIL_MMX_available());
 }
 
+test "playback delay holds the voice until the delay elapses on the engine clock" {
+    const allocator = testing.allocator;
+    const drv = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    const wav = try zeroWav(allocator);
+    defer allocator.free(wav);
+    try s.loadFromMemory(wav, true);
+
+    // No delay: the voice starts in the next mixed buffer.
+    dg.AIL_start_sample(s);
+    try testing.expectEqual(@as(u64, 0), s.scheduled_start_frames);
+
+    // 250 ms at 44100 is 11025 frames past the engine clock's reading at start.
+    api_v8b.AIL_set_sample_playback_delay(s, 250);
+    dg.AIL_start_sample(s);
+    const delayed: u64 = 11025;
+    try testing.expect(s.scheduled_start_frames >= delayed);
+    try testing.expect(s.scheduled_start_frames < delayed + 44100 / 10);
+
+    // The delay is an attribute, so it applies to every start until cleared.
+    dg.AIL_start_sample(s);
+    try testing.expect(s.scheduled_start_frames >= delayed);
+    api_v8b.AIL_set_sample_playback_delay(s, 0);
+    dg.AIL_start_sample(s);
+    try testing.expectEqual(@as(u64, 0), s.scheduled_start_frames);
+
+    // An absolute AIL_schedule_start_sample still wins over the relative delay.
+    api_v8b.AIL_set_sample_playback_delay(s, 250);
+    api_v9.AIL_schedule_start_sample(s, 500);
+    try testing.expectEqual(
+        @as(u64, 22050),
+        s.scheduled_start_frames,
+    );
+}
+
 const api_v7b = @import("api/v7.zig");
 test "MP3 inspector parses real Layer III frames" {
     // Two MPEG-1 Layer III frames, 128 kbps, 44100 Hz, stereo (header FF FB 90 00).

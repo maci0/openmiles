@@ -137,6 +137,16 @@ pub fn mixTimeMsToFrames(mix_ms: u64, sample_rate: u32) u64 {
     return @min(mix_ms, std.math.maxInt(u64) / rate) * rate / 1000;
 }
 
+/// Mixer milliseconds on the engine's own clock: the inverse of
+/// mixTimeMsToFrames, and the same clock AIL_schedule_start_sample's argument
+/// is expressed in. A delay of N ms is "now + N" on this clock, never a
+/// wall-clock instant, so a system-time step cannot move it.
+pub fn engineTimeMs(self: *DigitalDriver) u64 {
+    const rate = self.getSampleRate();
+    if (rate == 0) return 0;
+    return ma.ma_engine_get_time_in_pcm_frames(&self.engine) *| 1000 / rate;
+}
+
 /// A peak soft-limiter as a custom miniaudio node: passes audio below the knee
 /// untouched and saturates peaks toward unity so a bus can't clip.
 pub const LimiterNode = extern struct {
@@ -844,7 +854,9 @@ pub const Sample = struct {
     falloff_count: [4]u8 = [_]u8{0} ** 4,
     falloff_graph: [4][max_falloff_points]FalloffGraphPoint = undefined,
     // AIL_schedule_start_sample's mix timestamp, in mixer milliseconds, and the
-    // engine PCM frame it converts to (see setScheduledStartMs).
+    // absolute engine PCM frame the voice is scheduled to start at (0 =
+    // unscheduled, i.e. the next mixed buffer). AIL_set_sample_playback_delay
+    // places the same kind of frame ahead of "now" at each start.
     v9_schedule_time: u64 = 0,
     scheduled_start_frames: u64 = 0,
     v9_playback_delay: i32 = 0, // ms before playback starts (AIL_set_sample_playback_delay)
@@ -1383,6 +1395,18 @@ pub const Sample = struct {
             // previous start, so a plain restart would inherit that stale
             // schedule and wait for a point in the engine's past.
             ma.ma_sound_reset_start_time(&self.sound);
+            // AIL_set_sample_playback_delay: the voice waits until the engine
+            // clock has advanced past now + delay. Without this the delay was
+            // stored and read back but never applied, and a game staggering
+            // sounds by a few hundred ms heard them all at once. The delay is a
+            // sample attribute, so every start honours it; AIL_schedule_start_
+            // sample, called after this, overrides with its absolute point.
+            if (self.v9_playback_delay > 0) {
+                const rate = self.driver.getSampleRate();
+                const start_ms = engineTimeMs(self.driver) + @as(u64, @intCast(self.v9_playback_delay));
+                self.scheduled_start_frames = mixTimeMsToFrames(start_ms, rate);
+                ma.ma_sound_set_start_time_in_pcm_frames(&self.sound, self.scheduled_start_frames);
+            }
             // SDK wavefile.cpp AIL_API_start_sample rewinds to the beginning
             // (buf[tail].pos = 0) before playing -- it does NOT resume from the
             // current position. Continuing from where a sample was stopped is
