@@ -72,8 +72,12 @@ zig build -Dtarget=x86-windows -Doptimize=ReleaseFast -Dmss-version=5
 versions, checked before they run) besides Zig, since the `scripts/` gate and
 the workflows are linted too; `make lint` names any of the four that is
 missing, and CI installs them through the runner image. It checks `zig fmt`,
-shellchecks `scripts/*.sh`, lints `.github/workflows`, and asserts `src/mss.h`
-declares every symbol the export table exports, for each `-Dmss-version`.
+shellchecks `scripts/*.sh`, lints `.github/workflows`, and asserts that every
+declaration in `src/mss.h` agrees with the export table for each
+`-Dmss-version` (return type, argument count, calling convention, version
+range, struct layout). `src/mss.h` is a documented core subset, so symbols it
+does not declare are reported as a coverage count, not a failure; the per-symbol
+status for the rest is in [docs/API_STATUS.md](docs/API_STATUS.md).
 
 Every gate under `scripts/` follows one contract: `-h`/`--help` prints its own
 usage, findings go to stdout when they are the result and to stderr when they
@@ -278,11 +282,16 @@ int main(void)
 ```
 
 The header covers playback, streaming, MIDI, 3D, RIB, filters, the Quick API,
-the v6.5+ unified level/pan/reverb/low-pass and v7+ 3D calls on `HSAMPLE`, and
+the v6.5+ unified level/pan/reverb/low-pass and v7+ 3D calls on `HSAMPLE`,
 file I/O (`AIL_file_read`, `AIL_file_size`, `AIL_file_type`, and
-`AIL_set_file_callbacks` for routing file access through the game's own VFS).
-The v7 DSP-stage, v8/v9 event and SoundBank, and legacy `waveOut`/`midiOut`
-exports are not declared; see [docs/API_STATUS.md](docs/API_STATUS.md) for the
+`AIL_set_file_callbacks` for routing file access through the game's own VFS),
+and the `Miles*` event-system and SoundBank API a v8 or v9 build exports
+(`MilesStartupEventSystem`, `MilesAddSoundBank`, `MilesEnqueueEvent`,
+`MilesEnumerateSoundInstances`, and the rest, with the `MSS_FIRST` walk
+convention and the `MILESEVENTSOUNDSTATUS_*` and `MILESEVENT_ENQUEUE_*`
+constants). The v7 DSP-stage, the `AIL_add_*_event_step` event-text builders,
+the v9 per-bus mixer calls, and the legacy `waveOut`/`midiOut` exports are not
+declared; see [docs/API_STATUS.md](docs/API_STATUS.md) for the
 full list, and add your own declaration from the export table in
 `src/main.zig` if you need one.
 

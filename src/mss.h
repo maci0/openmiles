@@ -15,11 +15,12 @@
  * is 90, the build `zig build` produces with no options.
  *
  * This header covers the core surface a title needs for playback, streaming,
- * MIDI, 3D, RIB, filters, timers, the Quick API, and file I/O. Nothing else is
- * declared: the v7 DSP-stage and v8/v9 event/SoundBank surfaces, and the
- * legacy midiOut/DLS spellings, are exported by the DLL but absent here. For
- * the full per-function list see docs/API_STATUS.md, and the export table
- * itself in src/main.zig.
+ * MIDI, 3D, RIB, filters, timers, the Quick API, file I/O, and (from 8.0 on)
+ * the Miles* event-system and SoundBank API. Nothing else is declared: the
+ * v7 DSP-stage surface, the AIL_add_*_event_step event-text builders, the
+ * per-bus v9 mixer calls, and the legacy midiOut/DLS spellings are exported by
+ * the DLL but absent here. For the full per-function list see
+ * docs/API_STATUS.md, and the export table itself in src/main.zig.
  */
 
 #ifndef OPENMILES_MSS_VERSION
@@ -62,6 +63,10 @@
 typedef int S32;
 typedef unsigned int U32;
 typedef float F32;
+/* For the 64-bit-by-value fields the v8/v9 event API passes (queue IDs, label
+ * filters, instance IDs). Only the layout of `unsigned long long` is assumed,
+ * which every compiler agrees on for these eight bytes. */
+typedef unsigned long long U64;
 
 typedef void* HSAMPLE;
 typedef void* HSTREAM;
@@ -93,6 +98,21 @@ typedef void* HREDBOOK;
 #define REDBOOK_PLAYING          1
 #define REDBOOK_PAUSED           2
 #define REDBOOK_ERROR            3
+
+/* Event-system constants (8.0 and later). A sound instance carries a
+ * MILESEVENTSOUNDSTATUS mask; an instance that is in none of these states has
+ * left the system. */
+#define MILESEVENTSOUNDSTATUS_PENDING   0x1
+#define MILESEVENTSOUNDSTATUS_PLAYING   0x2
+#define MILESEVENTSOUNDSTATUS_COMPLETE  0x4
+
+/* The event text handed to MilesEnqueueEvent is freed once the event has been
+ * consumed rather than recycled into the command buffer. */
+#define MILESEVENT_ENQUEUE_FREE_EVENT   0x2
+
+/* Seeds an enumerator walk: write this into the enumeration cursor before the
+ * first MilesEnumerate* call, and pass back what each call wrote. */
+#define MSS_FIRST              ((HMSSENUM)-1)
 
 /* MSS 8.0 inserted `channel_mask` (U32) between `channels` and `samples` for
  * multichannel WAVE_FORMAT_EXTENSIBLE data, taking the struct from 9 fields /
@@ -143,6 +163,41 @@ _Static_assert(offsetof(AILSOUNDINFO, channel_mask) == MSS_AILSOUNDINFO_CHANNEL_
 #endif
 #endif
 #endif
+
+/* MILESEVENTSTATE: the counters MilesGetEventSystemState fills in. */
+typedef struct _MILESEVENTSTATE {
+    S32 CommandBufferSize;
+    S32 HeapSize;
+    S32 HeapRemaining;
+    S32 LoadedSoundCount;
+    S32 PlayingSoundCount;
+    S32 LoadedBankCount;
+    S32 PersistCount;
+    S32 SoundBankManagementMemory;
+    S32 SoundDataMemory;
+} MILESEVENTSTATE;
+
+/* MILESEVENTSOUNDINFO: one live sound instance, as
+ * MilesEnumerateSoundInstances reports it. The three leading U64s are
+ * byte-aligned identically under either alignment rule, so a consumer
+ * compiling this for the 32-bit x86 target reads the same offsets the DLL
+ * writes. */
+typedef struct _MILESEVENTSOUNDINFO {
+    U64 QueuedID;
+    U64 InstanceID;
+    U64 EventID;
+    void* Sample;
+    void* Stream;
+    void* UserBuffer;
+    S32 UserBufferLen;
+    S32 Status;
+    U32 Flags;
+    S32 UsedDelay;
+    F32 UsedVolume;
+    F32 UsedPitch;
+    char const* UsedSound;
+    S32 HasCompletionEvent;
+} MILESEVENTSOUNDINFO;
 
 typedef struct _AILREDBOOKTEXT {
     U32 count;
@@ -472,6 +527,176 @@ void        MSS_CALLBACK AIL_set_stream_reverb_levels(HSTREAM stream, F32 dry_le
 void        MSS_CALLBACK AIL_stream_reverb_levels(HSTREAM stream, F32* dry_level, F32* wet_level);
 void        MSS_CALLBACK AIL_set_stream_low_pass_cut_off(HSTREAM stream, F32 cut_off);
 F32         MSS_CALLBACK AIL_stream_low_pass_cut_off(HSTREAM stream);
+#endif
+
+// Event system / SoundBank API (8.0 and later)
+// The `Miles*` names are what the 8.0 and 9.x DLLs export; the 9.x SDK only
+// aliases AIL_* spellings onto them, so calling Miles* directly is correct on
+// both. Handles are opaque and are never freed by the DLL: a system from
+// MilesStartupEventSystem lives until MilesShutdownEventSystem, a bank from
+// MilesAddSoundBank until MilesReleaseSoundBank.
+// Several calls take the 64-bit fields (queue IDs, label filters, instance IDs)
+// by value, which on the 32-bit stdcall ABI occupies two stack slots. A 32-bit
+// declaration there would corrupt the caller's stack, so U64 is the type.
+#if MSS_AT_LEAST(80)
+
+/* Start an event system over `driver` (an HDIGDRIVER, or NULL for a standalone
+ * one) with a command buffer of `command_buf_len` bytes. `memory_buf` and
+ * `memory_len` are a caller-supplied scratch buffer the DLL reserves for
+ * persistent presets; NULL with a 0 length lets the DLL use the heap. Returns
+ * the system handle, or NULL with the reason in AIL_last_error(). */
+void*       MSS_CALLBACK MilesStartupEventSystem(void* driver, S32 command_buf_len, void* memory_buf, S32 memory_len);
+void        MSS_CALLBACK MilesShutdownEventSystem(void);
+#if MSS_AT_LEAST(90)
+/* Attach a second system to an existing one; returns the new handle. */
+void*       MSS_CALLBACK MilesAddEventSystem(void* driver);
+#endif
+
+/* Heap and instance counters for the system. `state` is left untouched when it
+ * is NULL. A v9 build takes the system to read; a v8 build has one global
+ * system and takes only the output. */
+#if MSS_AT_LEAST(90)
+void        MSS_CALLBACK MilesGetEventSystemState(void* system, MILESEVENTSTATE* state);
+#else
+void        MSS_CALLBACK MilesGetEventSystemState(MILESEVENTSTATE* state);
+#endif
+
+#if MSS_AT_LEAST(90)
+/* Variables: the name is resolved against the bank's and the application's
+ * variable blocks, and an unknown name is a no-op rather than an error. The
+ * Get forms report whether the name resolved and write through `value` when it
+ * did. `system` is a handle, not a pointer into the heap. A v8 build has one
+ * global system and does not export these four at all. */
+void        MSS_CALLBACK MilesSetVarI(U32 system, char const* name, S32 value);
+void        MSS_CALLBACK MilesSetVarF(U32 system, char const* name, F32 value);
+S32         MSS_CALLBACK MilesGetVarI(U32 system, char const* name, S32* value);
+S32         MSS_CALLBACK MilesGetVarF(U32 system, char const* name, F32* value);
+#endif
+
+/* Queue a compiled event for playback. `event` points at event text as
+ * AIL_create_event or AIL_get_event_contents produced it; `user_buffer` and
+ * `user_buffer_len` attach caller data to the resulting instance, which the
+ * instance reports back through MilesEnumerateSoundInstances. `flags` takes
+ * the MILESEVENT_ENQUEUE_* values. The return is the queue ID that
+ * MilesEnumerateSoundInstances matches on, or 0 if the event was rejected. */
+U64         MSS_CALLBACK MilesEnqueueEvent(void const* event, void* user_buffer, S32 user_buffer_len, S32 flags, U64 event_filter);
+#if MSS_AT_LEAST(90)
+/* The same, against one named event system instead of the current one, and
+ * against an event named rather than supplied as text. */
+U64         MSS_CALLBACK MilesEnqueueEventContext(void* system, void const* event, void* user_buffer, S32 user_buffer_len, S32 flags, U64 event_filter);
+U64         MSS_CALLBACK MilesEnqueueEventByName(char const* event_name);
+#endif
+
+/* Begin/Complete bracket the frames a game enqueues, so a batch of events all
+ * resolve their variables against one consistent view. Both report whether the
+ * queue was in the matching state. */
+S32         MSS_CALLBACK MilesBeginEventQueueProcessing(void);
+S32         MSS_CALLBACK MilesCompleteEventQueueProcessing(void);
+void        MSS_CALLBACK MilesClearEventQueue(void);
+
+/* Start one sound out of a bank. `sound_name` and `labels` are bank-relative
+ * names; NULL starts the bank default, and NULL labels start every instance
+ * carrying the sound. Returns the instance ID. */
+U64         MSS_CALLBACK MilesStartSoundInstance(void* bank, char const* sound_name, U32 loop_count, S32 stream, char const* labels, void* user_buffer, S32 user_buffer_len, S32 user_buffer_flags);
+/* Stop, pause, or resume every live instance carrying `labels`, or every
+ * instance when `labels` is NULL. `filter` is a mask of instance IDs to leave
+ * alone. Returns the number of instances affected. */
+U64         MSS_CALLBACK MilesStopSoundInstances(char const* labels, U64 filter);
+U64         MSS_CALLBACK MilesPauseSoundInstances(char const* labels, U64 filter);
+U64         MSS_CALLBACK MilesResumeSoundInstances(char const* labels, U64 filter);
+
+/* Enumerate live instances. Seed `*io_next` with MSS_FIRST for the first call
+ * and pass back what the previous call wrote; 0 ends the walk. `status` is a
+ * mask of MILESEVENTSOUNDSTATUS_* and 0 means every status. `labels` filters,
+ * `search_for_id` restricts to one instance, and `out_info` receives the
+ * MILESEVENTSOUNDINFO for the instance that was found (NULL to skip it). The
+ * v8 build drops the system argument and narrows the instance filter to 32
+ * bits, which is its only search granularity. */
+#if MSS_AT_LEAST(90)
+S32         MSS_CALLBACK MilesEnumerateSoundInstances(void* system, void** io_next, S32 status, char const* labels, U64 search_for_id, void* out_info);
+#else
+S32         MSS_CALLBACK MilesEnumerateSoundInstances(void* system, void** io_next, S32 status, char const* labels, U32 search_for_id, void* out_info);
+#endif
+
+/* Enumerate the names held as persistent presets, with the same MSS_FIRST
+ * seeding as the instance walk. `*out_name` receives a string that stays valid
+ * until the bank is released. */
+#if MSS_AT_LEAST(90)
+S32         MSS_CALLBACK MilesEnumeratePresetPersists(void* system, void** io_next, char** out_name);
+#else
+S32         MSS_CALLBACK MilesEnumeratePresetPersists(void** io_next, char** out_name);
+#endif
+
+#if MSS_AT_LEAST(90)
+/* Seek a playing instance. `offset` is in samples or in milliseconds, decided
+ * by `is_ms`; an offset before the start clamps to the start. */
+void        MSS_CALLBACK MilesSetSoundStartOffset(U32 instance, S32 offset, S32 is_ms);
+#endif
+
+/* Cap how many instances may carry a label at once, as a whitespace-separated
+ * list of `label count` pairs (`"footstep 4 door 2"`); matching is
+ * case-insensitive and a count of 0 evicts every instance carrying the label
+ * when the next one starts. A v8 build has one global system and takes only
+ * the limits string. */
+#if MSS_AT_LEAST(90)
+S32         MSS_CALLBACK MilesSetSoundLabelLimits(void* system, char const* sound_limits);
+#else
+S32         MSS_CALLBACK MilesSetSoundLabelLimits(char const* sound_limits);
+#endif
+
+/* Load a bank. `name` is the name the bank's assets resolve under, or NULL for
+ * the name the file carries; a `name` that does not match the bank's own is
+ * rejected with a NULL return. Returns the bank handle. A v8 build loads the
+ * bank under its own name and takes only the filename. */
+#if MSS_AT_LEAST(90)
+void*       MSS_CALLBACK MilesAddSoundBank(char const* filename, char const* name);
+#else
+void*       MSS_CALLBACK MilesAddSoundBank(char const* filename);
+#endif
+S32         MSS_CALLBACK MilesReleaseSoundBank(void* bank);
+/* Resolve a named event to its compiled text, or NULL if the bank has no such
+ * event. The bytes stay valid until the bank is released. */
+void const* MSS_CALLBACK MilesFindEvent(void* bank, char const* event_name);
+#if MSS_AT_LEAST(90)
+/* Duration in milliseconds of a named event across the loaded banks, or -1 if
+ * no bank carries it. */
+S32         MSS_CALLBACK MilesGetEventLength(char const* event_name);
+#endif
+/* A multi-line dump of the loaded banks and their assets, in a buffer the DLL
+ * owns. */
+char const* MSS_CALLBACK MilesTextDumpEventSystem(void);
+
+/* Install a 32-bit xorshift routine the event VM draws random choices from, and
+ * the callback that receives an event the VM could not execute. A NULL resets
+ * either to the built-in. */
+void        MSS_CALLBACK MilesRegisterRand(void* rand);
+void        MSS_CALLBACK MilesSetEventErrorCallback(void* callback);
+void        MSS_CALLBACK MilesSetBankFunctions(void const* functions);
+#if MSS_AT_LEAST(90)
+/* Function table the SDK's audition loader would install; it takes an opaque
+ * table and is accepted and ignored. */
+void        MSS_CDECL    MilesEventSetAuditionFunctions(void const* functions);
+/* The bank loader's function table, which this build has no table to hand
+ * back and answers with NULL. */
+void const* MSS_CALLBACK MilesGetBankFunctions(void);
+/* Opt into telemetry and the lightweight timer; both take the owning context
+ * or NULL and are accepted and ignored. */
+void        MSS_CALLBACK MilesUseTelemetry(void* context);
+void        MSS_CALLBACK MilesUseTmLite(void* context);
+
+/* Background file reads. Start one with MilesAsyncFileRead, poll it with
+ * MilesAsyncFileStatus until it reports a completion code, and drop it with
+ * MilesAsyncFileCancel; MilesAsyncStartup and MilesAsyncShutdown bracket the
+ * whole set. MilesAsyncSetPaused stops delivery without cancelling. */
+S32         MSS_CALLBACK MilesAsyncStartup(void);
+S32         MSS_CALLBACK MilesAsyncShutdown(void);
+S32         MSS_CALLBACK MilesAsyncFileRead(void* request);
+S32         MSS_CALLBACK MilesAsyncFileCancel(void* request);
+S32         MSS_CALLBACK MilesAsyncFileStatus(void* request, U32 ms);
+void        MSS_CALLBACK MilesAsyncSetPaused(S32 is_paused);
+void        MSS_CALLBACK MilesRequeueAsyncs(void);
+#endif
+
 #endif
 
 // Timer API

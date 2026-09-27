@@ -188,16 +188,47 @@ def arg_count(params):
     params = params.strip()
     if params in ("", "void"):
         return 0
+    return sum(1 for _ in split_args(params))
+
+
+def slot_count(params):
+    """Stack slots `params` occupies on the x86 stdcall ABI.
+
+    An export's stack size is measured in four-byte slots, and one argument is
+    one slot -- unless it is a 64-bit value, which is passed as two adjacent
+    slots. The v8/v9 event API passes queue IDs and instance filters by value
+    that way, so counting the parameters alone would demand a declaration that
+    splits each U64 into a `lo, hi` pair the DLL never asked for.
+    """
+    params = params.strip()
+    if params in ("", "void"):
+        return 0
+    return sum(slot_width(arg) // 4 for arg in split_args(params))
+
+
+def slot_width(arg):
+    """Bytes one top-level parameter occupies: 8 for a U64, 4 otherwise."""
+    declared_type = arg.strip().split(" ")[0].strip().rstrip("[]").lstrip("*")
+    return 8 if declared_type == "U64" else 4
+
+
+def split_args(params):
+    """The top-level parameters of a declaration, commas inside ()/[]/{} ignored."""
+    args = []
     depth = 0
-    n = 1
+    current = ""
     for ch in params:
-        if ch in "([{":
+        if ch in "([":
             depth += 1
         elif ch in ")]}":
             depth -= 1
-        elif ch == "," and depth == 0:
-            n += 1
-    return n
+        if ch == "," and depth == 0:
+            args.append(current)
+            current = ""
+        else:
+            current += ch
+    args.append(current)
+    return args
 
 
 def parse_never_export(text):
@@ -302,9 +333,9 @@ def decl_problems(version, decl, exports, never_export, rets):
 
     problems = []
     arities = {v[0] for v in live}
-    if arg_count(params) not in arities:
+    if slot_count(params) not in arities:
         problems.append(
-            f"v{version} ARITY       {name} takes {arg_count(params)} args in the header, "
+            f"v{version} ARITY       {name} takes {slot_count(params)} stack slots in the header, "
             f"export expects {'/'.join(str(a) for a in sorted(arities))}"
         )
     impl = set()
