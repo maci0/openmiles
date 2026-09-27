@@ -6,7 +6,8 @@ plugin loader in `src/rib/`, and the vendored headers in `deps/`.
 
 Every reference below is written as `path:line anchor`, and
 `scripts/check_threat_model_refs.py` asserts the anchor is on that line, so a
-reference that drifts fails the build rather than misleading the next pass.
+reference that drifts fails the `make lint` gate rather than misleading the next
+pass.
 
 OpenMiles is a library loaded into an unprivileged, single-user desktop process.
 It opens no listening socket, serves no HTTP or RPC, and has no database,
@@ -24,14 +25,15 @@ to set both.
 | # | Threat | Boundary | Impact | Status |
 |---|--------|----------|--------|--------|
 | 1 | Untrusted plugin image written to the temp directory and `LoadLibrary`'d | file/env to process | Code execution as the game user | Mitigated: unpredictable name, exclusive create (`src/api/rib.zig:194 randomSecure`, `src/api/rib.zig:214 exclusive`) |
-| 2 | `.asi`/`.m3d`/`.flt` files in the game directory loaded and executed at startup | file to process | Code execution as the game user | Unmitigated by design: the host game's own directory is trusted. Listed in [Deployment](#4-deployment-artifact-boundary) |
-| 3 | Malformed soundbank / event bytecode (`.BANK`) | file to process | Crash, in-process memory corruption, audio DoS | Partial: bounds chokepoint in `src/engine/soundbank.zig:158 rdU32`, step decode bounded in `src/engine/event.zig:483 copyString` |
-| 4 | Malformed XMIDI / MIDI sequence | file to process | Crash, memory exhaustion | Partial: saturating cursor arithmetic, fixed loop stack (`src/engine/xmidi.zig:377 xmidiToSmf`, `src/engine/midi.zig:229 xmidi_loop_stack`) |
-| 5 | Malformed or oversized audio file (MP3/OGG/WAV/FLAC) | file to process | Crash, memory exhaustion | Partial: declared-size caps in `src/engine/audio_detect.zig:15 max_declared_image_size`; no cap on the raw file read (`src/engine/digital.zig:1110 loadFromFile`) |
-| 6 | App VFS callback reports an arbitrary file size | game to DLL | Heap exhaustion in the game process | Unmitigated (`src/root.zig:251 fileCallbackReadAll`) |
-| 7 | Caller-supplied pointer/length pairs trusted verbatim | game to DLL | Read/write of game memory on a bad call | Unmitigated by ABI necessity (see [Game process boundary](#1-game-process-boundary)) |
-| 8 | Debug logging enabled by environment variable | environment to process | Verbose internal logging to disk, paths and asset names disclosed | Mitigated: opt-in, 64 MiB cap (`src/utils/logger.zig:14 max_log_bytes`) |
-| 9 | `TMPDIR` redirects the ASI image write | environment to process | PE image written into an attacker-chosen directory | Unmitigated (`src/api/rib.zig:137 TMPDIR`) |
+| 2 | `.asi`/`.m3d`/`.flt` files in the game directory, or in a game-named redist directory, loaded and executed at startup | file to process | Code execution as the game user | Unmitigated by design: the host game's own directory is trusted. Listed in [Deployment](#4-deployment-artifact-boundary) |
+| 3 | `AIL_WAV_file_write` creates or truncates a game-named path | game to DLL, DLL to disk | Overwrite of any file the game user can write | Unmitigated by ABI necessity (`src/api/digital.zig:876 AIL_WAV_file_write`) |
+| 4 | Malformed soundbank / event bytecode (`.BANK`) | file to process | Crash, in-process memory corruption, audio DoS | Partial: bounds chokepoint in `src/engine/soundbank.zig:158 rdU32`, step decode bounded in `src/engine/event.zig:483 copyString` |
+| 5 | Malformed XMIDI / MIDI sequence | file to process | Crash, memory exhaustion | Partial: saturating cursor arithmetic, fixed loop stack (`src/engine/xmidi.zig:377 xmidiToSmf`, `src/engine/midi.zig:229 xmidi_loop_stack`) |
+| 6 | Malformed or oversized audio file (MP3/OGG/WAV/FLAC) | file to process | Crash, memory exhaustion | Partial: declared-size caps in `src/engine/audio_detect.zig:15 max_declared_image_size`; no cap on the raw file read (`src/engine/digital.zig:1110 loadFromFile`) |
+| 7 | App VFS callback reports an arbitrary file size | game to DLL | Heap exhaustion in the game process | Unmitigated (`src/root.zig:251 fileCallbackReadAll`) |
+| 8 | Caller-supplied pointer/length pairs trusted verbatim | game to DLL | Read/write of game memory on a bad call | Unmitigated by ABI necessity (see [Game process boundary](#1-game-process-boundary)) |
+| 9 | Debug logging enabled by environment variable | environment to process | Verbose internal logging to disk, paths and asset names disclosed | Mitigated: opt-in, 64 MiB cap (`src/utils/logger.zig:14 max_log_bytes`) |
+| 10 | `TMPDIR` redirects the ASI image write | environment to process | PE image written into an attacker-chosen directory | Unmitigated (`src/api/rib.zig:137 TMPDIR`) |
 
 ## 1. Game process boundary
 
@@ -62,6 +64,15 @@ these are not remote attack vectors, they are the ABI contract.
 - Path inputs: `AIL_set_redist_directory` (`src/api/digital.zig:29 AIL_set_redist_directory`),
   `AIL_quick_load` (`src/api/quick.zig:21 AIL_quick_load`), `RIB_load_application_providers`
   (`src/api/rib.zig:40 RIB_load_application_providers`).
+- `AIL_WAV_file_write` (`src/api/digital.zig:876 AIL_WAV_file_write`) takes a
+  game-supplied filename and creates or truncates the file at that path, then
+  writes a WAV built from a game-supplied `(data, len)` pair
+  (`src/api/digital.zig:899 createFile`). It is the only export that writes
+  audio output to disk, and the write is a truncating create rather than an
+  append, so a caller-chosen name destroys whatever was there. No path
+  validation, no extension check, no prompt. The `AIL_file_write` export
+  (`src/api/file.zig:20 AIL_file_write`) reaches the same create path for
+  arbitrary bytes.
 
 There is no `AIL_open_file`/`AIL_close_file`/`HSFILE` handle API. The whole file
 service surface is `src/api/file.zig` plus the callback VFS in `src/root.zig:244 cb_file_open`.
@@ -75,7 +86,7 @@ hostile file, download, or mod pack reaches.
 |-------|-------------|-------|
 | Audio file | `AIL_load_sample` / `AIL_open_stream` / `AIL_quick_load` -> `Sample.loadFromFile` (`src/engine/digital.zig:1110 loadFromFile`) | Rejects only a zero length, then allocates the whole file. The 256 MiB cap in `readWholeFile` (`src/root.zig:286 max_file_load_bytes`) applies only to that helper. |
 | Audio in memory | `Sample.load` (`src/engine/digital.zig:1128 load`) | Caller length used as a slice length with no cap. |
-| XMIDI / MIDI | `AIL_init_sequence` -> `xmidiToSmf` (`src/engine/xmidi.zig:377 xmidiToSmf`) | Declared extents clamped to the buffer with saturating arithmetic; VLQ continuation capped at 4 bytes (`src/engine/xmidi.zig:80 bytes_read`); FOR/NEXT loop stack fixed at 8 with a depth check (`src/engine/midi.zig:460 xmidi_loop_depth`). |
+| XMIDI / MIDI | `AIL_init_sequence` -> `xmidiToSmf` (`src/engine/xmidi.zig:377 xmidiToSmf`) | Declared extents clamped to the buffer with saturating arithmetic; VLQ continuation capped at 4 bytes (`src/engine/xmidi.zig:80 bytes_read`); FOR/NEXT loop stack fixed at 8 with a depth check (`src/engine/midi.zig:228 xmidi_loop_depth`). |
 | BANK soundbank | `AIL_open_soundbank` (`src/api/v8.zig:514 AIL_open_soundbank`), `AIL_open_soundbank_v8` (`src/api/v8.zig:920 AIL_open_soundbank_v8`) -> `loadFromMemory` (`src/engine/soundbank.zig:443 loadFromMemory`) | Tag, version, and `meta_size` validated before any allocation; every offset read passes through the bounds-checked `rdU32` (`src/engine/soundbank.zig:158 rdU32`); metadata is NUL-terminated by an allocated sentinel. |
 | Event bytecode | `AIL_next_event_step` (`src/api/v8.zig:498 AIL_next_event_step`) -> `nextStep` (`src/engine/event.zig:624 nextStep`) | Step type is range-checked before the enum conversion, the header chain is depth-limited, and string copies refuse to pass `wlimit` (`src/engine/event.zig:483 copyString`). |
 | DLS container | `AIL_extract_DLS` / `AIL_find_DLS` / `AIL_list_DLS` / `AIL_merge_DLS_with_XMI` | Pointer images capped at 256 MiB (`src/engine/dls_container.zig:74 max_ptr_image_size`); merged image size checked with `std.math.add`. `AIL_list_DLS` takes a pointer with no length and derives one from the header, so a lying RIFF size drives a scan past the caller's buffer (`src/api/dls.zig:348 AIL_list_DLS`). |
@@ -111,25 +122,39 @@ than any validated config file.
 
 ## 4. Deployment artifact boundary
 
-`AIL_startup` (`src/api/digital.zig:17 AIL_startup`) reaches `startup()`
-(`src/root.zig:1067 loadApplicationProviders`), which scans the current working
-directory and loads every file with a plugin extension through the OS loader:
-`loadApplicationProviders(".")` (`src/root.zig:467 loadApplicationProviders`).
+Two entry points load plugin code, and both end at the same `Provider.load`
+choke point, loading every file with a plugin extension through the OS loader.
 
-Controls present:
+1. `AIL_startup` (`src/api/digital.zig:17 AIL_startup`) reaches `startup()`,
+   which scans the current working directory: `loadApplicationProviders(".")`
+   (`src/root.zig:1067 loadApplicationProviders`, defined at
+   `src/root.zig:467 loadApplicationProviders`).
+2. `AIL_set_redist_directory` (`src/api/digital.zig:29 AIL_set_redist_directory`)
+   records a game-supplied directory, and `loadAllAsi` scans it
+   (`src/engine/digital.zig:527 loadAllAsi`), called on a directory change
+   (`src/root.zig:706 loadAllAsi`) and again when a digital driver opens
+   (`src/root.zig:1108 loadAllAsi`). The directory is not restricted to the game
+   directory: the game names any path, so a redist directory pointing at a
+   download or per-user shared folder extends plugin execution to every plugin
+   extension found there.
+
+Controls present, on both scans:
 
 - Extension allowlist `.asi`, `.m3d`, `.flt` (`src/root.zig:443 isPluginExtension`).
 - Filename rejection of `..`, `/`, `\` so a directory entry cannot escape the
   scan directory (`src/root.zig:449 isSafePluginFilename`).
 - A rescan that finds an already-loaded module skips it, so one module is
-  loaded once per process (`src/root.zig:512 isPluginAlreadyLoaded`).
+  loaded once per process: `src/root.zig:512 isPluginAlreadyLoaded` for the
+  application list, and `src/root.zig:525 isPluginLoadedAnywhere` for the
+  redist scan, which also skips modules the application list already holds.
 - The loaded module runs in-process with the game's full authority. This is the
   original MSS design, and plugins are unsigned.
 
 Gaps:
 
 - No signature check, no allowlist of known plugins, no prompt. Any file with a
-  plugin extension in the game directory executes with game privileges.
+  plugin extension in the game directory, or in a directory the game points the
+  redist search at, executes with game privileges.
 - `Provider.load` resolves the path case-insensitively before loading
   (`src/rib/provider.zig:108 maybeResolveCaseInsensitivePath`), so a symlink or
   alternate-case name reaches whatever the resolver finds.
@@ -179,8 +204,11 @@ Gaps:
 - **Audio output.** Corrupted 3D or reverb state is a functional defect, not a
   security one.
 - **Local confidentiality.** The debug log and the temp plugin file are the only
-  places the module writes to disk. Neither holds credentials: OpenMiles stores
-  no secrets, no keys, and no user data of any kind.
+  places the module writes data it chose. Two exports also write to a
+  caller-named path: `AIL_WAV_file_write` and `AIL_file_write`, both
+  truncating creates. None of these holds credentials: OpenMiles stores no
+  secrets, no keys, and no user data of any kind. The exposure is overwrite
+  of a file the game user can write, not disclosure of one.
 - **No remote assets, no network egress.** The module never opens a socket.
 
 ## 7. Mitigation map
@@ -225,23 +253,29 @@ Single points of failure:
 
 ## Unmitigated threats, ranked
 
-1. Unsigned plugin execution from the game directory (`src/root.zig:467 loadApplicationProviders`).
-   Inherent to the compatibility target; a documented deployment note is the
-   available mitigation.
-2. Uncapped whole-file allocation whenever a VFS is installed. `readWholeFile`
+1. Unsigned plugin execution from the game directory (`src/root.zig:467 loadApplicationProviders`),
+   and from any directory the game hands to `AIL_set_redist_directory`
+   (`src/engine/digital.zig:527 loadAllAsi`). Inherent to the compatibility
+   target; a documented deployment note is the available mitigation.
+2. `AIL_WAV_file_write` truncates and overwrites a caller-named path
+   (`src/api/digital.zig:899 createFile`) with no extension check, no path
+   validation, and no append. A hostile in-process caller already has the
+   game's authority, so the exposure is to a buggy or confused game writing
+   over a file it did not mean to name.
+3. Uncapped whole-file allocation whenever a VFS is installed. `readWholeFile`
    returns `fileCallbackReadAll` before reaching its own cap
-   (`src/root.zig:291 cb_file_open`), and `ailFileRead` takes the same
-   uncapped path (`src/root.zig:319 cb_file_open`): a large or lying file
+   (`src/root.zig:296 fileCallbackReadAll`), and `ailFileRead` takes the same
+   uncapped path (`src/root.zig:320 fileCallbackReadAll`): a large or lying file
    size turns into a large allocation, with `OutOfMemory` as the only outcome.
-3. Game-VFS-reported size trusted for allocation, and trusted a second time by
+4. Game-VFS-reported size trusted for allocation, and trusted a second time by
    `AIL_file_read`'s `malloc` (`src/root.zig:336 std.c.malloc`).
-4. `AIL_list_DLS` derives a length from a caller pointer's header and scans up
+5. `AIL_list_DLS` derives a length from a caller pointer's header and scans up
    to 256 MiB past it (`src/api/dls.zig:348 AIL_list_DLS`).
-5. XMIDI event pre-allocation with no ceiling (`src/engine/xmidi.zig:204 ensureTotalCapacity`).
-6. No frame-count or duration limit on MP3 enumeration
+6. XMIDI event pre-allocation with no ceiling (`src/engine/xmidi.zig:204 ensureTotalCapacity`).
+7. No frame-count or duration limit on MP3 enumeration
    (`src/engine/mp3.zig:189 enumerateFrames`): bounded by the caller's loop, not
    by the module.
-7. `TMPDIR` chooses the directory the ASI image is written to
+8. `TMPDIR` chooses the directory the ASI image is written to
    (`src/api/rib.zig:137 TMPDIR`).
-8. Debug logging of paths and asset names in a game directory a second local
+9. Debug logging of paths and asset names in a game directory a second local
    user can read (`src/utils/logger.zig:42 builtin.mode`).

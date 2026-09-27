@@ -10,9 +10,9 @@ and the `.asi`/`.m3d`/`.flt` plugin DLLs it loads from the game's directory.
 
 The full model, including the current risk ranking, is in
 [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md). Every control it claims exists is
-cited as `file:line anchor`, and `make check-threat-model` fails the build when
-an anchor no longer sits on that line, so a moved control cannot keep a
-"mitigated" verdict.
+cited as a `file:line anchor`, and `make check-threat-model` (also run by
+`make lint`) fails when an anchor no longer sits on that line, so a moved
+control cannot keep a "mitigated" verdict.
 
 ## Supported versions
 
