@@ -227,8 +227,13 @@ var g_persists: std.ArrayListUnmanaged([:0]u8) = .empty;
 
 fn persistAdd(name: []const u8) void {
     if (name.len == 0) return;
+    // Case-blind, like every other name registry in this file (see NameKey): a
+    // preset persisted as "Menu" and again as "menu" is one preset, so
+    // PersistCount counts it once and the enumerator yields it once. An
+    // exact-byte compare stored both, so the count overstated what was
+    // persisted and two entries named the same preset.
     for (g_persists.items) |n| {
-        if (std.mem.eql(u8, n, name)) return; // dedup by name
+        if (std.ascii.eqlIgnoreCase(n, name)) return;
     }
     const dup = openmiles.global_allocator.dupeZ(u8, name) catch return;
     g_persists.append(openmiles.global_allocator, dup) catch openmiles.global_allocator.free(dup);
@@ -614,8 +619,12 @@ pub fn MilesEnqueueEventContext(context: ?*anyopaque, event: ?[*]const u8, user_
 }
 pub fn MilesEnqueueEventByName(name: ?[*:0]const u8) callconv(.winapi) u64 {
     const nm = std.mem.span(name orelse return 0);
-    const ev = openmiles.soundbank.containerFindEvent(nm) orelse return 0;
-    return enqueueParse(ev, null, 0, 0);
+    // The event string belongs to the bank it was found in, and the walk below
+    // reads it step by step, so the bank is held for the whole parse: a
+    // concurrent MilesReleaseSoundBank would otherwise free it mid-walk.
+    const found = openmiles.soundbank.containerFindEventOwned(nm) orelse return 0;
+    defer found.bank.deinit();
+    return enqueueParse(found.data, null, 0, 0);
 }
 // Processing moves new (pending) instances to playing and starts their clock.
 pub fn MilesBeginEventQueueProcessing() callconv(.winapi) i32 {
@@ -778,9 +787,12 @@ pub fn MilesFindEvent(bank: ?*anyopaque, event_name: ?[*:0]const u8) callconv(.w
 // (Container_GetEvent -> first start sound -> Container_GetSound.DurationMs).
 pub fn MilesGetEventLength(event_name: ?[*:0]const u8) callconv(.winapi) i32 {
     const name = std.mem.span(event_name orelse return 0);
-    const ev = openmiles.soundbank.containerFindEvent(name) orelse return 0;
+    // Held for the walk: the steps are read out of the bank's metadata, which
+    // a concurrent release would free.
+    const found = openmiles.soundbank.containerFindEventOwned(name) orelse return 0;
+    defer found.bank.deinit();
     var walker: StepWalker = undefined;
-    walker.init(ev);
+    walker.init(found.data);
     while (walker.next()) |st| {
         if (st.type != @intFromEnum(openmiles.event.StepType.start_sound)) continue;
         const sn = st.u.start.soundname;

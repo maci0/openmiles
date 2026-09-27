@@ -123,11 +123,38 @@ pub fn loadedCount() u32 {
 }
 
 /// Resolve a named event's step bytecode across all loaded banks (Container_GetEvent).
+///
+/// The bytes live in the bank's metadata, which the registry lock does not keep
+/// alive past this return: a concurrent MilesReleaseSoundBank frees them under a
+/// caller still walking the steps. A caller that holds its own reference to the
+/// bank (every open does) may use this; one that only has the name must use
+/// containerFindEventOwned, which takes the reference it needs.
 pub fn containerFindEvent(event_name: []const u8) ?[*]const u8 {
     g_registry_mutex.lockUncancelable(root.io);
     defer g_registry_mutex.unlock(root.io);
     for (g_registry.items) |b| {
         if (b.findEventContents(event_name)) |ev| return ev;
+    }
+    return null;
+}
+
+/// A found event's bytecode together with a reference on the bank that owns it.
+/// The bytes are only valid while that reference is held; drop it with
+/// `bank.deinit()` once the walk is done.
+pub const FoundEvent = struct { bank: *Bank, data: [*]const u8 };
+
+/// containerFindEvent for a caller that has only the name, taking the keep-alive
+/// under the same lock that resolves it. Taking the reference after the search
+/// would let a release in between unregister and free the bank, so the two are
+/// one step here.
+pub fn containerFindEventOwned(event_name: []const u8) ?FoundEvent {
+    g_registry_mutex.lockUncancelable(root.io);
+    defer g_registry_mutex.unlock(root.io);
+    for (g_registry.items) |b| {
+        if (b.findEventContents(event_name)) |ev| {
+            b.refs += 1;
+            return .{ .bank = b, .data = ev };
+        }
     }
     return null;
 }
@@ -742,6 +769,52 @@ test "container: a duplicated event name resolves by load order, not unload hist
     second.deinit();
     second_live = false;
     try testing.expect(resolvesTo(third, imgs[2].data_off));
+}
+
+test "owned lookup holds the bank for the walk and gives the reference back" {
+    const testing = std.testing;
+    var img: [256]u8 = undefined;
+    @memset(&img, 0);
+    const w32 = struct {
+        fn f(buf: []u8, off: u32, v: u32) void {
+            std.mem.writeInt(u32, buf[off..][0..4], v, .little);
+        }
+    }.f;
+
+    w32(&img, off_tag, BANK_TAG);
+    w32(&img, off_version, @bitCast(BANK_VERSION));
+    w32(&img, off_events, header_size);
+    w32(&img, off_event_count, 1);
+    var pool: usize = header_size + asset_entry_size;
+    const nm = "Boom";
+    w32(&img, header_size, @intCast(pool));
+    @memcpy(img[pool..][0..nm.len], nm);
+    pool += nm.len + 1;
+    const data_off: u32 = @intCast(pool);
+    w32(&img, header_size + 4, data_off);
+    @memset(img[pool..][0..4], 'A');
+    pool += 4;
+    w32(&img, off_meta_size, @intCast(pool));
+
+    const bank = try loadFromMemory(testing.allocator, "owned.mbnk", img[0..pool]);
+    var live = true;
+    defer if (live) bank.deinit();
+
+    // The reference the owned lookup hands out is the caller's to drop. If it
+    // were not, the release below would leave the bank registered and the test
+    // allocator would report its metadata as leaked at the end of the test.
+    const found = containerFindEventOwned("boom") orelse return error.NoEvent;
+    try testing.expectEqual(bank, found.bank);
+    try testing.expectEqual(@as(usize, data_off), @intFromPtr(found.data) - @intFromPtr(bank.meta.ptr));
+    found.bank.deinit();
+    try testing.expectEqual(@as(u32, 1), loadedCount());
+
+    // Still live and still answering: the found reference is gone, not the
+    // open that loaded it.
+    try testing.expect(bank.findEventContents("boom") != null);
+    bank.deinit();
+    live = false;
+    try testing.expectEqual(@as(u32, 0), loadedCount());
 }
 
 test "sound record: a DataOffset near the top of the 32-bit range is rejected" {

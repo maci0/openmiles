@@ -485,8 +485,17 @@ test "fuzz: invoke every export with adversarial inputs" {
             // binary reads a random value as if it were the shipped default.
             const old_pref = api_digital.AIL_set_preference(ru, ri);
             defer _ = api_digital.AIL_set_preference(ru, old_pref);
-            const old_redist = openmiles.getRedistDirectory();
-            defer _ = api_digital.AIL_set_redist_directory(@ptrCast(old_redist.ptr));
+            // A copy, not the borrowed slice: getRedistDirectory hands back the
+            // shared buffer, and the set below rewrites it, so the deferred
+            // restore would read back the value it just wrote.
+            var no_redist: [0]u8 = .{};
+            const old_redist = openmiles.getRedistDirectoryCopy(openmiles.global_allocator) catch no_redist[0..];
+            defer openmiles.global_allocator.free(old_redist);
+            var old_redist_z: [std.fs.max_path_bytes]u8 = undefined;
+            const old_len = @min(old_redist.len, old_redist_z.len - 1);
+            @memcpy(old_redist_z[0..old_len], old_redist[0..old_len]);
+            old_redist_z[old_len] = 0;
+            defer _ = api_digital.AIL_set_redist_directory(@ptrCast(&old_redist_z));
             _ = api_digital.AIL_set_redist_directory(rstr);
             api_v7.AIL_set_room_type(hd, ri, ri);
             api_v7.AIL_set_sample_3D_cone(hs, rf, rf, rf);

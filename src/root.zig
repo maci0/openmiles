@@ -917,6 +917,21 @@ fn getRedistDirectoryLocked() []const u8 {
     return std.mem.sliceTo(&redist_directory, 0);
 }
 
+/// An owned copy of the stored redist directory, taken under the lock. The
+/// caller frees it.
+///
+/// getRedistDirectory borrows the shared buffer and drops the lock before
+/// handing it back, so a caller that keeps the bytes (a scan walking the path
+/// for its whole run, the way openDigitalDriver does) reads them while
+/// setRedistDirectory may be rewriting them under it. A caller that only
+/// compares or formats the value can use the borrowing form; one that holds on
+/// to it needs this.
+pub fn getRedistDirectoryCopy(allocator: std.mem.Allocator) ![]u8 {
+    redist_mutex.lockUncancelable(io);
+    defer redist_mutex.unlock(io);
+    return allocator.dupe(u8, getRedistDirectoryLocked());
+}
+
 /// NUL-terminated pointer to the stored redist directory, for the char* return
 /// of AIL_set_redist_directory. A snapshot in thread-local storage: the
 /// returned pointer has to stay stable (the SDK hands back the address of its
@@ -1371,15 +1386,12 @@ pub fn openDigitalDriver(frequency: u32, bits: i32, channels: i32) ?*DigitalDriv
     // reaches this device; without it every AIL_open_digital_driver built
     // another miniaudio engine and left it running past AIL_shutdown.
     last_digital_driver.store(driver, .release);
-    const rd = getRedistDirectory();
-    if (rd.len > 0) {
-        // Scanned from a private copy: the scan holds the path for its whole
-        // duration, and a concurrent AIL_set_redist_directory would otherwise
-        // rewrite the bytes under it.
-        const scan_path = global_allocator.dupe(u8, rd) catch rd;
-        defer if (scan_path.ptr != rd.ptr) global_allocator.free(scan_path);
-        driver.loadAllAsi(scan_path);
-    }
+    const rd = getRedistDirectoryCopy(global_allocator) catch {
+        log("openDigitalDriver: cannot snapshot the redist directory; no plugins were scanned\n", .{});
+        return driver;
+    };
+    defer global_allocator.free(rd);
+    if (rd.len > 0) driver.loadAllAsi(rd);
     return driver;
 }
 

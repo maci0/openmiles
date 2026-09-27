@@ -815,6 +815,27 @@ test "setRedistDirectory and getRedistDirectory roundtrip" {
     try testing.expectEqualStrings("./test_plugins", openmiles.getRedistDirectory());
 }
 
+test "getRedistDirectoryCopy hands back an owned copy that outlives a rewrite" {
+    // getRedistDirectory borrows the shared buffer, so a caller that holds the
+    // bytes across a set reads whatever the set left there. The copy is taken
+    // under the lock and is the caller's to free, which is what the plugin scan
+    // in openDigitalDriver walks for its whole run.
+    openmiles.setRedistDirectory("./om_copy_first");
+    const copy = try openmiles.getRedistDirectoryCopy(testing.allocator);
+    defer testing.allocator.free(copy);
+    openmiles.setRedistDirectory("./om_copy_second");
+    try testing.expectEqualStrings("./om_copy_first", copy);
+    // The borrowed read follows the rewrite, which is what makes the copy the
+    // form a caller that holds the path has to use.
+    try testing.expectEqualStrings("./om_copy_second", openmiles.getRedistDirectory());
+
+    openmiles.setRedistDirectory("");
+    const empty = try openmiles.getRedistDirectoryCopy(testing.allocator);
+    defer testing.allocator.free(empty);
+    try testing.expectEqual(@as(usize, 0), empty.len);
+    openmiles.setRedistDirectory("");
+}
+
 test "AIL_set_redist_directory returns the stored directory pointer (SDK char*)" {
     const api_digital = @import("api/digital.zig");
     defer openmiles.setRedistDirectory("");
@@ -7113,6 +7134,19 @@ test "persist events populate PersistCount and MilesEnumeratePresetPersists" {
     _ = api_miles_t.MilesEnqueueEvent(@ptrCast(e2), null, 0, 0x2, 0);
     api_miles_t.MilesGetEventSystemState(null, &state);
     try testing.expectEqual(@as(i32, 1), state.PersistCount);
+
+    // And so is the same name in another case: the persist registry is keyed
+    // the way every other name registry here is, so "SAVE1" is the persist
+    // already stored as "save1" rather than a second one.
+    const ev3 = api_v8b.AIL_create_event() orelse return error.NoEvent;
+    _ = api_v8b.AIL_add_persist_preset_event_step(ev3, cstr("preset_c"), cstr("SAVE1"), cstr(""), 0);
+    const e3 = api_v8b.AIL_close_event(ev3) orelse return error.NoStr;
+    _ = api_miles_t.MilesEnqueueEvent(@ptrCast(e3), null, 0, 0x2, 0);
+    api_miles_t.MilesGetEventSystemState(null, &state);
+    try testing.expectEqual(@as(i32, 1), state.PersistCount);
+    nx = @ptrFromInt(std.math.maxInt(usize));
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesEnumeratePresetPersists(null, &nx, &name));
+    try testing.expectEqual(@as(i32, 0), api_miles_t.MilesEnumeratePresetPersists(null, &nx, &name));
 
     api_miles_t.MilesShutdownEventSystem();
 }
