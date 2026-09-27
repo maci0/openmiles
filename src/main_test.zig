@@ -1877,6 +1877,42 @@ test "AIL_startup returns an incrementing use count (SDK refcount)" {
     try testing.expectEqual(c1 + 1, c2);
 }
 
+test "AIL_shutdown holds the engine up until the last use count is released" {
+    const api_digital = @import("api/digital.zig");
+    // Two startups and two shutdowns, in the order a game that nests the Quick
+    // API inside the standard one calls them, must leave what one startup and
+    // one shutdown leaves: the engine is up after the first shutdown, and the
+    // teardown lands on the last. The count is process-global and other tests
+    // above have left it above zero, so drain it here and put a startup back,
+    // which is the state the suite expects to inherit.
+    const drained = api_digital.AIL_startup();
+    try testing.expect(drained >= 2);
+    api_digital.AIL_shutdown();
+    // Still one use outstanding, so nothing may have been released.
+    try testing.expect(openmiles.startupProvider() != null);
+
+    // Release every remaining use. shutdown() beyond the count is a no-op
+    // rather than a second teardown, so a caller that double-shuts down is the
+    // same as one that does not.
+    while (api_digital.startupUseCount() > 0) {
+        api_digital.AIL_shutdown();
+    }
+    try testing.expectEqual(@as(?*openmiles.Provider, null), openmiles.startupProvider());
+    api_digital.AIL_shutdown();
+    try testing.expectEqual(@as(?*openmiles.Provider, null), openmiles.startupProvider());
+
+    // A startup after the teardown brings the engine back, and the next
+    // shutdown takes it down again: the cycle is repeatable.
+    try testing.expectEqual(@as(i32, 1), api_digital.AIL_startup());
+    try testing.expect(openmiles.startupProvider() != null);
+    api_digital.AIL_shutdown();
+    try testing.expectEqual(@as(?*openmiles.Provider, null), openmiles.startupProvider());
+
+    // Leave the engine up for the tests that follow.
+    _ = api_digital.AIL_startup();
+    try testing.expect(openmiles.startupProvider() != null);
+}
+
 test "AIL_set/listener_relative_receiver_array round-trips the spec list (SDK)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

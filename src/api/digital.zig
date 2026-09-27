@@ -12,7 +12,16 @@ const AILSOUNDINFO = openmiles.AILSOUNDINFO;
 // Miles startup is reference-counted: AIL_startup returns the new use count (1
 // on the first call), and the public AIL_startup maps to AIL_startup_reg/_stack
 // in mss.h. AIL_shutdown stays void. We don't re-init the engine on nested
-// calls; the count just mirrors the documented return value.
+// calls, so the count is what both ends of the pair act on.
+//
+// The shutdown side of the count is honoured too. Several games (and the
+// Quick API's own users) call AIL_startup more than once and AIL_shutdown
+// once per startup; tearing the engine down on the first shutdown left those
+// processes with no startup provider, no drivers and a count that still said
+// one use was outstanding, so the same sequence of calls left a different
+// state depending on how many times startup had run. The teardown is what a
+// shutdown at count zero means and stays harmless when repeated, since
+// openmiles.shutdown() releases nothing that is already gone.
 var g_startup_count: i32 = 0;
 pub fn AIL_startup() callconv(.winapi) i32 {
     log("ENTER AIL_startup\n", .{});
@@ -23,8 +32,20 @@ pub fn AIL_startup() callconv(.winapi) i32 {
 }
 pub fn AIL_shutdown() callconv(.winapi) void {
     log("AIL_shutdown()\n", .{});
-    openmiles.shutdown();
     if (g_startup_count > 0) g_startup_count -= 1;
+    if (g_startup_count > 0) {
+        log("AIL_shutdown: {d} use(s) still open, the engine stays up\n", .{g_startup_count});
+        return;
+    }
+    openmiles.shutdown();
+}
+
+/// The outstanding AIL_startup uses. Not an SDK export: the test suite drains
+/// the count through AIL_shutdown to prove the teardown lands on the last use,
+/// and a hardcoded number of shutdowns would not survive a suite whose earlier
+/// tests left uses of their own behind.
+pub fn startupUseCount() i32 {
+    return g_startup_count;
 }
 pub fn AIL_set_redist_directory(path: [*:0]const u8) callconv(.winapi) [*:0]const u8 {
     // SDK returns char* — a pointer to the stored redist directory so callers
