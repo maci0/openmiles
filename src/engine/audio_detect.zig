@@ -210,7 +210,13 @@ pub fn wavInfoBounded(raw: [*]const u8, max_len: usize, info: *anyopaque) i32 {
             fact_samples = std.mem.readInt(u32, raw[offset .. offset + 4][0..4], .little);
         } else if (std.mem.eql(u8, tag, "data")) {
             data_ptr = raw + offset;
-            data_len = chunk_size;
+            // The chunk walk is bounded by file_end, but chunk_size is not: a
+            // crafted WAV can declare a data chunk far larger than the bytes
+            // that follow. Reporting it unclamped hands every consumer of
+            // info->data_len (a decode, a copy, a sample-count computation) a
+            // length that runs past the caller's buffer, so cap it at the bytes
+            // actually present.
+            data_len = @min(chunk_size, @as(u32, @intCast(file_end - offset)));
             // Keep walking for a fact chunk only if we haven't seen one (data is
             // usually last, so break here matches the SDK's data-found exit).
             break;

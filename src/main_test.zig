@@ -2385,6 +2385,33 @@ test "AIL_WAV_info computes IMA ADPCM sample count via the SDK block formula" {
     try testing.expectEqual(@as(u32, 1010), info.samples);
 }
 
+test "AIL_WAV_info clamps a data chunk longer than the image (no over-read)" {
+    // A crafted WAV declares a 4 GiB data chunk but carries 4 bytes of audio.
+    // info.data_len must be the bytes actually present, so a consumer that
+    // decodes or copies data_len bytes stays inside the caller's buffer.
+    var buf: [48]u8 = undefined;
+    @memset(&buf, 0);
+    @memcpy(buf[0..4], "RIFF");
+    @memcpy(buf[8..12], "WAVE");
+    @memcpy(buf[12..16], "fmt ");
+    buf[16] = 16; // fmt chunk size
+    buf[22] = 1; // channels
+    buf[24] = 0x44;
+    buf[25] = 0xAC; // 44100
+    buf[32] = 2; // block_align
+    buf[34] = 16; // bits
+    @memcpy(buf[36..40], "data");
+    @memcpy(buf[40..44], &[_]u8{ 0xFF, 0xFF, 0xFF, 0xFF }); // declares 0xFFFFFFFF
+    const riff_size: u32 = @intCast(buf.len - 8);
+    buf[4] = @truncate(riff_size);
+    buf[5] = @truncate(riff_size >> 8);
+
+    var info: openmiles.AILSOUNDINFO = .{};
+    try testing.expect(dg.AIL_WAV_info(&buf, &info) != 0);
+    try testing.expectEqual(@as(u32, 4), info.data_len); // 48 - 44
+    try testing.expectEqual(@as(u32, 2), info.samples); // 4 bytes * 8 / (16 bits * 1 ch)
+}
+
 test "AIL_load_sample_buffer returns the resolved slot (-1 on bad input) (SDK)" {
     const api_digital = @import("api/digital.zig");
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
