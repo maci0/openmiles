@@ -3043,6 +3043,14 @@ test "AIL_set_timer_frequency/period/divisor convert to the right period (SDK)" 
     api_timer.AIL_set_timer_divisor(timer, 0);
     try testing.expectEqual(@as(u32, 65536 * 1_000_000 / 1_193_180), timer.getPeriodUs());
 
+    // A rate above 1 MHz (and a zero period) truncate to a 0 us period, which
+    // would leave the run loop with an empty sleep slice; the floor keeps the
+    // loop sleeping instead of spinning the callback at full speed.
+    api_timer.AIL_set_timer_frequency(timer, 2_000_000);
+    try testing.expectEqual(openmiles.Timer.min_period_us, timer.getPeriodUs());
+    api_timer.AIL_set_timer_period(timer, 0);
+    try testing.expectEqual(openmiles.Timer.min_period_us, timer.getPeriodUs());
+
     // Null timer: all are no-ops (no crash).
     api_timer.AIL_set_timer_frequency(null, 100);
     api_timer.AIL_set_timer_period(null, 100);

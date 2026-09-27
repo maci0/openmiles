@@ -27,8 +27,15 @@ pub const Timer = struct {
         return @atomicLoad(u32, &self.period_us, .acquire);
     }
 
+    /// Shortest period the run loop can honor. A zero period leaves the sleep
+    /// slice empty, so the loop fires the callback back-to-back with no delay
+    /// and pins a core; callers that convert a rate to a period (hertz, PIT
+    /// divisor) truncate to 0 below this floor.
+    pub const min_period_us: u32 = 1;
+
     pub fn setPeriodUs(self: *Timer, us: u64) void {
-        @atomicStore(u32, &self.period_us, @intCast(@min(us, std.math.maxInt(u32))), .release);
+        const clamped: u64 = @max(@min(us, std.math.maxInt(u32)), min_period_us);
+        @atomicStore(u32, &self.period_us, @intCast(clamped), .release);
     }
 
     pub fn init(allocator: std.mem.Allocator, callback: *const fn (u32) callconv(.winapi) void) !*Timer {
