@@ -444,11 +444,16 @@ pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: i32, data: ?*anyopaque,
         // into the ping-pong stream source (zero-copy; the app owns it until EOB).
         s.loadStreamBuffer(@intCast(bn), data.?, len) catch |err| {
             openmiles.log("AIL_load_sample_buffer: stream feed failed: {any}\n", .{err});
+            openmiles.setLastErrorFmt("AIL_load_sample_buffer: buffer {d} rejected ({any})", .{ bn, err });
             return -1;
         };
     } else {
         // No format hint: treat as a complete encoded file image (whole-buffer).
-        s.load(data.?, @intCast(@min(len, @as(u32, std.math.maxInt(i32))))) catch return -1;
+        s.load(data.?, @intCast(@min(len, @as(u32, std.math.maxInt(i32))))) catch |err| {
+            openmiles.log("AIL_load_sample_buffer: load failed: {any}\n", .{err});
+            openmiles.setLastErrorFmt("AIL_load_sample_buffer: buffer {d} rejected ({any})", .{ bn, err });
+            return -1;
+        };
     }
     // Fire SOB (Start Of Buffer) callback now that a new buffer is accepted.
     // AILSAMPLECB: void callback(HSAMPLE S) — single arg; app queries buffer state separately.

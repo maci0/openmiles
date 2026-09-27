@@ -13,12 +13,17 @@ const io: std.Io = std.Io.Threaded.global_single_threaded.io();
 // by OPENMILES_DEBUG; this only caps how large the file may become.
 const max_log_bytes: u64 = 64 * 1024 * 1024; // 64 MiB
 
+// One formatted record. A record that does not fit is not written silently: see
+// the overflow marker in log(). Sized to hold a long path plus its context.
+const max_log_record_bytes = 1024;
+
 var log_file: ?std.Io.File = null;
 var log_offset: u64 = 0;
 var initialized = false;
 var config_logged = false;
 var debug_enabled = false;
 var debug_source: []const u8 = "the build default";
+var write_error_reported = false;
 var mutex: std.Io.Mutex = .init;
 
 // The W (UTF-16) entry points, not the A ones: the value of a UTF-8 env var
@@ -102,8 +107,22 @@ pub fn init() void {
         if (std.Io.Dir.cwd().createFile(io, "openmiles.log", .{
             .truncate = false,
         })) |f| {
-            log_offset = f.length(io) catch 0;
-            log_file = f;
+            // Records are written positionally at log_offset, so an offset of 0
+            // on a file that already holds records overwrites the ones there.
+            // A file whose length cannot be read is therefore not appended to
+            // at all: closing it keeps the existing log intact and the process
+            // console-only, which is visible, rather than silently destroying
+            // the history and appearing to succeed.
+            if (f.length(io)) |start| {
+                log_offset = start;
+                log_file = f;
+            } else |_| {
+                std.debug.print(
+                    "openmiles: cannot size openmiles.log; leaving it untouched and logging to the console only\n",
+                    .{},
+                );
+                f.close(io);
+            }
         } else |err| {
             // The log is the only record of what this process did. Losing it
             // silently leaves an operator with no trace at all, and since
@@ -124,6 +143,7 @@ pub fn deinit() void {
     }
     @atomicStore(bool, &initialized, false, .release);
     @atomicStore(bool, &config_logged, false, .release);
+    @atomicStore(bool, &write_error_reported, false, .release);
 }
 
 /// Record the effective configuration once per init, so a log that opens can be
@@ -167,18 +187,50 @@ pub fn log(comptime fmt: []const u8, args: anytype) void {
     init();
     if (!debug_enabled) return;
     logConfigOnce();
-    var buf: [1024]u8 = undefined;
-    const msg = std.fmt.bufPrint(&buf, fmt, args) catch return;
+    var buf: [max_log_record_bytes]u8 = undefined;
+    var over_buf: [wide_record_units]u8 = undefined;
+    const out = formatRecord(&buf, &over_buf, fmt, args);
+    emit(out);
+}
+
+/// Render one record into `buf`, or an overflow marker into `over_buf` when the
+/// formatted text does not fit. bufPrint yields nothing on overflow, so the
+/// record has to be replaced rather than dropped: the content is gone, but the
+/// loss is on the record and the format string names the call site that caused
+/// it. Returns a slice into one of the two buffers.
+fn formatRecord(
+    buf: []u8,
+    over_buf: []u8,
+    comptime fmt: []const u8,
+    args: anytype,
+) []const u8 {
+    const msg = std.fmt.bufPrint(buf, fmt, args) catch {
+        return std.fmt.bufPrint(
+            over_buf,
+            "openmiles: log record exceeded {d} bytes and was dropped: {s}\n",
+            .{ buf.len, fmt },
+        ) catch "";
+    };
     // The formatted message can carry an untrusted path or name, so scrub it
     // before it reaches any sink.
     sanitizeText(msg);
-    const out = msg[0..msg.len];
+    return msg;
+}
 
+/// Wide sink buffer. Sized for the overflow marker as well as a normal record,
+/// so a dropped record still reaches OutputDebugString instead of failing the
+/// conversion and vanishing.
+const wide_record_units = max_log_record_bytes + 128 + 1;
+
+/// Write one record to every enabled sink. The caller has already formatted and
+/// sanitized it, so this is the only place that knows about the console, the
+/// debug stream, and the on-disk log.
+fn emit(out: []const u8) void {
     mutex.lockUncancelable(io);
     defer mutex.unlock(io);
 
     if (builtin.os.tag == .windows) {
-        var w_buf: [1025]u16 = undefined;
+        var w_buf: [wide_record_units]u16 = undefined;
         if (wide.toWide(out, &w_buf)) |w| {
             OutputDebugStringW(w.ptr);
         } else |_| {}
@@ -188,7 +240,20 @@ pub fn log(comptime fmt: []const u8, args: anytype) void {
 
     if (log_file) |f| {
         if (log_offset < max_log_bytes) {
-            f.writePositionalAll(io, out, log_offset) catch return;
+            f.writePositionalAll(io, out, log_offset) catch |err| {
+                // The file is the sink an operator reads after the fact, so a
+                // failing write is not a record to be dropped quietly: say so
+                // once, on the console that is still working, and leave the
+                // handle in place so a later write may still succeed.
+                if (!write_error_reported) {
+                    write_error_reported = true;
+                    std.debug.print(
+                        "openmiles: cannot write to openmiles.log ({t}); further records are console-only\n",
+                        .{err},
+                    );
+                }
+                return;
+            };
             log_offset += out.len;
         }
     }
@@ -219,6 +284,18 @@ test "an unrecognized OPENMILES_DEBUG is rejected, not read as off" {
     for ([_][]const u8{ "", " ", "2", "enabled", "TRUE-ish", "t", "no!", "-1" }) |v| {
         try testing.expectEqual(@as(?bool, null), parseDebugFlag(v));
     }
+}
+
+test "an oversized record is replaced by a marker, not dropped silently" {
+    var buf: [64]u8 = undefined;
+    var over_buf: [192]u8 = undefined;
+    const long = "x" ** 200;
+    const out = formatRecord(&buf, &over_buf, "{s}", .{long});
+    // The record did not fit, so the marker names the failure and the format
+    // string, rather than the caller receiving an empty log line.
+    try testing.expect(out.len > 0);
+    try testing.expect(std.mem.indexOf(u8, out, "was dropped") != null);
+    try testing.expect(std.mem.indexOf(u8, out, "{s}") != null);
 }
 
 test "log text from an untrusted name cannot forge a record" {
