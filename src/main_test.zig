@@ -3517,6 +3517,106 @@ test "injected file faults reach the whole-file read path" {
     try testing.expectEqualStrings(body, again);
 }
 
+test "injected short reads reach AIL_file_read and the sample load" {
+    // readWholeFile is not the only reader: a schedule that models a write that
+    // never finished has to shorten these two as well, or a replay diverges
+    // from the run that produced the failure.
+    const io = openmiles.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const body = "RIFFxxxxWAVEfmt ";
+    const file = try tmp.dir.createFile(io, "clip.wav", .{});
+    try file.writeStreamingAll(io, body);
+    file.close(io);
+
+    var path_buf: [256]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, ".zig-cache/tmp/{s}/clip.wav", .{&tmp.sub_path});
+    var path_z_buf: [256]u8 = undefined;
+    const path_z = try std.fmt.bufPrintZ(&path_z_buf, "{s}", .{path});
+
+    const Faults = struct {
+        var keep: usize = 8;
+        fn truncate(p: []const u8) ?usize {
+            _ = p;
+            return keep;
+        }
+    };
+    const truncate_fault: openmiles.fs_compat.Fault = .{ .truncate_read = Faults.truncate };
+    defer openmiles.fs_compat.fault = null;
+
+    // AIL_file_read zero-fills the tail the read did not reach, out to the
+    // file's own length, in both the caller-buffer and malloc'd-buffer forms.
+    // Past that length the caller's buffer is left alone.
+    openmiles.fs_compat.fault = &truncate_fault;
+    var dst: [32]u8 = @splat(0xAA);
+    try testing.expect(@intFromPtr(api_file.AIL_file_read(path_z.ptr, &dst)) == @intFromPtr(&dst));
+    try testing.expectEqualStrings("RIFFxxxx", dst[0..8]);
+    try testing.expectEqualSlices(u8, &[_]u8{0} ** (body.len - 8), dst[8..body.len]);
+    try testing.expectEqualSlices(u8, &[_]u8{0xAA} ** (dst.len - body.len), dst[body.len..]);
+
+    const owned = api_file.AIL_file_read(path_z.ptr, null) orelse return error.MissingFileReadResult;
+    defer std.c.free(owned);
+    const owned_slice: []u8 = @as([*]u8, @ptrCast(owned))[0..body.len];
+    try testing.expectEqualStrings("RIFFxxxx", owned_slice[0..8]);
+    try testing.expectEqualSlices(u8, &[_]u8{0} ** (body.len - 8), owned_slice[8..]);
+
+    // A sample load refuses the short read rather than decoding a truncated
+    // image, which is the behaviour the fault models.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try testing.expectError(error.ReadFailed, s.loadFromFile(path));
+
+    openmiles.fs_compat.fault = null;
+    try testing.expectEqual(@intFromPtr(&dst), @intFromPtr(api_file.AIL_file_read(path_z.ptr, &dst)));
+    try testing.expectEqualStrings(body, dst[0..body.len]);
+}
+
+test "injected short writes store only the named prefix" {
+    // The temp image is the only file the library writes, and a write that
+    // stops short would otherwise be loaded as a module the caller never
+    // handed over. The write goes through the same schedule as the reads, so a
+    // simulation can produce a partial file.
+    const io = openmiles.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const body = "MZ\x90\x00not-a-pe-image";
+
+    // Relative to the cwd, which is where the test binary runs from.
+    var path_buf: [256]u8 = undefined;
+    const abs = try std.fmt.bufPrint(&path_buf, ".zig-cache/tmp/{s}/image.asi", .{&tmp.sub_path});
+
+    const Faults = struct {
+        var keep: usize = 4;
+        fn truncate(p: []const u8) ?usize {
+            if (!std.mem.endsWith(u8, p, "image.asi")) return null;
+            return keep;
+        }
+    };
+    const fault: openmiles.fs_compat.Fault = .{ .truncate_write = Faults.truncate };
+    defer openmiles.fs_compat.fault = null;
+
+    const f = try openmiles.fs_compat.createFile(io, abs, .{});
+    openmiles.fs_compat.fault = &fault;
+    const written = try openmiles.fs_compat.writeAll(io, f, abs, body);
+    f.close(io);
+    // The caller is told how much landed, so it can refuse the file instead of
+    // treating a partial write as a complete one.
+    try testing.expectEqual(@as(usize, 4), written);
+
+    // A schedule naming another path leaves this write whole.
+    Faults.keep = body.len + 16; // longer than the buffer, so the clamp is what holds
+    const f2 = try openmiles.fs_compat.createFile(io, abs, .{ .truncate = true });
+    openmiles.fs_compat.fault = &fault;
+    try testing.expectEqual(body.len, try openmiles.fs_compat.writeAll(io, f2, abs, body));
+    f2.close(io);
+
+    const round_trip = try openmiles.readWholeFile(abs);
+    defer openmiles.global_allocator.free(round_trip);
+    try testing.expectEqualStrings(body, round_trip);
+}
+
 test "Sequence setChannelMap out-of-range physical clamps" {
     const allocator = testing.allocator;
     const driver = try openmiles.MidiDriver.init(allocator);

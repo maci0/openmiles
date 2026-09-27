@@ -367,9 +367,14 @@ pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
         return null;
     }
     const size: usize = @intCast(file_len);
+    // Through the injected length, so a schedule that models a write that never
+    // finished reaches this path as well as readWholeFile's: the read stops
+    // short and the tail is zero-filled below, the same shape a real short
+    // read has.
+    const read_len = fs_compat.readLength(path, size);
     if (dest) |d| {
         const buf: [*]u8 = @ptrCast(@alignCast(d));
-        const n = file.readPositionalAll(io, buf[0..size], 0) catch {
+        const n = file.readPositionalAll(io, buf[0..read_len], 0) catch {
             setFileError("Read error");
             return null;
         };
@@ -382,7 +387,7 @@ pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
             setFileError("Out of memory");
             return null;
         });
-        const n = file.readPositionalAll(io, buf[0..size], 0) catch {
+        const n = file.readPositionalAll(io, buf[0..read_len], 0) catch {
             std.c.free(buf);
             setFileError("Read error");
             return null;

@@ -115,6 +115,30 @@ call `timer.tick()` once per period you want to elapse, and the callback sees
 the exact simulated timestamp. Replaying the same step sequence replays the
 same run, which is what makes a failing sequence reproducible.
 
+### Injecting disk faults
+
+Every file the library opens or writes goes through
+`openmiles.fs_compat`, which carries an optional fault schedule. A schedule
+names the paths it applies to and the fault to produce, so the two faults a
+real disk will not produce on demand can be replayed:
+
+```zig
+const schedule: openmiles.fs_compat.Fault = .{
+    .open = failOpen,          // an open that returns an error
+    .truncate_read = shortRead, // a whole-file read that stops short
+    .truncate_write = shortWrite, // a whole-file write that stores a prefix
+};
+openmiles.fs_compat.fault = &schedule; // null in production
+```
+
+`open` covers `AIL_file_read`, `Sample.loadFromFile`, soundfont and soundbank
+loads, and the plugin directory scans. `truncate_read` covers every whole-file
+read: `readWholeFile` refuses the short read, and `AIL_file_read` zero-fills
+the tail the read did not reach. `truncate_write` covers the ASI temp image,
+which is the only file the library writes; a short write there is discarded
+rather than loaded as a module the caller never handed over. Without a
+schedule installed, every one of these is a plain whole-file read or write.
+
 ### Release archive
 
 `scripts/package_release.sh <out.zip> [sha256sums]` packages

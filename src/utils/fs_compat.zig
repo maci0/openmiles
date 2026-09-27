@@ -156,6 +156,11 @@ pub const Fault = struct {
     /// file holds. Models a write that never finished, which a real disk
     /// cannot be made to do on demand. Null for no truncation.
     truncate_read: ?*const fn (path: []const u8) ?usize = null,
+    /// Bytes a whole-file write of `path` actually stores, fewer than the
+    /// caller offered. The complement of `truncate_read`: a short write leaves
+    /// a file whose tail was never written, so a later read of it is short too.
+    /// Null writes the whole buffer.
+    truncate_write: ?*const fn (path: []const u8) ?usize = null,
 };
 
 pub var fault: ?*const Fault = null;
@@ -174,6 +179,28 @@ pub fn readLength(path: []const u8, len: usize) usize {
     const hook = f.truncate_read orelse return len;
     const want = hook(path) orelse return len;
     return @min(want, len);
+}
+
+/// Write `bytes` to `file` in full, or to the length an installed schedule
+/// names for `path`. `file` must be positioned at the write offset. Returns
+/// the number of bytes stored, so the caller can tell a short write from a
+/// complete one exactly as it would from the real call.
+pub fn writeAll(io: std.Io, file: std.Io.File, path: []const u8, bytes: []const u8) !usize {
+    const f = fault orelse {
+        try file.writeStreamingAll(io, bytes);
+        return bytes.len;
+    };
+    const hook = f.truncate_write orelse {
+        try file.writeStreamingAll(io, bytes);
+        return bytes.len;
+    };
+    const want = hook(path) orelse {
+        try file.writeStreamingAll(io, bytes);
+        return bytes.len;
+    };
+    const len = @min(want, bytes.len);
+    try file.writeStreamingAll(io, bytes[0..len]);
+    return len;
 }
 
 pub fn openFile(io: std.Io, path: []const u8, options: std.Io.File.OpenFlags) !std.Io.File {

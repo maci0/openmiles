@@ -246,7 +246,10 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
         openmiles.setLastError("Failed to create temp file for ASI provider");
         return null;
     };
-    wf.writeStreamingAll(io, raw) catch |err| {
+    // A short write leaves a temp image whose tail never reached the disk, and
+    // loading that would map a module that is not the image the caller handed
+    // us. The injected length is how a simulation replays that.
+    const written = openmiles.fs_compat.writeAll(io, wf, path, raw) catch |err| {
         log("AIL_open_ASI_provider: writing {d} bytes to '{s}' failed ({any})\n", .{ size, path, err });
         wf.close(io);
         deleteTempImage(path);
@@ -254,6 +257,12 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
         return null;
     };
     wf.close(io);
+    if (written != raw.len) {
+        log("AIL_open_ASI_provider: only {d} of {d} bytes reached '{s}'; the image is discarded\n", .{ written, size, path });
+        deleteTempImage(path);
+        openmiles.setLastError("Failed to write temp file for ASI provider");
+        return null;
+    }
 
     // Load the provider (calls RIB_Main inside the DLL). On success the
     // Provider owns deleting the temp image: it records the path and removes

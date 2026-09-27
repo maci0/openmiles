@@ -1120,7 +1120,9 @@ pub const Sample = struct {
         const size: usize = @intCast(file_len);
         const buf = try self.driver.allocator.alloc(u8, size);
         errdefer self.driver.allocator.free(buf);
-        const n = file.readPositionalAll(io, buf, 0) catch return error.ReadFailed;
+        // Through the injected length, so a fault schedule that models a write
+        // that never finished reaches this load path as well.
+        const n = file.readPositionalAll(io, buf[0..fs_compat.readLength(path, size)], 0) catch return error.ReadFailed;
         // A short read means the file shrank or became unreadable mid-load; the
         // truncated image would decode as garbage (or fail confusingly inside
         // miniaudio), so refuse it like readWholeFile does.
