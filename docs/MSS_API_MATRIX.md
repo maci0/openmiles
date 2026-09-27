@@ -36,7 +36,7 @@ This matrix tracks the availability of major API groups across different histori
 | Memory Image Loading | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
 | Streaming (File-based) | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
 | Input API | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | Recording via miniaudio capture device |
-| Compression API | v4 | 🔴 | 🔴 | 🟢 | 🟡 Partial | Decompression implemented |
+| Compression API | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | IMA-ADPCM WAV encode via the bundled encoder, decode via libtsf |
 | Filter API | v6 | 🔴 | 🔴 | 🟢 | 🟢 Full | Low-pass filter via miniaudio ma_lpf_node; real-time cutoff/order control |
 
 ## 3. 3D Positional Audio

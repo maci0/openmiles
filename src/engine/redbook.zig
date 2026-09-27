@@ -8,13 +8,18 @@ fn nowMs() i64 {
     return @intCast(@divTrunc(ts.nanoseconds, std.time.ns_per_ms));
 }
 
-// SDK REDBOOK constants: ERROR=0, PLAYING=1, PAUSED=2, STOPPED=3. The 0 slot is
-// ERROR (returned for a null handle), NOT stopped.
+// REDBOOK_* codes as src/mss.h defines them: STOPPED=0, PLAYING=1, PAUSED=2.
+// The ERROR code (3) is only ever returned by the API wrapper, for a null
+// handle; it is not a state a live Redbook can be in, so it is not an enum
+// variant here.
 pub const RedbookStatus = enum(u32) {
+    stopped = 0,
     playing = 1,
     paused = 2,
-    stopped = 3,
 };
+
+/// The REDBOOK_ERROR code src/mss.h defines; returned when no handle is given.
+pub const redbook_status_error: u32 = 3;
 
 /// Software Redbook (CD audio) emulation.
 ///

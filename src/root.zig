@@ -55,6 +55,7 @@ pub const Input = @import("engine/input.zig").Input;
 const redbook_mod = @import("engine/redbook.zig");
 pub const Redbook = redbook_mod.Redbook;
 pub const RedbookStatus = redbook_mod.RedbookStatus;
+pub const redbook_status_error = redbook_mod.redbook_status_error;
 
 const rib_mod = @import("rib/provider.zig");
 pub const Provider = rib_mod.Provider;

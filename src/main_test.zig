@@ -2195,16 +2195,17 @@ test "AIL_file_type detects MPEG audio by frame sync (MP3 = layer III)" {
     try testing.expectEqual(@as(i32, 13), api_file.AIL_file_type(&mp3, mp3.len)); // MPEG_L3_AUDIO
 }
 
-test "AIL_redbook_status returns REDBOOK_* codes (STOPPED=3, ERROR=0)" {
-    // SDK: REDBOOK_ERROR=0, REDBOOK_PLAYING=1, REDBOOK_PAUSED=2, REDBOOK_STOPPED=3.
+test "AIL_redbook_status returns REDBOOK_* codes (STOPPED=0, ERROR=3)" {
+    // Values are the REDBOOK_* defines in src/mss.h; the engine enum only holds
+    // the three a live drive can be in.
+    try testing.expectEqual(@as(u32, 0), @intFromEnum(openmiles.RedbookStatus.stopped));
     try testing.expectEqual(@as(u32, 1), @intFromEnum(openmiles.RedbookStatus.playing));
     try testing.expectEqual(@as(u32, 2), @intFromEnum(openmiles.RedbookStatus.paused));
-    try testing.expectEqual(@as(u32, 3), @intFromEnum(openmiles.RedbookStatus.stopped));
     const allocator = testing.allocator;
     const rb = try openmiles.Redbook.init(allocator, 0);
     defer rb.deinit();
-    try testing.expectEqual(@as(u32, 3), api_redbook.AIL_redbook_status(rb)); // STOPPED, not 0
-    try testing.expectEqual(@as(u32, 0), api_redbook.AIL_redbook_status(null)); // ERROR (null handle)
+    try testing.expectEqual(@as(u32, 0), api_redbook.AIL_redbook_status(rb)); // REDBOOK_STOPPED
+    try testing.expectEqual(@as(u32, 3), api_redbook.AIL_redbook_status(null)); // REDBOOK_ERROR
 }
 
 test "AILSOUNDINFO layout: channel_mask present only for v8+" {

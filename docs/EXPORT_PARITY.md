@@ -22,7 +22,7 @@ different DLL was diffed against.
 
 ## Status
 
-**v6 MISSING: 0 / v7 MISSING: 0** (v5: 2). Every function in the real 6.1 and
+**v6 MISSING: 0 / v7 MISSING: 0**. Every function in the real 6.1 and
 7.x export tables is now reproduced with matching stdcall decoration. Resolved
 across several passes:
 

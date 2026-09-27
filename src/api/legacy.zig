@@ -4,10 +4,12 @@
 //! removed by 7.0 and are absent from every public SDK header (no prototype was
 //! ever published). They cover an embedded "library" resource system and a
 //! sample-attribute serialization path that the shipping engines used
-//! internally. We reproduce them as ABI-faithful exports — correct stdcall
-//! arity (so the caller's stack is balanced) with safe default returns — so a
-//! 6.x title that probes for them by name resolves the symbol and degrades
-//! gracefully rather than failing to link.
+//! internally. We reproduce them as ABI-faithful stubs — correct stdcall
+//! arity (so the caller's stack is balanced) with safe default returns — so
+//! internal and test callers resolve the symbol. They are in `never_export`
+//! (see src/main.zig): no reference DLL emits them, so they are never PE
+//! exports and a 6.x title probing for them by name still fails to link, the
+//! same as it does against the real DLL.
 
 const openmiles = @import("openmiles");
 const log = openmiles.log;

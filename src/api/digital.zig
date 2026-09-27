@@ -788,10 +788,10 @@ fn writeSample(out: [*]u8, o: *usize, dest_bps: usize, v: i32) void {
     }
 }
 // Real MSS: S32 AIL_size_processed_digital_audio(U32 dest_rate, U32 dest_format,
-// S32 num_srcs, AILMIXINFO const* src) @16 — return the byte size that
-// AIL_process_digital_audio would emit for the given source(s) resampled to the
-// destination rate/format. AILMIXINFO begins with an AILSOUNDINFO, so the first
-// source's length/rate drive the estimate.
+// S32 num_srcs, AILMIXINFO const* src) @16 — size the buffer that
+// AIL_process_digital_audio will write for the given source(s) resampled to the
+// destination rate/format, including the SDK's 256 bytes of slop. This is an
+// upper bound to allocate, not the exact byte count that call will return.
 pub fn AIL_size_processed_digital_audio(dest_rate: u32, dest_format: u32, num_srcs: i32, src: ?*const anyopaque) callconv(.winapi) i32 {
     if (num_srcs <= 0 or dest_rate == 0) return 0;
     const sp = src orelse return 0;

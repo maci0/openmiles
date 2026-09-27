@@ -38,7 +38,7 @@ pub fn AIL_redbook_resume(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
     return 1;
 }
 pub fn AIL_redbook_status(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
-    const rb = hb orelse return 0;
+    const rb = hb orelse return openmiles.redbook_status_error;
     return @intFromEnum(rb.status);
 }
 pub fn AIL_redbook_tracks(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {

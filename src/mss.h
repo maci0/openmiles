@@ -78,6 +78,7 @@ typedef void* HREDBOOK;
 #define REDBOOK_STOPPED          0
 #define REDBOOK_PLAYING          1
 #define REDBOOK_PAUSED           2
+#define REDBOOK_ERROR            3
 
 typedef struct _AILSOUNDINFO {
     S32 format;

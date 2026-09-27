@@ -1154,8 +1154,10 @@ pub const Sample = struct {
         self.user_data = [_]u32{0} ** 8;
         // SDK wavefile.cpp AIL_init_sample also resets the level / reverb / filter
         // / occlusion state of a reused handle to its defaults:
-        //   set_sample_volume_levels(1,1); low_pass_cutoff[*]=1; sys_level=1;
-        //   dry_level=1; wet_level=0; exclusion=obstruction=occlusion=0.
+        //   set_sample_volume_levels(1,1); low_pass_cutoff[*]=1; dry_level=1;
+        //   wet_level=0; exclusion=obstruction=occlusion=0.
+        // The v9 level mask is not in that list: AIL_API_init_sample predates it,
+        // so a reused handle keeps whatever AIL_set_sample_level_mask left.
         self.v51_levels = [_]f32{1.0} ** 6; // volume_levels(1,1) -> front/back 1.0
         self.v51_fb_pan = 0.5;
         self.v51_center_level = 1.0;

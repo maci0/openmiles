@@ -16,7 +16,9 @@ pub fn AIL_open_stream_ex(driver_opt: ?*DigitalDriver, filename_opt: ?[*:0]const
 // `stream_background`, it is an accidental export, not a public API, so there
 // is no documented signature or behavior to reproduce. We export the exact
 // decorated name (@16 = four stdcall args) backed by a safe stub that reports
-// failure (null HSTREAM), purely so the 6.1a export table byte-matches.
+// failure (null HSTREAM). It is in `never_export` (see src/main.zig): no real
+// release emitted it, so it stays callable internally and from tests but is
+// never emitted as a PE export.
 pub fn AIL_open_stream_by_sample(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32) callconv(.winapi) ?*Sample {
     _ = a0;
     _ = a1;

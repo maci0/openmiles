@@ -78,7 +78,7 @@ The full suite prints a lot of engine trace output and takes a couple of
 minutes. To run one test, filter by a substring of its name:
 
 ```bash
-make test FILTER=RIB_open          # or: zig build test -Dtest-filter=RIB_open
+make test FILTER=redbook           # or: zig build test -Dtest-filter=redbook
 ```
 
 `OPENMILES_DEBUG=0` silences the engine trace that otherwise fills the test

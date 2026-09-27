@@ -30,6 +30,8 @@ pub fn AIL_sample_bus(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
     return s.v9_bus;
 }
+// Stores the mask for AIL_sample_level_mask to read back. The software mixer
+// has no per-level bus for it to gate, so the mask does not change the mix.
 pub fn AIL_set_sample_level_mask(s_opt: ?*Sample, mask: u8) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.v9_level_mask = mask;

@@ -241,12 +241,13 @@ pub fn AIL_sample_reverb_levels(s_opt: ?*Sample, dry_level: ?*f32, wet_level: ?*
 pub fn AIL_set_sample_info(s_opt: ?*Sample, info: *const AILSOUNDINFO) callconv(.winapi) i32 {
     const s = s_opt orelse return 0; // SDK (wavefile.cpp): 0 on null S/info
     // Channel-count selection mirrors AIL_API_set_sample_info exactly (verified by
-    // disassembling 7.0k vs 8.0e/9.1d):
-    //   v8/v9: channels>2 OR channel_mask!=~0U  -> DIG_F_MULTICHANNEL | channels<<16
-    //          (the true channel count is preserved); channels==2 -> stereo; else
-    //          mono. Collapsing those cases, the resulting count is max(1,channels).
-    //   v7 and earlier: stereo only when channels==2, otherwise mono — there is no
-    //          multichannel path, so >2 channels downgrades to mono, NOT stereo.
+    // disassembling 7.0k vs 8.0e/9.1d). The arm is chosen at compile time from the
+    // AILSOUNDINFO shape, which is how the SDK versions differ: v8/v9 grow a
+    // `channel_mask` field, v7 and earlier do not.
+    //   v8/v9: the count is preserved as max(1, channels); there is no channel
+    //          reduction to mono/stereo here.
+    //   v7 and earlier: stereo only when channels==2, otherwise mono, so >2
+    //          channels downgrades to mono, NOT stereo.
     const ch: u16 = blk: {
         if (@hasField(AILSOUNDINFO, "channel_mask")) {
             const want = @max(@as(i32, 1), @min(info.channels, 0xFFFF));
@@ -260,8 +261,10 @@ pub fn AIL_set_sample_info(s_opt: ?*Sample, info: *const AILSOUNDINFO) callconv(
     return 1; // success (the miniaudio mixer accepts any PCM/ADPCM format we set)
 }
 
-// Obstruction / occlusion / exclusion: stored attenuation hints (reuse Sample3D
-// semantics but on the unified handle; applied as a wet/volume hint).
+// Obstruction / occlusion / exclusion: stored hints (reuse Sample3D semantics
+// but on the unified handle). Obstruction and exclusion are stored only; the
+// software path never reads them into a gain. Occlusion additionally drives
+// the low-pass cutoff, below.
 pub fn AIL_set_sample_obstruction(s_opt: ?*Sample, obstruction: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.v7_obstruction = obstruction; // SDK (m3d.cpp) stores verbatim, no clamp

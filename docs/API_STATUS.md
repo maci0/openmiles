@@ -42,7 +42,7 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_us_count` | 🟢 Implemented | |
 | `AIL_debug_printf` | 🟢 Implemented | |
 | `AIL_sprintf` | 🟢 Implemented | |
-| `AIL_get_DirectSound_info` | ⚪ Stub | Returns 0; DirectSound not used |
+| `AIL_get_DirectSound_info` | ⚪ Stub | No-op; zeroes both out-params. DirectSound not used |
 | `AIL_set_DirectSound_HWND` | ⚪ Stub | No-op; DirectSound not used |
 | `AIL_digital_CPU_percent` | 🟡 Partial | Estimated from active sound count vs nominal 32-voice budget |
 | `AIL_digital_latency` | 🟢 Implemented | Queries miniaudio device period for real latency |
@@ -218,7 +218,7 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_DLS_load_memory` | 🟢 Implemented | Loads SF2 soundfont from memory |
 | `AIL_DLS_unload` | 🟢 Implemented | Alias for unload_file |
 | `AIL_DLS_compact` | ⚪ Stub | No-op (miniaudio handles memory management) |
-| `AIL_DLS_get_info` | 🟢 Implemented | Returns soundfont memory footprint + preset/instrument counts (via `tsf_get_presetcount`) in DlsInfo struct |
+| `AIL_DLS_get_info` | 🟢 Implemented | Returns soundfont memory footprint + preset/instrument counts (via `tsf_get_presetcount`) in the `AILDLSINFO` struct |
 | `AIL_DLS_get_reverb` / `AIL_DLS_set_reverb` | 🟢 Implemented | Stores room_type/level/reflect_time on MidiDriver |
 | `AIL_DLS_open` | 🟢 Implemented | Opens MIDI driver with DLS bank |
 | `AIL_DLS_close` | 🟢 Implemented | |
@@ -401,7 +401,7 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_redbook_track_info` | 🟢 Implemented | Returns zeros (no disc) |
 | `AIL_redbook_position` | 🟢 Implemented | Real-time ms-from-play-start while playing |
 | `AIL_redbook_eject` | 🟢 Implemented | Stops playback |
-| `AIL_redbook_retract` | 🟢 Implemented | Returns 1 |
+| `AIL_redbook_retract` | 🟢 Implemented | No-op (declared `void` in the SDK header) |
 | `AIL_redbook_id` | 🟢 Implemented | Returns empty string (no disc ID) |
 | `AIL_redbook_set_volume` | 🟢 Implemented | Stored volume (0-127) |
 | `AIL_redbook_volume` | 🟢 Implemented | Returns stored volume |
@@ -440,7 +440,7 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_midiOutOpen` | 🟢 Implemented | Returns driver as handle so games that null-check succeed |
 | `AIL_waveOutOpen` | 🟢 Implemented | Opens digital driver; returns dummy waveOut handle |
 | `AIL_digital_handle_release` | ⚪ Stub | No-op |
-| `AIL_digital_handle_reacquire` | ⚪ Stub | Always returns 1 |
+| `AIL_digital_handle_reacquire` | ⚪ Stub | Returns 1, or 0 for a null driver handle |
 
 ## Event System & SoundBanks (v8/v9)
 *(Appeared in MSS v8; `Miles*` names are the v9 spelling)*
@@ -448,16 +448,16 @@ complete list; the tables here cover behaviour, not linkability.
 |----------|--------|-------|
 | `AIL_create_event` / `AIL_close_event` | 🟢 Implemented | Byte-faithful event-text constructor (`mssevent.cpp` encodings) |
 | `AIL_add_*_event_step` (all step types) | 🟢 Implemented | start_sound, control_sounds, ramp, set_lfo, set_blend, move_var, persist, sound_limit, apply_env, cache/uncache_sounds, enable_limit, exec_event, comment, clear_state — each encodes its fields faithfully |
-| `AIL_next_event_step` / `MilesNextEventStep` | 🟢 Implemented | Decodes every step type into `EVENT_STEP_INFO` (layout matches the SDK field-for-field); splits cache/purge sound lists into `namelist` |
+| `AIL_next_event_step` | 🟢 Implemented | Decodes every step type into `EVENT_STEP_INFO` (layout matches the SDK field-for-field); splits cache/purge sound lists into `namelist` |
 | `MilesSetVarI/F` / `MilesGetVarI/F` | 🟢 Implemented | Per-system variable store (default + named systems) |
 | `MilesStartupEventSystem` / `MilesAddEventSystem` / `MilesShutdownEventSystem` | 🟢 Implemented | Event-system lifecycle (linked list of systems) |
 | `MilesGetEventSystemState` | 🟢 Implemented | Reports live command-buffer size, loaded-bank / loaded-sound / playing-sound / persist counts (memory stats remain 0) |
 | `AIL_open_soundbank` / `MilesAddSoundBank` / `*ReleaseSoundBank` | 🟢 Implemented | Loads the `BANK` format; registers in the global container in load order (a name defined by two banks resolves to the one loaded first); enumerates event/sound/preset/env assets |
-| `AIL_find_event` / `MilesFindEvent` / `AIL_get_event_contents` | 🟢 Implemented | Resolves a named event's step bytecode (`hlbank.cpp`) |
+| `MilesFindEvent` / `AIL_get_event_contents` | 🟢 Implemented | Resolves a named event's step bytecode (`hlbank.cpp`) |
 | `AIL_sound_asset_filename` / `AIL_sound_asset_info` | 🟢 Implemented | Formats `*<bank><sound>` path and fills `MILESBANKSOUNDINFO` from the `Sound` struct |
 | `MilesEnqueueEvent*` / `MilesEnqueueEventByName` / `MilesStartSoundInstance` | 🟢 Implemented | Parse the event bytecode and create tracked sound instances per start_sound step (durations resolved via the bank container) |
 | `Miles*SoundInstances` (Enumerate/Stop/Pause/Resume) | 🟢 Implemented | Full instance lifecycle (PENDING→PLAYING→COMPLETE, duration-driven) with status-bitmask + label-query (token/glob) filtering and per-label concurrent caps |
-| `MilesBegin/Complete/ClearEventQueueProcessing` | 🟢 Implemented | Process-cycle state transitions and reaping |
+| `MilesBegin/CompleteEventQueueProcessing` / `MilesClearEventQueue` | 🟢 Implemented | Process-cycle state transitions and reaping |
 | `MilesGetEventLength` | 🟢 Implemented | `Container_GetEvent` → first start_sound → `Container_GetSound.DurationMs` |
 | `MilesSetSoundLabelLimits` / `MilesEnumeratePresetPersists` / `MilesTextDumpEventSystem` | 🟢 Implemented | Per-label caps; persisted-preset list; diagnostic dump |
 | Audio output for event-driven sounds | ⚪ Not wired | Instances are duration-tracked, **not** routed through the miniaudio mixer (blocked on the bank's embedded-audio data format); ramp/blend/LFO are not yet applied to live volume/pitch |
@@ -489,7 +489,7 @@ Verified end-to-end with **Europa 1400 Gold: The Guild** (TL edition) under Wine
   The native test suite runs 300+ unit tests plus a multi-seed fuzz harness that
   invokes every exported function with adversarial inputs; all pass. On a glibc
   host, plain `zig build test` is enough: build.zig automatically retargets the
-  native test executables to musl (same arch, `-Dcpu=baseline`) to avoid a
+  native test executables to musl (same architecture, host CPU) to avoid a
   host-toolchain linker error (gcc `crt1.o` `.sframe` relocations the Zig
   self-linker rejects); this affects only native test-exe linking, not the
   library or any source code.
@@ -500,13 +500,18 @@ reference `mss32.dll` (decorated stdcall names, via `winedump -j export`):
 
 | Build | Reference | Missing |
 |-------|-----------|---------|
-| v3 | 3.6f | 0 |
+| v3 | 3.6a | 0 |
 | v4 | 4.0h | 0 |
-| v5 | 5.0r | 0 |
-| v6 | 6.0i | 0 |
-| v7 | 7.0b | 0 |
-| v8 | 8.0b | 0 |
-| v9 | 9.3f | 0 |
+| v5 | 5.0b | 0 |
+| v6.1 | 6.1d | 0 |
+| v6.5 | 6.5h | 0 |
+| v7 | 7.0k | 0 |
+| v8 | 8.0e | 0 |
+| v9 | 9.1d | 0 |
+
+The reference column is the canonical per-version set
+`scripts/check_all_versions.sh` sweeps against. The `6`, `6.0` and `6.6`
+selects share the 6.0 mainline and are not swept separately.
 
 Per-version arity differences are reproduced exactly (e.g. `AIL_init_sample`
 `@4→@12→@8`, the v4/v5 5-arg `AIL_3D_sample_distances@20`, `AIL_input_open@12`,
