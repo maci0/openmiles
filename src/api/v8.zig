@@ -742,12 +742,16 @@ pub fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, f_left: f32, f_right: f3
         save_fb_pan = 0.5;
         save_volume = 0;
     }
-    const center_ratio: f32 = if (save_volume > 0.0001) center / save_volume else 0;
-    const sub_ratio: f32 = if (save_volume > 0.0001) sub / save_volume else 0;
+    const center_ratio: f32 = if (save_volume > 0.0001 and !std.math.isNan(center)) center / save_volume else 0;
+    const sub_ratio: f32 = if (save_volume > 0.0001 and !std.math.isNan(sub)) sub / save_volume else 0;
 
     // Engine is stereo; drive output from the front L/R pair (this sets the
     // quantized save_*; we overwrite with the exact reconstruction below).
-    s.setVolume(@intFromFloat(std.math.clamp(@max(f_left, f_right), 0.0, 1.0) * 127.0));
+    // NaN fails safe to silence: clamp() maps NaN to the upper bound, so a
+    // garbage level pair came out at full volume, the failure the 2D
+    // AIL_set_sample_volume_levels path already guards against.
+    const peak: f32 = @max(f_left, f_right);
+    s.setVolume(@intFromFloat((if (std.math.isNan(peak)) 0.0 else std.math.clamp(peak, 0.0, 1.0)) * 127.0));
     const sum = f_left + f_right;
     if (sum > 0.0001) s.setPan(@intFromFloat(std.math.clamp(f_right / sum, 0.0, 1.0) * 127.0));
 

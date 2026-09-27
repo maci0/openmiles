@@ -258,8 +258,20 @@ pub fn AIL_stream_info(s_opt: ?*Sample, datarate: ?*i32, sndtype: ?*i32, length:
         if (length) |p| p.* = @intCast(@min(s.cached_length_frames *| bpf, std.math.maxInt(i32)));
         if (memory) |p| p.* = 0; // working-buffer size not separately tracked
     } else {
-        if (datarate) |p| p.* = 44100 * 2 * 2;
-        if (sndtype) |p| p.* = 3;
+        // No decoder yet: report the driver's own rate/channel count, not a
+        // hardcoded 44100 stereo. A driver opened at 22050 (or 8 channels)
+        // described its streams as twice (or half) the data they actually
+        // carried, and a caller sizing a buffer from datarate over- or
+        // under-ran by that factor.
+        const engine_rate = s.driver.getSampleRate();
+        const engine_ch = s.driver.getChannels();
+        const rate: u64 = if (engine_rate > 0) engine_rate else 44100;
+        const ch: u64 = if (engine_ch > 0) @intCast(engine_ch) else 2;
+        if (datarate) |p| p.* = @intCast(@min(rate *| ch *| 2, std.math.maxInt(i32)));
+        if (sndtype) |p| p.* = switch (ch) {
+            1 => 1, // 16-bit mono
+            else => 3, // 16-bit stereo (and wider, which has no DIG_F code)
+        };
         if (length) |p| p.* = 0;
         if (memory) |p| p.* = 0;
     }

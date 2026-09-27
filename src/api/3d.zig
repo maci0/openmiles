@@ -270,8 +270,12 @@ pub fn AIL_set_3D_sample_loop_block(s: ?*anyopaque, loop_start: i32, loop_end: i
 pub fn AIL_set_3D_sample_cone(s: ?*anyopaque, inner_angle: f32, outer_angle: f32, outer_volume: i32) callconv(.winapi) void {
     const p = s orelse return;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
-    sample.cone_inner_rad = inner_angle * openmiles.deg2rad;
-    sample.cone_outer_rad = outer_angle * openmiles.deg2rad;
+    // NaN angle keeps the stored (omnidirectional) cone: the arithmetic below
+    // would store NaN, applyCone would hand NaN to the spatializer, and the
+    // getter would hand NaN back to the app. Same fail-safe the volume entry
+    // points use.
+    if (!std.math.isNan(inner_angle)) sample.cone_inner_rad = inner_angle * openmiles.deg2rad;
+    if (!std.math.isNan(outer_angle)) sample.cone_outer_rad = outer_angle * openmiles.deg2rad;
     const clamped: f32 = @floatFromInt(@min(@max(outer_volume, 0), 127));
     sample.cone_outer_volume = clamped / 127.0;
     sample.applyCone();
@@ -368,11 +372,11 @@ pub fn AIL_set_3D_sample_preference(s: ?*anyopaque, name: [*:0]const u8, val: *a
         if (sample.is_initialized) openmiles.ma.ma_sound_set_max_distance(&sample.sound, v.*);
     } else if (std.mem.eql(u8, n, "Cone inner angle")) {
         const v: *const f32 = @ptrCast(@alignCast(val));
-        sample.cone_inner_rad = v.* * openmiles.deg2rad;
+        if (!std.math.isNan(v.*)) sample.cone_inner_rad = v.* * openmiles.deg2rad;
         sample.applyCone();
     } else if (std.mem.eql(u8, n, "Cone outer angle")) {
         const v: *const f32 = @ptrCast(@alignCast(val));
-        sample.cone_outer_rad = v.* * openmiles.deg2rad;
+        if (!std.math.isNan(v.*)) sample.cone_outer_rad = v.* * openmiles.deg2rad;
         sample.applyCone();
     } else if (std.mem.eql(u8, n, "Cone outer volume")) {
         const v: *const f32 = @ptrCast(@alignCast(val));
