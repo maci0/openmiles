@@ -2044,6 +2044,30 @@ test "AIL_quick_play returns S32 success (1) and 0 for a null handle" {
     try testing.expectEqual(@as(i32, 0), api_quick.AIL_quick_play(null, 1)); // SDK null guard
 }
 
+test "AIL_quick_load_mem owns its image, so AIL_quick_copy duplicates the audio" {
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    openmiles.setLastDigitalDriver(driver);
+    defer openmiles.setLastDigitalDriver(null);
+
+    const pcm = [_]u8{0} ** 256;
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 8000, 8);
+    defer testing.allocator.free(wav);
+
+    const loaded = api_quick.AIL_quick_load_mem(wav.ptr, @intCast(wav.len)) orelse return error.QuickLoadFailed;
+    defer api_quick.AIL_quick_unload(loaded);
+
+    const copy = api_quick.AIL_quick_copy(loaded) orelse return error.QuickCopyFailed;
+    defer api_quick.AIL_quick_unload(copy);
+
+    // The copy plays the same audio as the source. A borrow-the-caller's-buffer
+    // load left the copy holding nothing, so it reported QSTAT_LOADED forever
+    // and produced silence.
+    try testing.expectEqual(loaded.getMsPosition().total, copy.getMsPosition().total);
+    try testing.expectEqual(@as(i32, 2), api_quick.AIL_quick_status(copy)); // QSTAT_LOADED
+    try testing.expectEqual(@as(i32, 1), api_quick.AIL_quick_play(copy, 1));
+}
+
 test "AIL_startup returns an incrementing use count (SDK refcount)" {
     const api_digital = @import("api/digital.zig");
     // Order-independent: each call bumps the use count by 1 and returns the new

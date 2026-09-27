@@ -61,11 +61,28 @@ pub fn AIL_quick_load_mem(data: *anyopaque, size: u32) callconv(.winapi) ?*Sampl
             openmiles.setLastError("Failed to allocate sample for quick load");
             return null;
         };
-        s.load(data, @intCast(@min(size, @as(u32, std.math.maxInt(i32))))) catch {
-            openmiles.setLastError("Failed to load quick sample from memory");
-            s.deinit();
-            return null;
-        };
+        // The handle owns its image. A quick sample is a self-contained asset
+        // the game plays, copies, and unloads independently of the buffer it
+        // passed in: borrowing the caller's memory left AIL_quick_copy with
+        // nothing to duplicate (it returned a handle holding no audio at all)
+        // and left the sample reading memory the app was free to reuse.
+        if (size == 0) {
+            // No length given: fall back to header/bounded detection, which has
+            // no image to copy from.
+            s.load(data, -1) catch {
+                openmiles.setLastError("Failed to load quick sample from memory");
+                s.deinit();
+                return null;
+            };
+        } else {
+            const raw: [*]const u8 = @ptrCast(@alignCast(data));
+            const bytes = raw[0..@min(size, @as(u32, std.math.maxInt(i32)))];
+            s.loadFromMemory(bytes, true) catch {
+                openmiles.setLastError("Failed to load quick sample from memory");
+                s.deinit();
+                return null;
+            };
+        }
         return s;
     }
     return null;
@@ -92,13 +109,20 @@ pub fn AIL_quick_copy(s_opt: ?*Sample) callconv(.winapi) ?*Sample {
             openmiles.setLastError("Failed to allocate sample for quick copy");
             return null;
         };
-        if (s.owned_buffer) |buf| {
-            new_s.loadFromMemory(buf, true) catch {
-                openmiles.setLastError("Failed to copy sample data");
-                new_s.deinit();
-                return null;
-            };
-        }
+        const buf = s.owned_buffer orelse {
+            // A sample with no owned image (a bounded streaming mount, or one
+            // loaded from a bare pointer) has nothing to duplicate. Handing back
+            // an empty handle instead reported success and the copy then played
+            // silence forever, with no way for the caller to tell.
+            openmiles.setLastError("Cannot copy a sample that holds no image");
+            new_s.deinit();
+            return null;
+        };
+        new_s.loadFromMemory(buf, true) catch {
+            openmiles.setLastError("Failed to copy sample data");
+            new_s.deinit();
+            return null;
+        };
         return new_s;
     }
     return null;

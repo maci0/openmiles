@@ -152,6 +152,17 @@ everything below is unreleased.
 
 ### Fixed
 
+- `AIL_sequence_position` reported beat 1, measure 1 for the whole of a playing
+  sequence unless the game had also registered a beat callback: the beat clock
+  only advanced on the callback path. It now advances on its own, and resyncs to
+  the derived position when one render buffer crosses more beats than the
+  per-call budget allows, instead of leaving the clock permanently behind.
+- `AIL_quick_load_mem` mounted the caller's buffer without copying it, so the
+  handle read memory the app was free to reuse and `AIL_quick_copy` had nothing
+  to duplicate: it returned a handle holding no audio at all, which then played
+  silence and reported `QSTAT_LOADED` forever. The quick handle now owns a copy
+  of the image, and `AIL_quick_copy` fails with `AIL_last_error` set rather than
+  reporting success for a sample that holds no image.
 - Plugin discovery loaded providers in directory-read order, which the
   filesystem chooses and changes between machines and between runs, so
   `RIB_enumerate_providers` answered in an order no replay could reproduce and

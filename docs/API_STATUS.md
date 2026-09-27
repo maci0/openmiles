@@ -373,8 +373,8 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_quick_startup` | 🟢 Implemented | Opens digital and/or MIDI driver based on flags |
 | `AIL_quick_shutdown` | 🟢 Implemented | Closes digital and MIDI drivers |
 | `AIL_quick_load` | 🟢 Implemented | File-based loading |
-| `AIL_quick_load_mem` | 🟢 Implemented | Memory-based loading |
-| `AIL_quick_copy` | 🟢 Implemented | Copies owned audio buffer to new sample handle |
+| `AIL_quick_load_mem` | 🟢 Implemented | Memory-based loading; the handle owns a copy of the image, so it survives the caller reusing its buffer and stays copyable |
+| `AIL_quick_copy` | 🟢 Implemented | Duplicates the sample's own image; returns null (with `AIL_last_error` set) for a sample that holds none, such as a bounded streaming mount |
 | `AIL_quick_unload` | 🟢 Implemented | |
 | `AIL_quick_play` | 🟢 Implemented | |
 | `AIL_quick_stop` | 🟢 Implemented | |

@@ -625,22 +625,39 @@ pub const Sequence = struct {
         return ma.MA_SUCCESS;
     }
 
+    /// Advance the beat clock to the current time, firing the beat callback for
+    /// every beat crossed. The clock advances whether or not a callback is
+    /// registered: AIL_sequence_position reports these same beat/measure
+    /// counters, and returning early with no callback left them frozen at 1,1
+    /// for the whole of a playing sequence.
     fn fireBeatCallbacks(self: *Sequence) void {
-        if (self.beat_callback.load(.acquire) == 0) return;
         if (self.ms_per_beat <= 0) return;
+        const cb_ptr = self.beat_callback.load(.acquire);
         var budget: u32 = 16; // cap iterations to prevent infinite loop on corrupted tempo
         while (self.time_ms >= self.next_beat_ms and budget > 0) : (budget -= 1) {
-            // AILBEATCB: void cb(HMDIDRIVER hmi, HSEQUENCE seq, S32 beat, S32 measure)
-            const cb: *const fn (?*anyopaque, *Sequence, i32, i32) callconv(.winapi) void = @ptrFromInt(self.beat_callback.load(.acquire));
             const beat = self.current_beat_in_measure.load(.acquire);
             const measure = self.current_measure.load(.acquire);
-            cb(@ptrCast(self.driver), self, beat, measure);
+            if (cb_ptr != 0) {
+                // AILBEATCB: void cb(HMDIDRIVER hmi, HSEQUENCE seq, S32 beat, S32 measure)
+                const cb: *const fn (?*anyopaque, *Sequence, i32, i32) callconv(.winapi) void = @ptrFromInt(cb_ptr);
+                cb(@ptrCast(self.driver), self, beat, measure);
+            }
             self.next_beat_ms += self.ms_per_beat;
             self.current_beat_in_measure.store(beat + 1, .release);
             if (beat + 1 > self.beats_per_measure) {
                 self.current_beat_in_measure.store(1, .release);
                 self.current_measure.store(measure + 1, .release);
             }
+        }
+        // A buffer longer than the budget (a very fast tempo, or a tempo change
+        // that shortened the beat) leaves next_beat_ms behind time_ms, so every
+        // later call re-fires the same capped run and the reported beat stays
+        // wrong forever. Resync the clock to the derived position instead.
+        if (budget == 0 and self.time_ms >= self.next_beat_ms) {
+            const beats = satBeats(self.time_ms / self.ms_per_beat);
+            self.next_beat_ms = @as(f64, @floatFromInt(beats + 1)) * self.ms_per_beat;
+            self.current_beat_in_measure.store(@mod(beats, self.beats_per_measure) + 1, .release);
+            self.current_measure.store(@divTrunc(beats, self.beats_per_measure) + 1, .release);
         }
     }
 
@@ -944,4 +961,41 @@ test "satBeats truncates in range and clamps extremes with +1 headroom" {
     // Beyond i32: clamps one below maxInt so callers' `+ 1` cannot overflow.
     try testing.expectEqual(std.math.maxInt(i32) - 1, satBeats(2e12));
     try testing.expectEqual(std.math.maxInt(i32) - 1, satBeats(1e300));
+}
+
+test "beat clock advances with no beat callback registered" {
+    const driver = try MidiDriver.init(testing.allocator);
+    defer driver.deinit();
+    const seq = try Sequence.init(driver);
+    defer seq.deinit();
+
+    seq.ms_per_beat = 500.0;
+    seq.beats_per_measure = 4;
+    seq.next_beat_ms = 500.0;
+    // No beat callback: AIL_sequence_position still reports a moving clock.
+    seq.time_ms = 2600.0;
+    seq.fireBeatCallbacks();
+    try testing.expectEqual(@as(i32, 2), seq.current_beat_in_measure.load(.acquire));
+    try testing.expectEqual(@as(i32, 2), seq.current_measure.load(.acquire));
+    try testing.expectEqual(@as(f64, 3000.0), seq.next_beat_ms);
+}
+
+test "beat clock resyncs after the per-call beat budget is spent" {
+    const driver = try MidiDriver.init(testing.allocator);
+    defer driver.deinit();
+    const seq = try Sequence.init(driver);
+    defer seq.deinit();
+
+    // 1000 ms of beats at 1 ms/beat crosses far more than the 16-beat budget.
+    seq.ms_per_beat = 1.0;
+    seq.beats_per_measure = 4;
+    seq.next_beat_ms = 1.0;
+    seq.time_ms = 1000.0;
+    seq.fireBeatCallbacks();
+    // Resynced to the derived position rather than left 984 ms behind the clock,
+    // which would make every later call re-run the capped loop and report the
+    // same stale beat.
+    try testing.expectEqual(@as(i32, 1), seq.current_beat_in_measure.load(.acquire));
+    try testing.expectEqual(@as(i32, 251), seq.current_measure.load(.acquire));
+    try testing.expectEqual(@as(f64, 1001.0), seq.next_beat_ms);
 }
