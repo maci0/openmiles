@@ -26,14 +26,37 @@ jobs:
   build:
     name: Build Windows DLL
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The job compiles the tree four times over: the test bundle, the shipped
+    # cross-compile, the reproducibility rebuild under a second path, and the
+    # C header parity compile. 15 minutes turned that budget into the first
+    # thing to break on a slow runner, and a job killed at the ceiling reports
+    # no failed step at all, only a timeout.
+    timeout-minutes: 30
     env:
       # The tag being released, on a push and on a manual re-run alike.
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
+      # TAG is a checkout ref and is spliced into shell words by every step
+      # below, and on a manual re-run it is whatever the dispatch input held. A
+      # git ref carries none of what a shell word does, so anything that is not
+      # v<major>.<minor>.<patch> is a typo or an attempt at one, and it is
+      # refused here, before the value selects a tree to build and publish.
+      - name: Reject a tag that is not a version
+        run: |
+          set -euo pipefail
+          if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.]+)*$ ]]; then
+            echo "tag '${TAG}' is not v<major>.<minor>.<patch>"
+            exit 1
+          fi
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           ref: ${{ env.TAG }}
+          # Nothing in this job pushes over git: the release is created with
+          # GH_TOKEN, and the rebuild step reads tracked paths with
+          # `git ls-files`. Leaving the job token in .git/config would hand every
+          # step in the job a credential none of them need.
+          persist-credentials: false
 
       # A release is only correct if the tag, the declared package version, and
       # the changelog agree. build.zig.zon is the single source of truth: the tag

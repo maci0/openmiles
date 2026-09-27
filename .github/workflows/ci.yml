@@ -17,13 +17,21 @@ jobs:
   test:
     name: Build and Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # The Ubuntu leg runs the full gate: lint, the native build, the test
+    # bundle, a sanitizer rebuild of every C translation unit, and the Windows
+    # cross-compile. That is five full compiles of the tree, and 15 minutes made
+    # a slow runner the first thing to fail, with no failed step to point at.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          # No step in this job pushes over git, and the job token is read-only
+          # anyway, so it has no business sitting in .git/config for the run.
+          persist-credentials: false
 
       # build.zig.zon declares the toolchain once; the Makefile and the release
       # workflow read the same field, so a Zig bump cannot land in one place
