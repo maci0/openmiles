@@ -89,6 +89,10 @@ substring of its name:
 make test FILTER=redbook           # or: zig build test -Dtest-filter=redbook
 ```
 
+A `FILTER` that matches no test name is a typo, so `make test` refuses it and
+names the problem; the raw `zig build test -Dtest-filter=...` reports a
+zero-test run as success.
+
 A test run is quiet: the test build does not enable the debug log by default
 (a Debug library build does), so a run neither floods the terminal nor appends
 to `openmiles.log`. Set `OPENMILES_DEBUG=1` for a run that wants the engine

@@ -106,6 +106,16 @@ everything below is unreleased.
 
 ### Fixed
 
+- `make lint` failed on a clean tree: `ruff check` reported the fixed-argv
+  `zig cc` call in `check_header.py` under the bandit rules, and every
+  `docs/THREAT_MODEL.md` `file:line` reference whose line had moved since it
+  was written failed the anchor check. The compiler call resolves `zig` through
+  `shutil.which` and names the missing binary instead of raising, and the
+  threat model references point at the line the anchor is on.
+- `make test FILTER=<substring>` reported success when the substring matched no
+  test name, so a typo read as a green run. A filter that matches nothing is
+  now refused, naming the filter.
+- `make help` did not list `check-yaml` or `check-parity-tools`.
 - `mss.h` declared the pre-8.0 `AILSOUNDINFO` (9 fields, 36 bytes) for every
   version, so a v8 or v9 build read `channel_mask` at +0x18 and `block_size` at
   +0x20 out of a 36-byte caller struct. `channel_mask` is now declared from

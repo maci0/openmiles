@@ -41,7 +41,8 @@ make check                # everything CI runs, in CI's order
 ```
 
 `make help` lists every target. A filtered run is the edit-test loop: it
-rebuilds only the test artifacts and skips the rest of the suite. Test output
+rebuilds only the test artifacts and skips the rest of the suite, and a filter
+that matches no test name is refused rather than reported as a pass. Test output
 is quiet by default; set `OPENMILES_DEBUG=1` to get the engine trace and the
 `openmiles.log` it writes.
 

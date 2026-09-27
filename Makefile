@@ -27,7 +27,18 @@ build: check-toolchain
 
 # make test FILTER=<substring> runs only the tests whose name contains it;
 # the full suite takes minutes, the filtered run seconds.
+#
+# A filter that matches no test name is a typo, not a green run, so it is
+# checked here: zig reports a zero-test run as success, which is how a
+# contributor ends up believing a fix is covered when nothing ran. FILTER goes
+# through the environment, not into the recipe text.
 test: check-toolchain
+	@if [ -n "$(FILTER)" ]; then \
+	  if ! grep -rhoE 'test "[^"]*"' --include='*.zig' src | grep -qF -- "$$FILTER"; then \
+	    echo "error: no test name in src/ contains '$(FILTER)'; run 'make test' with no FILTER" >&2; \
+	    exit 1; \
+	  fi; \
+	fi
 	zig build test $(if $(FILTER),-Dtest-filter=$(FILTER))
 
 # Everything .github/workflows/ci.yml runs, in the same order, so a failure
@@ -148,4 +159,6 @@ help:
 	@echo "  check-vendored      assert deps/ matches the digests in deps/SHA256SUMS"
 	@echo "  check-threat-model  assert every file:line anchor in docs/THREAT_MODEL.md resolves"
 	@echo "  check-python        assert ruff on PATH is the pinned version, then lint and format-check"
+	@echo "  check-yaml          assert yamllint on PATH is the pinned version, then lint .github/workflows"
+	@echo "  check-parity-tools  assert pefile is importable (only make parity needs it)"
 	@echo "  check-pins          assert the zig and ruff pins agree across the tree"

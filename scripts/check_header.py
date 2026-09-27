@@ -30,6 +30,7 @@ Exit code 0 when the header and the export table agree for every version.
 
 import argparse
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -444,6 +445,15 @@ def compile_problems():
     compiling to an object file needs no DLL to link against.
     """
     problems = []
+    # `make check-toolchain` owns the version; this only needs the binary, and
+    # naming it when it is missing beats a FileNotFoundError once per version.
+    zig = shutil.which("zig")
+    if zig is None:
+        print(
+            "error: zig not found on PATH; `make check-toolchain` names the version",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     for version in SUPPORTED_VERSIONS:
         with tempfile.TemporaryDirectory() as tmp:
             tu = Path(tmp) / "header_check.c"
@@ -452,12 +462,13 @@ def compile_problems():
                 f'#include "{MSS_H}"\n'
                 "int main(void) { return 0; }\n"
             )
-            # S603/S607: the tool name is the fixed one the Makefile already
-            # gates on, and the only path handed to it is the temp file this
-            # function just wrote; nothing from the repository reaches argv.
+            # S603: a fixed argv list with no shell, built here rather than from
+            # input, running the zig resolved above. The only path handed to it
+            # is the temp file this function just wrote; nothing from the
+            # repository reaches argv.
             proc = subprocess.run(  # noqa: S603
-                [  # noqa: S607
-                    "zig",
+                [
+                    zig,
                     "cc",
                     "-c",
                     "-std=c99",
