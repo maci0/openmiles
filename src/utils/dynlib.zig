@@ -133,12 +133,15 @@ fn applyElfFixups(lib: *std.DynLib, path: []const u8) !void {
 /// file offset 0, yields ELF-header garbage for every non-first segment).
 fn recopyWritableSegment(fd: std.posix.fd_t, img: []u8, ph: std.elf.Phdr) !void {
     if (ph.p_filesz == 0) return;
-    if (@as(u64, ph.p_vaddr) + ph.p_filesz > img.len) return error.ImageFixupFailed;
+    // Saturating: p_vaddr and p_filesz are file-controlled, so a sum that wraps
+    // would compare as small and pass the bound with a segment that lies past
+    // the mapping.
+    if (@as(u64, ph.p_vaddr) +| ph.p_filesz > img.len) return error.ImageFixupFailed;
     const buf = try std.heap.page_allocator.alloc(u8, @intCast(ph.p_filesz));
     defer std.heap.page_allocator.free(buf);
     var got: usize = 0;
     while (got < buf.len) {
-        const rc = std.os.linux.pread(fd, buf[got..].ptr, buf.len - got, @intCast(ph.p_offset + got));
+        const rc = std.os.linux.pread(fd, buf[got..].ptr, buf.len - got, @intCast(ph.p_offset +| @as(u64, got)));
         switch (std.os.linux.errno(rc)) {
             .SUCCESS => {
                 if (rc == 0) return error.ImageFixupFailed; // truncated file

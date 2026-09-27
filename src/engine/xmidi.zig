@@ -70,6 +70,11 @@ fn readBe32(data: []const u8, pos: usize) u32 {
     return std.mem.readInt(u32, data[pos..][0..4], .big);
 }
 
+/// Longest VLQ this file reads or writes. The SMF spec caps a variable-length
+/// quantity at four bytes, so writeVlq's `buf` is sized for exactly that and
+/// a value needing a fifth would be truncated on write instead of encoded.
+const max_vlq_bytes = 4;
+
 fn readVlq(data: []const u8, pos: *usize) u32 {
     var result: u32 = 0;
     var bytes_read: u8 = 0;
@@ -79,14 +84,16 @@ fn readVlq(data: []const u8, pos: *usize) u32 {
         result = (result << 7) | (b & 0x7F);
         bytes_read += 1;
         if (b & 0x80 == 0) break;
-        if (bytes_read >= 4) break;
+        if (bytes_read >= max_vlq_bytes) break;
     }
     return result;
 }
 
 fn writeVlq(list: *std.ArrayListUnmanaged(u8), allocator: std.mem.Allocator, value: u32) !void {
-    var v = value;
-    var buf: [5]u8 = undefined;
+    // Cap at what a four-byte VLQ can carry (2^28 - 1) rather than writing a
+    // fifth byte readVlq would refuse to decode.
+    var v: u32 = @min(value, (@as(u32, 1) << (7 * max_vlq_bytes)) - 1);
+    var buf: [max_vlq_bytes]u8 = undefined;
     var i: usize = 0;
     buf[i] = @truncate(v & 0x7F);
     v >>= 7;

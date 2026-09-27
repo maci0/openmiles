@@ -405,6 +405,11 @@ pub fn AIL_branch_index(seq_opt: ?*Sequence, marker: u32) callconv(.winapi) void
     log("AIL_branch_index(seq={*}, marker={d})\n", .{ seq, marker });
     seq.branchIndex(marker);
 }
+/// AIL_register_ICA_array(ICA_array* arr): the SDK's "initial controller
+/// array" is a fixed 16 x 128 byte grid (AIL_channel_info.c). The call carries
+/// no length, so the grid size is the contract: a caller passing anything
+/// smaller is already out of contract, and the walk below reads exactly the
+/// documented 2048 bytes.
 pub fn AIL_register_ICA_array(seq_opt: ?*Sequence, arr: *anyopaque) callconv(.winapi) void {
     const seq = seq_opt orelse return;
     const sf = seq.driver.soundfont orelse return;

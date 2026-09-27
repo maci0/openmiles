@@ -1559,7 +1559,11 @@ pub const Sample = struct {
         }
         self.v51_levels = .{ left, right, left, right, save_volume, save_volume };
         self.v51_fb_pan = 0.5;
-        const vol = std.math.clamp(@max(left, right), 0.0, 1.0);
+        // NaN fails safe (silence, centre): clamp() maps NaN to the upper bound
+        // (@min/@max skip NaN), i.e. garbage input -> full volume. Same guard
+        // setVolumePanF applies for the same reason.
+        const peak = @max(left, right);
+        const vol = if (std.math.isNan(peak)) 0.0 else std.math.clamp(peak, 0.0, 1.0);
         self.setVolume(@intFromFloat(vol * 127.0));
         const sum = left + right;
         if (sum > 0.0001) self.setPan(@intFromFloat(std.math.clamp(right / sum, 0.0, 1.0) * 127.0));

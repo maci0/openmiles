@@ -124,7 +124,10 @@ pub fn findDls(data: []const u8) ?[]const u8 {
             std.mem.eql(u8, data[i + 8 .. i + 12], "DLS "))
         {
             const body = std.mem.readInt(u32, data[i + 4 .. i + 8][0..4], .little);
-            const total = @min(8 + @as(usize, body), data.len - i);
+            // Saturating, like every other size field walked in this file: a
+            // body of 0xFFFFFFFF wraps to 7 on the 32-bit target and yields a
+            // 7-byte "DLS image" instead of the whole remainder.
+            const total = @min(8 +| @as(usize, body), data.len - i);
             return data[i .. i + total];
         }
     }

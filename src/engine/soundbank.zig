@@ -401,14 +401,7 @@ pub const Bank = struct {
             return -1;
         }
         const sfn = std.mem.sliceTo(self.meta[fn_abs..], 0);
-        var w: usize = 0;
-        out[w] = '*';
-        w += 1;
-        @memcpy(out[w .. w + self.filename.len], self.filename);
-        w += self.filename.len;
-        @memcpy(out[w .. w + sfn.len], sfn);
-        w += sfn.len;
-        out[w] = 0;
+        _ = self.writeSoundAssetPath(sfn, out);
         // MILESBANKSOUNDINFO.DataLen is at Sound+12 (Info) +12.
         if (!self.inBounds(data_off, 28)) return 0;
         return self.rdI32(data_off + 24);
@@ -452,6 +445,28 @@ pub const Bank = struct {
     /// `out_info`, optionally format its path into `out_filename`, and return the
     /// filename-buffer requirement (`2 + bankNameLen + soundNameLen`), or 0 if not
     /// found. Mirrors hlbank.cpp.
+    /// Write `*<bank file name><sound file name>` (MSS's DOS-style relative
+    /// asset path) into `out`, NUL-terminated. Returns the bytes the caller must
+    /// provide: 1 for the `*`, both names, and 1 for the terminator.
+    ///
+    /// No size parameter exists on the SDK call, so `out` must be at least this
+    /// many bytes; AIL_sound_asset_info returns the requirement for exactly this
+    /// reason.
+    fn writeSoundAssetPath(self: *const Bank, sfn: []const u8, out: [*]u8) i32 {
+        var w: usize = 0;
+        out[w] = '*';
+        w += 1;
+        @memcpy(out[w .. w + self.filename.len], self.filename);
+        w += self.filename.len;
+        @memcpy(out[w .. w + sfn.len], sfn);
+        w += sfn.len;
+        out[w] = 0;
+        // Saturating: both lengths come from the bank file, so a crafted pair
+        // could otherwise wrap the requirement to a small positive size and let
+        // the caller size its buffer from the wrapped value.
+        return root.satI32(@floatFromInt(1 + self.filename.len + sfn.len + 1));
+    }
+
     pub fn soundAssetInfo(self: *const Bank, sound_name: []const u8, out_filename: ?[*]u8, out_info: ?[*]u8) i32 {
         const data_off = self.findSoundDataOffset(sound_name) orelse 0;
         if (data_off == 0 or !self.inBounds(data_off, 8)) {
@@ -469,18 +484,8 @@ pub const Bank = struct {
             return 0;
         }
         const sfn = std.mem.sliceTo(self.meta[fn_abs..], 0);
-        const req: i32 = @intCast(2 + self.filename.len + sfn.len);
-        if (out_filename) |o| {
-            var w: usize = 0;
-            o[w] = '*';
-            w += 1;
-            @memcpy(o[w .. w + self.filename.len], self.filename);
-            w += self.filename.len;
-            @memcpy(o[w .. w + sfn.len], sfn);
-            w += sfn.len;
-            o[w] = 0;
-        }
-        return req;
+        if (out_filename) |o| return self.writeSoundAssetPath(sfn, o);
+        return root.satI32(@floatFromInt(1 + self.filename.len + sfn.len + 1));
     }
 
     /// MILESBANKSOUNDINFO.DurationMs (Sound+12 Info, +24) for a named sound.

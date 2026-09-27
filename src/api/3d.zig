@@ -339,7 +339,10 @@ pub fn AIL_set_3D_sample_preference(s: ?*anyopaque, name: [*:0]const u8, val: *a
         sample.setOcclusion(v.*);
     } else if (std.mem.eql(u8, n, "Effects level")) {
         const v: *const f32 = @ptrCast(@alignCast(val));
-        sample.effects_level = v.*;
+        // Same clamp as AIL_set_3D_sample_effects_level: two entry points
+        // writing one field, and the unclamped one let a preference file
+        // raise it past 1.0 while the setter could not.
+        sample.effects_level = @min(1.0, @max(0.0, v.*));
     } else if (std.mem.eql(u8, n, "Position")) {
         const v: *const [3]f32 = @ptrCast(@alignCast(val));
         sample.setPosition(v.*[0], v.*[1], v.*[2]);
@@ -448,7 +451,10 @@ pub fn AIL_3D_sample_attribute(s: ?*anyopaque, name: [*:0]const u8, val: *anyopa
         v.* = @intFromEnum(sample.status());
     } else if (std.mem.eql(u8, n, "Loop count")) {
         const v: *i32 = @ptrCast(@alignCast(val));
-        v.* = sample.loop_count;
+        // The remaining count, matching AIL_3D_sample_loop_count: the SDK field
+        // behind this name decrements during playback, so returning the stored
+        // original made the two readers of one field disagree while playing.
+        v.* = sample.loops_remaining.load(.acquire);
     }
 }
 pub fn AIL_auto_update_3D_position(s: ?*anyopaque, onoff: i32) callconv(.winapi) void {

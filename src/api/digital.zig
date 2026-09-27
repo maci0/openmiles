@@ -585,6 +585,9 @@ pub fn AIL_digital_configuration(driver_opt: ?*DigitalDriver, rate: ?*i32, forma
     if (rate) |p| p.* = @intCast(driver.getSampleRate());
     if (format) |p| p.* = if (driver.getChannels() >= 2) 3 else 1; // 16-bit: 1=mono,3=stereo
     if (string) |buf| {
+        // The SDK call carries no buffer size, so the write is what it has always
+        // been; named here so the assumption is visible at the call site rather
+        // than only in the header's signature.
         const name = "OpenMiles (miniaudio)";
         for (name, 0..) |c, i| buf[i] = c;
         buf[name.len] = 0;
@@ -779,7 +782,10 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
             mono[nmono] = cursor;
             nmono += 1;
         }
-        const pts: u64 = @as(u64, ms.points) *| dest_rate / ms.rate;
+        // Saturating multiply, then clamped to usize: a source rate far below
+        // dest_rate makes pts exceed 2^32, and the @intCast below would panic
+        // on the 32-bit target. dest_size caps the real output anyway.
+        const pts: u64 = @min(@as(u64, ms.points) *| dest_rate / ms.rate, std.math.maxInt(usize));
         if (pts > max_points) max_points = pts;
     }
 
@@ -978,16 +984,15 @@ pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, r
     };
     defer openmiles.global_allocator.free(wav);
     const io = openmiles.io;
-    const path = std.mem.span(filename);
-    const file = openmiles.fs_compat.createFile(io, path, .{}) catch |err| {
-        log("AIL_WAV_file_write: cannot create '{s}' ({any})\n", .{ path, err });
-        openmiles.setFileErrorFmt("AIL_WAV_file_write: cannot create '{s}'", .{path});
+    const file = openmiles.fs_compat.createFile(io, out_path, .{}) catch |err| {
+        log("AIL_WAV_file_write: cannot create '{s}' ({any})\n", .{ out_path, err });
+        openmiles.setFileErrorFmt("AIL_WAV_file_write: cannot create '{s}'", .{out_path});
         return 0;
     };
     defer file.close(io);
     file.writeStreamingAll(io, wav) catch |err| {
-        log("AIL_WAV_file_write: writing {d} bytes to '{s}' failed ({any})\n", .{ wav.len, path, err });
-        openmiles.setFileErrorFmt("AIL_WAV_file_write: write of {d} bytes to '{s}' failed", .{ wav.len, path });
+        log("AIL_WAV_file_write: writing {d} bytes to '{s}' failed ({any})\n", .{ wav.len, out_path, err });
+        openmiles.setFileErrorFmt("AIL_WAV_file_write: write of {d} bytes to '{s}' failed", .{ wav.len, out_path });
         return 0;
     };
     return 1;

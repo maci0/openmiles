@@ -206,8 +206,8 @@ pub const StreamSource = struct {
             // frame and cannot be completed from the next submission, so the slot
             // drains once no whole frame is left. Testing `avail == 0` instead
             // would leave the sub-frame remainder in place forever: avail would
-            // stay nonzero, take_frames would be 0, the read loop would break
-            // every call, and the sample would never fire EOB or EOS.
+            // stay nonzero, take_frames would be 0, the read loop would make no
+            // progress on every call, and the sample would never fire EOB or EOS.
             const whole_frames = avail - (avail % self.frame_size);
             if (whole_frames == 0) {
                 if (avail != 0) {
@@ -228,10 +228,10 @@ pub const StreamSource = struct {
                 continue;
             }
 
-            const want_bytes = (fc - total) * self.frame_size;
-            const take = @min(avail, want_bytes);
-            const take_frames = take / self.frame_size;
-            if (take_frames == 0) break;
+            // Frames, not bytes, on both sides: a byte-wise min can land mid-frame
+            // and yield 0, which would stall the ring for the rest of the call.
+            const take_frames = @min(avail / self.frame_size, fc - total);
+            std.debug.assert(take_frames > 0);
             if (out_base) |ob| {
                 const dst = ob + total * self.frame_size;
                 @memcpy(dst[0 .. take_frames * self.frame_size], slot.data.?[slot.pos .. slot.pos + take_frames * self.frame_size]);

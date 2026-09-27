@@ -448,6 +448,10 @@ pub fn DLSUnloadAll(driver_opt: ?*MidiDriver) callconv(.c) void {
         driver.owns_soundfont = true;
         driver.soundfont_size_bytes = 0;
         driver.clearSoundfontSource();
+    } else {
+        // No bank, but the reported size is driver state a later AIL_DLS_get_info
+        // reads; leaving the last bank's size in place reports a phantom bank.
+        driver.soundfont_size_bytes = 0;
     }
 }
 pub fn DLSUnloadFile(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.c) void {

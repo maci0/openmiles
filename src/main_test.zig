@@ -5528,6 +5528,19 @@ test "set_sample_volume_pan applies the 4+ channel front/back factor (SDK)" {
     try testing.expect(@abs(r - (0.812252196 * 0.812252196)) < 0.0005);
 }
 
+test "a non-finite volume level fails safe to silence" {
+    // clamp() maps NaN to the upper bound (@min/@max skip NaN), so the peak
+    // taken here used to reach unity gain from garbage input. setVolumePanF
+    // already guards the same way; the level path has to agree with it.
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
+    defer drv.deinit();
+    defer s.deinit();
+
+    s.setVolumeLevels(std.math.nan(f32), std.math.nan(f32));
+    try testing.expectEqual(@as(i32, 0), dg.AIL_sample_volume(s));
+}
+
 test "v7 master reverb decay/predelay/damping all round-trip" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();

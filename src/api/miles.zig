@@ -470,9 +470,6 @@ const EventSystem = struct {
 };
 
 var g_root: ?*EventSystem = null;
-var g_user_rand: ?*anyopaque = null;
-var g_error_cb: ?*anyopaque = null;
-var g_async_running: bool = false;
 
 // Resolve an event-system context: 0 means the default (root) system; a non-zero
 // value is trusted only if it identifies one of our live systems.
@@ -693,8 +690,9 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
     const np = io_next orelse return 0;
     updateInstances();
     const filter: u64 = if (status == 0) 0xffffffff else @intCast(@as(u32, @bitCast(status)));
-    // MSS_FIRST sentinel ((HMSSENUM)-1) starts a fresh walk at index 0.
-    const first = @intFromPtr(np.*) == std.math.maxInt(usize);
+    // MSS_FIRST sentinel ((HMSSENUM)-1) starts a fresh walk at index 0, the
+    // same convention MilesEnumeratePresetPersists uses.
+    const first = @intFromPtr(np.*) == std.math.maxInt(usize) or @intFromPtr(np.*) == 0;
     var idx: usize = if (first) 0 else @intFromPtr(np.*);
     while (idx < g_instances.items.len) : (idx += 1) {
         const inst = g_instances.items[idx];
@@ -789,7 +787,9 @@ pub fn MilesGetEventLength(event_name: ?[*:0]const u8) callconv(.winapi) i32 {
         const sp = sn.str orelse return 0;
         const full = sp[0..@intCast(@max(sn.len, 0))];
         const cut = std.mem.indexOfScalar(u8, full, ':') orelse full.len;
-        if (openmiles.soundbank.containerSoundDurationMs(full[0..cut])) |ms| return @intCast(ms);
+        // Saturating: the duration is a raw u32 field from the soundbank file, so
+        // a bank declaring 0x80000000 ms would panic the narrowing cast.
+        if (openmiles.soundbank.containerSoundDurationMs(full[0..cut])) |ms| return openmiles.satI32(@floatFromInt(ms));
         return 0;
     }
     return 0;
@@ -821,13 +821,17 @@ pub fn MilesTextDumpEventSystem() callconv(.winapi) ?[*:0]u8 {
     return @ptrCast(out);
 }
 
-// --- callbacks / config (stored or no-op) ------------------------------------
+// --- callbacks / config (no-op) ----------------------------------------------
+//
+// The event system runs on the engine's own mixer, which draws no randomness and
+// routes no error reporting, so these have nothing to bind to. They accept the
+// call and drop the pointer rather than storing a callback nothing ever invokes.
 
 pub fn MilesRegisterRand(rand: ?*anyopaque) callconv(.winapi) void {
-    g_user_rand = rand;
+    _ = rand;
 }
 pub fn MilesSetEventErrorCallback(callback: ?*anyopaque) callconv(.winapi) void {
-    g_error_cb = callback;
+    _ = callback;
 }
 pub fn MilesEventSetAuditionFunctions(functions: ?*const anyopaque) callconv(.c) void {
     _ = functions;
@@ -846,13 +850,15 @@ pub fn MilesUseTmLite(context: ?*anyopaque) callconv(.winapi) void {
 }
 
 // --- async file I/O (not yet ported) -----------------------------------------
+//
+// Startup reports success so a game's bracket call is satisfied, but nothing
+// reads the state: MilesAsyncFileRead below returns 0 (failed) for every
+// request, so no file is ever served asynchronously.
 
 pub fn MilesAsyncStartup() callconv(.winapi) i32 {
-    g_async_running = true;
     return 1;
 }
 pub fn MilesAsyncShutdown() callconv(.winapi) i32 {
-    g_async_running = false;
     return 1;
 }
 pub fn MilesAsyncFileRead(request: ?*anyopaque) callconv(.winapi) i32 {

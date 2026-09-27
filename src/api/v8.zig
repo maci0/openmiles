@@ -867,15 +867,9 @@ pub fn AIL_sound_asset_filename(a0: ?*anyopaque, a1: i32) callconv(.winapi) void
     _ = a1;
 }
 pub fn AIL_stricmp(a: ?*anyopaque, b: ?*anyopaque) callconv(.winapi) i32 {
-    const pa: [*:0]const u8 = @ptrCast(a orelse return 0);
-    const pb: [*:0]const u8 = @ptrCast(b orelse return 0);
-    var i: usize = 0;
-    while (true) : (i += 1) {
-        const ca = std.ascii.toLower(pa[i]);
-        const cb = std.ascii.toLower(pb[i]);
-        if (ca != cb) return @as(i32, ca) - @as(i32, cb);
-        if (ca == 0) return 0;
-    }
+    // Both operands are NUL-terminated, so the bounded compare stops on the
+    // terminator well before the bound.
+    return AIL_strnicmp(a, b, std.math.maxInt(u32));
 }
 pub fn AIL_strnicmp(a: ?*anyopaque, b: ?*anyopaque, n: u32) callconv(.winapi) i32 {
     const pa: [*:0]const u8 = @ptrCast(a orelse return 0);

@@ -141,6 +141,16 @@ pub fn isId3v2(p: [*]const u8) bool {
         p[3] < 0xff and p[4] < 0xff and p[6] < 0x80 and p[7] < 0x80 and p[8] < 0x80 and p[9] < 0x80;
 }
 
+/// Total byte length of the ID3v2 tag at `p`, header and footer included. The
+/// 7-bit syncsafe size counts the tag body only, and a v2.4 tag carries a
+/// 10-byte footer the size does not mention, so both `inspect` and the frame
+/// scanner's mid-stream skip go through here.
+pub fn id3v2TotalLen(p: [*]const u8) i32 {
+    const size: i32 = @intCast((@as(u32, p[9])) | (@as(u32, p[8]) << 7) |
+        (@as(u32, p[7]) << 14) | (@as(u32, p[6]) << 21));
+    return (if (p[5] & 0x10 != 0) 20 + size else 10 + size);
+}
+
 pub fn inspect(es: *MP3_INFO, file_image_in: [*]u8, file_size_in: i32) void {
     es.* = .{};
     es.MP3_file_image = file_image_in;
@@ -150,8 +160,7 @@ pub fn inspect(es: *MP3_INFO, file_image_in: [*]u8, file_size_in: i32) void {
 
     // Skip an initial ID3v2 tag.
     if (file_size >= 10 and isId3v2(file_image)) {
-        const skip: i32 = @intCast(10 + ((@as(u32, file_image[9])) | (@as(u32, file_image[8]) << 7) |
-            (@as(u32, file_image[7]) << 14) | (@as(u32, file_image[6]) << 21)));
+        const skip: i32 = id3v2TotalLen(file_image);
         es.ID3v2 = file_image;
         es.ID3v2_size = skip;
         // A tag claiming more bytes than the image holds is malformed; treat the
@@ -196,9 +205,7 @@ pub fn enumerateFrames(es: *MP3_INFO) i32 {
         // ID3v2 tags can appear at any frame boundary.
         while (es.bytes_left >= 10) {
             if (!isId3v2(ptr)) break;
-            const size: i32 = @intCast((@as(u32, ptr[9])) | (@as(u32, ptr[8]) << 7) |
-                (@as(u32, ptr[7]) << 14) | (@as(u32, ptr[6]) << 21));
-            const total_len: i32 = if (ptr[5] & 0x10 != 0) 20 + size else 10 + size;
+            const total_len: i32 = id3v2TotalLen(ptr);
             if (es.bytes_left < total_len) return 0;
             es.bytes_left -= total_len;
             ptr += @intCast(total_len);

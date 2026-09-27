@@ -756,19 +756,6 @@ fn snapshotTimers(caller: []const u8) ?[]*Timer {
     };
 }
 
-/// Empty the registry under the lock and return the detached timers to the
-/// caller, or null if the snapshot allocation failed (registry left intact).
-fn detachTimers() ?[]*Timer {
-    global_timers_mutex.lockUncancelable(io);
-    defer global_timers_mutex.unlock(io);
-    const snapshot = global_allocator.dupe(*Timer, global_timers.items) catch {
-        log("releaseAllTimers: cannot snapshot the timer list; timers left registered\n", .{});
-        return null;
-    };
-    global_timers.items.len = 0;
-    return snapshot;
-}
-
 // --- Driver state ---
 
 // The "current driver" handles are read by every API entry point and written by

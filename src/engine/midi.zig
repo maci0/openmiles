@@ -225,6 +225,9 @@ pub const MidiDriver = struct {
                 self.soundfont = null;
                 self.owns_soundfont = true;
                 self.clearSoundfontSource();
+                // AIL_DLS_get_info reports the size unconditionally, so a
+                // released bank must not keep reporting its length.
+                self.soundfont_size_bytes = 0;
             }
         }
     }
@@ -564,9 +567,13 @@ pub const Sequence = struct {
                         tsf.TML_PROGRAM_CHANGE => {
                             const prog = openmiles_tml_get_program(msg);
                             var allow: i32 = 1;
-                            if (self.driver.timbre_callback.load(.acquire) != 0) {
+                            // One load, one call: a second load inside the guard
+                            // can observe an unregister that landed between the
+                            // two and hand @ptrFromInt(0) to the call.
+                            const timbre_raw = self.driver.timbre_callback.load(.acquire);
+                            if (timbre_raw != 0) {
                                 // AILTIMBRECB(HMDIDRIVER hmi, S32 bank, S32 patch)
-                                const cb: *const fn (?*anyopaque, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.driver.timbre_callback.load(.acquire));
+                                const cb: *const fn (?*anyopaque, i32, i32) callconv(.winapi) i32 = @ptrFromInt(timbre_raw);
                                 allow = cb(@ptrCast(self.driver), self.channel_bank[@intCast(@as(u32, @intCast(phys_ch)))], @intCast(prog));
                             }
                             if (allow != 0) {
@@ -616,15 +623,17 @@ pub const Sequence = struct {
                             } else if (ctrl == 112) {
                                 // XMIDI prefix event — notify game.
                                 // AILPREFIXCB: S32 cb(HSEQUENCE seq, S32 log, S32 data)
-                                if (self.prefix_callback.load(.acquire) != 0) {
-                                    const cb: *const fn (*Sequence, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.prefix_callback.load(.acquire));
+                                const prefix_raw = self.prefix_callback.load(.acquire);
+                                if (prefix_raw != 0) {
+                                    const cb: *const fn (*Sequence, i32, i32) callconv(.winapi) i32 = @ptrFromInt(prefix_raw);
                                     _ = cb(self, @intCast(val), @intCast(msg.*.channel));
                                 }
                             } else if (ctrl == 119) {
                                 // XMIDI trigger marker — notify game.
                                 // AILTRIGGERCB: void cb(HSEQUENCE seq, S32 log, S32 data)
-                                if (self.trigger_callback.load(.acquire) != 0) {
-                                    const cb: *const fn (*Sequence, i32, i32) callconv(.winapi) void = @ptrFromInt(self.trigger_callback.load(.acquire));
+                                const trigger_raw = self.trigger_callback.load(.acquire);
+                                if (trigger_raw != 0) {
+                                    const cb: *const fn (*Sequence, i32, i32) callconv(.winapi) void = @ptrFromInt(trigger_raw);
                                     cb(self, @intCast(val), @intCast(msg.*.channel));
                                 }
                             } else {
@@ -636,8 +645,9 @@ pub const Sequence = struct {
                                 _ = tsf.tsf_channel_midi_control(self.driver.soundfont, phys_ch, ctrl, val);
                                 // AILEVENTCB(HMDIDRIVER hmi, HSEQUENCE seq, S32 status, S32 data_1, S32 data_2)
                                 // status = 0xB0 | logical channel for a control-change event.
-                                if (self.driver.event_callback.load(.acquire) != 0) {
-                                    const cb: *const fn (?*anyopaque, ?*anyopaque, i32, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.driver.event_callback.load(.acquire));
+                                const event_raw = self.driver.event_callback.load(.acquire);
+                                if (event_raw != 0) {
+                                    const cb: *const fn (?*anyopaque, ?*anyopaque, i32, i32, i32) callconv(.winapi) i32 = @ptrFromInt(event_raw);
                                     _ = cb(@ptrCast(self.driver), @ptrCast(self), 0xB0 | @as(i32, @intCast(msg.*.channel)), @intCast(ctrl), @intCast(val));
                                 }
                             }
@@ -686,8 +696,9 @@ pub const Sequence = struct {
                 } else {
                     self.is_playing.store(false, .release);
                     self.is_done.store(true, .release);
-                    if (self.sequence_callback.load(.acquire) != 0) {
-                        const cb: *const fn (*Sequence) callconv(.winapi) void = @ptrFromInt(self.sequence_callback.load(.acquire));
+                    const seq_raw = self.sequence_callback.load(.acquire);
+                    if (seq_raw != 0) {
+                        const cb: *const fn (*Sequence) callconv(.winapi) void = @ptrFromInt(seq_raw);
                         cb(self);
                     }
                     break;
@@ -1037,6 +1048,10 @@ pub const Sequence = struct {
     }
 
     pub fn load(self: *Sequence, data: *anyopaque, size: i32) !void {
+        // Guard the narrowing like Sample.load does: a negative size panics on
+        // the i32 -> usize cast in safe modes and becomes a ~4 GB slice in
+        // ReleaseFast.
+        if (size <= 0) return error.InvalidParam;
         try self.loadMidi(@as([*]const u8, @ptrCast(data))[0..@intCast(size)], 0);
     }
 
