@@ -57,6 +57,10 @@ const StdDynLib = struct {
 /// ReleaseFast) would pass a table that starts far outside the map.
 fn programHeaderTableFits(eh: *const std.elf.Ehdr, img_len: usize) bool {
     if (eh.e_phoff == 0) return false;
+    // The walk below indexes a [*]Phdr, so it strides by @sizeOf(Phdr), not by
+    // e_phentsize. A file whose declared entry size is smaller makes the two
+    // disagree and the loop reads past the image the bound was computed for.
+    if (eh.e_phentsize < @sizeOf(std.elf.Phdr)) return false;
     const end = @as(u64, eh.e_phoff) + @as(u64, eh.e_phentsize) * @as(u64, eh.e_phnum);
     return end <= @as(u64, img_len);
 }

@@ -113,7 +113,7 @@ fn findEvntChunk(data: []const u8, seq_num: usize) ![]const u8 {
     if (data.len < 12) return error.TooShort;
     if (!std.mem.eql(u8, data[0..4], "FORM")) return error.NotXmidi;
     const outer_sz: usize = readBe32(data, 4);
-    if (data.len < 8 + outer_sz) return error.Truncated;
+    if (8 +| outer_sz > data.len) return error.Truncated;
     if (!std.mem.eql(u8, data[8..12], "XDIR")) return error.NotXdir;
 
     var pos: usize = 12;
@@ -122,7 +122,7 @@ fn findEvntChunk(data: []const u8, seq_num: usize) ![]const u8 {
     while (pos + 8 <= outer_end) {
         const cid = data[pos .. pos + 4];
         const csz: usize = readBe32(data, pos + 4);
-        const cend: usize = @min(pos + 8 + csz, data.len);
+        const cend: usize = @min(pos +| 8 +| csz, data.len);
 
         if (std.mem.eql(u8, cid, "CAT ") and pos + 12 <= cend and
             std.mem.eql(u8, data[pos + 8 .. pos + 12], "XMID"))
@@ -133,7 +133,7 @@ fn findEvntChunk(data: []const u8, seq_num: usize) ![]const u8 {
             while (ipos + 8 <= cend) {
                 const iid = data[ipos .. ipos + 4];
                 const isz: usize = readBe32(data, ipos + 4);
-                const iend: usize = @min(ipos + 8 + isz, cend);
+                const iend: usize = @min(ipos +| 8 +| isz, cend);
 
                 if (std.mem.eql(u8, iid, "FORM") and ipos + 12 <= iend and
                     std.mem.eql(u8, data[ipos + 8 .. ipos + 12], "XMID"))
@@ -175,7 +175,7 @@ fn findBareEvnt(data: []const u8) ![]const u8 {
     if (data.len < 12) return error.TooShort;
     if (!std.mem.eql(u8, data[0..4], "FORM")) return error.NotForm;
     const form_sz: usize = readBe32(data, 4);
-    const form_end = @min(8 + form_sz, data.len);
+    const form_end = @min(8 +| form_sz, data.len);
     if (!std.mem.eql(u8, data[8..12], "XMID")) return error.NotXmid;
     var pos: usize = 12;
     while (pos + 8 <= form_end) {

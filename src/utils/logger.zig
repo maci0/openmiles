@@ -133,6 +133,19 @@ fn logConfigOnce() void {
     });
 }
 
+/// Neutralize control characters in an untrusted substring (a path, a VFS name,
+/// an error string) before it is written to the log.
+///
+/// A filename carrying CR, ESC, or a bare LF can end the current record early
+/// and forge the next one, so a reader (or a downstream log shipper) sees a
+/// line the library never wrote. Tab and newline are the library's own framing
+/// and stay as they are.
+fn sanitizeText(text: []u8) void {
+    for (text) |*c| {
+        if ((c.* < 0x20 and c.* != '\n' and c.* != '\t') or c.* == 0x7f) c.* = '.';
+    }
+}
+
 pub fn log(comptime fmt: []const u8, args: anytype) void {
     if (!debug_enabled and @atomicLoad(bool, &initialized, .acquire)) return;
     init();
@@ -140,23 +153,27 @@ pub fn log(comptime fmt: []const u8, args: anytype) void {
     logConfigOnce();
     var buf: [1024]u8 = undefined;
     const msg = std.fmt.bufPrint(&buf, fmt, args) catch return;
+    // The formatted message can carry an untrusted path or name, so scrub it
+    // before it reaches any sink.
+    sanitizeText(msg);
+    const out = msg[0..msg.len];
 
     mutex.lockUncancelable(io);
     defer mutex.unlock(io);
 
     if (builtin.os.tag == .windows) {
         var w_buf: [1025]u16 = undefined;
-        if (wide.toWide(msg, &w_buf)) |w| {
+        if (wide.toWide(out, &w_buf)) |w| {
             OutputDebugStringW(w.ptr);
         } else |_| {}
     } else {
-        std.debug.print("{s}", .{msg});
+        std.debug.print("{s}", .{out});
     }
 
     if (log_file) |f| {
         if (log_offset < max_log_bytes) {
-            f.writePositionalAll(io, msg, log_offset) catch return;
-            log_offset += msg.len;
+            f.writePositionalAll(io, out, log_offset) catch return;
+            log_offset += out.len;
         }
     }
 }
@@ -186,4 +203,19 @@ test "an unrecognized OPENMILES_DEBUG is rejected, not read as off" {
     for ([_][]const u8{ "", " ", "2", "enabled", "TRUE-ish", "t", "no!", "-1" }) |v| {
         try testing.expectEqual(@as(?bool, null), parseDebugFlag(v));
     }
+}
+
+test "log text from an untrusted name cannot forge a record" {
+    var forged = "C:\\evil.wav\r\nopenmiles: sample loaded\x1b[2K".*;
+    sanitizeText(&forged);
+    // CR and ESC are neutralized; the LF survives as the library's own line
+    // framing, so a name can start a line but cannot rewrite or erase one.
+    try testing.expectEqualStrings(
+        "C:\\evil.wav.\nopenmiles: sample loaded.[2K",
+        &forged,
+    );
+
+    var framing = "line one\nline two\ttabbed".*;
+    sanitizeText(&framing);
+    try testing.expectEqualStrings("line one\nline two\ttabbed", &framing);
 }

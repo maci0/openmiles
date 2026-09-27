@@ -482,7 +482,9 @@ const Decoder = struct {
     }
     fn copyString(self: *Decoder, x: *MSSStringC) void {
         const n: usize = @intCast(@max(0, x.len));
-        if (@intFromPtr(self.wp) + n + 1 >= @intFromPtr(self.wlimit)) {
+        // Compared as a subtraction, not `wp + n + 1 >= wlimit`: that sum wraps
+        // on the 32-bit target and lets a large length through the check.
+        if (n + 1 > @intFromPtr(self.wlimit) -| @intFromPtr(self.wp)) {
             self.overflow = true;
             return;
         }

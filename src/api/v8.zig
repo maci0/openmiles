@@ -58,6 +58,9 @@ fn wavImageLen(p: [*]const u8) ?usize {
     // shipped x86 build): riff+8 must be representable.
     const sum = @addWithOverflow(@as(usize, riff), 8);
     if (sum[1] != 0) return null;
+    // A length that does not overflow can still be an implausible claim on a
+    // bare pointer: every other header sniffer here caps the declared size.
+    if (sum[0] > openmiles.max_declared_image_size) return null;
     return sum[0];
 }
 
