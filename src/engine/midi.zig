@@ -673,6 +673,14 @@ pub const Sequence = struct {
         // pointing at freed TML memory while a playing sequence kept rendering.
         const loaded = tsf.tml_load_memory(smf_data.ptr, @intCast(smf_data.len));
         if (loaded == null) return error.MidiLoadFailed;
+        // state_mutex across the swap and the fields rewritten from the new
+        // list below. onRead holds it for the whole of each render block, and
+        // clears is_playing only at the end of this function, so without it the
+        // audio thread can still be walking the old chain when tml_free runs:
+        // current_msg is followed through msg.*.next while it is freed. The
+        // parse above stays outside the lock; it touches nothing shared.
+        self.state_mutex.lockUncancelable(io);
+        defer self.state_mutex.unlock(io);
         if (self.midi) |m| {
             tsf.tml_free(m);
         }

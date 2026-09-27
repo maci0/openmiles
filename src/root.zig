@@ -213,9 +213,18 @@ pub var global_allocator: std.mem.Allocator = default_allocator;
 
 // --- Error state ---
 
+// These two buffers are process-wide and every API entry point writes them
+// from whichever game thread called, while AIL_last_error / AIL_file_error
+// hand the caller a raw pointer into them. A writer that is mid-message and a
+// reader would otherwise see a body with no terminator, or two threads'
+// messages spliced. Serialized so a reader gets one whole message.
+var error_buf_mutex: std.Io.Mutex = .init;
+
 pub var last_error_buf: [256:0]u8 = [_:0]u8{0} ** 256;
 pub var last_file_error_buf: [256:0]u8 = [_:0]u8{0} ** 256;
 pub fn setLastError(msg: []const u8) void {
+    error_buf_mutex.lockUncancelable(io);
+    defer error_buf_mutex.unlock(io);
     // Cut on a character boundary, not a byte one: a message naming a file
     // outside ASCII otherwise ends in half a character, and the caller reading
     // it as UTF-8 sees a broken sequence where the tail of the name should be.
@@ -229,14 +238,21 @@ pub fn setLastError(msg: []const u8) void {
 /// file, a sample, a byte count). A message that does not survive the buffer
 /// says so rather than leaving a truncated string that reads as the whole error.
 pub fn setLastErrorFmt(comptime fmt: []const u8, args: anytype) void {
-    if (std.fmt.bufPrintZ(&last_error_buf, fmt, args)) |_| {} else |_| setLastError("Error message too long");
+    error_buf_mutex.lockUncancelable(io);
+    defer error_buf_mutex.unlock(io);
+    if (std.fmt.bufPrintZ(&last_error_buf, fmt, args)) |_| {} else |_|
+        writeLastErrorLocked("Error message too long");
 }
 
 pub fn clearLastError() void {
+    error_buf_mutex.lockUncancelable(io);
+    defer error_buf_mutex.unlock(io);
     last_error_buf[0] = 0;
 }
 
 pub fn setFileError(msg: []const u8) void {
+    error_buf_mutex.lockUncancelable(io);
+    defer error_buf_mutex.unlock(io);
     const cut = wide.utf8Prefix(msg, last_file_error_buf.len - 1);
     const len = cut.len;
     @memcpy(last_file_error_buf[0..len], msg[0..len]);
@@ -245,11 +261,44 @@ pub fn setFileError(msg: []const u8) void {
 
 /// Same as `setFileError`, for a message that names the file it applies to.
 pub fn setFileErrorFmt(comptime fmt: []const u8, args: anytype) void {
-    if (std.fmt.bufPrintZ(&last_file_error_buf, fmt, args)) |_| {} else |_| setFileError("Error message too long");
+    error_buf_mutex.lockUncancelable(io);
+    defer error_buf_mutex.unlock(io);
+    if (std.fmt.bufPrintZ(&last_file_error_buf, fmt, args)) |_| {} else |_|
+        writeFileErrorLocked("Error message too long");
+}
+
+fn writeLastErrorLocked(msg: []const u8) void {
+    const len = @min(msg.len, last_error_buf.len - 1);
+    @memcpy(last_error_buf[0..len], msg[0..len]);
+    last_error_buf[len] = 0;
+}
+
+fn writeFileErrorLocked(msg: []const u8) void {
+    const len = @min(msg.len, last_file_error_buf.len - 1);
+    @memcpy(last_file_error_buf[0..len], msg[0..len]);
+    last_file_error_buf[len] = 0;
 }
 
 pub fn clearFileError() void {
+    error_buf_mutex.lockUncancelable(io);
+    defer error_buf_mutex.unlock(io);
     last_file_error_buf[0] = 0;
+}
+
+/// Copy the stored last-error message into `out` and return the slice actually
+/// written. The error buffers are shared across every thread that calls the
+/// API, so a caller that reads them through the raw pointers the C API returns
+/// is reading whatever another thread writes; this is the race-free way in.
+pub fn copyLastError(out: []u8) []const u8 {
+    error_buf_mutex.lockUncancelable(io);
+    defer error_buf_mutex.unlock(io);
+    return std.mem.copyForwards(u8, out, std.mem.sliceTo(&last_error_buf, 0));
+}
+
+pub fn copyFileError(out: []u8) []const u8 {
+    error_buf_mutex.lockUncancelable(io);
+    defer error_buf_mutex.unlock(io);
+    return std.mem.copyForwards(u8, out, std.mem.sliceTo(&last_file_error_buf, 0));
 }
 
 // --- Custom file I/O callbacks ---
@@ -600,37 +649,60 @@ pub fn isPluginLoadedAnywhere(owned: []const *Provider, path: []const u8) bool {
 pub var global_timers: std.ArrayList(*Timer) = .empty;
 pub var global_timers_mutex: std.Io.Mutex = .init;
 
+// start()/stop() join a timer thread, and that thread is inside a game
+// callback free to call AIL_register_timer, which takes global_timers_mutex.
+// Holding the lock across the join is a hard deadlock: both threads wait on the
+// same mutex. So each of these snapshots the registry under the lock and does
+// the per-timer work with it released. A snapshot stays valid because deinit
+// unlinks and frees a timer under that same lock.
 pub fn startAllTimers() void {
-    global_timers_mutex.lockUncancelable(io);
-    defer global_timers_mutex.unlock(io);
-    for (global_timers.items) |t| t.start();
+    const snapshot = snapshotTimers("startAllTimers") orelse return;
+    defer global_allocator.free(snapshot);
+    for (snapshot) |t| t.start();
 }
 
 pub fn stopAllTimers() void {
-    global_timers_mutex.lockUncancelable(io);
-    defer global_timers_mutex.unlock(io);
-    for (global_timers.items) |t| t.stop();
+    const snapshot = snapshotTimers("stopAllTimers") orelse return;
+    defer global_allocator.free(snapshot);
+    for (snapshot) |t| t.stop();
 }
 
 pub fn releaseAllTimers() void {
     global_timers_mutex.lockUncancelable(io);
-    const items = global_timers.items;
-    const snapshot = global_allocator.dupe(*Timer, items) catch {
-        for (items) |t| {
-            t.stop();
-            t.allocator.destroy(t);
-        }
-        global_timers.items.len = 0;
+    const snapshot = global_allocator.dupe(*Timer, global_timers.items) catch {
         global_timers_mutex.unlock(io);
+        log("releaseAllTimers: cannot snapshot the timer list; timers left registered\n", .{});
         return;
     };
     global_timers.items.len = 0;
     global_timers_mutex.unlock(io);
     defer global_allocator.free(snapshot);
-    for (snapshot) |t| {
-        t.stop();
-        t.allocator.destroy(t);
-    }
+    // deinit, not stop + destroy: a timer that self-stopped inside its own
+    // callback still owns an unjoined thread handle, and stop() alone leaves
+    // the struct freed while that run loop is unwinding through it.
+    for (snapshot) |t| t.deinit();
+}
+
+fn snapshotTimers(caller: []const u8) ?[]*Timer {
+    global_timers_mutex.lockUncancelable(io);
+    defer global_timers_mutex.unlock(io);
+    return global_allocator.dupe(*Timer, global_timers.items) catch {
+        log("{s}: cannot snapshot the timer list; the registry is unchanged\n", .{caller});
+        return null;
+    };
+}
+
+/// Empty the registry under the lock and return the detached timers to the
+/// caller, or null if the snapshot allocation failed (registry left intact).
+fn detachTimers() ?[]*Timer {
+    global_timers_mutex.lockUncancelable(io);
+    defer global_timers_mutex.unlock(io);
+    const snapshot = global_allocator.dupe(*Timer, global_timers.items) catch {
+        log("releaseAllTimers: cannot snapshot the timer list; timers left registered\n", .{});
+        return null;
+    };
+    global_timers.items.len = 0;
+    return snapshot;
 }
 
 // --- Driver state ---
@@ -810,10 +882,21 @@ fn getRedistDirectoryLocked() []const u8 {
     return std.mem.sliceTo(&redist_directory, 0);
 }
 
-/// NUL-terminated pointer to the stored redist directory (for the char* return
-/// of AIL_set_redist_directory).
+/// NUL-terminated pointer to the stored redist directory, for the char* return
+/// of AIL_set_redist_directory. A snapshot in thread-local storage: the
+/// returned pointer has to stay stable (the SDK hands back the address of its
+/// own buffer), and redist_directory itself is rewritten by setRedistDirectory
+/// on whatever thread calls it, so a pointer into it would be read while
+/// another thread was mid-memcpy.
+threadlocal var redist_scratch: [256:0]u8 = [_:0]u8{0} ** 256;
+
 pub fn redistDirectoryZ() [*:0]const u8 {
-    return &redist_directory;
+    redist_mutex.lockUncancelable(io);
+    defer redist_mutex.unlock(io);
+    const len = @min(getRedistDirectoryLocked().len, redist_scratch.len - 1);
+    @memcpy(redist_scratch[0..len], redist_directory[0..len]);
+    redist_scratch[len] = 0;
+    return &redist_scratch;
 }
 
 // --- Preferences ---

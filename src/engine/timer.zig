@@ -14,6 +14,11 @@ pub const Timer = struct {
     // thread from its own callback would deadlock, so the handle is left for
     // deinit()/a later external stop to reap.
     thread_id: std.atomic.Value(std.Thread.Id) = .init(0),
+    // Set when deinit runs on the timer thread itself, i.e. from inside the
+    // callback. The run loop is still unwinding through this struct and writes
+    // to it again on the way out, so the destroy belongs to the loop, not to
+    // deinit. Clear on no path: a retiring timer never runs again.
+    retiring: std.atomic.Value(bool) = .init(false),
     // Serializes start/stop/deinit lifecycle transitions so concurrent
     // AIL_start_timer/AIL_stop_timer calls from different game threads cannot
     // both pass the is_running check (double spawn: two run loops firing the
@@ -52,27 +57,48 @@ pub const Timer = struct {
     }
 
     pub fn deinit(self: *Timer) void {
-        self.stop();
-        // A self-stopped timer left its handle behind (stop from inside the
-        // callback cannot join); reap it here before the struct is destroyed.
-        // state_mutex is released before global_timers_mutex is taken so the
-        // global->state nesting order of startAllTimers/stopAllTimers can
-        // never invert.
+        // One hold of state_mutex across the whole teardown. Releasing it
+        // between the stop and the join (as stop() does) would let a
+        // concurrent AIL_start_timer spawn a fresh run loop onto a struct that
+        // is about to be destroyed, and would hand the join a loop whose
+        // is_running had been set true again. run() never takes state_mutex,
+        // so holding it across the join is safe.
         self.state_mutex.lockUncancelable(io);
+        @atomicStore(bool, &self.is_running, false, .release);
+        if (self.thread_id.load(.acquire) == std.Thread.getCurrentId()) {
+            // Deinit from inside the callback: this is the run loop's own
+            // thread, so it cannot be joined, and the loop touches this struct
+            // again on the way out. Hand it the destroy instead.
+            self.retiring.store(true, .release);
+            self.state_mutex.unlock(io);
+            self.unlinkFromGlobalList(false);
+            return;
+        }
         if (self.thread) |t| {
             t.join();
             self.thread = null;
         }
         self.state_mutex.unlock(io);
+        self.unlinkFromGlobalList(true);
+    }
+
+    /// Drop this timer from the global registry, and free it when `free_self`.
+    /// The free happens under the lock, and only once the thread is joined, so
+    /// a snapshot taken by startAllTimers/stopAllTimers under the same lock
+    /// cannot be left holding a freed pointer. A retiring timer is not freed
+    /// here: its own run loop still reads it and does the destroy on the way
+    /// out. Taken after state_mutex is released so the global->state nesting
+    /// order those callers use can never invert.
+    fn unlinkFromGlobalList(self: *Timer, free_self: bool) void {
         root.global_timers_mutex.lockUncancelable(io);
+        defer root.global_timers_mutex.unlock(io);
         for (root.global_timers.items, 0..) |t, i| {
             if (t == self) {
                 _ = root.global_timers.swapRemove(i);
                 break;
             }
         }
-        root.global_timers_mutex.unlock(io);
-        self.allocator.destroy(self);
+        if (free_self) self.allocator.destroy(self);
     }
 
     pub fn start(self: *Timer) void {
@@ -84,6 +110,7 @@ pub const Timer = struct {
         // holds the lock leaves the timer running, and start is idempotent.
         if (!self.state_mutex.tryLock()) return;
         defer self.state_mutex.unlock(io);
+        if (self.retiring.load(.acquire)) return;
         if (@atomicLoad(bool, &self.is_running, .acquire)) return;
         if (self.thread) |stale| {
             // A self-stop leaves its run loop alive until the callback returns,
@@ -171,7 +198,12 @@ pub const Timer = struct {
         // branch, leaving the timer "running" with no loop to fire the callback.
         // Clearing it also means an external stop() after the loop is gone never
         // mistakes itself for the callback thread.
-        defer self.thread_id.store(0, .release);
+        defer {
+            self.thread_id.store(0, .release);
+            // A deinit that ran on this thread left the destroy to the loop:
+            // the callback's caller is still unwinding through this struct.
+            if (self.retiring.load(.acquire)) self.allocator.destroy(self);
+        }
         var next_ns: i128 = root.nowNs();
         while (@atomicLoad(bool, &self.is_running, .acquire)) {
             self.callback(self.getUserData());

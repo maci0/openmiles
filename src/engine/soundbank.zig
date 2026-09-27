@@ -88,9 +88,19 @@ fn registryAcquireBySource(source_path: []const u8) ?*Bank {
     return existing;
 }
 
-fn registryRemove(bank: *Bank) void {
+/// Drop one reference and report whether this was the last one. The
+/// decrement, the last-reference test and the unregister all happen under the
+/// registry lock, so they are one atomic step against registryAcquireBySource:
+/// a concurrent open either takes its reference before the drop and keeps the
+/// bank alive, or misses the bank entirely and loads its own. Splitting them
+/// let an open find the bank, take a reference, and then have the bank torn
+/// down under it, and let two concurrent closes lose a decrement.
+fn registryRelease(bank: *Bank) bool {
     g_registry_mutex.lockUncancelable(root.io);
     defer g_registry_mutex.unlock(root.io);
+    std.debug.assert(bank.refs > 0);
+    bank.refs -= 1;
+    if (bank.refs > 0) return false;
     for (g_registry.items, 0..) |b, i| {
         if (b == bank) {
             // orderedRemove, not swapRemove: registry order is the resolution
@@ -100,9 +110,10 @@ fn registryRemove(bank: *Bank) void {
             // which bank answers a name it never defined. The cost is an O(n)
             // shift over the handful of banks a game loads.
             _ = g_registry.orderedRemove(i);
-            return;
+            break;
         }
     }
+    return true;
 }
 
 pub fn loadedCount() u32 {
@@ -483,10 +494,9 @@ pub const Bank = struct {
     /// release that drops the last one, so an open of an already-loaded bank and
     /// its matching close leave the state the first open alone would.
     pub fn deinit(self: *Bank) void {
-        std.debug.assert(self.refs > 0);
-        self.refs -= 1;
-        if (self.refs > 0) return;
-        registryRemove(self);
+        // A leftover reference means another open still holds the bank; the
+        // frees belong to whichever release drops the last one.
+        if (!registryRelease(self)) return;
         self.teardown();
     }
 
