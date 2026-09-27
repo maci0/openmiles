@@ -1,4 +1,4 @@
-.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-yaml check-threat-model check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity help
+.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-yaml check-threat-model check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity sanitize help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -49,9 +49,19 @@ test: check-toolchain
 	fi
 	zig build test $(if $(FILTER),-Dtest-filter=$(FILTER))
 
+# The undefined-behaviour sanitizer build. Separate from `test` on purpose: it
+# rebuilds every C translation unit with instrumentation, so it is minutes
+# slower than a plain run and CI runs it as its own job rather than making every
+# pull request pay for it. FILTER works here too. Zig's own safety checks are
+# already on in the Debug build `test` uses; what this adds is UB in the C
+# sources and the vendored headers translate-C pulls in, which is where the
+# interpreter code in src/ actually lives.
+sanitize: check-toolchain
+	zig build test -Dsanitize $(if $(FILTER),-Dtest-filter=$(FILTER))
+
 # Everything .github/workflows/ci.yml runs, in the same order, so a failure
 # here is the same failure CI would give.
-check: lint build test cross
+check: lint build test sanitize cross
 
 # The shipped artifact. A build that only passes natively can still fail to
 # link as a 32-bit stdcall DLL, so check what ships. Gated on the toolchain for
@@ -172,7 +182,8 @@ help:
 	@echo "Targets:"
 	@echo "  build      build the library and the test binaries (zig build)"
 	@echo "  test       run the test suite (zig build test); FILTER=<substr> runs a subset"
-	@echo "  check      run every CI check in order: lint, build, test, cross"
+	@echo "  sanitize   run the test suite with the C undefined-behaviour sanitizer (-Dsanitize)"
+	@echo "  check      run every CI check in order: lint, build, test, sanitize, cross"
 	@echo "  lint       zig fmt, ruff, shellcheck, yamllint, header/vendored parity, pin agreement"
 	@echo "  format     apply zig fmt and ruff format"
 	@echo "  cross      cross-compile the shipped x86-windows DLL"

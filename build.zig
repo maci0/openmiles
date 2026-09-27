@@ -78,6 +78,7 @@ fn addOpenmilesModule(
     rtarget: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
     build_opts_mod: *std.Build.Module,
+    sanitize_c: ?std.zig.SanitizeC,
 ) OpenmilesModule {
     const tma = b.addTranslateC(.{ .root_source_file = b.path("deps/miniaudio.h"), .target = rtarget, .optimize = optimize });
     tma.addIncludePath(b.path("deps"));
@@ -95,7 +96,12 @@ fn addOpenmilesModule(
 
     const ci = b.addObject(.{
         .name = "c_impl_test",
-        .root_module = b.createModule(.{ .target = rtarget, .optimize = optimize, .link_libc = true }),
+        .root_module = b.createModule(.{
+            .target = rtarget,
+            .optimize = optimize,
+            .link_libc = true,
+            .sanitize_c = sanitize_c,
+        }),
     });
     ci.root_module.addIncludePath(b.path("deps"));
     ci.root_module.addCSourceFile(.{ .file = b.path("src/bindings/c_impl.c"), .flags = &c_flags_tsf });
@@ -106,6 +112,28 @@ fn addOpenmilesModule(
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    // -Dsanitize builds every C translation unit with the undefined-behaviour
+    // sanitizer, which is the only gate that sees the UB Zig's own safety
+    // checks cannot: c_impl.c, the tests/*.c harnesses, the mock plugin, and
+    // the vendored tsf.h/miniaudio.h code that translate-C pulls into the Zig
+    // modules. Nothing else in the tree looks for it, and the source carries
+    // the scars of a run that was done by hand (see the aligned decode scratch
+    // buffer in src/api/rib.zig), so the mode is a first-class build option and
+    // a Makefile target rather than an ad-hoc invocation.
+    //
+    // Debug is forced: the sanitizer needs the safety checks and the debug
+    // info it reports against, and an explicit -Doptimize=ReleaseFast would
+    // silently strip both out from under it.
+    const sanitize = b.option(bool, "sanitize", "Instrument the C sources with the undefined-behaviour sanitizer (forces Debug)") orelse false;
+    const sanitize_c: ?std.zig.SanitizeC = if (sanitize) .full else null;
+    const build_optimize: std.builtin.OptimizeMode = if (sanitize) .Debug else optimize;
+    // -Doptimize is ignored under -Dsanitize, so a build that asked for both
+    // says so rather than producing an uninstrumented release and reporting it
+    // as a sanitizer run.
+    if (sanitize and optimize != .Debug) {
+        std.debug.print("note: -Dsanitize forces -Doptimize=Debug (requested {s})\n", .{@tagName(optimize)});
+    }
 
     // The native test executables (the C harnesses + native_rib_test) are real
     // executables that pull the host's C-runtime startup object. On a modern
@@ -127,7 +155,7 @@ pub fn build(b: *std.Build) void {
     // the compile directory, so the same source built from two different paths
     // yields different bytes and the build path lands in the CI artifact. A
     // Debug build keeps its symbols so a test panic still names a function.
-    const strip_installed = optimize != .Debug;
+    const strip_installed = build_optimize != .Debug;
 
     // Target MSS version: gates which API groups are compiled/exported so the
     // DLL is ABI-shaped like a specific Miles release. Encoded major*10+minor:
@@ -166,7 +194,7 @@ pub fn build(b: *std.Build) void {
     const translate_ma = b.addTranslateC(.{
         .root_source_file = b.path("deps/miniaudio.h"),
         .target = target,
-        .optimize = optimize,
+        .optimize = build_optimize,
     });
     translate_ma.addIncludePath(b.path("deps"));
     const ma_mod = translate_ma.createModule();
@@ -174,7 +202,7 @@ pub fn build(b: *std.Build) void {
     const translate_tsf = b.addTranslateC(.{
         .root_source_file = b.path("deps/tsf_tml.h"),
         .target = target,
-        .optimize = optimize,
+        .optimize = build_optimize,
     });
     translate_tsf.addIncludePath(b.path("deps"));
     const tsf_mod = translate_tsf.createModule();
@@ -183,7 +211,7 @@ pub fn build(b: *std.Build) void {
     const mod = b.addModule("openmiles", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = build_optimize,
     });
     mod.addIncludePath(b.path("deps"));
     mod.addImport("ma_c", ma_mod);
@@ -197,7 +225,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
-            .optimize = optimize,
+            .optimize = build_optimize,
             .imports = &.{
                 .{ .name = "openmiles", .module = mod },
                 .{ .name = "build_options", .module = build_opts_mod },
@@ -225,8 +253,9 @@ pub fn build(b: *std.Build) void {
         .name = "c_impl",
         .root_module = b.createModule(.{
             .target = target,
-            .optimize = optimize,
+            .optimize = build_optimize,
             .link_libc = true,
+            .sanitize_c = sanitize_c,
             .stack_protector = if (target.result.os.tag == .windows) true else null,
         }),
     });
@@ -248,14 +277,14 @@ pub fn build(b: *std.Build) void {
     // The module is built for the test bundle on every host, not just a glibc
     // one: it is what gives the tests their own build_options (log_by_default
     // off), which reusing the library module would silently skip.
-    const tb = addOpenmilesModule(b, test_target, optimize, test_opts_mod);
+    const tb = addOpenmilesModule(b, test_target, build_optimize, test_opts_mod, sanitize_c);
 
     const mod_tests = b.addTest(.{
         .filters = test_filters,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/test_root.zig"),
             .target = test_target,
-            .optimize = optimize,
+            .optimize = build_optimize,
             .link_libc = true,
             .imports = &.{
                 .{ .name = "ma_c", .module = tb.ma },
@@ -284,8 +313,9 @@ pub fn build(b: *std.Build) void {
         .name = "engine_c_impl",
         .root_module = b.createModule(.{
             .target = test_target,
-            .optimize = optimize,
+            .optimize = build_optimize,
             .link_libc = true,
+            .sanitize_c = sanitize_c,
         }),
     });
     engine_c_impl.root_module.addIncludePath(b.path("deps"));
@@ -298,7 +328,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/engine_test_root.zig"),
             .target = test_target,
-            .optimize = optimize,
+            .optimize = build_optimize,
             .link_libc = true,
             .imports = &.{
                 .{ .name = "ma_c", .module = tb.ma },
@@ -325,8 +355,9 @@ pub fn build(b: *std.Build) void {
             .name = b.fmt("{s}_obj", .{t.name}),
             .root_module = b.createModule(.{
                 .target = test_target,
-                .optimize = optimize,
+                .optimize = build_optimize,
                 .link_libc = true,
+                .sanitize_c = sanitize_c,
             }),
         });
         obj.root_module.addCSourceFile(.{
@@ -340,7 +371,7 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("tests/empty.zig"),
                 .target = test_target,
-                .optimize = optimize,
+                .optimize = build_optimize,
                 .link_libc = true,
                 .strip = strip_installed,
             }),
@@ -360,8 +391,9 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = mock_root_step.add("mock_root.zig", ""),
             .target = test_target,
-            .optimize = optimize,
+            .optimize = build_optimize,
             .link_libc = true,
+            .sanitize_c = sanitize_c,
             .strip = strip_installed,
         }),
     });
@@ -390,7 +422,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/native_rib_test.zig"),
             .target = test_target,
-            .optimize = optimize,
+            .optimize = build_optimize,
             .link_libc = true,
             .strip = strip_installed,
             .imports = &.{

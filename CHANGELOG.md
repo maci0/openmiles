@@ -56,6 +56,14 @@ everything below is unreleased.
 
 ### Added
 
+- `zig build test -Dsanitize`, `make sanitize`: the test suite with every C
+  translation unit instrumented by the undefined-behaviour sanitizer. Zig's own
+  safety checks are already on in the Debug build the plain suite uses; this
+  adds the UB the bindings and the vendored `tsf.h` / `miniaudio.h` code can
+  hit, which nothing in the tree looked for. `-Dsanitize` forces Debug, since
+  the sanitizer reports against the safety checks and the debug info. CI runs
+  it as its own step on the Linux leg, and `make check` includes it.
+
 - C sources compile with the correctness and portability warning groups the
   tree already passes, on top of `-Wall -Wextra -Werror`: `-Wpedantic`,
   `-Wshadow`, `-Wstrict-prototypes`, `-Wold-style-definition`, `-Wvla`,
@@ -163,6 +171,12 @@ everything below is unreleased.
   silence and reported `QSTAT_LOADED` forever. The quick handle now owns a copy
   of the image, and `AIL_quick_copy` fails with `AIL_last_error` set rather than
   reporting success for a sample that holds no image.
+- `make lint` failed on a clean checkout: 29 of the 109 `file:line anchor`
+  references in `docs/THREAT_MODEL.md` pointed at a line the named anchor had
+  moved off, so `check_threat_model_refs.py` (part of `make lint`, part of
+  `make check`, and a CI step through both) reported them and exited 1. The
+  anchors are re-pointed at the line each identifier now sits on; the model
+  describes the same controls as before.
 - Plugin discovery loaded providers in directory-read order, which the
   filesystem chooses and changes between machines and between runs, so
   `RIB_enumerate_providers` answered in an order no replay could reproduce and

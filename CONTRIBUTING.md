@@ -39,6 +39,7 @@ builds and tests green.
 make build                # zig build
 make test FILTER=redbook  # one test, by substring of its name
 make test                 # the whole suite (minutes)
+make sanitize             # the same suite with the C undefined-behaviour sanitizer
 make check                # everything CI runs, in CI's order
 ```
 
@@ -48,10 +49,18 @@ that matches no test name is refused rather than reported as a pass. Test output
 is quiet by default; set `OPENMILES_DEBUG=1` to get the engine trace and the
 `openmiles.log` it writes.
 
+`make sanitize` is `zig build test -Dsanitize`: it instruments every C
+translation unit (the bindings, the vendored headers translate-C pulls in, the
+`tests/*.c` harnesses) with the undefined-behaviour sanitizer and forces Debug.
+Zig's own safety checks are already on in the Debug build `make test` uses; this
+adds the UB the C code and the vendored third-party code can hit. It takes
+noticeably longer than a plain run, so it is its own CI step rather than part of
+`make test`.
+
 ## Before you push
 
-`make check` runs `make lint`, `make build`, `make test`, and the
-x86-windows cross-compile, which is what `.github/workflows/ci.yml` runs on
+`make check` runs `make lint`, `make build`, `make test`, `make sanitize`, and
+the x86-windows cross-compile, which is what `.github/workflows/ci.yml` runs on
 Ubuntu. CI additionally runs the build and tests on Windows; nothing in the
 library is Linux-only, but a change that only builds on one host shows up there
 rather than locally.

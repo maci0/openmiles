@@ -84,6 +84,15 @@ jobs:
       - name: Run Tests
         run: zig build test
 
+      - name: Run Tests (C undefined-behaviour sanitizer)
+        if: matrix.os == 'ubuntu-latest'
+        # -Dsanitize instruments every C translation unit, so it rebuilds the
+        # tree and runs minutes slower than the step above; a separate step on
+        # the Linux leg keeps it off the Windows matrix and off the critical
+        # path of an ordinary `zig build test`. A finding here is a real
+        # undefined-behaviour report: the run fails, nothing is suppressed.
+        run: make sanitize
+
       - name: Cross-compile Windows DLL
         if: matrix.os == 'ubuntu-latest'
         run: zig build -Dtarget=x86-windows -Doptimize=ReleaseFast

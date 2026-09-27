@@ -58,12 +58,16 @@ zig build -Dtarget=x86-windows -Doptimize=ReleaseFast -Dmss-version=5
 ```
 
 `make` wraps the same commands: `make help` lists the targets, `make test`,
-`make lint`, and `make parity` runs the per-version export-table sweep
-(`scripts/check_all_versions.sh`, which needs the reference DLLs under
-`references/`, not checked in).
+`make sanitize`, `make lint`, and `make parity` runs the per-version
+export-table sweep (`scripts/check_all_versions.sh`, which needs the reference
+DLLs under `references/`, not checked in). `make sanitize` is
+`zig build test -Dsanitize`: the same suite with the C undefined-behaviour
+sanitizer on, which is the only gate that sees UB in the bindings and in the
+vendored headers `translate-C` pulls in.
 
 `make check` runs every check CI runs, in CI's order: `make lint`, `make build`,
-`make test`, and the Windows cross-compile. Run it before pushing.
+`make test`, `make sanitize`, and the Windows cross-compile. Run it before
+pushing.
 
 `make lint` needs `shellcheck`, a Python 3 interpreter (the gates run under
 `python3`, or `python` where that is the name on PATH),
