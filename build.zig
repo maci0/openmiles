@@ -155,6 +155,12 @@ pub fn build(b: *std.Build) void {
             // protection"), so scope it to the Windows targets that accept it
             // rather than breaking the native build the tests run on.
             .stack_protector = if (target.result.os.tag == .windows) true else null,
+            // ReleaseFast optimizes, but the linked image still carries a
+            // CodeView directory pointing at a PDB whose GUID is derived from
+            // the compile directory, so two builds of one commit at different
+            // paths produce different DLL bytes. Stripping drops the directory,
+            // which is what makes the shipped artifact path independent.
+            .strip = true,
         }),
     });
 

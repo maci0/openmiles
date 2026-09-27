@@ -20,6 +20,8 @@
 # Usage: scripts/check_all_versions.sh [--strict]
 #   --strict folds EXTRA into the per-version pass/fail too.
 #
+# The per-version builds install under zig-out/parity, never zig-out itself.
+#
 # Exit status: 0 every version matched, 1 a build/diff failed or a version had
 # no reference DLL to check against, 2 bad invocation.
 set -uo pipefail
@@ -86,6 +88,11 @@ declare -A UNSWEPT=(
 )
 fail=0
 skipped=()
+# Each version is installed under its own prefix: the sweep's builds are
+# Debug DLLs for other releases, and overwriting zig-out/bin/mss32.dll with
+# one leaves a stale artifact exactly where the shipped DLL is picked up from.
+out_prefix=zig-out/parity
+dll="$out_prefix/bin/mss32.dll"
 for ver in "${VERSIONS[@]}"; do
   ref="${REF[$ver]}"
   if [ ! -f "$ref" ]; then
@@ -93,7 +100,7 @@ for ver in "${VERSIONS[@]}"; do
     skipped+=("$ver")
     continue
   fi
-  if ! zig build -Dmss-version="$ver" -Dtarget=x86-windows; then
+  if ! zig build --prefix "$out_prefix" -Dmss-version="$ver" -Dtarget=x86-windows; then
     echo "v$ver: BUILD FAILED"
     fail=1
     continue
@@ -103,7 +110,7 @@ for ver in "${VERSIONS[@]}"; do
   # readable, so a missing line is reported as an empty count rather than
   # aborting the sweep.
   rc=0
-  out=$(python3 scripts/check_exports.py zig-out/bin/mss32.dll "$ref" --names-only $STRICT 2>/dev/null) || rc=$?
+  out=$(python3 scripts/check_exports.py "$dll" "$ref" --names-only $STRICT 2>/dev/null) || rc=$?
   m=$(printf '%s\n' "$out" | grep '^MISSING'    | grep -oE '[0-9]+$' || true)
   d=$(printf '%s\n' "$out" | grep '^DECORATION' | grep -oE '[0-9]+$' || true)
   e=$(printf '%s\n' "$out" | grep '^EXTRA'      | grep -oE '[0-9]+$' || true)

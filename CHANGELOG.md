@@ -254,6 +254,14 @@ everything below is unreleased.
   relocating the ASI image to the game directory. The README now has a
   *Configuration* section listing both variables, their values, and their
   defaults.
+- The shipped `mss32.dll` is linked stripped. It no longer carries a CodeView
+  directory, so the build directory cannot reach the artifact through the PDB
+  GUID, and two builds of one commit at different paths produce the same bytes.
+- `make parity` installs its per-version builds under `zig-out/parity` instead
+  of overwriting the shipped `zig-out/bin/mss32.dll` with a Debug build of
+  another release.
+- Every release-archive entry is staged with mode 0644, so a build output's
+  executable bit cannot reach the zip bytes.
 - Unknown-size sample loads go through bounded callbacks.
 - MIDI sequence beat and millisecond conversions saturate instead of
   overflowing `i32`.

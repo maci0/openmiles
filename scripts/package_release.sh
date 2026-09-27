@@ -13,9 +13,9 @@
 #
 # The archive is byte-identical for identical inputs: entries are staged in the
 # explicit order below rather than the filesystem order of a glob, every entry
-# takes one mtime (SOURCE_DATE_EPOCH, defaulting to the HEAD commit time), and
-# `zip -X` omits the uid/gid and extended-timestamp extra fields that would
-# otherwise record the packaging host.
+# takes one mtime (SOURCE_DATE_EPOCH, defaulting to the HEAD commit time) and
+# one mode, and `zip -X` omits the uid/gid and extended-timestamp extra fields
+# that would otherwise record the packaging host.
 #
 # Exit status: 0 archive written, 1 packaging failed, 2 bad invocation.
 set -euo pipefail
@@ -109,6 +109,10 @@ names=()
 for e in "${entries[@]}"; do
   name=${e%%:*}
   cp "${e#*:}" "$stage/$name"
+  # zip records the mode in the central directory, and a build output is
+  # usually 0755 while a checked-in file is 0644, so the staging umask would
+  # otherwise reach the archive bytes. One mode for every entry.
+  chmod 0644 "$stage/$name"
   touch -d "@$epoch" "$stage/$name"
   names+=("$name")
 done
