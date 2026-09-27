@@ -251,7 +251,7 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
             },
             else => {},
         }
-        if (std.Io.Dir.cwd().createFile(io, path, .{ .exclusive = true })) |f| {
+        if (openmiles.fs_compat.createFile(io, path, .{ .exclusive = true })) |f| {
             created = f;
             break;
         } else |cwd_err| switch (cwd_err) {

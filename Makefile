@@ -210,7 +210,7 @@ help:
 	@echo "  check-yaml          assert yamllint on PATH is the pinned version, then lint .github/workflows"
 	@echo "  check-interpreter   assert a Python 3 interpreter is named python3 or python"
 	@echo "  check-parity-tools  assert pefile is importable (only make parity needs it)"
-	@echo "  check-pins          assert the zig and ruff pins agree across the tree"
+	@echo "  check-pins          assert the zig, ruff, and yamllint pins agree across the tree"
 	@echo ""
 	@echo "These targets take no arguments, so 'make check-header --help' is make's own"
 	@echo "help and the check does not run. The Python gates behind them print their own"

@@ -140,7 +140,8 @@ pub const StreamSource = struct {
         return -1;
     }
 
-    /// Whether the mixer underran (both slots empty) since the last submit.
+    /// Whether the mixer underran (no slot in the ring held data) since the
+    /// last submit.
     /// Read under the lock because `onRead` (audio thread) writes `starved`.
     pub fn isStarved(self: *StreamSource) bool {
         self.mutex.lockUncancelable(io);

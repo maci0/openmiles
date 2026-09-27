@@ -306,9 +306,9 @@ pub const Sequence = struct {
     time_ms: f64 = 0,
     total_ms: f64 = 0,
     // Playback flags are written under state_mutex but read without it: by
-    // onRead before it takes the lock, by status() on the caller's thread, and
-    // by the root registry's active-sequence count. Atomic so those reads are
-    // race-free without taking a lock the audio thread may already hold.
+    // status() on the caller's thread and by the root registry's active-sequence
+    // count. Atomic so those reads are race-free without taking a lock the audio
+    // thread may already hold. is_paused has no unlocked reader and is plain.
     is_playing: std.atomic.Value(bool) = .init(false),
     is_paused: bool = false,
     is_done: std.atomic.Value(bool) = .init(false),
@@ -336,7 +336,7 @@ pub const Sequence = struct {
     ms_per_beat: f64 = 500.0, // current ms/beat (MIDI-time units = file BPM based)
     next_beat_ms: f64 = 500.0,
     // Advanced on the audio thread under state_mutex, read by
-    // AIL_sequence_beat_info from any thread (including from inside a beat
+    // AIL_sequence_position from any thread (including from inside a beat
     // callback, where taking state_mutex would deadlock).
     current_beat_in_measure: std.atomic.Value(i32) = .init(1),
     current_measure: std.atomic.Value(i32) = .init(1),

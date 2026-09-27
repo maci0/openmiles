@@ -23,7 +23,7 @@ const BYTES_FLAG: u32 = 2;
 const TOC_FLAG: u32 = 4;
 const VBR_SCALE_FLAG: u32 = 8;
 
-/// Mirrors the SDK MP3_INFO struct field-for-field (all 32-bit fields + TOC[100]).
+/// Mirrors the SDK MP3_INFO (pointers, 32-bit fields, TOC[100]); order locked below.
 pub const MP3_INFO = extern struct {
     MP3_file_image: ?[*]u8 = null,
     MP3_image_size: i32 = 0,

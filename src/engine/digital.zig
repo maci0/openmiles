@@ -860,7 +860,7 @@ pub const Sample = struct {
     v9_schedule_time: u64 = 0,
     scheduled_start_frames: u64 = 0,
     v9_playback_delay: i32 = 0, // ms before playback starts (AIL_set_sample_playback_delay)
-    // 5.1 per-speaker volume levels: FL, FR, FC, LFE, BL, BR.
+    // 5.1 levels in SDK order: f_left, f_right, b_left, b_right, center, sub.
     v51_levels: [6]f32 = [_]f32{1.0} ** 6,
     // Per-driver-channel speaker scale factors (HSAMPLE.speaker_levels), indexed
     // by output channel 0..MAX_SPEAKERS-1. Set/read by AIL_*_sample_speaker_scale_factors.

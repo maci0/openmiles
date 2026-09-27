@@ -34,7 +34,8 @@ typedef void (__stdcall *t_AIL_set_digital_master_volume)(void*, int);
 
 typedef void* (__stdcall *t_AIL_allocate_sample_handle)(void*);
 typedef void (__stdcall *t_AIL_release_sample_handle)(void*);
-typedef void (__stdcall *t_AIL_init_sample)(void*);
+/* v8+ export: the symbol is AIL_init_sample_v8, S32 AIL_init_sample(HSAMPLE, S32 format) */
+typedef int (__stdcall *t_AIL_init_sample)(void*, int);
 typedef int (__stdcall *t_AIL_set_sample_file)(void*, const void*, int);
 typedef void (__stdcall *t_AIL_start_sample)(void*);
 typedef void (__stdcall *t_AIL_stop_sample)(void*);

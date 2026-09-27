@@ -1,8 +1,8 @@
 //! MSS v8 additive API. The faithfully-implementable pieces are real here —
 //! in-memory I/O (AIL_mem_*), case-insensitive string compares, float-to-ascii,
-//! 5.1 volumes mapped to the engine, and sample 3D/rate helpers. The soundbank /
-//! event / preset / environment system (a proprietary data-driven layer) has no
-//! OpenMiles engine equivalent and is stubbed to link and return safe defaults.
+//! 5.1 volumes mapped to the engine, sample 3D/rate helpers, and the soundbank /
+//! event / preset layer. Applying a preset to a live sound still returns a
+//! default: a bank preset is not decoded into engine parameters.
 //! Signatures from the MSS 9.x SDK mss.h.
 const std = @import("std");
 const openmiles = @import("openmiles");

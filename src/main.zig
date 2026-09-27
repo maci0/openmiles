@@ -108,7 +108,9 @@ comptime {
             .{ .name = "AIL_sample_loop_count", .stack_size = 4 },
             .{ .name = "AIL_register_EOS_callback", .stack_size = 8 },
             .{ .name = "AIL_open_stream", .stack_size = 12 },
-            // Undocumented internal that leaked into the 6.1a export table only.
+            // Undocumented internal that leaked into the 6.1a export table. In
+            // never_export below: no reference DLL carries it, so the entry
+            // never becomes a PE export.
             .{ .name = "AIL_open_stream_by_sample", .stack_size = 16, .ver = 61, .ver_max = 61 },
             .{ .name = "AIL_close_stream", .stack_size = 4 },
             .{ .name = "AIL_start_stream", .stack_size = 4 },
@@ -119,8 +121,9 @@ comptime {
             .{ .name = "AIL_auto_service_stream", .stack_size = 8 },
             .{ .name = "AIL_set_stream_playback_rate", .stack_size = 8, .ver_max = 66 },
             .{ .name = "AIL_set_stream_pan", .stack_size = 8, .ver_max = 61 },
-            // Combined F32 volume/pan stream setter — present in many v4+ builds
-            // (e.g. Midnight Club II's v6 mss32.dll) though absent from some refs.
+            // Combined F32 volume/pan stream setter. Exported for 6.5-6.6 only:
+            // the other releases in the v4+ line that some games ship (e.g.
+            // Midnight Club II's v6 mss32.dll) do not carry the name.
             .{ .name = "AIL_set_stream_volume_pan", .stack_size = 12, .ver = 65, .ver_max = 66 },
             .{ .name = "AIL_set_stream_ms_position", .stack_size = 8, .ver = 50 },
             .{ .name = "AIL_stream_status", .stack_size = 4 },
@@ -398,7 +401,7 @@ comptime {
             .{ .name = "MIX_RIB_MAIN", .stack_size = 20, .ver = 90 },
             .{ .name = "MIX_RIB_MAIN", .stack_size = 8, .ver = 65, .ver_max = 80, .symbol = "MIX_RIB_MAIN_v7" },
             // Intermittent export: present in 6.x and v8 (8.0j), absent from v5,
-            // v7, and v9 — two separate version ranges.
+            // v7, and v9.
             .{ .name = "MSSDisableThreadLibraryCalls", .stack_size = 4, .ver = 80, .ver_max = 89 },
             .{ .name = "MSS_alloc_info", .stack_size = 16, .ver = 90 },
             .{ .name = "MSS_free_info", .stack_size = 16, .ver = 90 },
@@ -823,7 +826,8 @@ comptime {
             .{ .name = "MilesAsyncFileStatus", .stack_size = 8, .ver = 90 },
             .{ .name = "MilesAsyncSetPaused", .stack_size = 4, .ver = 90 },
             .{ .name = "MilesRequeueAsyncs", .stack_size = 0, .ver = 90 },
-            // Quick-API mem loader with a filename format hint (6.x onward).
+            // Quick-API mem loader with a filename format hint (7.0 only; the
+            // 6.x-only embedded-library exports are the next block).
             .{ .name = "AIL_quick_load_named_mem", .stack_size = 12, .ver = 70, .ver_max = 70 },
             // 6.x-only embedded-library + sample-attribute exports (gone by 7.0).
             .{ .name = "AIL_open_library", .stack_size = 8, .ver = 60, .ver_max = 69 },

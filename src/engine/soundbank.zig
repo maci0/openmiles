@@ -366,7 +366,7 @@ pub const Bank = struct {
         return @ptrCast(self.meta.ptr + data_off);
     }
 
-    /// The event-step bytecode for a named event (MilesFindEvent / AIL_find_event).
+    /// The event-step bytecode for a named event (MilesFindEvent).
     pub fn findEventContents(self: *const Bank, event_name: []const u8) ?[*]const u8 {
         return self.assetData(.events, event_name);
     }

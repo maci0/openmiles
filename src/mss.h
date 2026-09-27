@@ -565,9 +565,9 @@ F32         MSS_CALLBACK AIL_stream_low_pass_cut_off(HSTREAM stream);
 
 /* Start an event system over `driver` (an HDIGDRIVER, or NULL for a standalone
  * one) with a command buffer of `command_buf_len` bytes. `memory_buf` and
- * `memory_len` are a caller-supplied scratch buffer the DLL reserves for
- * persistent presets; NULL with a 0 length lets the DLL use the heap. Returns
- * the system handle, or NULL with the reason in AIL_last_error(). */
+ * `memory_len` are accepted and ignored: persistent presets are heap-allocated
+ * per name. Returns the system handle, or NULL with the reason in
+ * AIL_last_error(). */
 void*       MSS_CALLBACK MilesStartupEventSystem(void* driver, S32 command_buf_len, void* memory_buf, S32 memory_len);
 void        MSS_CALLBACK MilesShutdownEventSystem(void);
 #if MSS_AT_LEAST(90)
@@ -618,12 +618,12 @@ S32         MSS_CALLBACK MilesCompleteEventQueueProcessing(void);
 void        MSS_CALLBACK MilesClearEventQueue(void);
 
 /* Start one sound out of a bank. `sound_name` and `labels` are bank-relative
- * names; NULL starts the bank default, and NULL labels start every instance
- * carrying the sound. Returns the instance ID. */
+ * names; a NULL `sound_name` starts nothing and returns 0, and NULL labels
+ * start every instance carrying the sound. Returns the instance ID. */
 U64         MSS_CALLBACK MilesStartSoundInstance(void* bank, char const* sound_name, U32 loop_count, S32 stream, char const* labels, void* user_buffer, S32 user_buffer_len, S32 user_buffer_flags);
 /* Stop, pause, or resume every live instance carrying `labels`, or every
- * instance when `labels` is NULL. `filter` is a mask of instance IDs to leave
- * alone. Returns the number of instances affected. */
+ * instance when `labels` is NULL. `filter` is a mask of MILESEVENTSOUNDSTATUS_*
+ * states; 0 matches every state. Returns the number of instances affected. */
 U64         MSS_CALLBACK MilesStopSoundInstances(char const* labels, U64 filter);
 U64         MSS_CALLBACK MilesPauseSoundInstances(char const* labels, U64 filter);
 U64         MSS_CALLBACK MilesResumeSoundInstances(char const* labels, U64 filter);
@@ -633,8 +633,8 @@ U64         MSS_CALLBACK MilesResumeSoundInstances(char const* labels, U64 filte
  * mask of MILESEVENTSOUNDSTATUS_* and 0 means every status. `labels` filters,
  * `search_for_id` restricts to one instance, and `out_info` receives the
  * MILESEVENTSOUNDINFO for the instance that was found (NULL to skip it). The
- * v8 build drops the system argument and narrows the instance filter to 32
- * bits, which is its only search granularity. */
+ * v8 build narrows the instance filter to 32 bits, which is its only search
+ * granularity. */
 #if MSS_AT_LEAST(90)
 S32         MSS_CALLBACK MilesEnumerateSoundInstances(void* system, void** io_next, S32 status, char const* labels, U64 search_for_id, void* out_info);
 #else
@@ -656,8 +656,8 @@ S32         MSS_CALLBACK MilesEnumeratePresetPersists(void** io_next, char** out
 void        MSS_CALLBACK MilesSetSoundStartOffset(U32 instance, S32 offset, S32 is_ms);
 #endif
 
-/* Cap how many instances may carry a label at once, as a whitespace-separated
- * list of `label count` pairs (`"footstep 4 door 2"`); matching is
+/* Cap how many instances may carry a label at once, as a colon-separated list
+ * of `label count` pairs (`"footstep 4:door 2"`); matching is
  * case-insensitive and a count of 0 evicts every instance carrying the label
  * when the next one starts. A v8 build has one global system and takes only
  * the limits string. */
@@ -681,12 +681,12 @@ S32         MSS_CALLBACK MilesReleaseSoundBank(void* bank);
  * event. The bytes stay valid until the bank is released. */
 void const* MSS_CALLBACK MilesFindEvent(void* bank, char const* event_name);
 #if MSS_AT_LEAST(90)
-/* Duration in milliseconds of a named event across the loaded banks, or -1 if
- * no bank carries it. */
+/* Duration in milliseconds of a named event across the loaded banks, or 0 if
+ * no bank carries it or its first start sound has no resolvable duration. */
 S32         MSS_CALLBACK MilesGetEventLength(char const* event_name);
 #endif
-/* A multi-line dump of the loaded banks and their assets, in a buffer the DLL
- * owns. */
+/* A multi-line dump of the loaded banks and their assets, in a buffer the
+ * caller frees with free() (or AIL_mem_free_lock). */
 char const* MSS_CALLBACK MilesTextDumpEventSystem(void);
 
 /* Install a 32-bit xorshift routine the event VM draws random choices from, and

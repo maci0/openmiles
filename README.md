@@ -379,7 +379,6 @@ int main(void)
 
 The header covers playback, streaming, 3D, RIB, filters, the timers, the
 v6.5+ unified level/pan/reverb/low-pass and v7+ 3D calls on `HSAMPLE`,
-the v6.5+ unified level/pan/reverb/low-pass and v7+ 3D calls on `HSAMPLE`,
 file I/O (`AIL_file_read`, `AIL_file_size`, `AIL_file_type`, and
 `AIL_set_file_callbacks` for routing file access through the game's own VFS),
 and the `Miles*` event-system and SoundBank API a v8 or v9 build exports

@@ -5,11 +5,11 @@
 //! genuine library bug rather than a harness contract violation.
 //!
 //! Out of scope here (covered by the ordered unit tests in main_test.zig and
-//! the C integration harnesses instead): lifecycle functions that destroy or
-//! create shared state — startup/shutdown, the open_*/close_*/release_* and
-//! *_handle_release destructors, the DLS/memory subsystem teardown, the filter
-//! attribute calls that need a live filter handle, and DllMain. Looping those
-//! over a shared handle pool would tear it down rather than exercise input.
+//! the C integration harnesses instead): AIL_startup and AIL_shutdown, which
+//! the handle pool below is built on and which run once per process rather than
+//! per input. The other lifecycle calls are fuzzed like any other export: each
+//! opens its own driver or filter and tears that down again, so none of them
+//! disturbs the pool.
 const std = @import("std");
 const testing = std.testing;
 const openmiles = @import("openmiles");

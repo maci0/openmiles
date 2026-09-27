@@ -82,7 +82,9 @@ int play_test_main(int argc, char** argv) {
     LOAD_FUNC_EX(AIL_set_digital_master_volume, 8);
     LOAD_FUNC_EX(AIL_allocate_sample_handle, 4);
     LOAD_FUNC_EX(AIL_release_sample_handle, 4);
-    LOAD_FUNC_EX(AIL_init_sample, 8); /* v8+ ABI: AIL_init_sample(HSAMPLE, S32 format) */
+    /* The v8+ table renames the 2-arg entry, so plain AIL_init_sample@8 does not exist. */
+    p_AIL_init_sample = (t_AIL_init_sample)GetProcAddress(mss, MSS_DECORATE(AIL_init_sample_v8, 8));
+    if (!p_AIL_init_sample) { printf("Failed to load function: AIL_init_sample_v8\n"); return 1; }
     LOAD_FUNC_EX(AIL_set_sample_file, 12);
     LOAD_FUNC_EX(AIL_start_sample, 4);
     LOAD_FUNC_EX(AIL_stop_sample, 4);
@@ -128,6 +130,7 @@ int play_test_main(int argc, char** argv) {
     void* wdata = malloc(sz);
     fread(wdata, 1, sz, fwav);
     fclose(fwav);
+    TEST_ASSERT(p_AIL_init_sample(S, 0) == 1, "Init Sample");
     p_AIL_set_sample_file(S, wdata, (int)sz);
     p_AIL_start_sample(S);
     TEST_ASSERT(p_AIL_sample_status(S) == SMP_PLAYING, "Sample playing status");

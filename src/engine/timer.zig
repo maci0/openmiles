@@ -85,10 +85,14 @@ pub const Timer = struct {
     /// Drop this timer from the global registry, and free it when `free_self`.
     /// The free happens under the lock, and only once the thread is joined, so
     /// a snapshot taken by startAllTimers/stopAllTimers under the same lock
-    /// cannot be left holding a freed pointer. A retiring timer is not freed
-    /// here: its own run loop still reads it and does the destroy on the way
-    /// out. Taken after state_mutex is released so the global->state nesting
-    /// order those callers use can never invert.
+    /// cannot be left holding a freed pointer. (releaseAllTimers is the one
+    /// exception: it detaches the whole list first, then deinits each timer with
+    /// the lock released, since the join would deadlock against a run loop that
+    /// registers a timer. Shutdown is single-threaded by contract, so no
+    /// snapshot is in flight then.) A retiring timer is not freed here: its own
+    /// run loop still reads it and does the destroy on the way out. Taken after
+    /// state_mutex is released so the global->state nesting order those callers
+    /// use can never invert.
     fn unlinkFromGlobalList(self: *Timer, free_self: bool) void {
         root.global_timers_mutex.lockUncancelable(io);
         defer root.global_timers_mutex.unlock(io);

@@ -144,7 +144,7 @@ pub const EVENT_STEP_INFO = extern struct {
 // ---------------------------------------------------------------------------
 // Constructor (byte-faithful write side)
 // ---------------------------------------------------------------------------
-// Arguments to addStartSound, in the order the start-sound step encodes them.
+// Arguments to addStartSound; the wire order is the one it writes, not this one.
 pub const StartSoundArgs = struct {
     soundname: ?*const anyopaque,
     presetname: ?*const anyopaque,

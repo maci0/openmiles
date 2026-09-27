@@ -1,5 +1,5 @@
-//! Memory API (MSS v4+). Split into its own module so `-Dmss-version` can gate
-//! it cleanly out of v3 builds.
+//! Memory API. `AIL_mem_alloc_lock` / `AIL_mem_free_lock` ship from v3; the
+//! callback hooks start at v4. Split out so `-Dmss-version` can gate the rest.
 
 const std = @import("std");
 const openmiles = @import("openmiles");

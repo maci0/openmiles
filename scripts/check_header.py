@@ -12,7 +12,7 @@ corrupts the stack or fails to link.
 This resolves the header's version guards once per supported version and, for
 each resulting declaration, reports:
 
-  UNDECLARED  the header exports a symbol no build provides
+  UNDECLARED  the header declares a symbol the export table never provides
   RETURN      the declared return type disagrees with the implementation
   ARITY       the declared argument count does not match the export's stack size
   CONVENTION  the header's calling convention disagrees with the export's
@@ -58,8 +58,9 @@ V8_0 = 80
 # of the chain is skipped.
 PENDING, TAKEN, DONE = 0, 1, 2
 
-# Symbols the export loop in main.zig never emits, and name substrings it
-# drops wholesale from 8.0 on. A declaration for either is a link error.
+# Name substrings the export loop in main.zig drops wholesale from 8.0 on. A
+# declaration for one is a link error. (The names it never emits at all are
+# main.zig's `never_export`, read by parse_never_export below.)
 REMOVED_AT_80 = [
     "redbook",
     "quick",

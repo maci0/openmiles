@@ -218,7 +218,7 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_DLS_load_memory` | 🟢 Implemented | Loads SF2 soundfont from memory; an image already loaded keeps that bank and returns the same handle |
 | `AIL_DLS_unload` | 🟢 Implemented | Alias for unload_file |
 | `AIL_DLS_compact` | ⚪ Stub | No-op (miniaudio handles memory management) |
-| `AIL_DLS_get_info` | 🟢 Implemented | Returns soundfont memory footprint + preset/instrument counts (via `tsf_get_presetcount`) in the `AILDLSINFO` struct |
+| `AIL_DLS_get_info` | 🟢 Implemented | Fills the soundfont memory footprint (`CurrentDLSMemory`, `LargestSize`, `MaxDLSMemory`, `GMAvailable`, `GMBankSize`) in the `AILDLSINFO` struct, and reports `*PercentCPU` as 0 (not measured) |
 | `AIL_DLS_get_reverb` / `AIL_DLS_set_reverb` | 🟢 Implemented | Stores room_type/level/reflect_time on MidiDriver |
 | `AIL_DLS_open` | 🟢 Implemented | Opens MIDI driver with DLS bank |
 | `AIL_DLS_close` | 🟢 Implemented | |
@@ -249,7 +249,7 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_register_beat_callback` | 🟢 Implemented | Fires continuously during playback |
 | `AIL_register_event_callback` | 🟢 Implemented | Fires on Control Change messages |
 | `AIL_register_prefix_callback` | 🟢 Implemented | Handles system exclusive prefixes |
-| `AIL_register_trigger_callback` | 🟢 Implemented | Fires on CC 111 (XMIDI trigger) |
+| `AIL_register_trigger_callback` | 🟢 Implemented | Fires on CC 119 (XMIDI trigger) |
 | `AIL_register_sequence_callback` | 🟢 Implemented | Fires when sequence ends naturally |
 | `AIL_register_timbre_callback` | 🟢 Implemented | Fires on Program Change |
 | `AIL_XMIDI_master_volume` / `AIL_set_XMIDI_master_volume` | 🟢 Implemented | Scales global TSF output volume |

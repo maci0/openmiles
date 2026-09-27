@@ -1,6 +1,7 @@
 //! Filesystem compatibility shim. Wraps file/directory operations over std.Io
 //! with a native Windows fallback so the rest of the codebase has one portable
-//! open/read/seek/stat surface regardless of target OS.
+//! surface (open, create, whole-file read, whole-file write) regardless of
+//! target OS.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -145,10 +146,12 @@ fn logResolvedPath(original: []const u8, resolved: []const u8) void {
     }
 }
 
-/// Fault injection at the library's only file-I/O seam. Every open the engine
-/// performs goes through this module, so a schedule installed here is what a
-/// simulation replays to produce a failing open or a read that comes up
-/// short. Null in production: one load of a global per open.
+/// Fault injection at the library's file-I/O seam. The opens, creates, and
+/// whole-file reads and writes the engine performs go through this module's
+/// `openFile`, `openDir`, `createFile`, `readLength`, and `writeAll`, so a
+/// schedule installed here is what a simulation replays to produce a failing
+/// open or a read that comes up short. Null in production: one load of a
+/// global per call.
 pub const Fault = struct {
     /// Fails the open of `path` with the error returned. Null lets it pass.
     open: ?*const fn (path: []const u8) ?anyerror = null,
@@ -248,6 +251,7 @@ pub fn openDir(io: std.Io, path: []const u8, options: std.Io.Dir.OpenOptions) !s
 }
 
 pub fn createFile(io: std.Io, path: []const u8, flags: std.Io.Dir.CreateFileOptions) !std.Io.File {
+    if (checkOpenFault(path)) |err| return err;
     if (std.fs.path.isAbsolute(path)) {
         return std.Io.Dir.createFileAbsolute(io, path, flags);
     }

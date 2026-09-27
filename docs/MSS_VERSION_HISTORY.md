@@ -33,7 +33,7 @@ Focus was on low-level hardware abstraction (Sound Blaster, AdLib) and early Win
   - XMIDI sequence management.
   - Red Book (CD-Audio) control.
 
-## 2. Mainstream Era (v6.x) - *Current Project Target*
+## 2. Mainstream Era (v6.x)
 This version is the most common target for legacy game mods and wrappers (e.g., GTA III, Vice City, early CoD).
 
 - **Filter System:** Introduced `AIL_open_filter` and `AIL_filter_attribute`. Allowed real-time DSP effects.

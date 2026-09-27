@@ -1,7 +1,9 @@
-//! MSS v9 additive API (stubbed). Soundbank/event/preset system, 5.1
+//! MSS v9 additive API. Soundbank/event/preset system, 5.1
 //! surround, in-memory I/O, WAV markers, util helpers — gated at v9+ and
-//! additive over v3-v7. Signatures from the MSS 9.x SDK mss.h. These subsystems
-//! have no OpenMiles engine equivalent yet, so they link and return safe defaults.
+//! additive over v3-v7. Signatures from the MSS 9.x SDK mss.h. The event-step
+//! builders, the bank loader, and the 3D/level state are real; the raw
+//! environment and sound preset application calls have no engine equivalent and
+//! return 0.
 const std = @import("std");
 const openmiles = @import("openmiles");
 

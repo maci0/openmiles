@@ -419,7 +419,7 @@ pub fn AIL_allocate_file_sample(driver_opt: ?*DigitalDriver, data: *anyopaque, f
     return s;
 }
 // AIL_load_sample_buffer(HSAMPLE S, U32 buff_num, void const *buffer, U32 len)
-/// MSS_BUFFER_HEAD (mss.h): pass as buff_num to target the ring's head slot.
+/// The SDK's MSS_BUFFER_HEAD (-1): pass as buff_num for the ring's head slot.
 const MSS_BUFFER_HEAD: i32 = -1;
 pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: i32, data: ?*anyopaque, len: u32) callconv(.winapi) i32 {
     // SDK (wavefile.cpp) returns S32: -1 on a null sample or an out-of-range
@@ -495,8 +495,8 @@ pub fn AIL_sample_buffer_info_old(s_opt: ?*Sample, pos0: ?*u32, len0: ?*u32, pos
     }
 }
 // v8+ form: S32 AIL_sample_buffer_info(HSAMPLE S, S32 buff_num, U32 *pos,
-// U32 *len, U32 *used, U32 *free) @24 — report play position/length and the
-// used/free buffer counts for the requested double-buffer slot.
+// U32 *len, S32 *head, S32 *tail) @24 — report the play position/length for the
+// requested buffer slot, plus the ring head/tail indices.
 // SDK (wavefile.cpp): pos/len of buffer buff_num, the ring head/tail indices,
 // and the return is S->starved (0 when healthy) — NOT a success flag. A null
 // sample yields pos/len 0 and head/tail -1.

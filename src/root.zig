@@ -443,8 +443,8 @@ pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
     }
 }
 
-/// AIL_file_size core: size in bytes via the app's callbacks when set,
-/// otherwise from the filesystem. Returns 0 and sets the file error on failure.
+/// AIL_file_size core: size in bytes via the app's callbacks when set, otherwise
+/// from the filesystem. Returns 0 and sets the file error on failure, except when the /// app set an open callback without a close one.
 pub fn ailFileSize(filename: [*:0]const u8) u32 {
     clearFileError();
     if (cb_file_open != null) {
@@ -702,7 +702,8 @@ pub var global_timers_mutex: std.Io.Mutex = .init;
 // Holding the lock across the join is a hard deadlock: both threads wait on the
 // same mutex. So each of these snapshots the registry under the lock and does
 // the per-timer work with it released. A snapshot stays valid because deinit
-// unlinks and frees a timer under that same lock.
+// unlinks and frees a timer under that same lock. releaseAllTimers is the one
+// exception: it detaches the list first and relies on shutdown being single-threaded.
 pub fn startAllTimers() void {
     const snapshot = snapshotTimers("startAllTimers") orelse return;
     defer global_allocator.free(snapshot);
@@ -745,8 +746,7 @@ fn snapshotTimers(caller: []const u8) ?[]*Timer {
 // The "current driver" handles are read by every API entry point and written by
 // driver open/close, which a game may drive from a worker thread while its main
 // thread is calling into the API. Atomic so a reader never sees a torn
-// pointer. Public so a test can reset the handle between cases; callers should
-// go through lastDigitalDriver()/lastMidiDriver().
+// pointer. Read them through lastDigitalDriver()/lastMidiDriver().
 pub var last_digital_driver: std.atomic.Value(?*DigitalDriver) = .init(null);
 pub var last_midi_driver: std.atomic.Value(?*MidiDriver) = .init(null);
 
