@@ -297,9 +297,11 @@ full list, and add your own declaration from the export table in
 
 `make check-header` re-checks every declaration in `mss.h` against that export
 table, and the `AILSOUNDINFO` layout against `src/root.zig`, for all ten distinct
-version encodings, and compiles the header once per encoding as C99 with
-`-Wall -Wextra -Werror` so a declaration that only parses is caught here rather
-than in your build. It runs as part of `make lint`.
+version encodings, and compiles the header once per encoding with the same
+warning set `build.zig` compiles C with (`-Wall -Wextra -Werror` plus the
+pedantic, shadow, prototype, VLA, format and write-strings groups), so a
+declaration that only parses is caught here rather than in your build. It runs
+as part of `make lint`.
 
 ### Configuration
 

@@ -42,6 +42,20 @@ everything below is unreleased.
 
 ### Added
 
+- C sources compile with the correctness and portability warning groups the
+  tree already passes, on top of `-Wall -Wextra -Werror`: `-Wpedantic`,
+  `-Wshadow`, `-Wstrict-prototypes`, `-Wold-style-definition`, `-Wvla`,
+  `-Wformat=2` and `-Wwrite-strings`. Three counter-flags keep the vendored
+  headers from failing the build, each for vendored code only: `tml.h` declares
+  an anonymous union, `miniaudio.h` passes a format string through a parameter,
+  and `tsf.h` computes member offsets from a null pointer.
+- `make check-pins` fails when the C warning set in `scripts/check_header.py`
+  drifts from `c_flags` in `build.zig`, so the header gate cannot compile
+  `mss.h` under a weaker set than the one the build uses.
+- ruff's `BLE`, `PGH`, `SLF` and `T10` groups are selected in `ruff.toml`, so
+  the gate scripts are checked for a swallowed `except`, a bare `# noqa` that
+  silences every rule on the line, a reach into another object's private
+  member, and a leftover breakpoint.
 - One clock for the whole library (`openmiles.clock`). Every period, deadline,
   and elapsed counter now reads it, so a test or simulation can install a
   virtual one: `openmiles.useVirtualClock(0)` re-bases the elapsed counters,
@@ -106,6 +120,11 @@ everything below is unreleased.
 
 ### Fixed
 
+- `make lint` failed on a clean tree: eight `docs/THREAT_MODEL.md` `file:line`
+  anchors in `src/engine/midi.zig` and `src/engine/digital.zig` named lines
+  their definitions had moved off, so the threat model read as claiming a
+  mitigation at a place a reader would not find it. The references point at the
+  line each anchor is on again.
 - `make lint` failed on a clean tree: `ruff check` reported the fixed-argv
   `zig cc` call in `check_header.py` under the bandit rules, and every
   `docs/THREAT_MODEL.md` `file:line` reference whose line had moved since it

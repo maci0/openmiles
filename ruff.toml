@@ -9,10 +9,14 @@
 # Not selected, and why: COM (COM812/COM819 fight the formatter over trailing
 # commas, and the formatter wins), T20 (printing the report is the job), ANN
 # and D (annotating 60-line scripts and documenting every three-line accessor
-# is a separate pass), TCH and ASYNC (no typing-only imports and no async yet,
-# so both are no-ops until ANN lands). S is selected: the scripts parse vendored
-# C headers and a DLL, which is exactly the untrusted-shape input worth
-# checking, and the tree passes it.
+# is a separate pass), TCH, ASYNC, FAST and PD (no typing-only imports, no
+# async, no pytest fixtures and no numpy yet, so all four are no-ops until ANN
+# lands). S is selected: the scripts parse vendored C headers and a DLL, which
+# is exactly the untrusted-shape input worth checking, and the tree passes it.
+# So are BLE, PGH, SLF and T10: a swallowed exception, a bare `# noqa` that
+# silences every rule on the line, a reach into another object's private
+# member, and a leftover breakpoint are all defects a gate should catch, and
+# none of them is present.
 
 line-length = 100
 target-version = "py38"
@@ -29,6 +33,7 @@ select = [
     "B",    # bugbear
     "A",    # shadowing a builtin
     "ARG",  # unused function argument
+    "BLE",  # blind except
     "C4",   # comprehensions
     "DTZ",  # naive datetime
     "EM",   # exception message handling
@@ -41,6 +46,7 @@ select = [
     "ISC",  # implicit string concatenation
     "LOG",  # logging misuse
     "PERF", # per-file performance
+    "PGH",  # suppression hygiene: blanket noqa, type: ignore
     "PIE",  # misc lints
     "PL",   # pylint
     "PTH",  # use pathlib
@@ -51,6 +57,8 @@ select = [
     "RUF",  # ruff-specific
     "S",    # flake8-bandit
     "SIM",  # simplify
+    "SLF",  # private member access
+    "T10",  # stray debugger
     "TID",  # tidy imports
     "TRY",  # tryceratops
 ]

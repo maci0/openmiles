@@ -13,8 +13,9 @@ Four tools, the first three version-pinned in the tree:
 
 `make` reads the Zig version out of `build.zig.zon` and refuses to build on
 any other one; `make check-pins` (part of `make lint`) fails when the Makefile,
-`ci.yml`, and `build.zig.zon` disagree. Nothing else is fetched: every
-dependency is a vendored header under `deps/`, verified by
+`ci.yml`, and `build.zig.zon` disagree, and when the C warning set in
+`scripts/check_header.py` drifts from `c_flags` in `build.zig`. Nothing else is
+fetched: every dependency is a vendored header under `deps/`, verified by
 `make check-vendored` against `deps/SHA256SUMS`.
 
 `make parity` is the one exception. It diffs each `-Dmss-version` build against

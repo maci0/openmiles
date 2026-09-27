@@ -23,11 +23,27 @@ const OpenmilesModule = struct {
     tsf: *std.Build.Module,
 };
 
-// C sources compile with warnings as errors. c_impl.c additionally silences
-// -Wnull-pointer-subtraction because vendored tsf.h computes struct member
-// offsets via ((struct tsf_region*)0)->FIELD pointer math.
-const c_flags = [_][]const u8{ "-std=c99", "-Wall", "-Wextra", "-Werror" };
-const c_flags_tsf = [_][]const u8{ "-std=c99", "-Wall", "-Wextra", "-Werror", "-Wno-null-pointer-subtraction" };
+// C sources compile with warnings as errors. The set beyond -Wall -Wextra is
+// the correctness and portability groups the tree already passes: -Wpedantic
+// for anything outside c99, -Wshadow for a variable that hides another, the
+// two prototype groups for declarations that do not match a header, -Wvla for
+// stack arrays of unknown size, -Wformat=2 for a format string that does not
+// match its arguments, and -Wwrite-strings for a string literal written
+// through a mutable pointer.
+//
+// Three of them need a counter-flag, each for vendored code, never ours:
+// -Wno-c11-extensions because tml.h declares an anonymous union, and
+// -Wno-format-nonliteral because miniaudio.h passes a format string through a
+// parameter. c_impl.c additionally silences -Wnull-pointer-subtraction because
+// vendored tsf.h computes struct member offsets via
+// ((struct tsf_region*)0)->FIELD pointer math.
+const c_flags = [_][]const u8{
+    "-std=c99",               "-Wall",               "-Wextra",    "-Werror",
+    "-Wpedantic",             "-Wno-c11-extensions", "-Wshadow",   "-Wstrict-prototypes",
+    "-Wold-style-definition", "-Wvla",               "-Wformat=2", "-Wno-format-nonliteral",
+    "-Wwrite-strings",
+};
+const c_flags_tsf = c_flags ++ [_][]const u8{"-Wno-null-pointer-subtraction"};
 
 /// Build an (anonymous) openmiles module plus its c_impl object for a given
 /// resolved target. Used to produce a musl-targeted copy for the native test

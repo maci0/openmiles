@@ -10,6 +10,9 @@ repeats. Nothing otherwise keeps them in step, and a stale CI pin is invisible:
 CI installs the old tool, the old tool is happy with the old tree, and the merge
 goes green.
 
+The same drift applies to the C warning set, which build.zig declares once and
+check_header.py repeats to compile mss.h on its own.
+
 So this reads the pins back out of each file and compares them, reporting:
 
   DRIFT     a file that must derive its pin, or names a different version
@@ -28,6 +31,8 @@ MAKEFILE = ROOT / "Makefile"
 CI_YML = ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_YML = ROOT / ".github" / "workflows" / "release.yml"
 ZON = ROOT / "build.zig.zon"
+BUILD_ZIG = ROOT / "build.zig"
+CHECK_HEADER = ROOT / "scripts" / "check_header.py"
 
 # Makefile variable -> (files that must repeat it, pattern naming the pin).
 PINS = {
@@ -38,6 +43,14 @@ PINS = {
 # Workflows that build the tree, so each has to take its zig from build.zig.zon
 # rather than repeating it.
 ZIG_WORKFLOWS = (CI_YML, RELEASE_YML)
+
+# The C warning set is declared once, as c_flags in build.zig, and
+# check_header.py repeats it to compile mss.h on its own. The two are the same
+# list, so a warning added to the build and not to the header gate compiles in
+# one place and not the other, which is the drift this reports.
+C_FLAGS_BUILD_ZIG_RE = re.compile(r"const c_flags = \[_\]\[\]const u8\{(?P<body>.*?)\};", re.DOTALL)
+C_FLAGS_HEADER_RE = re.compile(r'"cc",(?P<body>.*?)str\(tu\)', re.DOTALL)
+QUOTED_RE = re.compile(r'"(-W[A-Za-z0-9=-]+|-std=[A-Za-z0-9]+)"')
 
 
 def read(path):
@@ -113,6 +126,44 @@ def zig_workflow_problems(path, text):
     return bad
 
 
+def c_flag_problems():
+    """Report any disagreement between the two copies of the C warning set."""
+    bad = []
+    sources = (
+        (BUILD_ZIG, C_FLAGS_BUILD_ZIG_RE, "c_flags"),
+        (CHECK_HEADER, C_FLAGS_HEADER_RE, "the zig cc argv list"),
+    )
+    found = {}
+    for path, pattern, label in sources:
+        text = read(path)
+        if text is None:
+            bad.append(f"{path.name} missing")
+            continue
+        m = pattern.search(text)
+        if not m:
+            print(f"{path.relative_to(ROOT)} UNPINNED  no {label}")
+            bad.append(f"{path.name} C flags")
+            continue
+        found[path] = QUOTED_RE.findall(m.group("body"))
+    if len(found) != len(sources):
+        return bad
+    build_flags = found[BUILD_ZIG]
+    header_flags = found[CHECK_HEADER]
+    if "-Werror" not in build_flags:
+        print("build.zig DRIFT     c_flags does not promote warnings to errors")
+        bad.append("build.zig C flags")
+    if build_flags != header_flags:
+        only_build = sorted(set(build_flags) - set(header_flags))
+        only_header = sorted(set(header_flags) - set(build_flags))
+        print(
+            f"{CHECK_HEADER.relative_to(ROOT)} DRIFT     the C warning set differs from "
+            f"c_flags in build.zig (build only: {', '.join(only_build) or 'none'}; "
+            f"header only: {', '.join(only_header) or 'none'})"
+        )
+        bad.append("check_header.py C flags")
+    return bad
+
+
 def main():
     argparse.ArgumentParser(
         prog="check_toolchain_pins.py",
@@ -155,6 +206,8 @@ def main():
             problems.append(f"{path.name} missing")
             continue
         problems.extend(zig_workflow_problems(path, text))
+
+    problems.extend(c_flag_problems())
 
     if problems:
         print(f"{len(problems)} toolchain pin(s) disagree: {', '.join(problems)}")

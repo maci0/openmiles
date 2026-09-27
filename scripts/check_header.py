@@ -497,6 +497,11 @@ def compile_problems():
             # input, running the zig resolved above. The only path handed to it
             # is the temp file this function just wrote; nothing from the
             # repository reaches argv.
+            #
+            # The warning set is the one c_flags carries in build.zig, so a
+            # construct the build would reject fails here too. A copy, not a
+            # source of truth: build.zig owns the list, and
+            # scripts/check_toolchain_pins.py asserts the two agree.
             proc = subprocess.run(  # noqa: S603
                 [
                     zig,
@@ -506,6 +511,15 @@ def compile_problems():
                     "-Wall",
                     "-Wextra",
                     "-Werror",
+                    "-Wpedantic",
+                    "-Wno-c11-extensions",
+                    "-Wshadow",
+                    "-Wstrict-prototypes",
+                    "-Wold-style-definition",
+                    "-Wvla",
+                    "-Wformat=2",
+                    "-Wno-format-nonliteral",
+                    "-Wwrite-strings",
                     str(tu),
                     "-o",
                     str(Path(tmp) / "header_check.o"),
