@@ -13,7 +13,7 @@ pub const Filter = struct {
     allocator: std.mem.Allocator,
     lpf_node: ma.ma_lpf_node,
     lpf_initialized: bool = false,
-    cutoff_frequency: f64 = 22050.0, // Hz — fully open by default
+    cutoff_frequency: f64 = 22050.0, // Hz; initLpfNode replaces this with the driver Nyquist
     order: u32 = 2, // 2nd-order = 12dB/octave rolloff
     // Track which samples are routed through this filter for cleanup
     attached_samples: std.ArrayListUnmanaged(*root.Sample),
@@ -42,6 +42,11 @@ pub const Filter = struct {
     fn initLpfNode(self: *Filter) !void {
         const sample_rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
         const channels = ma.ma_engine_get_channels(&self.driver.engine);
+        // "Fully open" is the device's Nyquist, not a fixed 22050 Hz: MSS's
+        // normalized 1.0 maps to cutoff * Nyquist (Sample.setLowPassNormalized),
+        // so the untouched filter has to sit at the driver's Nyquist to make a
+        // normalized cutoff of 1.0 mean "no filtering" on any sample rate.
+        self.cutoff_frequency = @as(f64, @floatFromInt(@max(sample_rate, 2))) / 2.0;
         const config = ma.ma_lpf_node_config_init(channels, sample_rate, self.cutoff_frequency, self.order);
         const result = ma.ma_lpf_node_init(
             @ptrCast(&self.driver.engine),
@@ -162,11 +167,16 @@ pub const Filter = struct {
 
     /// Set the low-pass cutoff frequency in Hz and reinitialize the filter.
     pub fn setCutoff(self: *Filter, frequency: f64) void {
-        const clamped = if (std.math.isNan(frequency)) 1000.0 else @max(20.0, @min(frequency, 22050.0));
+        // MSS's low-pass cutoff is a normalized 0..1 value (1.0 = fully open) and
+        // Sample.setLowPassNormalized converts it with cutoff * Nyquist, so the
+        // ceiling has to be the device's actual Nyquist: a fixed 22050 ceiling
+        // clipped every cutoff above 0.919 on a 48 kHz (or higher) driver.
+        const sample_rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
+        const nyquist: f64 = @as(f64, @floatFromInt(@max(sample_rate, 2))) / 2.0;
+        const clamped = if (std.math.isNan(frequency)) 1000.0 else @max(20.0, @min(frequency, nyquist));
         if (clamped == self.cutoff_frequency) return;
         self.cutoff_frequency = clamped;
         if (self.lpf_initialized) {
-            const sample_rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
             const channels = ma.ma_engine_get_channels(&self.driver.engine);
             const config = ma.ma_lpf_config_init(
                 ma.ma_format_f32,

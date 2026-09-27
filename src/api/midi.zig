@@ -211,7 +211,9 @@ pub fn AIL_list_MIDI(midi: ?*const anyopaque, midi_size: u32, lst: ?*?*anyopaque
     if (lst_size) |p| p.* = 0;
     const mp = midi orelse return 0;
     const raw: [*]const u8 = @ptrCast(mp);
-    if (midi_size < 12) return 0;
+    // The MThd reads below span bytes 0..14, so a 12- or 13-byte image would
+    // read past the caller's buffer.
+    if (midi_size < 14) return 0;
     const data = raw[0..@as(usize, midi_size)];
 
     var text: [:0]u8 = undefined;
