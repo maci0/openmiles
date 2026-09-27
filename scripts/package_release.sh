@@ -15,7 +15,9 @@
 # explicit order below rather than the filesystem order of a glob, every entry
 # takes one mtime (SOURCE_DATE_EPOCH, defaulting to the HEAD commit time) and
 # one mode, and `zip -X` omits the uid/gid and extended-timestamp extra fields
-# that would otherwise record the packaging host.
+# that would otherwise record the packaging host. The GNU and BSD spellings of
+# the digests and of the timestamp are both handled, so a host that ships
+# `shasum` and a `touch` without `-d` produces the same archive bytes.
 #
 # Exit status: 0 archive written, 1 packaging failed, 2 bad invocation.
 set -euo pipefail
@@ -83,6 +85,34 @@ command -v zip >/dev/null 2>&1 || {
   exit 1
 }
 
+# Digests. `sha256sum` is GNU coreutils; the BSD/macOS spelling is
+# `shasum -a 256`, and both write the same "<digest>  <name>" line `sha256sum -c`
+# reads. Probe the capability rather than the OS name, and name the tool that is
+# missing so a host without either says which one to install.
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256() { sha256sum "$@"; }
+elif command -v shasum >/dev/null 2>&1; then
+  sha256() { shasum -a 256 "$@"; }
+else
+  echo "error: neither sha256sum nor shasum found on PATH (needed for the checksums file)" >&2
+  exit 1
+fi
+
+# Timestamps. `touch -d @epoch` is GNU; BSD touch takes only `-t`, and reading
+# an epoch is `date -r` there and `date -d @` here. Both spellings name the
+# same instant, and TZ is pinned to UTC above, so the archive bytes do not
+# depend on which one the host has.
+stamp_mtime() {
+  local file=$1 stamp
+  if touch -d "@$epoch" "$file" 2>/dev/null; then return 0; fi
+  stamp=$(date -u -r "$epoch" +%y%m%d%H%M.%S 2>/dev/null) ||
+    stamp=$(date -u -d "@$epoch" +%y%m%d%H%M.%S 2>/dev/null) || {
+      echo "error: cannot read SOURCE_DATE_EPOCH=$epoch as a date (need 'date -r' or 'date -d @')" >&2
+      return 1
+    }
+  touch -t "$stamp" "$file"
+}
+
 OUT=$1
 SUMS=${2:-}
 
@@ -134,7 +164,7 @@ for e in "${entries[@]}"; do
   # usually 0755 while a checked-in file is 0644, so the staging umask would
   # otherwise reach the archive bytes. One mode for every entry.
   chmod 0644 "$stage/$name"
-  touch -d "@$epoch" "$stage/$name"
+  stamp_mtime "$stage/$name"
   names+=("$name")
 done
 
@@ -143,7 +173,7 @@ if [ -n "$SUMS" ]; then
   # Absolute before the cd below, which is relative to the staging directory.
   sums_abs=$(cd "$(dirname "$SUMS")" && pwd)/$(basename "$SUMS")
   # Digests of the staged copies, which are byte-for-byte the archive entries.
-  (cd "$stage" && sha256sum "${names[@]}" > "$sums_abs")
+  (cd "$stage" && sha256 "${names[@]}" > "$sums_abs")
   echo "wrote $sums_abs ($(wc -l < "$sums_abs") entries)"
 fi
 

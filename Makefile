@@ -13,6 +13,10 @@ ZIG_VERSION := $(shell sed -n 's/^[[:space:]]*\.minimum_zig_version[[:space:]]*=
 # invoked as `$(PYTHON) scripts/...` so one resolution covers every call site.
 PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
 
+# Exported so the `test` recipe reads FILTER from the environment rather than
+# splicing a caller's argument into the recipe text.
+export FILTER
+
 all: build
 
 # Fail before any compile work, with a clear message, rather than letting an
@@ -31,13 +35,17 @@ build: check-toolchain
 # A filter that matches no test name is a typo, not a green run, so it is
 # checked here: zig reports a zero-test run as success, which is how a
 # contributor ends up believing a fix is covered when nothing ran. FILTER goes
-# through the environment, not into the recipe text.
+# through the environment, not into the recipe text. The names are read with
+# find + grep rather than a GNU-only `grep --include` scan, and matched
+# with the shell's own substring test, so the check does not depend on a grep
+# that BSD (macOS) does not ship.
 test: check-toolchain
-	@if [ -n "$(FILTER)" ]; then \
-	  if ! grep -rhoE 'test "[^"]*"' --include='*.zig' src | grep -qF -- "$$FILTER"; then \
-	    echo "error: no test name in src/ contains '$(FILTER)'; run 'make test' with no FILTER" >&2; \
-	    exit 1; \
-	  fi; \
+	@if [ -n "$$FILTER" ]; then \
+	  names=$$(find src -name '*.zig' -exec grep -hoE 'test "[^"]*"' {} +); \
+	  case "$$names" in \
+	    *"$$FILTER"*) ;; \
+	    *) echo "error: no test name in src/ contains '$$FILTER'; run 'make test' with no FILTER" >&2; exit 1 ;; \
+	  esac; \
 	fi
 	zig build test $(if $(FILTER),-Dtest-filter=$(FILTER))
 

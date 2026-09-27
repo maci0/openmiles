@@ -164,7 +164,9 @@ on each install.
 `scripts/package_release.sh <out.zip> [sha256sums]` packages
 `zig-out/bin/mss32.dll` with the license, this README, the changelog, and the
 vendored-dependency attribution (`VENDORED.md`, `DEPS-SHA256SUMS`). It needs
-`zip` on PATH and says so if it is missing. `--help` prints the same usage.
+`zip` on PATH and says so if it is missing, and takes the digests for the
+optional checksum file from `sha256sum` or, where that is not the name
+(GNU vs BSD), from `shasum -a 256`. `--help` prints the same usage.
 The optional second argument writes
 a `SHA256SUMS` naming exactly the archive entries, so `sha256sum -c` passes on
 an unpacked download. The archive is reproducible: entry order is fixed, every
