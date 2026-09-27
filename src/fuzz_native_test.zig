@@ -5,9 +5,12 @@
 //! (`xmidiToSmf` / `xmidiBareToSmf`), the BANK image loader behind the bank
 //! query API, the WAV container readers that classify a file, and the WAV
 //! cue-point marker API (count / by-index / by-name over a nested
-//! LIST-adtl-labl chunk tree), and the Miles 9.x event enqueue, which turns a
+//! LIST-adtl-labl chunk tree), the Miles 9.x event enqueue, which turns a
 //! parsed event string into sound instances, cached names, persisted presets
-//! and per-label caps.
+//! and per-label caps, the MP3 image inspector and frame enumerator (ID3v2
+//! skips, the frame-sync search, and the bitrate-derived frame length a
+//! decoder is handed for each frame), and the DLS container split
+//! (find / extract / list over a merged .mil image).
 //!
 //! fuzz_test.zig drives these with fixed-seed PRNG bytes. These targets add
 //! what a PRNG loop cannot: the input picks the shapes (which ASCII a field may
@@ -25,11 +28,18 @@ const testing = std.testing;
 const openmiles = @import("openmiles");
 const api_v8 = @import("api/v8.zig");
 const api_miles = @import("api/miles.zig");
+const api_dls = @import("api/dls.zig");
+const api_memory = @import("api/memory.zig");
 
 const Weight = std.testing.Smith.Weight;
 
 fn w(min: u8, max: u8, weight: u64) Weight {
     return .{ .min = min, .max = max, .weight = weight };
+}
+
+/// The C allocator's free, for the buffers the AIL_* exports hand back.
+fn freeLock(p: ?*anyopaque) void {
+    if (p) |ptr| api_memory.AIL_mem_free_lock(ptr);
 }
 
 // --- Target 1: the event-step decoder ---------------------------------------
@@ -1796,4 +1806,428 @@ test "a well-formed Miles event enqueues the instances, cache and preset it name
     try testing.expectEqual(@as(usize, 1), collectInstances(&views));
     try testing.expectEqual(@as(u64, 1), api_miles.MilesStopSoundInstances(null, 0));
     try testing.expectEqual(@as(usize, 0), collectInstances(&views));
+}
+
+// --- Target 7: the MP3 image inspector and frame enumerator ------------------
+//
+// `mp3.inspect` takes a raw image pointer and an i32 size the caller got from
+// the filesystem, then `mp3.enumerateFrames` walks it: it skips an ID3v2 tag
+// anywhere in the stream, slides a 4-byte window looking for an 11-bit frame
+// sync, and turns each header's bitrate/sample-rate fields into a frame length
+// it then consumes. Every one of those is attacker-declared, and a frame length
+// computed one step wrong desynchronizes every frame after it, so the parser
+// hands the caller lengths and pointers that are internally consistent only if
+// nothing was miscounted. fuzz_test.zig feeds this random bytes and asserts
+// nothing but a step cap; this target builds images out of real Layer III
+// frames, ID3v2 tags and VBR headers, lies about individual header fields, and
+// checks the cursor invariant after every step.
+
+const mp3_ctx = struct {
+    buf: [2048]u8 = undefined,
+};
+
+/// Bytes an MP3 stream is built from: the 0xFF/0xE0 frame syncs, the ASCII of a
+/// Xing/Info/LAME header and an ID3v1 "TAG", the rest arbitrary.
+const mp3_byte_weights: []const Weight = &.{
+    w(0xFF, 0xFF, 30), // frame sync lead
+    w(0xE0, 0xEF, 20), // frame sync follow
+    w(0x00, 0x7F, 20), // side info, payloads
+    w('X', 'X', 4),
+    w('i', 'i', 4),
+    w('n', 'n', 4),
+    w('g', 'g', 4),
+    w('I', 'I', 2),
+    w('f', 'f', 2),
+    w('o', 'o', 2),
+    w('T', 'T', 2),
+    w('A', 'A', 2),
+    w('G', 'G', 2),
+};
+
+/// Write a 4-byte Layer III header. The two fixed bytes are sync + MPEG-1 +
+/// Layer III + no CRC; the other two carry the fields the frame length is
+/// computed from, so a draw of 0xF (bad bitrate) or 3 (reserved sample rate)
+/// is a header the parser must reject without consuming it.
+fn putFrameHeader(buf: []u8, at: usize, bitrate_index: u8, sf_index: u8, padding: bool) void {
+    buf[at] = 0xFF;
+    buf[at + 1] = 0xFB;
+    buf[at + 2] = (bitrate_index << 4) | (sf_index << 2) | (@as(u8, @intFromBool(padding)) << 1);
+    buf[at + 3] = 0xC0; // stereo
+}
+
+/// The frame length the parser derives from a header, or 0 for a header it
+/// rejects. Written out rather than reused from mp3.zig so the corpus and the
+/// assertions below agree with the SDK rule independently.
+fn mpeg1Layer3FrameLen(bitrate: i32, sample_rate: i32, padding: bool) usize {
+    if (sample_rate <= 0 or bitrate <= 0) return 0;
+    return @intCast(@divTrunc(144 * bitrate, sample_rate) + @as(i32, @intFromBool(padding)));
+}
+
+/// An ID3v2.3/2.4 header with a 28-bit synchsafe body size, optionally with
+/// the v2.4 footer flag. A size that claims more than the image holds is the
+/// case both the initial skip and the mid-stream skip have to survive.
+fn putId3v2(buf: []u8, at: usize, body_len: u32, footer: bool) void {
+    @memcpy(buf[at..][0..3], "ID3");
+    buf[at + 3] = 3; // version
+    buf[at + 4] = 0;
+    buf[at + 5] = if (footer) 0x10 else 0;
+    const s: u32 = body_len & 0x0FFF_FFFF;
+    buf[at + 6] = @intCast((s >> 21) & 0x7F);
+    buf[at + 7] = @intCast((s >> 14) & 0x7F);
+    buf[at + 8] = @intCast((s >> 7) & 0x7F);
+    buf[at + 9] = @intCast(s & 0x7F);
+}
+
+/// Build one stream into `ctx.buf` and return its length: an optional leading
+/// ID3v2 tag, a run of frames (the first optionally carrying a Xing/Info VBR
+/// header), an optional ID3v2 tag between frames, and an optional trailing
+/// ID3v1 tag. Sizes the fuzzer draws are written as declared, so the image
+/// routinely claims more than it holds.
+fn buildMp3Image(ctx: *mp3_ctx, smith: *std.testing.Smith) usize {
+    var at: usize = 0;
+    if (smith.boolWeighted(1, 2)) {
+        const body: usize = smith.index(64);
+        if (at + 10 + body > ctx.buf.len) return at;
+        const declared: u32 = switch (smith.index(6)) {
+            0 => @intCast(body),
+            1 => @intCast(body + 1),
+            2 => 0x0FFF_FFFF,
+            3 => @as(u32, @intCast(body)) -| 1,
+            else => @intCast(smith.index(256)),
+        };
+        putId3v2(&ctx.buf, at, declared, smith.boolWeighted(2, 1));
+        at += 10;
+        smith.bytesWeighted(ctx.buf[at..][0..body], mp3_byte_weights);
+        at += body;
+    }
+
+    const frames: usize = 2 + smith.index(5);
+    var f: usize = 0;
+    while (f < frames) : (f += 1) {
+        if (at + 8 > ctx.buf.len) break;
+        // Bitrate index 1..14 is a tabulated rate; 0 (free format) and 0xF
+        // (bad) are the two headers a real file carries that the parser has to
+        // refuse rather than turn into a frame length.
+        const bitrate_index: u8 = switch (smith.index(8)) {
+            0 => 0,
+            1 => 0x0F,
+            else => 1 + @as(u8, @intCast(smith.index(14))),
+        };
+        const sf_index: u8 = switch (smith.index(5)) {
+            0 => 3, // reserved
+            else => @intCast(smith.index(3)),
+        };
+        const padding = smith.boolWeighted(1, 1);
+        putFrameHeader(&ctx.buf, at, bitrate_index, sf_index, padding);
+        const body = mpeg1Layer3FrameLen(
+            openmiles.mp3.MPEG_bit_rate[0][@min(bitrate_index, 14)],
+            openmiles.mp3.MPEG_sample_rate[0][0][sf_index & 3],
+            padding,
+        );
+        if (at + 4 + body > ctx.buf.len) {
+            at += 4;
+            break;
+        }
+        smith.bytesWeighted(ctx.buf[at + 4 ..][0..body], mp3_byte_weights);
+        at += 4 + body;
+
+        // A VBR header belongs in the first frame's payload, where the parser
+        // looks for it before it consumes the frame.
+        if (f == 0 and smith.boolWeighted(1, 2)) {
+            const tag: usize = smith.index(16);
+            if (at + tag <= ctx.buf.len) {
+                smith.bytesWeighted(ctx.buf[at..][0..tag], mp3_byte_weights);
+                // Written after the fill: the four identifier bytes are the one
+                // part of the tag the parser looks for by name.
+                @memcpy(ctx.buf[at..][0..4], if (smith.boolWeighted(1, 1)) "Xing" else "Info");
+            }
+        }
+        // A tag between frames: the mid-stream skip in enumerateFrames.
+        if (f + 1 < frames and smith.boolWeighted(3, 1)) {
+            const tag_body: usize = smith.index(48);
+            if (at + 10 + tag_body > ctx.buf.len) break;
+            putId3v2(&ctx.buf, at, @intCast(tag_body + smith.index(4)), smith.boolWeighted(1, 2));
+            at += 10 + tag_body;
+        }
+    }
+
+    if (smith.boolWeighted(1, 1) and at + 128 <= ctx.buf.len) {
+        @memcpy(ctx.buf[at..][0..3], "TAG");
+        smith.bytesWeighted(ctx.buf[at + 3 ..][0..125], mp3_byte_weights);
+        at += 128;
+    }
+    return at;
+}
+
+/// After every step the cursor and the remaining-byte count must describe the
+/// same window of the image: the enumerator advances `ptr` by one byte for
+/// every byte it takes off `bytes_left`, so the two can only agree if no read
+/// walked off either end. A frame's own numbers must be usable by a caller that
+/// decodes from `byte_offset` for `data_size` bytes.
+fn expectCursorState(es: *const openmiles.mp3.MP3_INFO, img: [*]const u8, img_len: usize) !void {
+    const ptr = es.ptr orelse return error.NoCursor;
+    const start = es.start_MP3_data orelse return error.NoStart;
+    const end = es.end_MP3_data orelse return error.NoEnd;
+    const lo = @intFromPtr(img);
+    const hi = lo + img_len;
+    try testing.expect(@intFromPtr(start) >= lo and @intFromPtr(start) <= hi);
+    try testing.expect(@intFromPtr(end) >= @intFromPtr(start) and @intFromPtr(end) < hi);
+    try testing.expect(@intFromPtr(ptr) >= @intFromPtr(start) and @intFromPtr(ptr) <= @intFromPtr(end) + 1);
+    try testing.expectEqual(@intFromPtr(end) + 1, @intFromPtr(ptr) + @as(usize, @intCast(es.bytes_left)));
+    try testing.expect(es.bytes_left >= 0);
+    // Offsets are relative to the first MP3 byte, so they cannot precede it.
+    try testing.expect(es.byte_offset >= 0);
+    try testing.expect(es.next_frame_expected >= 0);
+}
+
+fn expectFrameState(es: *const openmiles.mp3.MP3_INFO, img: [*]const u8, img_len: usize) !void {
+    try expectCursorState(es, img, img_len);
+    const start = es.start_MP3_data orelse return error.NoStart;
+    const lo = @intFromPtr(img);
+    const hi = lo + img_len;
+    // A reported frame is one the decoder will be handed.
+    try testing.expect(es.data_size > 0);
+    try testing.expect(es.header_size == 4 or es.header_size == 6);
+    try testing.expect(es.bit_rate > 0);
+    try testing.expect(es.sample_rate > 0);
+    try testing.expect(es.channels_per_sample == 1 or es.channels_per_sample == 2);
+    try testing.expect(es.samples_per_frame == 576 or es.samples_per_frame == 1152);
+    try testing.expect(es.MPEG1 == 0 or es.MPEG1 == 1);
+    try testing.expect(es.MPEG25 == 0 or es.MPEG25 == 1);
+    // The frame runs from the header the byte offset names to the cursor, and
+    // a caller decodes that whole span, so it has to fit in the image.
+    const frame_start = @intFromPtr(start) + @as(usize, @intCast(es.byte_offset));
+    try testing.expect(frame_start >= lo);
+    try testing.expect(frame_start <= @intFromPtr(es.end_MP3_data.?) + 1);
+    try testing.expect(hi - frame_start >= @as(usize, @intCast(es.data_size + es.header_size + es.side_info_size)));
+    // LAME delay/padding are 12-bit fields; anything outside the range is
+    // reported as -1, never as a wrapped value.
+    try testing.expect(es.enc_delay >= -1 and es.enc_delay <= 4096);
+    try testing.expect(es.enc_padding >= -1 and es.enc_padding <= 4096);
+}
+
+fn fuzzMp3One(ctx: *mp3_ctx, smith: *std.testing.Smith) anyerror!void {
+    const len = buildMp3Image(ctx, smith);
+    if (len == 0) return;
+    const img = ctx.buf[0..len];
+
+    var es: openmiles.mp3.MP3_INFO = .{};
+    openmiles.mp3.inspect(&es, @ptrCast(img.ptr), @intCast(len));
+    try testing.expectEqual(@as(i32, @intCast(len)), es.MP3_image_size);
+    try expectCursorState(&es, img.ptr, len);
+    // The reported tag pointer names the tag at the head of the image, and the
+    // audio start is either that tag's end (a tag that fits) or the head of the
+    // image again (one claiming more than the file holds).
+    if (es.ID3v2) |p| {
+        try testing.expectEqual(@intFromPtr(img.ptr), @intFromPtr(p));
+        try testing.expect(es.ID3v2_size > 0);
+        if (es.start_MP3_data) |s| {
+            try testing.expect(@intFromPtr(s) == @intFromPtr(p) or
+                @intFromPtr(s) >= @intFromPtr(p) + @as(usize, @intCast(es.ID3v2_size)));
+        }
+    }
+    if (es.ID3v1) |p| {
+        try testing.expect(@intFromPtr(p) + 128 <= @intFromPtr(img.ptr) + len);
+    }
+
+    // Walk every frame, checking the cursor after each one and that the walk
+    // makes progress: two successive frames at the same offset would spin a
+    // caller's decode loop forever.
+    var prev: usize = 0;
+    var frames: usize = 0;
+    while (openmiles.mp3.enumerateFrames(&es) != 0) {
+        try expectFrameState(&es, img.ptr, len);
+        const at = @intFromPtr(es.ptr.?) - @intFromPtr(img.ptr);
+        try testing.expect(at > prev);
+        try testing.expect(at <= len);
+        prev = at;
+        frames += 1;
+        if (frames > 100_000) return error.WalkDidNotTerminate;
+    }
+    // A walk that stops still has to leave the cursor inside the image with a
+    // non-negative remainder, whatever half-finished header it stopped on.
+    try expectCursorState(&es, img.ptr, len);
+}
+
+const mp3_frame_seed = [_]u8{ 0xFF, 0xFB, 0x90, 0xC0 };
+const mp3_xing_seed = "ID3" ++ "\x03\x00\x00" ++ "\x00\x00\x00\x0A" ++ "abcdefghij" ++
+    mp3_frame_seed[0..] ++ "\x00\x00\x00\x00\x00\x00\x00\x00" ++
+    "Xing" ++ "\x00\x00\x00\x0F" ++ "\x00\x00\x00\x0A" ++ "\x00\x00\x30\x00" ++
+    mp3_frame_seed[0..] ++ "\x00\x00\x00\x00\x00\x00\x00\x00";
+
+const mp3_corpus = [_][]const u8{
+    // A tagged VBR stream: ID3v2, a Xing frame, a plain frame, ID3v1.
+    mp3_xing_seed,
+    // The same stream without the tags, so the first bytes are a frame header.
+    mp3_frame_seed[0..] ++ "\x00\x00\x00\x00\x00\x00\x00\x00",
+    // A header whose fields the parser must reject (bad bitrate, reserved
+    // sample rate, free format) in front of a good one.
+    mp3_frame_seed[0..] ++ "\xFF\xFF\xFF\xFF" ++ mp3_frame_seed[0..] ++ "\x00\x00\x00\x00",
+    // A tag claiming 256 MiB of body, then a frame.
+    "ID3" ++ "\x03\x00\x00" ++ "\x7F\x7F\x7F\x7F" ++ mp3_frame_seed[0..] ++ "\x00\x00",
+    // A lone sync with nothing behind it.
+    "\xFF\xFB",
+    "",
+};
+
+test "fuzz: MP3 image inspector and frame enumerator" {
+    var ctx: mp3_ctx = .{};
+    try std.testing.fuzz(&ctx, fuzzMp3One, .{ .corpus = &mp3_corpus });
+}
+
+// --- Target 8: the DLS container split (find / extract / list) ---------------
+//
+// A merged .mil image is two containers in one buffer: an XMIDI sequence and a
+// RIFF/DLS bank. `AIL_find_DLS` reports where each starts without copying and
+// `AIL_extract_DLS` copies them out for a caller that loads the halves
+// separately, so every pointer and length those exports hand back is a
+// boundary the caller dereferences with no further checks. fuzz_test.zig runs
+// them over random bytes; this target builds the two containers as they nest in
+// a real file, lies about their declared sizes, and checks that what comes back
+// is the same bytes that went in, at a length that fits.
+
+const dls_ctx = struct {
+    buf: [2048]u8 = undefined,
+};
+
+/// Write an XDIR-wrapped XMIDI image (FORM/XDIR/CAT/XMID/FORM/XMID/EVNT) and
+/// return the offset the DLS bank should start at.
+fn buildXmiImage(buf: []u8, smith: *std.testing.Smith) usize {
+    const evnt_len: usize = 8 + smith.index(24);
+    const xmid_inner: usize = 8 + 8 + evnt_len;
+    const cat_body: usize = 4 + xmid_inner;
+    var at: usize = 0;
+    @memcpy(buf[at..][0..4], "FORM");
+    putBe32(buf, at + 4, declaredSize(smith, 4 + 4 + 4 + cat_body));
+    @memcpy(buf[at + 8 ..][0..4], "XDIR");
+    at += 12;
+    @memcpy(buf[at..][0..4], "CAT ");
+    putBe32(buf, at + 4, declaredSize(smith, cat_body));
+    @memcpy(buf[at + 8 ..][0..4], "XMID");
+    at += 12;
+    @memcpy(buf[at..][0..4], "FORM");
+    putBe32(buf, at + 4, declaredSize(smith, xmid_inner));
+    @memcpy(buf[at + 8 ..][0..4], "XMID");
+    at += 12;
+    @memcpy(buf[at..][0..4], "EVNT");
+    putBe32(buf, at + 4, declaredSize(smith, evnt_len));
+    smith.bytes(buf[at + 8 ..][0..evnt_len]);
+    return at + 8 + evnt_len;
+}
+
+/// Write a RIFF/DLS bank: a LIST/INFO group, an instrument collection, and a
+/// LIST/adtl group carrying a `labl` chunk, which is what the listing reads
+/// the instrument count out of.
+fn buildDlsImage(buf: []u8, at: usize, smith: *std.testing.Smith) usize {
+    var p = at;
+    @memcpy(buf[p..][0..4], "RIFF");
+    putBe32(buf, p + 4, declaredSize(smith, 4 + 4 + 8 + 8 + 12 + 8 + 4 + 8));
+    @memcpy(buf[p + 8 ..][0..4], "DLS ");
+    p += 12;
+    @memcpy(buf[p..][0..4], "LIST");
+    putBe32(buf, p + 4, declaredSize(smith, 4 + 8));
+    @memcpy(buf[p + 8 ..][0..4], "INFO");
+    p += 12;
+    @memcpy(buf[p..][0..4], "colh");
+    putBe32(buf, p + 4, declaredSize(smith, 12));
+    putBe32(buf, p + 8, @intCast(smith.index(64)));
+    p += 20;
+    @memcpy(buf[p..][0..4], "LIST");
+    putBe32(buf, p + 4, declaredSize(smith, 4 + 8 + 4));
+    @memcpy(buf[p + 8 ..][0..4], "adtl");
+    @memcpy(buf[p + 12 ..][0..4], "labl");
+    putBe32(buf, p + 16, declaredSize(smith, 4));
+    putBe32(buf, p + 20, @intCast(smith.index(4)));
+    return p + 24;
+}
+
+fn fuzzDlsSplitOne(ctx: *dls_ctx, smith: *std.testing.Smith) anyerror!void {
+    // A merged .mil puts the XMIDI sequence before the DLS bank; a bank
+    // loaded on its own has no sequence in front of it. Both halves are built
+    // either way, so every input reaches the split with a bank in it.
+    var at: usize = if (smith.index(2) == 0) buildXmiImage(&ctx.buf, smith) else 0;
+    if (at + 64 > ctx.buf.len) return;
+    at = buildDlsImage(&ctx.buf, at, smith);
+    const img = ctx.buf[0..at];
+
+    var xo: ?*anyopaque = null;
+    var xl: u32 = 0;
+    var do_: ?*anyopaque = null;
+    var dl: u32 = 0;
+    const found = api_dls.AIL_find_DLS(@ptrCast(img.ptr), @intCast(img.len), &xo, &xl, &do_, &dl);
+
+    // Every pointer handed back is an interior pointer into this buffer, and
+    // its length has to fit: a caller walks these without a bounds check.
+    const lo = @intFromPtr(img.ptr);
+    if (do_) |p| {
+        const off = @intFromPtr(p) - lo;
+        try testing.expect(off <= img.len);
+        try testing.expectEqual(@as(usize, dl), img.len - off);
+    } else try testing.expectEqual(@as(u32, 0), dl);
+    if (xo) |p| {
+        const off = @intFromPtr(p) - lo;
+        try testing.expect(off <= img.len);
+        try testing.expect(@as(usize, xl) <= img.len - off);
+    } else try testing.expectEqual(@as(u32, 0), xl);
+    // The XMI, when reported, ends where the bank begins: the two are the
+    // halves of one buffer, and an overlap would make the second load re-read
+    // the first one's bytes.
+    if (xo != null and do_ != null) try testing.expect(xl == @intFromPtr(do_.?) - lo);
+
+    // extract_DLS copies the same two regions out, so the copy has to be
+    // byte-identical to the region find_DLS reported.
+    var exo: ?*anyopaque = null;
+    var exl: u32 = 0;
+    var edo: ?*anyopaque = null;
+    var edl: u32 = 0;
+    const extracted = api_dls.AIL_extract_DLS(@ptrCast(img.ptr), @intCast(img.len), &exo, &exl, &edo, &edl, null);
+    defer freeLock(exo);
+    defer freeLock(edo);
+    if (extracted != 0) {
+        const bank: ?[*]const u8 = if (edo) |p| @ptrCast(p) else null;
+        const at_off: usize = if (do_) |p| @intFromPtr(p) - lo else img.len;
+        if (bank) |b| try testing.expectEqualSlices(u8, img[at_off..][0..@intCast(edl)], b[0..@intCast(edl)]);
+        try testing.expectEqual(@as(u32, dl), edl);
+    }
+    if (exo) |p| {
+        const x: [*]const u8 = @ptrCast(p);
+        const off: usize = if (xo) |q| @intFromPtr(q) - lo else 0;
+        try testing.expectEqualSlices(u8, img[off..][0..@intCast(exl)], x[0..@intCast(exl)]);
+    }
+    try testing.expectEqual(found == 1, extracted == 1);
+
+    // The listing is a C string a game prints; the terminator has to be inside
+    // the block the caller's free owns, and its length has to be the size the
+    // same call reported.
+    var lst: ?*anyopaque = null;
+    var lsz: u32 = 0;
+    if (api_dls.AIL_list_DLS(@ptrCast(img.ptr), &lst, &lsz, 0, "fuzz") != 0) {
+        defer freeLock(lst);
+        const text: [*:0]const u8 = @ptrCast(@alignCast(lst.?));
+        try testing.expectEqual(@as(usize, lsz), std.mem.span(text).len);
+        try testing.expect(lsz > 0);
+        try testing.expect(std.mem.indexOf(u8, std.mem.span(text), "fuzz") != null);
+    } else {
+        try testing.expectEqual(@as(u32, 0), lsz);
+    }
+}
+
+const dls_corpus = [_][]const u8{
+    // A merged image: XMIDI sequence first, DLS bank after it.
+    "FORM" ++ "\x00\x00\x00\x28" ++ "XDIR" ++ "CAT " ++ "\x00\x00\x00\x20" ++ "XMID" ++
+        "FORM" ++ "\x00\x00\x00\x14" ++ "XMID" ++ "EVNT" ++ "\x00\x00\x00\x08" ++ "\x00\xFF\x51\x03\x0F\x42\x40\x60" ++
+        "RIFF" ++ "\x00\x00\x00\x40" ++ "DLS " ++ "LIST" ++ "\x00\x00\x00\x0C" ++ "INFO" ++
+        "colh" ++ "\x0C\x00\x00\x00" ++ "\x04\x00\x00\x00" ++ "\x00\x00\x00\x00",
+    // The bank alone, with a lying RIFF size.
+    "RIFF" ++ "\xFF\xFF\xFF\xFF" ++ "DLS " ++ "LIST" ++ "\x00\x00\x00\x0C" ++ "INFO" ++
+        "colh" ++ "\x0C\x00\x00\x00" ++ "\xFF\xFF\xFF\xFF" ++ "\x00\x00\x00\x00",
+    // The sequence alone, and a plain SMF (not XMIDI at all).
+    "FORM" ++ "\x00\x00\x00\x14" ++ "XMID" ++ "EVNT" ++ "\x00\x00\x00\x04" ++ "\x00\xFF\x2F\x00",
+    "MThd" ++ "\x00\x00\x00\x06" ++ "\x00\x00\x00\x01\x00\x78" ++ "MTrk" ++ "\x00\x00\x00\x04" ++ "\x00\xFF\x2F\x00",
+    "",
+};
+
+test "fuzz: DLS container split, extract, and listing" {
+    var ctx: dls_ctx = .{};
+    try std.testing.fuzz(&ctx, fuzzDlsSplitOne, .{ .corpus = &dls_corpus });
 }
