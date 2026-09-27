@@ -640,6 +640,10 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
     switch (st) {
         .version => {
             if (version_headers >= max_version_headers) return null;
+            // The separator after the type byte must be there: a string that
+            // ends at the type byte carries no version field, and stepping
+            // over the terminator would read past the end of the string.
+            if (d.p[1] == 0) return null;
             d.p += 2; // type + ';'
             const ver = std.fmt.parseInt(i32, d.fieldText(), 10) catch -1;
             if (ver != CURRENT_EVENT_VERSION) return null;
@@ -826,4 +830,20 @@ test "nextStep stops at a premature NUL inside float/decimal fields" {
 
     // Well-formed equivalents still decode fully.
     try testing.expect(nextStep(":n;l;1.;t;1;0;2;", &step, &scratch) != null);
+}
+
+test "nextStep stops at a version header cut off after the type byte" {
+    const testing = std.testing;
+    var step: EVENT_STEP_INFO = undefined;
+    var scratch: [256]u8 align(8) = undefined;
+
+    // "9" alone: the version step skips its type byte and the ';' after it.
+    // With the string ending there, that skip lands on the terminator, and
+    // scanning for the version field from there would read whatever follows
+    // the string in memory. It must be refused instead.
+    try testing.expectEqual(@as(?[*:0]const u8, null), nextStep("9", &step, &scratch));
+    // A header with a separator but no version number stops at the same place.
+    try testing.expectEqual(@as(?[*:0]const u8, null), nextStep("9;", &step, &scratch));
+    // Well-formed headers still hand back the step that follows them.
+    try testing.expectEqual(@as(?[*:0]const u8, @ptrCast(":x;y;1.000000;1;1;2;")), nextStep("9;4:x;y;1.000000;1;1;2;", &step, &scratch));
 }

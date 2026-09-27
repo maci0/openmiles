@@ -11,6 +11,7 @@
 comptime {
     _ = @import("main_test.zig");
     _ = @import("fuzz_test.zig");
+    _ = @import("fuzz_native_test.zig");
     _ = @import("api_coverage_test.zig");
     _ = @import("fuzz_all_test.zig");
     _ = @import("rib_test.zig");
