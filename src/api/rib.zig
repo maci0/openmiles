@@ -20,7 +20,7 @@ pub fn RIB_free_provider_handle(provider_opt: ?*Provider) callconv(.c) void {
     log("RIB_free_provider_handle(provider={*})\n", .{provider});
     provider.deinit();
 }
-pub fn RIB_register_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: *anyopaque) callconv(.c) void {
+pub fn RIB_register_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: ?*anyopaque) callconv(.c) void {
     const provider = provider_opt orelse return;
     log("RIB_register_interface(provider={*}, name={s}, count={d}, entries={*})\n", .{ provider, name, count, entries });
     provider.registerInterface(std.mem.span(name), count, entries) catch |err| {

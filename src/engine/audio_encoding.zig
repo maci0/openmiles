@@ -1,23 +1,23 @@
 const std = @import("std");
 
-/// Wrap already-encoded IMA ADPCM block data in a WAV container so a standard
-/// WAV decoder (miniaudio) can decode it. Mirrors buildAdpcmWav's header layout
-/// but copies the supplied ADPCM bytes verbatim instead of encoding. `block_size`
-/// is the ADPCM block alignment; `total_per_ch` is the decoded sample count per
-/// channel (the fact-chunk value).
-pub fn wrapAdpcmInWav(alloc: std.mem.Allocator, adpcm: []const u8, block_size: u32, channels: u16, rate: u32, total_per_ch: u32) ![]u8 {
-    if (channels == 0 or channels > 2) return error.InvalidParam;
-    const ch: u32 = channels;
-    // block_size is a u16 WAV field; reject out-of-range values so neither the
-    // u16 store nor the (block_size-4*ch)*8 math can overflow/panic.
-    if (block_size <= 4 * ch or block_size > 0xFFFF) return error.InvalidParam;
-    const spb: u32 = (block_size - 4 * ch) * 8 / (4 * ch) + 1;
-    if (adpcm.len > std.math.maxInt(u32)) return error.InvalidParam;
-    const data_size: u32 = @intCast(adpcm.len);
+/// Bytes an IMA ADPCM WAV header occupies before its payload.
+pub const adpcm_header_size: usize = 8 + 4 + 8 + 20 + 8 + 4 + 8;
+
+/// Write the RIFF/WAVE + fmt (IMA ADPCM) + fact + data header for a `data_size`
+/// byte payload into the front of `buf`, which must be at least
+/// `adpcm_header_size` long. Returns the offset the payload starts at.
+/// `block_size` must be a valid u16 block alignment (both callers check), `spb`
+/// is samples per block and `total_per_ch` the fact-chunk sample count.
+fn writeAdpcmWavHeader(
+    buf: []u8,
+    channels: u16,
+    rate: u32,
+    block_size: u32,
+    spb: u32,
+    total_per_ch: u32,
+    data_size: u32,
+) usize {
     const avg_bps: u32 = @intCast(@min(@as(u64, rate) * block_size / spb, std.math.maxInt(u32)));
-    const header_sz: usize = 8 + 4 + 8 + 20 + 8 + 4 + 8;
-    var buf = try alloc.alloc(u8, header_sz + adpcm.len);
-    errdefer alloc.free(buf);
     var o: usize = 0;
     const wr16 = struct {
         fn f(b: []u8, p: *usize, v: u16) void {
@@ -54,6 +54,26 @@ pub fn wrapAdpcmInWav(alloc: std.mem.Allocator, adpcm: []const u8, block_size: u
     @memcpy(buf[o .. o + 4], "data");
     o += 4;
     wr32(buf, &o, data_size);
+    return o;
+}
+
+/// Wrap already-encoded IMA ADPCM block data in a WAV container so a standard
+/// WAV decoder (miniaudio) can decode it. Mirrors buildAdpcmWav's header layout
+/// but copies the supplied ADPCM bytes verbatim instead of encoding. `block_size`
+/// is the ADPCM block alignment; `total_per_ch` is the decoded sample count per
+/// channel (the fact-chunk value).
+pub fn wrapAdpcmInWav(alloc: std.mem.Allocator, adpcm: []const u8, block_size: u32, channels: u16, rate: u32, total_per_ch: u32) ![]u8 {
+    if (channels == 0 or channels > 2) return error.InvalidParam;
+    const ch: u32 = channels;
+    // block_size is a u16 WAV field; reject out-of-range values so neither the
+    // u16 store nor the (block_size-4*ch)*8 math can overflow/panic.
+    if (block_size <= 4 * ch or block_size > 0xFFFF) return error.InvalidParam;
+    const spb: u32 = (block_size - 4 * ch) * 8 / (4 * ch) + 1;
+    if (adpcm.len > std.math.maxInt(u32)) return error.InvalidParam;
+    const data_size: u32 = @intCast(adpcm.len);
+    var buf = try alloc.alloc(u8, adpcm_header_size + adpcm.len);
+    errdefer alloc.free(buf);
+    const o = writeAdpcmWavHeader(buf, channels, rate, block_size, spb, total_per_ch, data_size);
     @memcpy(buf[o..], adpcm);
     return buf;
 }
@@ -139,52 +159,18 @@ pub fn buildAdpcmWav(alloc: std.mem.Allocator, pcm: [*]const i16, total_per_ch: 
     if (bs <= 4 * ch or bs > 0xFFFF) return error.InvalidParam;
     const block_size: u32 = @intCast(bs);
     const spb: u32 = (block_size - 4 * ch) * 8 / (4 * ch) + 1;
-    const num_blocks: usize = (total_per_ch + spb - 1) / spb;
+    // Bound the sample count before the round-up and the product below: on the
+    // 32-bit target `total_per_ch + spb - 1` and `num_blocks * block_size` both
+    // wrap before any of these checks could see it.
+    if (total_per_ch > std.math.maxInt(u32)) return error.InvalidParam;
+    const num_blocks: usize = total_per_ch / spb + @intFromBool(total_per_ch % spb != 0);
     // Reject inputs whose encoded size would not fit the 32-bit WAV size fields.
-    const data_bytes: usize = num_blocks * block_size;
+    const data_bytes: usize = num_blocks *| block_size;
     if (data_bytes > std.math.maxInt(u32)) return error.InvalidParam;
     const data_size: u32 = @intCast(data_bytes);
-    const avg_bps: u32 = @intCast(@min(@as(u64, rate) * block_size / spb, std.math.maxInt(u32)));
-    const header_sz: usize = 8 + 4 + 8 + 20 + 8 + 4 + 8;
-    var buf = try alloc.alloc(u8, header_sz + data_size);
+    var buf = try alloc.alloc(u8, adpcm_header_size + data_size);
     errdefer alloc.free(buf);
-    var o: usize = 0;
-    @memcpy(buf[o .. o + 4], "RIFF");
-    o += 4;
-    std.mem.writeInt(u32, buf[o..][0..4], @intCast(buf.len - 8), .little);
-    o += 4;
-    @memcpy(buf[o .. o + 4], "WAVE");
-    o += 4;
-    @memcpy(buf[o .. o + 4], "fmt ");
-    o += 4;
-    std.mem.writeInt(u32, buf[o..][0..4], 20, .little);
-    o += 4;
-    std.mem.writeInt(u16, buf[o..][0..2], 0x0011, .little);
-    o += 2;
-    std.mem.writeInt(u16, buf[o..][0..2], channels, .little);
-    o += 2;
-    std.mem.writeInt(u32, buf[o..][0..4], rate, .little);
-    o += 4;
-    std.mem.writeInt(u32, buf[o..][0..4], avg_bps, .little);
-    o += 4;
-    std.mem.writeInt(u16, buf[o..][0..2], @intCast(block_size), .little);
-    o += 2;
-    std.mem.writeInt(u16, buf[o..][0..2], 4, .little);
-    o += 2;
-    std.mem.writeInt(u16, buf[o..][0..2], 2, .little);
-    o += 2;
-    std.mem.writeInt(u16, buf[o..][0..2], @intCast(spb), .little);
-    o += 2;
-    @memcpy(buf[o .. o + 4], "fact");
-    o += 4;
-    std.mem.writeInt(u32, buf[o..][0..4], 4, .little);
-    o += 4;
-    std.mem.writeInt(u32, buf[o..][0..4], @intCast(total_per_ch), .little);
-    o += 4;
-    @memcpy(buf[o .. o + 4], "data");
-    o += 4;
-    std.mem.writeInt(u32, buf[o..][0..4], data_size, .little);
-    o += 4;
+    var o = writeAdpcmWavHeader(buf, channels, rate, block_size, spb, @intCast(total_per_ch), data_size);
     // MSS (mssadpcm.cpp) initializes the IMA step index to 0 once and CARRIES it
     // across every block (convert_to_adpcm reads/writes *plstepi/*prstepi), while
     // the predictor is reset to each block's first sample. Each block header thus

@@ -84,13 +84,16 @@ fn applyElfFixups(lib: *std.DynLib, path: []const u8) !void {
     const dynv: [*]align(1) const usize = @ptrFromInt(base + dyn_vaddr);
     // The DT_NULL terminator is what ends this walk, and a malformed image may
     // not have one inside the mapping. Bound the scan by the image so a lying
-    // dynamic section fails the load instead of reading past the map.
+    // dynamic section fails the load instead of reading past the map. Each step
+    // reads d_tag and d_un, so the bound is on complete pairs: `dyn_entries` is
+    // truncated and can be odd, and stopping on it alone would read one entry
+    // past the image.
     const dyn_entries = (img.len - dyn_vaddr) / @sizeOf(usize);
     if (dyn_entries < 2) return error.ImageFixupFailed;
     var rela_off: usize = 0;
     var rela_sz: usize = 0;
     var i: usize = 0;
-    while (i < dyn_entries and dynv[i] != 0) : (i += 2) {
+    while (i + 1 < dyn_entries and dynv[i] != 0) : (i += 2) {
         switch (dynv[i]) {
             std.elf.DT_RELA => rela_off = dynv[i + 1],
             std.elf.DT_RELASZ => rela_sz = dynv[i + 1],
@@ -103,6 +106,10 @@ fn applyElfFixups(lib: *std.DynLib, path: []const u8) !void {
     const relas: [*]align(1) const std.elf.Rela = @ptrFromInt(base + rela_off);
     for (relas[0 .. rela_sz / @sizeOf(std.elf.Rela)]) |r| {
         if (@as(u32, @truncate(r.r_info)) == @intFromEnum(std.elf.R_X86_64.RELATIVE)) {
+            // r_offset is file-controlled and not implied by the rela table's
+            // own bounds, so a crafted entry would otherwise write anywhere in
+            // the address space. Only in-image, 8-byte-aligned slots are ours.
+            if (r.r_offset % @alignOf(u64) != 0 or r.r_offset > img.len -| @sizeOf(u64)) return error.ImageFixupFailed;
             const slot: *u64 = @ptrFromInt(base + r.r_offset);
             slot.* = @bitCast(base +% @as(u64, @bitCast(r.r_addend)));
         }

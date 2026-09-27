@@ -183,17 +183,23 @@ pub const Filter = struct {
         const clamped = if (std.math.isNan(frequency)) 1000.0 else @max(20.0, @min(frequency, nyquist));
         if (clamped == self.cutoff_frequency) return;
         self.cutoff_frequency = clamped;
-        if (self.lpf_initialized) {
-            const channels = ma.ma_engine_get_channels(&self.driver.engine);
-            const config = ma.ma_lpf_config_init(
-                ma.ma_format_f32,
-                channels,
-                engine_rate,
-                self.cutoff_frequency,
-                self.order,
-            );
-            _ = ma.ma_lpf_node_reinit(&config, &self.lpf_node);
-        }
+        self.reinitLpf();
+    }
+
+    /// Rebuild the LPF node from the current cutoff and order. Both setters go
+    /// through here so changing either one takes effect.
+    fn reinitLpf(self: *Filter) void {
+        if (!self.lpf_initialized) return;
+        const engine_rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
+        const channels = ma.ma_engine_get_channels(&self.driver.engine);
+        const config = ma.ma_lpf_config_init(
+            ma.ma_format_f32,
+            channels,
+            engine_rate,
+            self.cutoff_frequency,
+            self.order,
+        );
+        _ = ma.ma_lpf_node_reinit(&config, &self.lpf_node);
     }
 
     /// Set a named attribute. Supported: "Cutoff" (Hz), "Order" (1-4).
@@ -206,10 +212,7 @@ pub const Filter = struct {
             const new_order: u32 = @intFromFloat(v);
             if (new_order != self.order) {
                 self.order = new_order;
-                // Force reinit: temporarily invalidate cutoff so setCutoff doesn't early-return
-                const saved = self.cutoff_frequency;
-                self.cutoff_frequency = 0.0;
-                self.setCutoff(saved);
+                self.reinitLpf();
             }
         } else {
             log("Filter.setAttribute: unknown attribute '{s}'\n", .{name});

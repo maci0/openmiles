@@ -184,7 +184,7 @@ pub const Provider = struct {
         }
     }
 
-    pub fn registerInterface(self: *Provider, name: []const u8, count: i32, entries: *anyopaque) !void {
+    pub fn registerInterface(self: *Provider, name: []const u8, count: i32, entries: ?*anyopaque) !void {
         log("Provider.registerInterface called: {s}, count={d}\n", .{ name, count });
         // A negative entry count comes from the plugin, not from us: rejecting
         // it silently would hand back an empty interface the plugin believes
@@ -192,6 +192,12 @@ pub const Provider = struct {
         if (count < 0) {
             log("Provider.registerInterface: '{s}' declared {d} entries\n", .{ name, count });
             return error.NegativeEntryCount;
+        }
+        // A plugin may pass entries == NULL with a positive count; the cast
+        // below would then walk a null array.
+        if (entries == null and count > 0) {
+            log("Provider.registerInterface: '{s}' declared {d} entries with no array\n", .{ name, count });
+            return error.MissingEntryArray;
         }
         const entry_count: usize = @intCast(count);
         const iface = try Interface.init(self.allocator, name);
