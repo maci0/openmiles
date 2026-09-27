@@ -15,13 +15,13 @@ pub fn AIL_quick_startup(use_dig: i32, use_midi: i32, rate: u32, bits: i32, chan
 }
 pub fn AIL_quick_shutdown() callconv(.winapi) void {
     log("AIL_quick_shutdown()\n", .{});
-    if (openmiles.last_digital_driver) |d| openmiles.closeDigitalDriver(d);
-    if (openmiles.last_midi_driver) |m| openmiles.closeMidiDriver(m);
+    if (openmiles.lastDigitalDriver()) |d| openmiles.closeDigitalDriver(d);
+    if (openmiles.lastMidiDriver()) |m| openmiles.closeMidiDriver(m);
 }
 pub fn AIL_quick_load(filename: [*:0]const u8) callconv(.winapi) ?*Sample {
     log("AIL_quick_load(filename={s})\n", .{filename});
     openmiles.clearLastError();
-    if (openmiles.last_digital_driver) |d| {
+    if (openmiles.lastDigitalDriver()) |d| {
         const s = openmiles.Sample.init(d) catch |err| {
             log("Error: {any}\n", .{err});
             openmiles.setLastError("Failed to allocate sample for quick load");
@@ -55,7 +55,7 @@ pub fn AIL_quick_load(filename: [*:0]const u8) callconv(.winapi) ?*Sample {
 pub fn AIL_quick_load_mem(data: *anyopaque, size: u32) callconv(.winapi) ?*Sample {
     log("AIL_quick_load_mem(data={*}, size={d})\n", .{ data, size });
     openmiles.clearLastError();
-    if (openmiles.last_digital_driver) |d| {
+    if (openmiles.lastDigitalDriver()) |d| {
         const s = openmiles.Sample.init(d) catch |err| {
             log("Error: {any}\n", .{err});
             openmiles.setLastError("Failed to allocate sample for quick load");
@@ -86,7 +86,7 @@ pub fn AIL_quick_copy(s_opt: ?*Sample) callconv(.winapi) ?*Sample {
     const s = s_opt orelse return null;
     log("AIL_quick_copy(s={*})\n", .{s});
     openmiles.clearLastError();
-    if (openmiles.last_digital_driver) |d| {
+    if (openmiles.lastDigitalDriver()) |d| {
         const new_s = openmiles.Sample.init(d) catch |err| {
             log("Error: {any}\n", .{err});
             openmiles.setLastError("Failed to allocate sample for quick copy");
@@ -191,7 +191,7 @@ pub fn AIL_quick_set_reverb(s_opt: ?*Sample, reverb_level: f32, reverb_reflect_t
 }
 pub fn AIL_quick_load_and_play(filename: [*:0]const u8, loop_count: i32, start_paused: i32) callconv(.winapi) ?*Sample {
     openmiles.clearLastError();
-    if (openmiles.last_digital_driver) |d| {
+    if (openmiles.lastDigitalDriver()) |d| {
         const s = openmiles.Sample.init(d) catch |err| {
             log("Error: {any}\n", .{err});
             openmiles.setLastError("Failed to allocate sample for quick load and play");
@@ -229,12 +229,12 @@ pub fn AIL_quick_type(s_opt: ?*Sample) callconv(.winapi) i32 {
 }
 pub fn AIL_quick_handles(quick_ptr: ?*?*Sample, dig_ptr: ?*?*DigitalDriver, midi_ptr: ?*?*openmiles.MidiDriver) callconv(.winapi) void {
     if (quick_ptr) |p| p.* = null;
-    if (dig_ptr) |p| p.* = openmiles.last_digital_driver;
-    if (midi_ptr) |p| p.* = openmiles.last_midi_driver;
+    if (dig_ptr) |p| p.* = openmiles.lastDigitalDriver();
+    if (midi_ptr) |p| p.* = openmiles.lastMidiDriver();
 }
 // MSS 3.x form: 2 args @8 (digital + MIDI driver handles, no DLS slot).
 // Exported as _AIL_quick_handles@8 for v3 only.
 pub fn AIL_quick_handles_v3(dig_ptr: ?*?*DigitalDriver, midi_ptr: ?*?*openmiles.MidiDriver) callconv(.winapi) void {
-    if (dig_ptr) |p| p.* = openmiles.last_digital_driver;
-    if (midi_ptr) |p| p.* = openmiles.last_midi_driver;
+    if (dig_ptr) |p| p.* = openmiles.lastDigitalDriver();
+    if (midi_ptr) |p| p.* = openmiles.lastMidiDriver();
 }

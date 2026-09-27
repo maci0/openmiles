@@ -227,7 +227,7 @@ pub fn AIL_DLS_open(mdi_opt: ?*MidiDriver, dig_opt: ?*DigitalDriver, libname: ?[
     // MidiDriver.init publishes itself as last_midi_driver; keep the previous
     // one so the failure path below can put it back instead of leaving the
     // process with no "current" MIDI driver at all.
-    const prev_driver = openmiles.last_midi_driver;
+    const prev_driver = openmiles.lastMidiDriver();
     const driver = openmiles.MidiDriver.init(openmiles.global_allocator) catch |err| {
         log("AIL_DLS_open: driver init failed ({any})\n", .{err});
         openmiles.setLastError("Failed to initialize DLS device");
@@ -240,7 +240,7 @@ pub fn AIL_DLS_open(mdi_opt: ?*MidiDriver, dig_opt: ?*DigitalDriver, libname: ?[
         _ = driver.loadDLS(std.mem.span(name)) catch |err| {
             log("AIL_DLS_open: failed to load DLS library '{s}' ({any})\n", .{ name, err });
             driver.deinit();
-            openmiles.last_midi_driver = prev_driver;
+            openmiles.setLastMidiDriver(prev_driver);
             openmiles.setLastError("Failed to load DLS/SoundFont file");
             return null;
         };
@@ -250,7 +250,7 @@ pub fn AIL_DLS_open(mdi_opt: ?*MidiDriver, dig_opt: ?*DigitalDriver, libname: ?[
 pub fn AIL_DLS_close(driver_opt: ?*MidiDriver, flags: u32) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     _ = flags;
-    if (openmiles.last_midi_driver == driver) openmiles.last_midi_driver = null;
+    openmiles.clearLastMidiDriver(driver);
     driver.deinit();
 }
 pub fn AIL_set_DLS_processor(driver_opt: ?*MidiDriver, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
@@ -426,7 +426,7 @@ pub fn DLSMSSOpen(mdi_opt: ?*MidiDriver, dig_opt: ?*DigitalDriver, libname: ?[*:
 pub fn DLSMSSGetCPU(driver_opt: ?*MidiDriver) callconv(.winapi) f32 {
     _ = driver_opt;
     // MidiDriver param unused; estimates CPU from active sample count on the primary digital driver.
-    if (openmiles.last_digital_driver) |dig| {
+    if (openmiles.lastDigitalDriver()) |dig| {
         const active: f32 = @floatFromInt(dig.getActiveSampleCount());
         return @min((active / 32.0) * 100.0, 100.0);
     }

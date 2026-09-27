@@ -136,8 +136,8 @@ test "Sequence setMsPosition clamps beat math for tiny ms_per_beat" {
     try testing.expectEqual(@as(f64, 2000000000.0), seq.time_ms);
     // beats_elapsed saturates at maxInt-1 so the +1 bookkeeping cannot overflow.
     const beats: i32 = std.math.maxInt(i32) - 1;
-    try testing.expectEqual(@mod(beats, seq.beats_per_measure) + 1, seq.current_beat_in_measure);
-    try testing.expectEqual(@divTrunc(beats, seq.beats_per_measure) + 1, seq.current_measure);
+    try testing.expectEqual(@mod(beats, seq.beats_per_measure) + 1, seq.current_beat_in_measure.load(.acquire));
+    try testing.expectEqual(@divTrunc(beats, seq.beats_per_measure) + 1, seq.current_measure.load(.acquire));
 
     // Extreme negative seeks clamp symmetrically without panicking.
     seq.setMsPosition(std.math.minInt(i32));
@@ -449,9 +449,9 @@ test "Sequence initial status is done when uninitialized" {
     // explicit AIL_stop_sequence is it SEQ_STOPPED (SEQ_DONE = finished or not
     // yet played). Drive the status() logic via the flags directly.
     seq.is_initialized = true;
-    seq.was_stopped = false;
+    seq.was_stopped.store(false, .release);
     try testing.expectEqual(openmiles.MidiStatus.done, seq.status());
-    seq.was_stopped = true;
+    seq.was_stopped.store(true, .release);
     try testing.expectEqual(openmiles.MidiStatus.stopped, seq.status());
     seq.is_initialized = false; // restore so deinit doesn't touch the undefined sound
 }

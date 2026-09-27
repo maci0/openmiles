@@ -532,15 +532,58 @@ pub fn releaseAllTimers() void {
 
 // --- Driver state ---
 
-pub var last_digital_driver: ?*DigitalDriver = null;
-pub var last_midi_driver: ?*MidiDriver = null;
+// The "current driver" handles are read by every API entry point and written by
+// driver open/close, which a game may drive from a worker thread while its main
+// thread is calling into the API. Atomic so a reader never sees a torn
+// pointer.
+var last_digital_driver: std.atomic.Value(?*DigitalDriver) = .init(null);
+var last_midi_driver: std.atomic.Value(?*MidiDriver) = .init(null);
+
+pub fn lastDigitalDriver() ?*DigitalDriver {
+    return last_digital_driver.load(.acquire);
+}
+
+pub fn setLastDigitalDriver(driver: ?*DigitalDriver) void {
+    last_digital_driver.store(driver, .release);
+}
+
+pub fn lastMidiDriver() ?*MidiDriver {
+    return last_midi_driver.load(.acquire);
+}
+
+pub fn setLastMidiDriver(driver: ?*MidiDriver) void {
+    last_midi_driver.store(driver, .release);
+}
+
+/// Clear the current driver handle, but only if it is still `driver`. Closing a
+/// handle the game already replaced with a newer one must not clear the newer.
+pub fn clearLastDigitalDriver(driver: *DigitalDriver) void {
+    _ = last_digital_driver.cmpxchgStrong(driver, null, .acq_rel, .acquire);
+}
+
+pub fn clearLastMidiDriver(driver: *MidiDriver) void {
+    _ = last_midi_driver.cmpxchgStrong(driver, null, .acq_rel, .acquire);
+}
+
+// Serializes the create-if-absent sequence in openDigitalDriver/openMidiDriver
+// so two threads calling AIL_open_digital_driver at once cannot both pass the
+// "already open" check and build two engines (the loser would be orphaned with
+// a live audio thread). Only ever held around create/publish; never around
+// deinit, and never while driver_table_mutex is held.
+var driver_create_mutex: std.Io.Mutex = .init;
 
 /// Handles of every live digital driver. `isKnownDriver` uses this table to
 /// tell a driver handle from a Sample3D handle, so a driver that fails to land
 /// in it is misclassified and its handle is written through the wrong layout.
+/// Guarded by driver_table_mutex: register/unregister run on whichever thread
+/// opened or closed the driver, and isKnownDriver is called from every 3D
+/// handle-dispatch entry point.
 var known_drivers_buf: [8]?*DigitalDriver = [_]?*DigitalDriver{null} ** 8;
+var driver_table_mutex: std.Io.Mutex = .init;
 
 pub fn registerDriver(driver: *DigitalDriver) void {
+    driver_table_mutex.lockUncancelable(io);
+    defer driver_table_mutex.unlock(io);
     for (&known_drivers_buf) |*slot| {
         if (slot.* == null) {
             slot.* = driver;
@@ -553,6 +596,8 @@ pub fn registerDriver(driver: *DigitalDriver) void {
 }
 
 pub fn unregisterDriver(driver: *DigitalDriver) void {
+    driver_table_mutex.lockUncancelable(io);
+    defer driver_table_mutex.unlock(io);
     for (&known_drivers_buf) |*slot| {
         if (slot.* == driver) {
             slot.* = null;
@@ -562,6 +607,8 @@ pub fn unregisterDriver(driver: *DigitalDriver) void {
 }
 
 pub fn isKnownDriver(ptr: *anyopaque) bool {
+    driver_table_mutex.lockUncancelable(io);
+    defer driver_table_mutex.unlock(io);
     for (known_drivers_buf) |slot| {
         if (slot) |d| {
             if (@as(*anyopaque, @ptrCast(d)) == ptr) return true;
@@ -599,7 +646,7 @@ pub fn getActiveSequenceCount() u32 {
     defer global_sequences_mutex.unlock(io);
     var count: u32 = 0;
     for (global_sequences.items) |s| {
-        if (s.is_playing) count += 1;
+        if (s.is_playing.load(.acquire)) count += 1;
     }
     return count;
 }
@@ -613,7 +660,7 @@ pub fn setRedistDirectory(path: []const u8) void {
     const len = @min(path.len, redist_directory.len - 1);
     @memcpy(redist_directory[0..len], path[0..len]);
     redist_directory[len] = 0;
-    if (last_digital_driver) |driver| {
+    if (lastDigitalDriver()) |driver| {
         driver.loadAllAsi(redist_directory[0..len]);
     }
 }
@@ -896,8 +943,8 @@ pub fn shutdown() void {
     // (their voices are attached to the digital engine and must be stopped
     // before it is torn down), then the drivers themselves.
     releaseAllTimers();
-    if (last_midi_driver) |m| closeMidiDriver(m);
-    if (last_digital_driver) |d| closeDigitalDriver(d);
+    if (lastMidiDriver()) |m| closeMidiDriver(m);
+    if (lastDigitalDriver()) |d| closeDigitalDriver(d);
     for (global_providers.items) |p| p.deinit();
     global_providers.deinit(global_allocator);
     global_providers = .empty;
@@ -910,7 +957,9 @@ pub fn shutdown() void {
 
 pub fn openDigitalDriver(frequency: u32, bits: i32, channels: i32) ?*DigitalDriver {
     clearLastError();
-    if (last_digital_driver) |existing| return existing;
+    driver_create_mutex.lockUncancelable(io);
+    defer driver_create_mutex.unlock(io);
+    if (lastDigitalDriver()) |existing| return existing;
     const ch: u32 = if (channels <= 0) 2 else @intCast(channels);
     const driver = DigitalDriver.init(global_allocator, frequency, bits, ch) catch |err| {
         log("openDigitalDriver: DigitalDriver.init failed: {any}\n", .{err});
@@ -923,13 +972,15 @@ pub fn openDigitalDriver(frequency: u32, bits: i32, channels: i32) ?*DigitalDriv
 }
 
 pub fn closeDigitalDriver(driver: *DigitalDriver) void {
-    if (last_digital_driver == driver) last_digital_driver = null;
+    clearLastDigitalDriver(driver);
     driver.deinit();
 }
 
 pub fn openMidiDriver() ?*MidiDriver {
     clearLastError();
-    if (last_midi_driver) |existing| return existing;
+    driver_create_mutex.lockUncancelable(io);
+    defer driver_create_mutex.unlock(io);
+    if (lastMidiDriver()) |existing| return existing;
     return MidiDriver.init(global_allocator) catch |err| {
         log("openMidiDriver: {any}\n", .{err});
         setLastError("Failed to initialize MIDI driver");
@@ -938,7 +989,7 @@ pub fn openMidiDriver() ?*MidiDriver {
 }
 
 pub fn closeMidiDriver(driver: *MidiDriver) void {
-    if (last_midi_driver == driver) last_midi_driver = null;
+    clearLastMidiDriver(driver);
     // Snapshot sequences to stop, then release mutex before the potentially
     // blocking stopAndUninit calls to avoid holding the lock during audio
     // thread synchronization.

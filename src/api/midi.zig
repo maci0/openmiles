@@ -118,18 +118,18 @@ pub fn AIL_active_sequence_count(driver: *anyopaque) callconv(.winapi) u32 {
 }
 pub fn AIL_sequence_position(seq_opt: ?*Sequence, beat: ?*i32, measure: ?*i32) callconv(.winapi) void {
     const seq = seq_opt orelse return;
-    if (beat) |p| p.* = seq.current_beat_in_measure;
-    if (measure) |p| p.* = seq.current_measure;
+    if (beat) |p| p.* = seq.current_beat_in_measure.load(.acquire);
+    if (measure) |p| p.* = seq.current_measure.load(.acquire);
 }
 pub fn AIL_sequence_user_data(seq_opt: ?*Sequence, index: i32) callconv(.winapi) u32 {
     const seq = seq_opt orelse return 0;
-    const idx: usize = @intCast(@min(@max(index, 0), 7));
-    return seq.user_data[idx];
+
+    return seq.getUserData(@intCast(@min(@max(index, 0), 7)));
 }
 pub fn AIL_set_sequence_user_data(seq_opt: ?*Sequence, index: i32, value: u32) callconv(.winapi) void {
     const seq = seq_opt orelse return;
-    const idx: usize = @intCast(@min(@max(index, 0), 7));
-    seq.user_data[idx] = value;
+
+    seq.setUserData(@intCast(@min(@max(index, 0), 7)), value);
 }
 pub fn AIL_end_sequence(seq_opt: ?*Sequence) callconv(.winapi) void {
     const seq = seq_opt orelse return;
@@ -145,8 +145,8 @@ pub fn AIL_map_sequence_channel(seq_opt: ?*Sequence, channel: i32, new_channel: 
 }
 pub fn AIL_register_sequence_callback(seq_opt: ?*Sequence, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const seq = seq_opt orelse return null;
-    const prev: ?*anyopaque = @ptrFromInt(seq.sequence_callback);
-    seq.sequence_callback = if (callback) |cb| @intFromPtr(cb) else 0;
+    const prev: ?*anyopaque = @ptrFromInt(seq.sequence_callback.load(.acquire));
+    seq.sequence_callback.store(if (callback) |cb| @intFromPtr(cb) else 0, .release);
     return prev;
 }
 pub fn AIL_XMIDI_master_volume(driver_opt: ?*openmiles.MidiDriver) callconv(.winapi) i32 {
@@ -333,34 +333,34 @@ pub fn AIL_release_channel(mdi_opt: ?*MidiDriver, channel: i32) callconv(.winapi
 }
 pub fn AIL_register_beat_callback(seq_opt: ?*Sequence, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const seq = seq_opt orelse return null;
-    const prev: ?*anyopaque = @ptrFromInt(seq.beat_callback);
-    seq.beat_callback = if (callback) |cb| @intFromPtr(cb) else 0;
+    const prev: ?*anyopaque = @ptrFromInt(seq.beat_callback.load(.acquire));
+    seq.beat_callback.store(if (callback) |cb| @intFromPtr(cb) else 0, .release);
     return prev;
 }
 // AIL_register_event_callback(HMDIDRIVER mdi, AILEVENTCB cb) — driver-level.
 pub fn AIL_register_event_callback(mdi_opt: ?*MidiDriver, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const mdi = mdi_opt orelse return null;
-    const prev: ?*anyopaque = @ptrFromInt(mdi.event_callback);
-    mdi.event_callback = if (callback) |cb| @intFromPtr(cb) else 0;
+    const prev: ?*anyopaque = @ptrFromInt(mdi.event_callback.load(.acquire));
+    mdi.event_callback.store(if (callback) |cb| @intFromPtr(cb) else 0, .release);
     return prev;
 }
 pub fn AIL_register_prefix_callback(seq_opt: ?*Sequence, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const seq = seq_opt orelse return null;
-    const prev: ?*anyopaque = @ptrFromInt(seq.prefix_callback);
-    seq.prefix_callback = if (callback) |cb| @intFromPtr(cb) else 0;
+    const prev: ?*anyopaque = @ptrFromInt(seq.prefix_callback.load(.acquire));
+    seq.prefix_callback.store(if (callback) |cb| @intFromPtr(cb) else 0, .release);
     return prev;
 }
 pub fn AIL_register_trigger_callback(seq_opt: ?*Sequence, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const seq = seq_opt orelse return null;
-    const prev: ?*anyopaque = @ptrFromInt(seq.trigger_callback);
-    seq.trigger_callback = if (callback) |cb| @intFromPtr(cb) else 0;
+    const prev: ?*anyopaque = @ptrFromInt(seq.trigger_callback.load(.acquire));
+    seq.trigger_callback.store(if (callback) |cb| @intFromPtr(cb) else 0, .release);
     return prev;
 }
 // AIL_register_timbre_callback(HMDIDRIVER mdi, AILTIMBRECB cb) — driver-level.
 pub fn AIL_register_timbre_callback(mdi_opt: ?*MidiDriver, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const mdi = mdi_opt orelse return null;
-    const prev: ?*anyopaque = @ptrFromInt(mdi.timbre_callback);
-    mdi.timbre_callback = if (callback) |cb| @intFromPtr(cb) else 0;
+    const prev: ?*anyopaque = @ptrFromInt(mdi.timbre_callback.load(.acquire));
+    mdi.timbre_callback.store(if (callback) |cb| @intFromPtr(cb) else 0, .release);
     return prev;
 }
 pub fn AIL_branch_index(seq_opt: ?*Sequence, marker: u32) callconv(.winapi) void {

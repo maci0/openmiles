@@ -336,7 +336,7 @@ pub const DigitalDriver = struct {
             ma.ma_spatializer_listener_set_speed_of_sound(&self.engine.listeners[0], mss_speed_of_sound);
         }
 
-        root.last_digital_driver = self;
+        root.setLastDigitalDriver(self);
         root.registerDriver(self);
         return self;
     }
@@ -383,7 +383,7 @@ pub const DigitalDriver = struct {
     }
 
     pub fn deinit(self: *DigitalDriver) void {
-        if (root.last_digital_driver == self) root.last_digital_driver = null;
+        root.clearLastDigitalDriver(self);
         root.unregisterDriver(self);
         self.freeAllBusses();
         self.buses.deinit(self.allocator);

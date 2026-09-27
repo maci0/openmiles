@@ -520,8 +520,8 @@ pub fn AIL_set_sample_processor(s_opt: ?*Sample, stage: i32, processor: ?*anyopa
 // AIL_primary_digital_driver(HDIGDRIVER new_primary) -> HDIGDRIVER
 // Passing a driver makes it the primary; null queries the current primary.
 pub fn AIL_primary_digital_driver(new_primary: ?*DigitalDriver) callconv(.winapi) ?*DigitalDriver {
-    if (new_primary) |d| openmiles.last_digital_driver = d;
-    return openmiles.last_digital_driver;
+    if (new_primary) |d| openmiles.setLastDigitalDriver(d);
+    return openmiles.lastDigitalDriver();
 }
 pub fn AIL_digital_CPU_percent(driver_opt: ?*DigitalDriver) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
@@ -1057,11 +1057,11 @@ pub fn AIL_create_wave_synthesizer(dig_opt: ?*DigitalDriver, mdi: ?*MidiDriver, 
     return driver;
 }
 pub fn AIL_destroy_wave_synthesizer(synth: *MidiDriver) callconv(.winapi) void {
-    if (openmiles.last_midi_driver == synth) openmiles.last_midi_driver = null;
+    openmiles.clearLastMidiDriver(synth);
     synth.deinit();
 }
 pub fn AIL_waveOutClose(driver_opt: ?*DigitalDriver) callconv(.winapi) void {
     const driver = driver_opt orelse return;
-    if (openmiles.last_digital_driver == driver) openmiles.last_digital_driver = null;
+    openmiles.clearLastDigitalDriver(driver);
     driver.deinit();
 }

@@ -538,7 +538,7 @@ pub fn AIL_close_3D_listener(listener: *anyopaque) callconv(.winapi) void {
 pub fn AIL_open_3D_object(provider: *anyopaque) callconv(.winapi) ?*anyopaque {
     // Prefer the active digital driver (the real engine); fall back to treating
     // the provider handle as a driver for legacy callers.
-    const dig: *DigitalDriver = openmiles.last_digital_driver orelse @ptrCast(@alignCast(provider));
+    const dig: *DigitalDriver = openmiles.lastDigitalDriver() orelse @ptrCast(@alignCast(provider));
     const s = openmiles.Sample3D.init(dig) catch |err| {
         log("Error: {any}\n", .{err});
         return null;

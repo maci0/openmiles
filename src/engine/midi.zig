@@ -37,8 +37,9 @@ pub const MidiDriver = struct {
     dls_processor: usize = 0,
     // Driver-level MIDI callbacks (MSS registers these on HMDIDRIVER, not a
     // sequence): AILEVENTCB(hmi, seq, status, d1, d2) and AILTIMBRECB(hmi, bank, patch).
-    event_callback: usize = 0,
-    timbre_callback: usize = 0,
+    // Fired from the audio thread (onRead), registered from the game thread.
+    event_callback: std.atomic.Value(usize) = .init(0),
+    timbre_callback: std.atomic.Value(usize) = .init(0),
     // DLS filter preferences — stored name/value pairs for AIL_set_filter_DLS_preference
     // and AIL_filter_DLS_attribute round-tripping. Simple last-set wins.
     dls_filter_pref_cutoff: f32 = 0.0,
@@ -50,12 +51,12 @@ pub const MidiDriver = struct {
             .allocator = allocator,
             .soundfont = null,
         };
-        root.last_midi_driver = self;
+        root.setLastMidiDriver(self);
         return self;
     }
 
     pub fn deinit(self: *MidiDriver) void {
-        if (root.last_midi_driver == self) root.last_midi_driver = null;
+        root.clearLastMidiDriver(self);
         if (self.soundfont) |sf| {
             if (self.owns_soundfont) tsf.tsf_close(sf);
         }
@@ -78,7 +79,7 @@ pub const MidiDriver = struct {
         } else |_| {}
         self.soundfont = tsf.tsf_load_filename(path_z.ptr);
         if (self.soundfont == null) return error.SoundFontLoadFailed;
-        if (root.last_digital_driver) |dig| {
+        if (root.lastDigitalDriver()) |dig| {
             self.sample_rate = ma.ma_engine_get_sample_rate(&dig.engine);
         }
         tsf.tsf_set_output(self.soundfont, tsf.TSF_STEREO_INTERLEAVED, @intCast(self.sample_rate), 0);
@@ -158,13 +159,17 @@ pub const Sequence = struct {
     current_msg: ?*tsf.tml_message = null,
     time_ms: f64 = 0,
     total_ms: f64 = 0,
-    is_playing: bool = false,
+    // Playback flags are written under state_mutex but read without it: by
+    // onRead before it takes the lock, by status() on the caller's thread, and
+    // by the root registry's active-sequence count. Atomic so those reads are
+    // race-free without taking a lock the audio thread may already hold.
+    is_playing: std.atomic.Value(bool) = .init(false),
     is_paused: bool = false,
-    is_done: bool = false,
+    is_done: std.atomic.Value(bool) = .init(false),
     // SEQ_STOPPED only after an explicit AIL_stop_sequence; otherwise a loaded-
     // but-unplayed sequence is SEQ_DONE (the SDK comment: "finished playing, or
     // has [not yet played]").
-    was_stopped: bool = false,
+    was_stopped: std.atomic.Value(bool) = .init(false),
     loop_count: i32 = 1,
     loops_remaining: i32 = 1,
     sound: ma.ma_sound,
@@ -176,26 +181,39 @@ pub const Sequence = struct {
     tempo_ratio: f64 = 1.0, // user_bpm / file_bpm; scales time advancement in onRead
     initial_tempo: i32 = 120, // file's initial BPM (from first TML_SET_TEMPO at time 0)
     initial_ms_per_beat: f64 = 500.0, // file's initial ms/beat (reset on start/loop)
-    user_data: [8]u32 = [_]u32{0} ** 8,
+    // Read back by the game's sequence callbacks, which the audio thread fires
+    // while holding state_mutex, so this cannot be a plain field: the game
+    // calls AIL_set_sequence_user_data from that same callback and would
+    // deadlock on the mutex.
+    user_data: [8]std.atomic.Value(u32) = [_]std.atomic.Value(u32){.init(0)} ** 8,
     // Beat/measure tracking
     ms_per_beat: f64 = 500.0, // current ms/beat (MIDI-time units = file BPM based)
     next_beat_ms: f64 = 500.0,
-    current_beat_in_measure: i32 = 1,
-    current_measure: i32 = 1,
+    // Advanced on the audio thread under state_mutex, read by
+    // AIL_sequence_beat_info from any thread (including from inside a beat
+    // callback, where taking state_mutex would deadlock).
+    current_beat_in_measure: std.atomic.Value(i32) = .init(1),
+    current_measure: std.atomic.Value(i32) = .init(1),
     beats_per_measure: i32 = 4,
     // Callbacks (per-sequence: beat/prefix/trigger/sequence take HSEQUENCE).
-    // event/timbre are driver-level and live on MidiDriver instead.
-    beat_callback: usize = 0,
-    prefix_callback: usize = 0,
-    trigger_callback: usize = 0,
-    sequence_callback: usize = 0,
+    // event/timbre are driver-level and live on MidiDriver instead. Registered
+    // from the game's thread and read by the audio thread, so atomic.
+    beat_callback: std.atomic.Value(usize) = .init(0),
+    prefix_callback: std.atomic.Value(usize) = .init(0),
+    trigger_callback: std.atomic.Value(usize) = .init(0),
+    sequence_callback: std.atomic.Value(usize) = .init(0),
     // Per-channel bank select (CC0 MSB) for timbre_callback
     channel_bank: [16]i32 = [_]i32{0} ** 16,
     // XMIDI FOR/NEXT loop stack
     xmidi_loop_depth: usize = 0,
     xmidi_loop_stack: [8]XmidiLoopEntry = [_]XmidiLoopEntry{.{}} ** 8,
     // Channel mapping: channel_map[logical] = physical. Identity by default.
-    channel_map: [16]i32 = .{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+    // AIL_map_sequence_channel writes it from the game's thread while the audio
+    // thread resolves channels in onRead, so each slot is atomic.
+    channel_map: [16]std.atomic.Value(i32) = .{
+        .init(0),  .init(1),  .init(2),  .init(3),  .init(4),  .init(5),  .init(6),  .init(7),
+        .init(8),  .init(9),  .init(10), .init(11), .init(12), .init(13), .init(14), .init(15),
+    },
     // Tempo fade state: gradually transition tempo_ratio over a duration
     tempo_fade_start_ratio: f64 = 1.0,
     tempo_fade_target_ratio: f64 = 1.0,
@@ -210,16 +228,26 @@ pub const Sequence = struct {
     /// Resolve a logical MIDI channel to its physical (mapped) channel.
     fn mapChannel(self: *const Sequence, ch: i32) i32 {
         const idx: usize = @intCast(@min(@max(ch, 0), 15));
-        return self.channel_map[idx];
+        return self.channel_map[idx].load(.acquire);
     }
 
     pub fn setChannelMap(self: *Sequence, logical: i32, physical: i32) void {
         const idx: usize = @intCast(@min(@max(logical, 0), 15));
-        self.channel_map[idx] = @min(@max(physical, 0), 15);
+        self.channel_map[idx].store(@min(@max(physical, 0), 15), .release);
     }
 
     pub fn getPhysicalChannel(self: *const Sequence, logical: i32) i32 {
         return self.mapChannel(logical);
+    }
+
+    pub fn getUserData(self: *const Sequence, index: u32) u32 {
+        const idx: usize = @intCast(@min(index, self.user_data.len - 1));
+        return self.user_data[idx].load(.acquire);
+    }
+
+    pub fn setUserData(self: *Sequence, index: u32, value: u32) void {
+        const idx: usize = @intCast(@min(index, self.user_data.len - 1));
+        self.user_data[idx].store(value, .release);
     }
 
     /// Send CC 123 (All Notes Off) on all 16 MIDI channels to avoid stuck notes.
@@ -356,7 +384,7 @@ pub const Sequence = struct {
 
     fn onRead(pDataSource: ?*ma.ma_data_source, pFramesOut: ?*anyopaque, frameCount: ma.ma_uint64, pFramesRead: ?*ma.ma_uint64) callconv(.c) ma.ma_result {
         const self: *Sequence = @fieldParentPtr("data_source", @as(*ma.ma_data_source_base, @ptrCast(@alignCast(pDataSource.?))));
-        if (!self.is_playing or self.driver.soundfont == null) {
+        if (!self.is_playing.load(.acquire) or self.driver.soundfont == null) {
             if (pFramesRead) |pr| pr.* = 0;
             return ma.MA_SUCCESS;
         }
@@ -393,9 +421,9 @@ pub const Sequence = struct {
                         tsf.TML_PROGRAM_CHANGE => {
                             const prog = openmiles_tml_get_program(msg);
                             var allow: i32 = 1;
-                            if (self.driver.timbre_callback != 0) {
+                            if (self.driver.timbre_callback.load(.acquire) != 0) {
                                 // AILTIMBRECB(HMDIDRIVER hmi, S32 bank, S32 patch)
-                                const cb: *const fn (?*anyopaque, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.driver.timbre_callback);
+                                const cb: *const fn (?*anyopaque, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.driver.timbre_callback.load(.acquire));
                                 allow = cb(@ptrCast(self.driver), self.channel_bank[@intCast(@as(u32, @intCast(phys_ch)))], @intCast(prog));
                             }
                             if (allow != 0) {
@@ -432,8 +460,8 @@ pub const Sequence = struct {
                                         self.time_ms = top.start_time_ms;
                                         if (self.ms_per_beat > 0) {
                                             const beats_elapsed: i32 = satBeats(self.time_ms / self.ms_per_beat);
-                                            self.current_beat_in_measure = @mod(beats_elapsed, self.beats_per_measure) + 1;
-                                            self.current_measure = @divTrunc(beats_elapsed, self.beats_per_measure) + 1;
+                                            self.current_beat_in_measure.store(@mod(beats_elapsed, self.beats_per_measure) + 1, .release);
+                                            self.current_measure.store(@divTrunc(beats_elapsed, self.beats_per_measure) + 1, .release);
                                             self.next_beat_ms = @as(f64, @floatFromInt(beats_elapsed + 1)) * self.ms_per_beat;
                                         }
                                         xmidi_jumped = true;
@@ -445,15 +473,15 @@ pub const Sequence = struct {
                             } else if (ctrl == 112) {
                                 // XMIDI prefix event — notify game.
                                 // AILPREFIXCB: S32 cb(HSEQUENCE seq, S32 log, S32 data)
-                                if (self.prefix_callback != 0) {
-                                    const cb: *const fn (*Sequence, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.prefix_callback);
+                                if (self.prefix_callback.load(.acquire) != 0) {
+                                    const cb: *const fn (*Sequence, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.prefix_callback.load(.acquire));
                                     _ = cb(self, @intCast(val), @intCast(msg.*.channel));
                                 }
                             } else if (ctrl == 119) {
                                 // XMIDI trigger marker — notify game.
                                 // AILTRIGGERCB: void cb(HSEQUENCE seq, S32 log, S32 data)
-                                if (self.trigger_callback != 0) {
-                                    const cb: *const fn (*Sequence, i32, i32) callconv(.winapi) void = @ptrFromInt(self.trigger_callback);
+                                if (self.trigger_callback.load(.acquire) != 0) {
+                                    const cb: *const fn (*Sequence, i32, i32) callconv(.winapi) void = @ptrFromInt(self.trigger_callback.load(.acquire));
                                     cb(self, @intCast(val), @intCast(msg.*.channel));
                                 }
                             } else {
@@ -465,8 +493,8 @@ pub const Sequence = struct {
                                 _ = tsf.tsf_channel_midi_control(self.driver.soundfont, phys_ch, ctrl, val);
                                 // AILEVENTCB(HMDIDRIVER hmi, HSEQUENCE seq, S32 status, S32 data_1, S32 data_2)
                                 // status = 0xB0 | logical channel for a control-change event.
-                                if (self.driver.event_callback != 0) {
-                                    const cb: *const fn (?*anyopaque, ?*anyopaque, i32, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.driver.event_callback);
+                                if (self.driver.event_callback.load(.acquire) != 0) {
+                                    const cb: *const fn (?*anyopaque, ?*anyopaque, i32, i32, i32) callconv(.winapi) i32 = @ptrFromInt(self.driver.event_callback.load(.acquire));
                                     _ = cb(@ptrCast(self.driver), @ptrCast(self), 0xB0 | @as(i32, @intCast(msg.*.channel)), @intCast(ctrl), @intCast(val));
                                 }
                             }
@@ -510,13 +538,13 @@ pub const Sequence = struct {
                     self.time_ms = 0;
                     self.ms_per_beat = self.initial_ms_per_beat;
                     self.next_beat_ms = self.ms_per_beat;
-                    self.current_beat_in_measure = 1;
-                    self.current_measure = 1;
+                    self.current_beat_in_measure.store(1, .release);
+                    self.current_measure.store(1, .release);
                 } else {
-                    self.is_playing = false;
-                    self.is_done = true;
-                    if (self.sequence_callback != 0) {
-                        const cb: *const fn (*Sequence) callconv(.winapi) void = @ptrFromInt(self.sequence_callback);
+                    self.is_playing.store(false, .release);
+                    self.is_done.store(true, .release);
+                    if (self.sequence_callback.load(.acquire) != 0) {
+                        const cb: *const fn (*Sequence) callconv(.winapi) void = @ptrFromInt(self.sequence_callback.load(.acquire));
                         cb(self);
                     }
                     break;
@@ -562,18 +590,20 @@ pub const Sequence = struct {
     }
 
     fn fireBeatCallbacks(self: *Sequence) void {
-        if (self.beat_callback == 0) return;
+        if (self.beat_callback.load(.acquire) == 0) return;
         if (self.ms_per_beat <= 0) return;
         var budget: u32 = 16; // cap iterations to prevent infinite loop on corrupted tempo
         while (self.time_ms >= self.next_beat_ms and budget > 0) : (budget -= 1) {
             // AILBEATCB: void cb(HMDIDRIVER hmi, HSEQUENCE seq, S32 beat, S32 measure)
-            const cb: *const fn (?*anyopaque, *Sequence, i32, i32) callconv(.winapi) void = @ptrFromInt(self.beat_callback);
-            cb(@ptrCast(self.driver), self, self.current_beat_in_measure, self.current_measure);
+            const cb: *const fn (?*anyopaque, *Sequence, i32, i32) callconv(.winapi) void = @ptrFromInt(self.beat_callback.load(.acquire));
+            const beat = self.current_beat_in_measure.load(.acquire);
+            const measure = self.current_measure.load(.acquire);
+            cb(@ptrCast(self.driver), self, beat, measure);
             self.next_beat_ms += self.ms_per_beat;
-            self.current_beat_in_measure += 1;
-            if (self.current_beat_in_measure > self.beats_per_measure) {
-                self.current_beat_in_measure = 1;
-                self.current_measure += 1;
+            self.current_beat_in_measure.store(beat + 1, .release);
+            if (beat + 1 > self.beats_per_measure) {
+                self.current_beat_in_measure.store(1, .release);
+                self.current_measure.store(measure + 1, .release);
             }
         }
     }
@@ -640,9 +670,9 @@ pub const Sequence = struct {
             self.recalcTempoRatio(self.initial_tempo);
         }
         // Loading a new sequence resets playback state (MSS: init_sequence → stopped)
-        self.is_playing = false;
+        self.is_playing.store(false, .release);
         self.is_paused = false;
-        self.is_done = false;
+        self.is_done.store(false, .release);
     }
 
     /// Reset playback state to the beginning of the sequence (shared by start/stop).
@@ -656,8 +686,8 @@ pub const Sequence = struct {
         self.tempo_fade_active = false;
         self.recalcTempoRatio(self.initial_tempo);
         self.next_beat_ms = self.ms_per_beat;
-        self.current_beat_in_measure = 1;
-        self.current_measure = 1;
+        self.current_beat_in_measure.store(1, .release);
+        self.current_measure.store(1, .release);
         self.xmidi_loop_depth = 0;
     }
 
@@ -673,16 +703,16 @@ pub const Sequence = struct {
         }
         self.resetToBeginning();
         _ = ma.ma_sound_start(&self.sound);
-        self.is_playing = true;
+        self.is_playing.store(true, .release);
         self.is_paused = false;
-        self.is_done = false;
-        self.was_stopped = false;
+        self.is_done.store(false, .release);
+        self.was_stopped.store(false, .release);
     }
 
     pub fn stopAndUninit(self: *Sequence) void {
         self.state_mutex.lockUncancelable(io);
         defer self.state_mutex.unlock(io);
-        self.is_playing = false;
+        self.is_playing.store(false, .release);
         if (self.is_initialized) {
             _ = ma.ma_sound_stop(&self.sound);
             ma.ma_sound_uninit(&self.sound);
@@ -694,17 +724,17 @@ pub const Sequence = struct {
         self.state_mutex.lockUncancelable(io);
         defer self.state_mutex.unlock(io);
         if (self.is_initialized) _ = ma.ma_sound_stop(&self.sound);
-        self.is_playing = false;
+        self.is_playing.store(false, .release);
         self.is_paused = false;
-        self.is_done = false;
-        self.was_stopped = true;
+        self.is_done.store(false, .release);
+        self.was_stopped.store(true, .release);
         self.resetToBeginning();
     }
 
     pub fn pause(self: *Sequence) void {
         self.state_mutex.lockUncancelable(io);
         defer self.state_mutex.unlock(io);
-        if (self.is_playing and !self.is_paused) {
+        if (self.is_playing.load(.acquire) and !self.is_paused) {
             if (self.is_initialized) _ = ma.ma_sound_stop(&self.sound);
             self.is_paused = true;
         }
@@ -713,7 +743,7 @@ pub const Sequence = struct {
     pub fn resumePlayback(self: *Sequence) void {
         self.state_mutex.lockUncancelable(io);
         defer self.state_mutex.unlock(io);
-        if (self.is_playing and self.is_paused) {
+        if (self.is_playing.load(.acquire) and self.is_paused) {
             if (self.is_initialized) _ = ma.ma_sound_start(&self.sound);
             self.is_paused = false;
         }
@@ -721,11 +751,11 @@ pub const Sequence = struct {
 
     pub fn status(self: *Sequence) MidiStatus {
         if (!self.is_initialized) return .done; // MSS: uninitialized sequences report SEQ_DONE
-        if (self.is_playing) return .playing; // includes paused state
-        if (self.is_done) return .done;
+        if (self.is_playing.load(.acquire)) return .playing; // includes paused state
+        if (self.is_done.load(.acquire)) return .done;
         // Loaded-but-never-played -> SEQ_DONE; only after AIL_stop_sequence is it
         // SEQ_STOPPED (SEQ_DONE covers "finished or not yet played").
-        return if (self.was_stopped) .stopped else .done;
+        return if (self.was_stopped.load(.acquire)) .stopped else .done;
     }
 
     pub fn setVolume(self: *Sequence, volume: i32, ms: i32) void {
@@ -810,8 +840,8 @@ pub const Sequence = struct {
     fn recalcBeatPosition(self: *Sequence, target_ms: f64) void {
         if (self.ms_per_beat <= 0) return;
         const beats_elapsed: i32 = satBeats(target_ms / self.ms_per_beat);
-        self.current_beat_in_measure = @mod(beats_elapsed, self.beats_per_measure) + 1;
-        self.current_measure = @divTrunc(beats_elapsed, self.beats_per_measure) + 1;
+        self.current_beat_in_measure.store(@mod(beats_elapsed, self.beats_per_measure) + 1, .release);
+        self.current_measure.store(@divTrunc(beats_elapsed, self.beats_per_measure) + 1, .release);
         self.next_beat_ms = @as(f64, @floatFromInt(beats_elapsed + 1)) * self.ms_per_beat;
         self.xmidi_loop_depth = 0;
     }
@@ -843,14 +873,14 @@ pub const Sequence = struct {
     pub fn ensureSoundInitialized(self: *Sequence) !void {
         if (self.is_initialized) return;
         // Auto-create a digital driver if none exists (game may only have opened a MIDI driver)
-        if (root.last_digital_driver == null) {
+        if (root.lastDigitalDriver() == null) {
             _ = root.DigitalDriver.init(root.global_allocator, 44100, 16, 2) catch |err| {
                 // The caller only ever sees error.NoDigitalDriver below, which
                 // says nothing about why the implicit driver could not start.
                 log("Sequence.ensureSoundInitialized: implicit digital driver init failed ({any})\n", .{err});
             };
         }
-        if (root.last_digital_driver) |driver| {
+        if (root.lastDigitalDriver()) |driver| {
             const result = ma.ma_sound_init_from_data_source(&driver.engine, @ptrCast(&self.data_source), ma.MA_SOUND_FLAG_NO_SPATIALIZATION, null, &self.sound);
             if (result != ma.MA_SUCCESS) return error.SoundInitFailed;
             self.is_initialized = true;
