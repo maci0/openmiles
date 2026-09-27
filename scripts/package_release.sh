@@ -37,6 +37,13 @@ Arguments:
 
 Options:
   -h, --help  show this help
+
+Environment:
+  SOURCE_DATE_EPOCH  mtime stamped on every archive entry, as a Unix epoch.
+                     Defaults to the HEAD commit time; set it to reproduce an
+                     archive from a tree that is not a git checkout.
+
+Exit status: 0 archive written, 1 packaging failed, 2 bad invocation.
 EOF
 }
 

@@ -14,7 +14,13 @@ import sys
 import pefile
 
 EXIT_OK = 0
-EXIT_DIFF = 1
+# 1 covers both a parity difference and a check that could not run at all: an
+# unreadable DLL, or a file that is not a PE image. The invocation was fine in
+# both cases, which is what every sibling gate means by 1 and what keeps 2 for
+# a bad invocation alone, so a script reading the code can tell a broken
+# reference DLL from a typo on the command line.
+EXIT_FAIL = 1
+# argparse's own exit code, for a missing or misspelled argument.
 EXIT_USAGE = 2
 
 
@@ -53,7 +59,10 @@ def main(argv=None):
         prog="check_exports.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Diff a built mss32.dll export table against a real Miles DLL.",
-        epilog=("Exit status: 0 export tables match, 1 discrepancies found, 2 bad invocation."),
+        epilog=(
+            "Exit status: 0 export tables match, 1 discrepancies found or a DLL "
+            "could not be read, 2 bad invocation."
+        ),
     )
     parser.add_argument("ours", metavar="OURS.dll", help="DLL we built")
     parser.add_argument("reference", metavar="REFERENCE.dll", help="real Miles DLL")
@@ -74,7 +83,7 @@ def main(argv=None):
         ref = exports(args.reference)
     except ValueError as exc:
         print(f"check_exports.py: {exc}", file=sys.stderr)
-        return EXIT_USAGE
+        return EXIT_FAIL
 
     on = {norm(x): x for x in ours}
     rn = {norm(x): x for x in ref}
@@ -98,7 +107,7 @@ def main(argv=None):
             print(f"    {on[k]}")
 
     diffs = len(missing) + len(deco) + (len(extra) if args.strict else 0)
-    return EXIT_DIFF if diffs else EXIT_OK
+    return EXIT_FAIL if diffs else EXIT_OK
 
 
 if __name__ == "__main__":

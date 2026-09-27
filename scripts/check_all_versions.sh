@@ -118,7 +118,11 @@ for ver in "${VERSIONS[@]}"; do
     skipped+=("$ver")
     continue
   fi
-  if ! zig build --prefix "$out_prefix" -Dmss-version="$ver" -Dtarget=x86-windows; then
+  # The build's own chatter goes to stderr whatever stream its runner chooses,
+  # so the table on stdout stays machine-readable: stdout is documented as one
+  # row per version, and a "Build Summary:" block in the middle of it breaks
+  # anything reading that table.
+  if ! zig build --prefix "$out_prefix" -Dmss-version="$ver" -Dtarget=x86-windows >&2; then
     echo "v$ver: BUILD FAILED" >&2
     fail=1
     continue
@@ -150,9 +154,13 @@ done
 # A green sweep says nothing about a value it never built, so name the ones it
 # skipped by declaration. scripts/check_versions.py keeps this list in step with
 # the values -Dmss-version accepts.
-for ver in "${!UNSWEPT[@]}"; do
+# A bash associative array has no defined key order, so iterating it directly
+# printed the unswept values in a different sequence from run to run. Sorted by
+# version, the report is a stable table a reader can diff across runs.
+while IFS= read -r ver; do
+  [ -n "$ver" ] || continue
   printf 'v%-4s not swept: %s\n' "$ver" "${UNSWEPT[$ver]}"
-done
+done < <(printf '%s\n' "${!UNSWEPT[@]}" | sort -V)
 
 if [ "${#skipped[@]}" -ne 0 ]; then
   echo "RESULT: FAIL (no reference DLL for: ${skipped[*]})"
