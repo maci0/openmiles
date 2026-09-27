@@ -182,8 +182,11 @@ image in memory, writes it to a temporary file, and loads it.
 Controls present:
 
 - The file name is `om_asi_<random>.dll` with 64 bits of entropy from
-  `openmiles.randomNameBytes`; failure to obtain entropy fails closed rather
-  than falling back to a guessable name (`src/api/rib.zig:222 randomNameBytes`).
+  `openmiles.randomNameBytes`, which draws from the run's seeded PRNG under a
+  simulation and otherwise from `io.randomSecure`; failure to obtain entropy
+  fails closed rather than falling back to a guessable name
+  (`src/root.zig:1225 randomNameBytes`, called from
+  `src/api/rib.zig:222 randomNameBytes`).
 - The file is created with `.exclusive = true` (`src/api/rib.zig:242 exclusive`),
   so a planted name cannot be opened for overwrite and a race replacement loses.
 - The file is deleted after the module is unloaded (`src/rib/provider.zig:156 deinit`).
@@ -238,7 +241,8 @@ Gaps:
 | Step-type range check, header depth limit, `wlimit`-bounded string copies | `src/engine/event.zig:492 copyString` | Crafted event bytecode |
 | Log cap, 64 MiB | `src/utils/logger.zig:14 max_log_bytes` | Unbounded debug log growth |
 | Fuzz harness over every export that takes input | `src/fuzz_all_test.zig:37 test` | Regression coverage on the export surface |
-| Native-path fuzz harness | `src/fuzz_native_test.zig:225 test` | Regression coverage on non-Windows paths |
+| Native-path fuzz harness | `src/fuzz_native_test.zig:228 test` | Regression coverage on non-Windows paths |
+| Miles event-enqueue fuzz harness | `src/fuzz_native_test.zig:1706 test` | Crafted event strings driving the instance list, the cache and persist sets, and the per-label caps |
 | Export-parity and unit suites | `src/main_test.zig:28 test`, `src/api_coverage_test.zig:57 test` | ABI regressions |
 
 Single points of failure:

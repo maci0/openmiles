@@ -5,10 +5,12 @@
 //! (`xmidiToSmf` / `xmidiBareToSmf`), the BANK image loader behind the bank
 //! query API, the WAV container readers that classify a file, and the WAV
 //! cue-point marker API (count / by-index / by-name over a nested
-//! LIST-adtl-labl chunk tree).
+//! LIST-adtl-labl chunk tree), and the Miles 9.x event enqueue, which turns a
+//! parsed event string into sound instances, cached names, persisted presets
+//! and per-label caps.
 //!
 //! fuzz_test.zig drives these with fixed-seed PRNG bytes. These targets add
-//! what a PRNG loop cannot: `Smith` picks the shapes (which ASCII a field may
+//! what a PRNG loop cannot: the input picks the shapes (which ASCII a field may
 //! contain, how the IFF chunks nest, whether a declared chunk size lies), and
 //! each target asserts invariants instead of only "did not crash", so a
 //! correctness bug becomes a failing input rather than a silent one.
@@ -22,6 +24,7 @@ const std = @import("std");
 const testing = std.testing;
 const openmiles = @import("openmiles");
 const api_v8 = @import("api/v8.zig");
+const api_miles = @import("api/miles.zig");
 
 const Weight = std.testing.Smith.Weight;
 
@@ -1301,4 +1304,496 @@ test "WAV marker API resolves a well-formed tagged WAV" {
     try testing.expectEqual(@as(i32, 0), api_v8.AIL_WAV_marker_by_index(unterminated[0..].ptr, 0, &unterminated_name));
     try testing.expect(unterminated_name == null);
     try testing.expectEqual(@as(i32, -1), api_v8.AIL_WAV_marker_by_name(unterminated[0..].ptr, "mark"));
+}
+
+// --- Target 6: the Miles 9.x event enqueue ----------------------------------
+//
+// An event string reaches the enqueue path from a game's data: a soundbank
+// event resolved by name, or a text handed straight to MilesEnqueueEvent. The
+// decoder itself is Target 1, but enqueue is where a decoded step turns into
+// state the rest of the library owns: one tracked SoundInstance per start_sound
+// (with the names and labels copied onto the global allocator), names added to
+// and removed from the cache set, presets added to the persist set, and the
+// per-label caps evicting instances. fuzz_test.zig fuzzes the caps and the
+// label grammar through MilesStartSoundInstance; this target drives the same
+// state from the parse side, and pairs the two entry points that must agree on
+// it (the decode walk against the instance list, the enumeration against
+// pause/stop, the persist list against the reported PersistCount).
+//
+// The choices come from a PRNG seeded by the input rather than from Smith
+// draws: one weighted slice consumes the rest of the seed, so a target that
+// draws many fields would see the stream run dry after the first and run the
+// same minimal event every time. Hashing the whole seed instead of reading a
+// draw from it also keeps two seeds that share a prefix apart.
+
+const miles_ctx = struct {
+    text: [1025]u8 = undefined,
+    name: [25]u8 = undefined,
+    other: [33]u8 = undefined,
+    labels: [25]u8 = undefined,
+    // The label list of the last start_sound step, kept apart from `labels` so
+    // the query below can be the one a caller would write for this event.
+    last_labels: [25]u8 = undefined,
+};
+
+const Range = struct { min: u8, max: u8, weight: u64 };
+
+/// A sound reference, bank name or preset name: what the format allows inside
+/// a field, which is any byte that is not the ';' separator or the NUL.
+const miles_name_ranges = [_]Range{
+    .{ .min = 'a', .max = 'z', .weight = 40 },
+    .{ .min = 'A', .max = 'Z', .weight = 20 },
+    .{ .min = '0', .max = '9', .weight = 20 },
+    .{ .min = '_', .max = '_', .weight = 10 },
+    .{ .min = '-', .max = '-', .weight = 5 },
+    .{ .min = '.', .max = '.', .weight = 5 },
+    .{ .min = '/', .max = '/', .weight = 5 },
+    .{ .min = '*', .max = '?', .weight = 5 },
+    .{ .min = 0x80, .max = 0xFF, .weight = 5 },
+};
+
+/// A label list: the label names, the ',' and ' ' the tokenizer splits on, and
+/// the '*' / '?' globs a query is written with.
+const miles_label_ranges = [_]Range{
+    .{ .min = 'a', .max = 'z', .weight = 40 },
+    .{ .min = 'A', .max = 'Z', .weight = 20 },
+    .{ .min = ',', .max = ',', .weight = 20 },
+    .{ .min = ' ', .max = ' ', .weight = 20 },
+    .{ .min = '0', .max = '9', .weight = 10 },
+    .{ .min = '*', .max = '?', .weight = 5 },
+    .{ .min = 0x80, .max = 0xFF, .weight = 5 },
+};
+
+fn randFromRanges(rand: std.Random, comptime ranges: []const Range) u8 {
+    comptime var total: u64 = 0;
+    inline for (ranges) |r| total += r.weight;
+    var pick = rand.intRangeAtMost(u64, 0, total - 1);
+    inline for (ranges) |r| {
+        if (pick < r.weight) return rand.intRangeAtMost(u8, r.min, r.max);
+        pick -= r.weight;
+    }
+    unreachable;
+}
+
+/// The step an event is built from, weighted towards the ones the enqueue acts
+/// on: a start_sound step creates an instance, cache/purge and persist steps
+/// move the two sets the counts are read from, and the rest only have to be
+/// walked over.
+fn randStepKind(rand: std.Random) u8 {
+    return switch (rand.intRangeAtMost(u8, 0, 19)) {
+        0...7 => 0, // start_sound
+        8, 9 => 1, // cache_sounds
+        10, 11 => 2, // purge_sounds
+        12, 13 => 3, // persist
+        14 => 4, // set_limits
+        15 => 5, // comment
+        else => 6, // version
+    };
+}
+
+/// A NUL-terminated field of 0..`buf.len - 1` bytes, empty included (an empty
+/// sound name is a shape the event VM writes for an unset field).
+fn randMilesField(rand: std.Random, buf: []u8, comptime ranges: []const Range) [:0]const u8 {
+    const n = rand.intRangeAtMost(usize, 0, buf.len - 1);
+    for (buf[0..n]) |*b| b.* = randFromRanges(rand, ranges);
+    buf[n] = 0;
+    return buf[0..n :0];
+}
+
+/// A ':'-separated cache/purge name list, which the decoder splits into a
+/// pointer array carved out of its scratch. Names are kept short so three of
+/// them still fit the field with room for the separators.
+fn randMilesNameList(rand: std.Random, buf: []u8) [:0]const u8 {
+    var scratch: [8]u8 = undefined;
+    var used: usize = 0;
+    const parts = rand.intRangeAtMost(usize, 1, 3);
+    for (0..parts) |p| {
+        if (used + scratch.len >= buf.len) break;
+        if (p > 0) {
+            buf[used] = ':';
+            used += 1;
+        }
+        const name = randMilesField(rand, &scratch, &miles_name_ranges);
+        @memcpy(buf[used..][0..name.len], name);
+        used += name.len;
+    }
+    buf[used] = 0;
+    return buf[0..used :0];
+}
+
+/// How many start_sound steps the public step decoder reads out of `text`. The
+/// enqueue path runs the same decoder with the same 512-byte scratch, so this
+/// is the number of instances the event asked for before any cap evicted some.
+fn countStartSteps(text: []const u8) usize {
+    var scratch: [512]u8 align(8) = undefined;
+    var p: [*:0]const u8 = @ptrCast(@constCast(text.ptr));
+    var starts: usize = 0;
+    var guard: usize = 0;
+    while (guard < 256) : (guard += 1) {
+        var step_out: ?*openmiles.event.EVENT_STEP_INFO = null;
+        const next = api_v8.AIL_next_event_step(@ptrCast(p), &step_out, &scratch, scratch.len) orelse break;
+        if (step_out.?.type == @intFromEnum(openmiles.event.StepType.start_sound)) starts += 1;
+        p = @ptrCast(next);
+    }
+    return starts;
+}
+
+/// The event string is handed over as a malloc'd copy and the library is asked
+/// to own it (FREE_EVENT), so the parse and the free are one boundary: a
+/// length that disagrees with the allocation is a heap overflow, and a queue
+/// that still points into the buffer after the free is a use-after-free.
+fn enqueueOwned(text: []const u8, user_buffer_len: i32) u64 {
+    const buf: [*]u8 = @ptrCast(std.c.malloc(text.len + 1) orelse return 0);
+    @memcpy(buf[0..text.len], text);
+    buf[text.len] = 0;
+    return api_miles.MilesEnqueueEvent(buf, null, user_buffer_len, 0x2, 0);
+}
+
+const InstanceView = struct {
+    instance_id: u64,
+    queued_id: u64,
+    status: i32,
+    sound: []const u8,
+};
+
+/// Every instance the enumeration reports, with the fields a caller reads back.
+fn collectInstances(views: []InstanceView) usize {
+    var next: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize)); // MSS_FIRST
+    var info: api_miles.MILESEVENTSOUNDINFO = undefined;
+    var n: usize = 0;
+    while (api_miles.MilesEnumerateSoundInstances(null, &next, 0, null, 0, @ptrCast(&info)) != 0) {
+        if (n == views.len) return n;
+        views[n] = .{
+            .instance_id = info.InstanceID,
+            .queued_id = info.QueuedID,
+            .status = info.Status,
+            .sound = std.mem.span(info.UsedSound.?),
+        };
+        n += 1;
+    }
+    return n;
+}
+
+fn countInstancesMatching(query: ?[*:0]const u8) u64 {
+    var next: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var info: api_miles.MILESEVENTSOUNDINFO = undefined;
+    var n: u64 = 0;
+    while (api_miles.MilesEnumerateSoundInstances(null, &next, 0, query, 0, @ptrCast(&info)) != 0) n += 1;
+    return n;
+}
+
+fn countPersists() u64 {
+    var next: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var name: ?[*:0]const u8 = null;
+    var n: u64 = 0;
+    while (api_miles.MilesEnumeratePresetPersists(null, &next, &name) != 0) {
+        _ = std.mem.span(name.?);
+        n += 1;
+    }
+    return n;
+}
+
+fn milesState() api_miles.MILESEVENTSTATE {
+    var st: api_miles.MILESEVENTSTATE = undefined;
+    api_miles.MilesGetEventSystemState(null, &st);
+    return st;
+}
+
+fn fuzzMilesEnqueueOne(ctx: *miles_ctx, smith: *std.testing.Smith) anyerror!void {
+    // Outside a fuzzing build the whole seed is available; under the fuzzer
+    // `in` is null and the draw below is the fuzzer's, so a mutated input
+    // still reaches every decision below.
+    const seed: u64 = if (smith.in) |bytes|
+        std.hash.Wyhash.hash(0, bytes)
+    else
+        smith.value(u64);
+    var prng = std.Random.DefaultPrng.init(seed);
+    const rand = prng.random();
+
+    api_miles.MilesClearEventQueue();
+    defer {
+        api_miles.MilesClearEventQueue();
+        _ = api_miles.MilesSetSoundLabelLimits(null, "");
+    }
+    // Caps first, so an event whose start_sound steps carry a capped label runs
+    // the eviction the label limits drive.
+    _ = api_miles.MilesSetSoundLabelLimits(null, randMilesField(rand, &ctx.other, &miles_label_ranges).ptr);
+
+    // The event is built by the shipped constructor, so the fuzzer picks the
+    // field *values* (which names, labels, name lists and cap strings the event
+    // names) while the step layout stays one the encoder really writes. The
+    // layout is Target 1's job; what is unproven here is what the enqueue does
+    // with a step it decodes.
+    const ev = openmiles.event.EventConstruct.create(testing.allocator) orelse return error.NoEvent;
+    const steps = rand.intRangeAtMost(usize, 1, 3);
+    for (0..steps) |_| {
+        switch (randStepKind(rand)) {
+            0 => {
+                const name = randMilesField(rand, &ctx.name, &miles_name_ranges);
+                const labels = randMilesField(rand, &ctx.labels, &miles_label_ranges);
+                @memcpy(ctx.last_labels[0..labels.len], labels);
+                ctx.last_labels[labels.len] = 0;
+                _ = ev.addStartSound(.{
+                    .soundname = name.ptr,
+                    .presetname = null,
+                    .presetisdynamic = 0,
+                    .eventname = null,
+                    .markerstart = null,
+                    .markerend = null,
+                    .statevar = null,
+                    .varinit = null,
+                    .labels = labels.ptr,
+                    .stream = 0,
+                    .canload = 0,
+                    .delaymin = 0,
+                    .delaymax = 0,
+                    .priority = 0,
+                    .loopcount = 0,
+                    .startoffset = null,
+                    .volmin = 0,
+                    .volmax = 0,
+                    .pitchmin = -127,
+                    .pitchmax = 127,
+                    .fadeintime = 0,
+                    .evictiontype = 0,
+                    .selecttype = 0,
+                });
+            },
+            1, 2 => {
+                const lib = randMilesField(rand, &ctx.name, &miles_name_ranges);
+                const list = randMilesNameList(rand, &ctx.other);
+                _ = ev.addCacheSounds(if (rand.boolean()) .cache_sounds else .purge_sounds, lib.ptr, list.ptr);
+            },
+            3 => {
+                const preset = randMilesField(rand, &ctx.name, &miles_name_ranges);
+                const labels = randMilesField(rand, &ctx.labels, &miles_label_ranges);
+                _ = ev.addPersist(preset.ptr, preset.ptr, labels.ptr, 0);
+            },
+            4 => {
+                const name = randMilesField(rand, &ctx.name, &miles_name_ranges);
+                const limits = randMilesField(rand, &ctx.other, &miles_label_ranges);
+                _ = ev.addSoundLimit(name.ptr, limits.ptr);
+            },
+            5 => _ = ev.addOneString(.comment, randMilesField(rand, &ctx.name, &miles_name_ranges)),
+            else => _ = ev.addOneString(.version, "4"),
+        }
+    }
+
+    // close() consumes the builder, so this is the one point the event text
+    // exists: everything past it works on a copy the enqueue owns.
+    const built = ev.close() orelse return error.NoEvent;
+    defer std.c.free(built);
+    const nul = std.mem.indexOfScalar(u8, built[0 .. ctx.text.len - 1], 0) orelse return;
+    const raw = built[0..nul];
+    if (raw.len == 0 or raw.len > ctx.text.len - 1) return;
+    @memcpy(ctx.text[0..raw.len], raw);
+
+    // Malformations on top of the constructed text: a cut at an arbitrary point
+    // (the half-written bank record), a NUL inside a field, and a run of raw
+    // bytes over a run of fields.
+    var len: usize = raw.len;
+    if (rand.intRangeAtMost(u8, 0, 7) == 0) len = rand.intRangeAtMost(usize, 0, raw.len);
+    if (len == 0) return;
+    if (rand.intRangeAtMost(u8, 0, 3) == 0) {
+        const holes = rand.intRangeAtMost(usize, 1, 3);
+        for (0..holes) |_| ctx.text[rand.intRangeAtMost(usize, 0, len - 1)] = 0;
+    }
+    if (rand.intRangeAtMost(u8, 0, 3) == 0) {
+        const at = rand.intRangeAtMost(usize, 0, len - 1);
+        const n = rand.intRangeAtMost(usize, 0, len - at);
+        for (0..n) |j| ctx.text[at + j] = randFromRanges(rand, &miles_name_ranges);
+    }
+    const text = ctx.text[0..len];
+    ctx.text[len] = 0; // however it was cut or overwritten, this is a C string
+
+    const starts = countStartSteps(text);
+    const first_qid = enqueueOwned(text, rand.intRangeAtMost(i32, -8, 64));
+    try testing.expect(first_qid != 0);
+
+    var views: [256]InstanceView = undefined;
+    const n = collectInstances(&views);
+    try testing.expect(n <= starts);
+    for (views[0..n], 0..) |v, j| {
+        // A name is copied out of a field of the event text, so it cannot be
+        // longer than the text it came from: a longer one is a read past the
+        // buffer the library was handed.
+        try testing.expect(v.sound.len <= text.len);
+        try testing.expect(v.instance_id != 0);
+        try testing.expect(v.status == 0x1 or v.status == 0x2 or v.status == 0x4);
+        // Two entries carrying one id means the instance array was compacted
+        // into a slot still holding the pointer it moved out of.
+        for (views[0..j]) |prev| try testing.expect(prev.instance_id != v.instance_id);
+    }
+
+    // The enumeration, the pause and the resume are three public entry points
+    // onto the same label predicate and must report the same set. Half the time
+    // the query is the label list this event's own start step carried, so the
+    // predicate is walked with a list it really has to match.
+    const last: [*:0]const u8 = @ptrCast(&ctx.last_labels);
+    const query: [*:0]const u8 = if (last[0] != 0 and rand.boolean())
+        last
+    else
+        randMilesField(rand, &ctx.labels, &miles_label_ranges).ptr;
+    const matched = countInstancesMatching(query);
+    try testing.expectEqual(matched, api_miles.MilesPauseSoundInstances(query, 0));
+    try testing.expectEqual(matched, api_miles.MilesResumeSoundInstances(query, 0));
+    try testing.expectEqual(@as(u64, n), countInstancesMatching(null));
+
+    // The cache and the persist list are sets keyed by name, so enqueuing the
+    // same event twice lands on the same two counts: a run that added an entry
+    // on every enqueue is the leak this catches.
+    const st_before = milesState();
+    const second_qid = enqueueOwned(text, 0);
+    try testing.expect(second_qid != first_qid);
+    const st_after = milesState();
+    try testing.expectEqual(st_before.LoadedSoundCount, st_after.LoadedSoundCount);
+    try testing.expectEqual(st_before.PersistCount, st_after.PersistCount);
+    try testing.expectEqual(@as(i32, @intCast(countPersists())), st_after.PersistCount);
+    try testing.expect(st_after.LoadedSoundCount >= 0);
+
+    // Processing the queue runs the state machine over the same array.
+    _ = api_miles.MilesBeginEventQueueProcessing();
+    _ = api_miles.MilesCompleteEventQueueProcessing();
+    const st_done = milesState();
+    const total = collectInstances(&views);
+    try testing.expect(total <= 2 * starts);
+    try testing.expect(st_done.PlayingSoundCount >= 0);
+    try testing.expect(st_done.PlayingSoundCount <= @as(i32, @intCast(total)));
+
+    // Stopping everything removes exactly what the enumeration reported, and
+    // an emptied queue enumerates empty.
+    try testing.expectEqual(@as(u64, total), api_miles.MilesStopSoundInstances(null, 0));
+    try testing.expectEqual(@as(usize, 0), collectInstances(&views));
+}
+
+// Seeds are the shapes an event takes in real data, in the field order the
+// decoder reads. A seed only has to be long enough to carry a full event: the
+// PRNG inside the target spreads it over every choice.
+const seed_version = "9;4;";
+const seed_start_music = "1;MUS/FLUTE;0;EVT_MUS;M_START;M_END;music,amb;0;0;0;0000;0000;00;00;;0.000000;0.000000;-127.000000;127.000000;0.000000;0;0;";
+const seed_start_sfx = "1;SFX/KICK;0;EVT_SFX;M_START;M_END;sfx,amb;0;1;0;0000;0000;0a;00;;0.000000;1.000000;-127.000000;127.000000;0.000000;0;0;";
+const seed_cache = "5;MUS.MLB;FLUTE:CLARINET:VIOLIN;";
+const seed_purge = "6;MUS.MLB;VIOLIN;";
+const seed_persist = "8;preset_a;save1;music;0;";
+const seed_limits = "7;limname;music 2:amb 0:sfx 4;";
+const seed_ramp = "10;VAR_pitch;music,amb;VAR_vol;1.500000;1;1;2;";
+const seed_lfo = "15;LFO1;0;1.000000;2.000000;0;0;0;0;1;";
+const seed_glob = "1;sound*?;0;;;;*music;0;0;0;0000;0000;00;00;;0.000000;0.000000;-127.000000;127.000000;0.000000;0;0;";
+const seed_utf8 = "1;caf\xC3\xA9;0;;;;caf\xC3\xA9,amb;0;0;0;0000;0000;00;00;;0.000000;0.000000;-127.000000;127.000000;0.000000;0;0;";
+
+const miles_corpus = [_][]const u8{
+    // The full shape: two start_sound steps under a cap, a cached name list, a
+    // purge of one of those names, a persisted preset and a limits step.
+    seed_version ++ seed_start_music ++ seed_start_sfx ++ seed_cache ++ seed_purge ++ seed_persist ++ seed_limits,
+    // A start step after a comment, with the cache set the counts are read from.
+    seed_version ++ "4;level_one_music" ++ seed_start_music ++ seed_cache ++ seed_limits,
+    // A start step, a ramp and an LFO between two start steps, so the walk
+    // passes over the step types the enqueue ignores.
+    seed_version ++ seed_start_sfx ++ seed_ramp ++ seed_lfo ++ seed_start_music,
+    // Globs and multi-byte characters in the names, a trailing-colon name list,
+    // and an empty sound name.
+    seed_glob ++ seed_utf8 ++ "5;MUS.MLB;snd1:;" ++ "1;;;0;;;;music;0;0;0;0000;0000;00;00;;0.000000;0.000000;-127.000000;127.000000;0.000000;0;0;",
+    // Truncations: every prefix of a well-formed event is the shape a
+    // half-written bank record has on disk.
+    (seed_version ++ seed_start_music ++ seed_cache ++ seed_persist)[0..160],
+    (seed_version ++ seed_start_music ++ seed_cache)[0..120],
+    (seed_version ++ seed_start_music)[0..80],
+    (seed_version ++ seed_start_music)[0..24],
+    seed_version,
+    "",
+};
+
+test "fuzz: Miles event enqueue, instance lifecycle, and cache bookkeeping" {
+    var ctx: miles_ctx = .{};
+    try std.testing.fuzz(&ctx, fuzzMilesEnqueueOne, .{ .corpus = &miles_corpus });
+}
+
+// The target above is only worth running if a well-formed event actually
+// reaches the state it asserts on, so the seed shape is pinned here: two
+// start_sound steps, a cached name list, a persist and a cap.
+test "a well-formed Miles event enqueues the instances, cache and preset it names" {
+    api_miles.MilesClearEventQueue();
+    api_miles.MilesShutdownEventSystem(); // clears the cache and persist sets
+    defer {
+        api_miles.MilesClearEventQueue();
+        _ = api_miles.MilesSetSoundLabelLimits(null, "");
+    }
+    const base = milesState();
+
+    const ev = openmiles.event.EventConstruct.create(testing.allocator).?;
+    for ([_][]const u8{ "kick:0", "snare:0" }) |name| {
+        _ = ev.addStartSound(.{
+            .soundname = @ptrCast(@constCast(name.ptr)),
+            .presetname = null,
+            .presetisdynamic = 0,
+            .eventname = null,
+            .markerstart = null,
+            .markerend = null,
+            .statevar = null,
+            .varinit = null,
+            .labels = @constCast("music,amb"),
+            .stream = 0,
+            .canload = 0,
+            .delaymin = 0,
+            .delaymax = 0,
+            .priority = 0,
+            .loopcount = 0,
+            .startoffset = null,
+            .volmin = 0,
+            .volmax = 0,
+            .pitchmin = -127,
+            .pitchmax = 127,
+            .fadeintime = 0,
+            .evictiontype = 0,
+            .selecttype = 0,
+        });
+    }
+    _ = ev.addCacheSounds(.cache_sounds, "MUS.MLB", "a:bee:cee");
+    _ = ev.addPersist("preset_a", "save1", "music", 0);
+    _ = ev.addSoundLimit("limname", "music 2:amb 2");
+    // close() consumes the builder, so the text is the only copy of the event.
+    const built = ev.close().?;
+    defer std.c.free(built);
+    const text = built[0..std.mem.indexOfScalar(u8, built[0..1024], 0).?];
+
+    // The decoder walk the target compares against sees both start steps.
+    try testing.expectEqual(@as(usize, 2), countStartSteps(text));
+    _ = api_miles.MilesSetSoundLabelLimits(null, "music 2:amb 2");
+    try testing.expect(enqueueOwned(text, 0) != 0);
+
+    var views: [16]InstanceView = undefined;
+    const n = collectInstances(&views);
+    try testing.expectEqual(@as(usize, 2), n);
+    try testing.expectEqualStrings("kick", views[0].sound);
+    try testing.expectEqualStrings("snare", views[1].sound);
+    try testing.expectEqual(views[0].queued_id, views[1].queued_id);
+    try testing.expect(views[0].instance_id != views[1].instance_id);
+    try testing.expectEqual(@as(u64, 2), countInstancesMatching("music"));
+    try testing.expectEqual(@as(u64, 2), countInstancesMatching("amb"));
+
+    const after = milesState();
+    try testing.expectEqual(base.LoadedSoundCount + 3, after.LoadedSoundCount);
+    try testing.expectEqual(base.PersistCount + 1, after.PersistCount);
+    try testing.expectEqual(after.PersistCount, @as(i32, @intCast(countPersists())));
+
+    // Re-enqueuing the same event adds no cache or preset names: both are sets
+    // keyed by name. The instance list does not grow either, because the two
+    // caps hold it at one instance per label.
+    try testing.expect(enqueueOwned(text, 0) != 0);
+    const again = milesState();
+    try testing.expectEqual(after.LoadedSoundCount, again.LoadedSoundCount);
+    try testing.expectEqual(after.PersistCount, again.PersistCount);
+    try testing.expectEqual(@as(usize, 2), collectInstances(&views));
+    try testing.expectEqual(@as(u64, 2), api_miles.MilesStopSoundInstances(null, 0));
+    try testing.expectEqual(@as(usize, 0), collectInstances(&views));
+
+    // A cap of 0 evicts every instance carrying the label before the step that
+    // enforces it adds its own, so one run of the two start steps leaves the
+    // second instance alone.
+    _ = api_miles.MilesSetSoundLabelLimits(null, "music 0");
+    try testing.expect(enqueueOwned(text, 0) != 0);
+    try testing.expectEqual(@as(u64, 1), countInstancesMatching("music"));
+    try testing.expectEqual(@as(usize, 1), collectInstances(&views));
+    try testing.expectEqual(@as(u64, 1), api_miles.MilesStopSoundInstances(null, 0));
+    try testing.expectEqual(@as(usize, 0), collectInstances(&views));
 }
