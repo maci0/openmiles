@@ -579,10 +579,10 @@ pub const DigitalDriver = struct {
                 log("loadAllAsi: failed to load plugin '{s}': {any}\n", .{ name, err });
                 continue;
             };
-            self.providers.append(alloc, p) catch |err| {
-                log("loadAllAsi: cannot track loaded plugin '{s}' ({any}); it is unloaded\n", .{ name, err });
-                p.deinit();
-            };
+            // Identity is re-checked under the lock that guards both plugin
+            // lists, so a scan running alongside this one that registered the
+            // same module in between is not answered with a second copy of it.
+            _ = root.adoptPlugin(p, &self.providers);
         }
     }
 

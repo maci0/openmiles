@@ -594,24 +594,54 @@ pub fn loadApplicationProviders(dir: []const u8) i32 {
             log("loadApplicationProviders: failed to load plugin '{s}': {any}\n", .{ name, err });
             continue;
         };
-        if (addProvider(p)) continue;
+        if (!adoptPlugin(p, null)) continue;
         count += 1;
     }
     return count;
 }
 
-/// Track a freshly loaded module, or report failure after unloading it. The
-/// list is under provider_mutex because a concurrent RIB_enumerate_providers is
-/// indexing it while this scan appends.
-fn addProvider(p: *Provider) bool {
+/// Track a freshly loaded module in the list that owns it, or report that it
+/// was not tracked (after unloading it). `owned` is the driver's own list for a
+/// module loaded by a driver scan, null for one that belongs to the application
+/// list; the two lists stay separate, because only the application list is what
+/// RIB_enumerate_providers walks.
+///
+/// The identity check the scan did before Provider.load is repeated here, under
+/// the lock both lists are guarded by: the module is loaded by running the
+/// plugin's RIB_Main, which takes arbitrarily long, and a scan of the same
+/// directory running alongside this one can register the module in between. The
+/// check-then-act pair is the whole dedup, so repeating it outside the lock
+/// leaves a second dlopen'd copy of the module in one of the lists, which
+/// answers provider enumeration with every codec twice and lives until
+/// AIL_shutdown. The redundant copy is unloaded here instead.
+///
+/// The lists are appended under the lock because a concurrent
+/// RIB_enumerate_providers is indexing global_providers while this scan appends.
+pub fn adoptPlugin(p: *Provider, owned: ?*std.ArrayList(*Provider)) bool {
     provider_mutex.lockUncancelable(io);
     defer provider_mutex.unlock(io);
-    global_providers.append(global_allocator, p) catch |err| {
-        log("loadApplicationProviders: cannot track loaded plugin '{s}' ({any}); it is unloaded\n", .{ p.source_path orelse "?", err });
-        p.deinit();
+    if (p.source_path) |sp| {
+        if (isPluginAlreadyLoaded(global_providers.items, sp) or
+            (if (owned) |list| isPluginAlreadyLoaded(list.items, sp) else false))
+        {
+            p.deinit();
+            return false;
+        }
+    }
+    if (owned) |list| {
+        list.append(p.allocator, p) catch |err| {
+            log("plugin load: cannot track loaded plugin '{s}' ({any}); it is unloaded\n", .{ p.source_path orelse "?", err });
+            p.deinit();
+            return false;
+        };
         return true;
+    }
+    global_providers.append(global_allocator, p) catch |err| {
+        log("plugin load: cannot track loaded plugin '{s}' ({any}); it is unloaded\n", .{ p.source_path orelse "?", err });
+        p.deinit();
+        return false;
     };
-    return false;
+    return true;
 }
 
 /// Whether `path` names a module already held in the application list.

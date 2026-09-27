@@ -1346,6 +1346,42 @@ test "a redist directory startup already scanned loads no second copy" {
     try testing.expectEqual(after_scan, driver.providers.items.len);
 }
 
+test "adopting a module already in the plugin list unloads the second copy" {
+    // A scan checks a module's identity, then loads it (running the plugin's
+    // RIB_Main, which takes as long as it likes), and only then tracks it. A
+    // scan of the same directory running alongside it can register the module
+    // in that window. adoptPlugin is where the identity is re-checked under the
+    // lock both lists share, so the second copy is unloaded instead of tracked
+    // and held for the life of the process.
+    const img_path = "zig-out/bin/plugins/mock.asi";
+    std.Io.Dir.cwd().access(openmiles.io, img_path, .{}) catch return;
+    // A copy under a path of its own, so the identity under test is one no
+    // other test in this process has registered. The copy needs a directory
+    // component: the loader resolves a bare file name as a system library.
+    const dir_name = "om_adopt_dedup_test";
+    const cwd = std.Io.Dir.cwd();
+    cwd.createDir(openmiles.io, dir_name, .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+    defer cwd.deleteTree(openmiles.io, dir_name) catch {};
+    const copy_path = dir_name ++ "/mock.asi";
+    try cwd.copyFile(img_path, cwd, copy_path, openmiles.io, .{});
+
+    var owned: std.ArrayList(*openmiles.Provider) = .empty;
+    defer {
+        for (owned.items) |p| p.deinit();
+        owned.deinit(testing.allocator);
+    }
+    const first = try openmiles.Provider.load(testing.allocator, copy_path);
+    try testing.expect(openmiles.adoptPlugin(first, &owned));
+
+    // Same file, loaded again: this is the copy the racing scan produced.
+    const second = try openmiles.Provider.load(testing.allocator, copy_path);
+    try testing.expect(!openmiles.adoptPlugin(second, &owned));
+    try testing.expectEqual(@as(usize, 1), owned.items.len);
+}
+
 test "RIB plugin loading registers the mock provider's interface end to end" {
     // The only automated coverage of the dynamic-plugin path (dlopen/LoadLibrary
     // + RIB_Main + interface registration). The fixture is installed by
