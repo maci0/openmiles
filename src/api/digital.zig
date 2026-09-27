@@ -432,7 +432,7 @@ pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: i32, data: ?*anyopaque,
 }
 pub fn AIL_sample_buffer_ready(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    // Streaming: return the index (0/1) of a free buffer slot, or -1 if both full.
+    // Streaming: index of a free buffer slot, or -1 when the ring is full.
     if (s.stream_active) return s.streamBufferReady();
     // Non-streaming whole-buffer samples: "ready" once finished or not yet started.
     if (s.is_done or !s.is_initialized) return 0;

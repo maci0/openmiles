@@ -650,7 +650,7 @@ pub fn MilesSetSoundLabelLimits(system: ?*anyopaque, sound_limits: ?[*:0]const u
     return 1;
 }
 
-// --- sound banks / events (loader not yet ported) ----------------------------
+// --- sound banks / events ----------------------------------------------------
 
 pub fn MilesAddSoundBank(filename: ?[*:0]const u8, name: ?[*:0]const u8) callconv(.winapi) ?*anyopaque {
     _ = name;

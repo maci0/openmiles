@@ -669,7 +669,9 @@ pub const Sequence = struct {
             self.tempo = self.initial_tempo;
             self.recalcTempoRatio(self.initial_tempo);
         }
-        // Loading a new sequence resets playback state (MSS: init_sequence → stopped)
+        // Loading a new sequence stops playback (MSS: init_sequence → stopped).
+        // The status goes back to SEQ_DONE, not SEQ_STOPPED: was_stopped is only
+        // set by AIL_stop_sequence, and SEQ_DONE also covers "not yet played".
         self.is_playing.store(false, .release);
         self.is_paused = false;
         self.is_done.store(false, .release);

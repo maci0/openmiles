@@ -27,8 +27,9 @@ on Linux. They are listed in SHA256SUMS so a stray edit to either is caught
 along with the rest of the directory.
 
 ## Updating
-To update these dependencies, download the latest raw `.h` files from their
-upstream repositories and replace the files in this directory.
+To update a dependency, follow the checklist at the end of this file. Nothing
+here is resolved by a package manager, so a swap is only reviewable if the
+upstream commit it came from is recorded with the version.
 
 ## Vendored file checksums
 `SHA256SUMS` holds the SHA-256 of every file in this directory, and
@@ -37,12 +38,14 @@ header swapped in without a matching digest, or a digest edited to match a
 header that arrived from somewhere unexpected.
 
 Update checklist:
-1. Fetch by commit id, never by branch or tag, and record that id under the
-   dependency above. A branch name resolves to different bytes every week, so
-   a header fetched from `master` cannot be traced back to what was reviewed.
-2. Download only from the upstream URLs listed above (miniaudio: the commit of
-   the release; tsf.h/tml.h: master, which is ahead of their old version tags).
-3. Confirm the version banner / `MA_VERSION_*`, `TSF_*`, `TML_*` macros.
+1. Fetch by commit id, never by branch or tag, and record that id in the entry
+   above next to the version. A branch name resolves to different bytes every
+   week, so a header fetched from `master` cannot be traced back to what was
+   reviewed.
+2. Download only from the upstream URLs listed above.
+3. Confirm the version: miniaudio carries `MA_VERSION_MAJOR/MINOR/REVISION`,
+   but tsf.h and tml.h have no version macro at all, so their version entry
+   comes from the commit id recorded in step 1.
 4. Diff against the current vendored copy to spot unexpected changes.
 5. Run `scripts/check_vendored.py --update` in the same commit as the header
    swap, and read the diff: a changed digest is a reviewed change, not a

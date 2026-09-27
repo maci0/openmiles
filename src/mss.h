@@ -1,8 +1,7 @@
 #ifndef OPENMILES_MSS_H
 #define OPENMILES_MSS_H
 
-/* Every handle below is tested against NULL, so callers get it from here
- * rather than having to remember the include themselves. */
+/* NULL, which callers use to test every handle this header declares. */
 #include <stddef.h>
 
 /*
@@ -16,10 +15,11 @@
  * is 90, the build `zig build` produces with no options.
  *
  * This header covers the core surface a title needs for playback, streaming,
- * MIDI, 3D, RIB, filters, timers, and the Quick API. The v7 DSP-stage, v8/v9
- * event and SoundBank, and legacy waveOut/midiOut compatibility exports are
- * declared in their own sections below only where they round out that core;
- * for the full per-function list see docs/API_STATUS.md.
+ * MIDI, 3D, RIB, filters, timers, and the Quick API. Nothing else is declared:
+ * the v7 DSP-stage and v8/v9 event/SoundBank surfaces, and the legacy
+ * midiOut/DLS spellings, are exported by the DLL but absent here. For the full
+ * per-function list see docs/API_STATUS.md, and the export table itself in
+ * src/main.zig.
  */
 
 #ifndef OPENMILES_MSS_VERSION
@@ -319,8 +319,6 @@ HSAMPLE     MSS_CALLBACK AIL_quick_load_mem(void const* buffer, U32 size);
 HSAMPLE     MSS_CALLBACK AIL_quick_copy(HSAMPLE S);
 void        MSS_CALLBACK AIL_quick_unload(HSAMPLE S);
 S32         MSS_CALLBACK AIL_quick_play(HSAMPLE S, S32 loop_count);
-#if MSS_AT_LEAST(40)
-#endif
 S32         MSS_CALLBACK AIL_quick_status(HSAMPLE S);
 /* No AIL_quick_stop: the Quick API's stop entry point is exported under
  * AIL_quick_halt. */

@@ -12,22 +12,25 @@ has known limitations, or is a compatibility stub.
 **A listed function is not necessarily callable.** A handful of names below
 (`AIL_open_midi_driver`, `AIL_close_midi_driver`, `AIL_pause_sample`,
 `AIL_pause_sequence`, `AIL_set_timer_user_data`, `AIL_set_sample_filter`,
-`AIL_set_filter_attribute`, `AIL_open_ASI_provider`, `AIL_close_ASI_provider`,
+`AIL_set_filter_attribute`, `AIL_3D_sample_ms_position`,
+`AIL_set_3D_sample_ms_position`, `AIL_set_mem_callbacks`,
+`AIL_open_ASI_provider`, `AIL_close_ASI_provider`,
 `AIL_ASI_provider_attribute`, `AIL_quick_stop`, `AIL_DLS_unload_file`) appear in
 no Miles export table, so `src/main.zig` lists them as `never_export`: they are
 implemented and unit-tested internally, but the DLL does not export them, and a
 call from your own code will not link. `src/mss.h` therefore does not declare
-them; `make check-header` enforces that.
+them; `make check-header` enforces that. `never_export` in `src/main.zig` is the
+complete list; the tables here cover behaviour, not linkability.
 
 `src/main.zig` is the authoritative list of what a build actually exports. The
 `ver` / `ver_max` on each entry says which `-Dmss-version` values provide it.
 
 ## Core System
-*(Appeared in MSS v3+)*
+*(v3 base, with the redist, latency and file-callback entries from v6+)*
 | Function | Status | Notes |
 |----------|--------|-------|
 | `AIL_HWND` | ⚪ Stub | Returns null; not applicable under miniaudio |
-| `AIL_MMX_available` | ⚪ Stub | Returns 0; MMX detection not applicable |
+| `AIL_MMX_available` | 🟢 Implemented | Returns 1; the 32-bit Windows target always runs on an x86 with MMX |
 | `AIL_background` | ⚪ Stub | Returns null; not applicable |
 | `AIL_delay` | 🟢 Implemented | |
 | `AIL_lock` | ⚪ Stub | No-op; miniaudio manages its own synchronization |
@@ -61,7 +64,7 @@ them; `make check-header` enforces that.
 | `AIL_serve` | ⚪ Stub | No-op; miniaudio uses its own audio thread |
 
 ## RIB / ASI Plugin System
-*(Appeared in MSS v4+)*
+*(v4 interface API; provider management, enumeration and the ASI codecs from v5+)*
 | Function | Status | Notes |
 |----------|--------|-------|
 | `AIL_request_EOB_ASI_reset` | 🟢 Implemented | |
@@ -92,7 +95,7 @@ them; `make check-header` enforces that.
 | `AIL_ASI_provider_attribute` | 🟢 Implemented | Searches registered interfaces |
 
 ## Digital Audio Driver
-*(Appeared in MSS v3+)*
+*(v3-v6.0 via `AIL_waveOutOpen`, v6.1+ via `AIL_open_digital_driver`)*
 | Function | Status | Notes |
 |----------|--------|-------|
 | `AIL_primary_digital_driver` | 🟢 Implemented | |
@@ -101,7 +104,7 @@ them; `make check-header` enforces that.
 | `AIL_size_processed_digital_audio` | 🟢 Implemented | Computes output size from format parameters |
 | `AIL_open_digital_driver` | 🟢 Implemented | Uses miniaudio engine; `bits` parameter ignored |
 | `AIL_close_digital_driver` | 🟢 Implemented | |
-| `AIL_set_digital_master_volume` | 🟢 Implemented | Cubic perceptual curve (0-127 → ~60dB range) |
+| `AIL_set_digital_master_volume` | 🟢 Implemented | Linear final gain, 0-127 mapped to 0.0-1.0 (no perceptual curve, per the SDK) |
 | `AIL_digital_master_volume` | 🟢 Implemented | Returns current engine volume mapped to 0-127 |
 
 ## Sample Management
@@ -114,7 +117,7 @@ them; `make check-header` enforces that.
 | `AIL_compress_ADPCM` | 🟢 Implemented | |
 | `AIL_decompress_ADPCM` | 🟢 Implemented | |
 | `AIL_load_sample_buffer` | 🟢 Implemented | True double-buffered streaming: with a format set via `AIL_set_sample_type`, feeds the buffer (zero-copy) into a custom `ma_data_source` that ping-pongs the two app buffers |
-| `AIL_minimum_sample_buffer_size` | 🟢 Implemented | |
+| `AIL_minimum_sample_buffer_size` | ⚪ Stub | Ignores `rate`/`format`, returns a constant 2048; the SDK formula needs driver values miniaudio does not expose |
 | `AIL_register_EOB_callback` | 🟢 Implemented | |
 | `AIL_register_SOB_callback` | 🟢 Implemented | |
 | `AIL_sample_buffer_info` | 🟢 Implemented | Returns pos/len of both stream buffers (matches MSS `pos0/len0/pos1/len1` signature) |
@@ -359,7 +362,7 @@ them; `make check-header` enforces that.
 | `AIL_stop_all_timers` | 🟢 Implemented | Stops all registered timers via global timer registry |
 
 ## Quick API
-*(Appeared in MSS v4+)*
+*(Appeared in MSS v3+)*
 | Function | Status | Notes |
 |----------|--------|-------|
 | `AIL_quick_halt` | 🟢 Implemented | |
@@ -404,7 +407,7 @@ them; `make check-header` enforces that.
 | `AIL_redbook_volume` | 🟢 Implemented | Returns stored volume |
 
 ## Memory API
-*(Appeared in MSS v4+)*
+*(Appeared in MSS v3+)*
 | Function | Status | Notes |
 |----------|--------|-------|
 | `AIL_mem_use_free` | 🟡 Partial | Stores callback pointer for round-tripping; OpenMiles uses its own allocator internally |
@@ -414,7 +417,7 @@ them; `make check-header` enforces that.
 | `AIL_mem_free_lock` | 🟢 Implemented | |
 
 ## Compression API
-*(Appeared in MSS v4+)*
+*(Appeared in MSS v5+)*
 | Function | Status | Notes |
 |----------|--------|-------|
 | `AIL_compress_ASI` | 🟢 Implemented | Encodes input file to IMA-ADPCM WAV (~4:1) via the bundled ADPCM encoder; symmetric with `AIL_decompress_ASI` |

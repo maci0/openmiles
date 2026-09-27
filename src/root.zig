@@ -927,9 +927,10 @@ pub fn startup() void {
         log("startup: registerInterface ASI stream FAILED\n", .{});
     };
     startup_provider = p;
-    // Scan for external .asi plugins — games may ship proprietary codecs that
-    // we don't replace yet.  These supplement (not replace) the built-in provider.
-    log("startup: scanning CWD for .asi plugins\n", .{});
+    // Scan for external plugins (.asi, .m3d, .flt) — games may ship
+    // proprietary codecs that we don't replace yet. These supplement (not
+    // replace) the built-in provider.
+    log("startup: scanning CWD for external plugins\n", .{});
     const n = loadApplicationProviders(".");
     if (n > 0) log("startup: loaded {d} external plugin(s) from CWD\n", .{n});
 }

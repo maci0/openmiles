@@ -102,11 +102,13 @@ existing release without moving the tag.
 ### Targeting an MSS version
 
 `-Dmss-version=<3|4|5|6|6.0|6.1|6.5|6.6|7|8|9>` (default `9`) selects which Miles
-release the export table mimics. Each value reproduces that version's reference
-`mss32.dll` export table with **zero missing decorated exports** — including the
-per-version ABI quirks (functions whose stdcall arity changed across releases,
-e.g. `init_sample` `@4→@12→@8`, the v4/v5 5-arg 3D-distance variants, the v7-only
-DSP-stage API, and the v8 vs v9 `Miles*` event-API arities).
+release the export table mimics. `6` and `6.6` are the same build (both encode
+66); the other values are distinct. Each value reproduces that version's
+reference `mss32.dll` export table with **zero missing decorated exports** —
+including the per-version ABI quirks (functions whose stdcall arity changed
+across releases, e.g. `init_sample` `@4→@12→@8`, the v4/v5 5-arg 3D-distance
+variants, the v7-only DSP-stage API, and the v8 vs v9 `Miles*` event-API
+arities).
 
 | Version | Adds | Missing vs ref |
 |---------|------|---------------|
@@ -206,7 +208,7 @@ full list, and add your own declaration from the export table in
 `src/main.zig` if you need one.
 
 `make check-header` re-checks every declaration in `mss.h` against that export
-table, for all ten `-Dmss-version` values; it runs as part of `make lint`.
+table, for all ten distinct version encodings; it runs as part of `make lint`.
 
 ### Debug logging
 

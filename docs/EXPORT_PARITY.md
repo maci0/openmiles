@@ -14,10 +14,11 @@ on a bad invocation (unknown flag, missing file, non-PE input), so it gates CI
 on the status alone; `scripts/check_all_versions.sh [--strict]` sweeps every
 version.
 
-Reference DLLs in-tree:
-- v5: `references/MSS-5.x/nolf-sdk-plugins/mss32.dll` (332 exports)
-- v6: `references/MSS-6.1/Tools/win/mss32.dll` (355; matches Examples/win)
-- v7: `references/MSS-7.x/ragnarok-online-redist/mss32.dll` (332)
+Reference DLLs are not committed (`references/` is gitignored). The canonical
+per-version set the sweep uses is the `REF` map in
+`scripts/check_all_versions.sh`: 3.6a, 4.0h, 5.0b, 6.1d, 6.5h, 7.0k, 8.0e,
+9.1d. Other point releases appear in the historical notes below, where a
+different DLL was diffed against.
 
 ## Status
 
@@ -128,9 +129,11 @@ EXTRA breaks down into two very different groups:
    real plugins export `RIB_Main`; the host exports `MIX_RIB_MAIN`),
    `DllMainCRTStartup` (a Zig/lld entry-point artifact), and 15 convenience
    wrappers the project added (`AIL_pause_sequence`, `AIL_quick_stop`,
-   `AIL_open_midi_driver`, ...). The wrappers are harmless for real games (never
-   named in any header) and several back the project's own C tests, so they are
-   kept deliberately.
+   `AIL_open_midi_driver`, ...). The wrappers backed the project's own C tests,
+   which still reach them. Since then they were suppressed from the PE export
+   table: `never_export` in `src/main.zig` lists every name no real release
+   ever exported, and the implementations stay callable internally and from
+   tests.
 
 **EXTRA bounding (done).** Using a presence map computed over *all* 148
 reference DLLs (per-function set of major versions it appears in), every target
@@ -150,19 +153,19 @@ v9 280→159). The map's scale bug (`major` vs `major*10`) that made an early
 attempt compute *last*-appearance instead of first was found and fixed before
 any change was applied.
 
-**Remaining EXTRA is two irreducible groups:**
+**Remaining EXTRA is sub-version variance, plus a group since eliminated:**
 
 1. *Sub-version variance* (the bulk — e.g. v6's 118, v9's 143): genuine Miles
    functions present in some sub-version of the major but not the single
    mainline DLL we diff against. Our build is their **union**, so it serves
    every sub-version's games — a faithful superset, not an error. Forcing it to
    one sub-version would reduce fidelity to the others.
-2. *16 deliberate/artifact* (per version): `DllMainCRTStartup` (a Zig/lld
-   entry-point artifact, not a real export) and 15 convenience wrappers the
-   project added (`AIL_pause_sequence`, `AIL_quick_stop`, `AIL_open_midi_driver`,
-   ...). They appear in no Miles DLL or SDK header, are harmless for real games
-   (never named in any header), and several back the project's own C tests, so
-   they are kept.
+2. *Artifacts, since eliminated:* `DllMainCRTStartup` (a Zig/lld entry-point
+   artifact, never a real Miles export) and the 15 convenience wrappers counted
+   above. Neither is in the table any more: the CRT entry is the PE entry point
+   rather than an export, and `never_export` in `src/main.zig` drops the
+   wrappers while their implementations stay callable internally and from the
+   project's own C tests.
 
 The byte-exact MISSING/MISMATCH result remains the load-bearing fidelity
 guarantee; EXTRA is now at its safe floor.

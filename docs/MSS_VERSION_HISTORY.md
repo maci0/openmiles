@@ -53,8 +53,8 @@ Improved performance for multi-core systems and handled console-specific audio h
 ## 4. Modern Era (v8.x - v9.x)
 Shifted from a "Programmer's API" to an "Artist's API" with data-driven event systems.
 
-- **Event System:** Functions like `AIL_enqueue_event` allow playing sounds by name rather than handle. Logic (randomization, pitch shifting) is moved to data files.
-- **Soundbanks:** `AIL_open_soundbank` and `AIL_add_soundbank`. Unified asset management.
+- **Event System:** The `AIL_enqueue_event_*` family (e.g. `AIL_enqueue_event_start`) allows playing sounds by name rather than handle. Logic (randomization, pitch shifting) is moved to data files.
+- **Soundbanks:** `AIL_open_soundbank` and `MilesAddSoundBank`. Unified asset management.
 - **Speaker Config:** Explicit support for 5.1 and 7.1 surround sound via `AIL_set_speaker_configuration`.
 - **Bink Audio:** Deep integration with Bink Video's audio tracks.
 
@@ -76,4 +76,4 @@ Shifted from a "Programmer's API" to an "Artist's API" with data-driven event sy
 ## Implementation Guidance for OpenMiles
 When implementing a specific game's `mss32.dll`, check the **Version String** in the original DLL's metadata, then build with the matching `-Dmss-version` (every value v3–v9 already reproduces that release's export table with zero missing exports).
 - If it's **v6.x**, the filter and sample-management path is fully implemented.
-- If it's **v8.x/v9.x**, the event-text constructor/decoder and soundbank query API are implemented; the event *execution* VM (running `AIL_enqueue_event` / `MilesStartSoundInstance` to actually schedule sounds) is the remaining work — those symbols are present and ABI-correct but currently return empty-state.
+- If it's **v8.x/v9.x**, the event-text constructor/decoder and soundbank query API are implemented, and the event *execution* VM parses enqueued events into tracked sound instances (lifecycle, durations, label filtering/caps, state counts). Routing those instances through the mixer for audio output is the remaining work: they are tracked and queryable but silent.

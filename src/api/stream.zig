@@ -309,8 +309,8 @@ pub fn AIL_set_filter_stream_preference(s_opt: ?*Sample, name: [*:0]const u8, va
 // These existed only in MSS 6.5/6.6 (dropped in 7.x). A stream handle is a
 // Sample, so each mirrors the corresponding AIL_*_sample_* form exactly.
 
-// Per-channel volume levels: store as volume=max(L,R), pan=R/(L+R); the getter
-// reconstructs L/R (lossless when both were <=1). Matches AIL_sample_volume_levels.
+// Per-channel volume levels, stored and returned verbatim, exactly as
+// AIL_sample_volume_levels does for a non-streaming sample.
 pub fn AIL_set_stream_volume_levels(s_opt: ?*Sample, left_level: f32, right_level: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     s.setVolumeLevels(left_level, right_level); // verbatim L/R, like the sample form

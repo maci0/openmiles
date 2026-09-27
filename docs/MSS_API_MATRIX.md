@@ -20,11 +20,11 @@ This matrix tracks the availability of major API groups across different histori
 | Basic Init (`startup`, `shutdown`) | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | rebranded in v3. |
 | Legacy Driver Init (`install_driver`) | v2 | 🟢 | 🟢 | ⚪ | ⚪ Stub | Used in AIL era. |
 | Error Handling (`last_error`) | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
-| Preference Management | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | |
+| Preference Management | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
 | Redist Handling (`redist_dir`) | v6 | 🔴 | 🔴 | 🟢 | 🟢 Full | Stores path and scans for .asi/.m3d/.flt plugins |
 | Timer API | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | Background timer threads |
-| Quick API | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | High-level sound engine helpers |
-| Memory API | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | Basic memory allocators and locking |
+| Quick API | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | High-level sound engine helpers |
+| Memory API | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | Basic memory allocators and locking |
 
 ## 2. Digital Audio (Samples & Streams)
 | Function Group | Intro | AIL v2 | MSS v3 | MSS 6.6 | OpenMiles | Notes |
@@ -34,7 +34,7 @@ This matrix tracks the availability of major API groups across different histori
 | Sample Allocation/Release | v2 | 🟢 | 🟢 | 🟢 | 🟢 Full | |
 | Volume / Panning Control | v2 | 🟢 | 🟢 | 🟢 | 🟢 Full | |
 | Memory Image Loading | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
-| Streaming (File-based) | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | |
+| Streaming (File-based) | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
 | Input API | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | Recording via miniaudio capture device |
 | Compression API | v4 | 🔴 | 🔴 | 🟢 | 🟡 Partial | Decompression implemented |
 | Filter API | v6 | 🔴 | 🔴 | 🟢 | 🟢 Full | Low-pass filter via miniaudio ma_lpf_node; real-time cutoff/order control |

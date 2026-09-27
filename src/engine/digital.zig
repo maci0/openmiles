@@ -1087,7 +1087,8 @@ pub const Sample = struct {
         self.stream_src.loadBuffer(index, data, @intCast(len));
     }
 
-    /// Index of a stream buffer slot free to fill (0/1), or -1 if both are full.
+    /// Index of a free stream buffer slot (0..slot_count-1), or -1 when the
+    /// ring is full. AIL_set_sample_buffer_count sizes the ring 2..8.
     pub fn streamBufferReady(self: *Sample) i32 {
         if (!self.stream_active) return -1;
         return self.stream_src.bufferReady();

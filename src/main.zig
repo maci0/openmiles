@@ -774,7 +774,9 @@ comptime {
             .{ .name = "AIL_add_set_lfo_event_step", .stack_size = 40, .ver = 90 },
             // Miles 9.x event-system C-ABI (the 9.x SDK aliases AIL_* event names
             // onto these). Real mss32.dll 9.x exports the Miles* set.
-            // @16 (4-arg) in both v8 and v9 — the default covers both.
+            // @16 (4-arg) in v9. v8 carried a fifth slot (@20), and
+            // MilesStartupEventSystem_v8 in api/miles.zig matches that arity,
+            // but it has no entry here: a v8 build still exports the @16 form.
             .{ .name = "MilesStartupEventSystem", .stack_size = 16, .ver = 80 },
             .{ .name = "MilesShutdownEventSystem", .stack_size = 0, .ver = 80 },
             .{ .name = "MilesAddEventSystem", .stack_size = 4, .ver = 90 },
