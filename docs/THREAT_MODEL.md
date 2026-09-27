@@ -286,7 +286,7 @@ something other than a control in this tree.
   changed, so a game that re-sets the same path each time does not re-walk it,
   but a game that alternates between two paths re-walks both.
 - **Write-path abuse through `AIL_WAV_file_write`.** The export creates or
-  truncates a caller-named file (`src/api/digital.zig:987 createFile`). A game
+  truncates a caller-named file (`src/api/digital.zig:992 createFile`). A game
   that builds the name from a level or save name turns a data-file-controlled
   string into a path: `..` segments in the name are not rejected, and the write
   follows them. The caller is in-process, so this is a confused-deputy case
@@ -300,7 +300,7 @@ something other than a control in this tree.
   defence.
 - **Unbounded work per call, bounded work per process.** Stream ring depth is
   clamped to the SDK range (`src/engine/stream_buffer.zig:126 clamped`), and
-  mix operations are capped (`src/api/digital.zig:714 max_mix_operations`), but
+  mix operations are capped (`src/api/digital.zig:726 max_mix_operations`), but
   a caller can still make a decode take arbitrarily long by naming an
   arbitrarily long file within the 256 MiB cap, with no timeout anywhere in
   the module.

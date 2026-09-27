@@ -56,7 +56,14 @@ everything below is unreleased.
   `make check` with it. The ASI temp-file controls now point at the entropy
   draw and the exclusive create as they are written today, and the
   plugin-scanning references at the current `loadApplicationProviders` and
-  `loadAllAsi` call sites.
+  `loadAllAsi` call sites. The WAV write path, the sample loader and the mixer
+  cap had drifted the same way; they now point at `AIL_WAV_file_write`,
+  `createFile`, `max_mix_operations`, `Sample.loadFromFile`, `Sample.load` and
+  the `root.max_file_load_bytes` check as they are written today.
+- `make lint`: the gate ran `zig fmt --check` from whatever zig was on PATH,
+  while `build` and `test` refused to run against anything but the version in
+  `build.zig.zon`. A local format check now runs against the pinned toolchain
+  too, so a green run means what CI's green run means.
 
 ### Breaking
 

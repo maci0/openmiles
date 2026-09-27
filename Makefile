@@ -155,7 +155,10 @@ check-parity-tools:
 	@[ -n "$(PYTHON)" ] || { echo "error: neither python3 nor python found on PATH; the scripts/*.py gates need one" >&2; exit 1; }
 	@$(PYTHON) -c 'import pefile' 2>/dev/null || { echo "error: pefile not found; uv pip install -r scripts/requirements.txt" >&2; exit 1; }
 
-lint: check-host-tools
+# check-toolchain comes first because `zig fmt` is part of this gate: a stray
+# zig on PATH would format-check the tree with a formatter no other step
+# compares against, and a green run would mean nothing.
+lint: check-toolchain check-host-tools
 	zig fmt --check .
 	shellcheck scripts/*.sh
 	$(PYTHON) scripts/check_header.py
@@ -187,7 +190,7 @@ help:
 	@echo "  test       run the test suite (zig build test); FILTER=<substr> runs a subset"
 	@echo "  sanitize   run the test suite with the C undefined-behaviour sanitizer (-Dsanitize)"
 	@echo "  check      run every CI check in order: lint, build, test, sanitize, cross"
-	@echo "  lint       zig fmt, ruff, shellcheck, yamllint, header/vendored parity, pin agreement"
+	@echo "  lint       pinned zig fmt, ruff, shellcheck, yamllint, header/vendored parity, pin agreement"
 	@echo "  format     apply zig fmt and ruff format"
 	@echo "  cross      cross-compile the shipped x86-windows DLL"
 	@echo "  parity     diff every -Dmss-version export table against its reference DLL (needs scripts/requirements.txt)"
