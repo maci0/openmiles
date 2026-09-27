@@ -19,8 +19,6 @@ const builtin = @import("builtin");
 const wide = @import("wide.zig");
 const native_os = builtin.os.tag;
 
-pub const Error = error{ FileNotFound, OutOfMemory, ImageFixupFailed } || std.posix.RealPathError;
-
 /// Same condition under which std.DynLib picks its relocation-less ElfDynLib
 /// backend (plus an arch gate: the relocation pass knows x86_64 types).
 const needs_elf_fixup = native_os == .linux and

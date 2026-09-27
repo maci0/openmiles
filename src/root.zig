@@ -928,13 +928,6 @@ pub const Clock = struct {
         self.virtual_enabled.store(false, .release);
     }
 
-    /// Jump virtual time to an absolute value. Only meaningful virtually.
-    pub fn setVirtual(self: *Clock, ns: i64) void {
-        self.virtual_mutex.lockUncancelable(io);
-        self.virtual_ns = ns;
-        self.virtual_mutex.unlock(io);
-    }
-
     /// Move virtual time forward by `ns`. Never moves it backwards.
     pub fn advance(self: *Clock, ns: i64) void {
         self.virtual_mutex.lockUncancelable(io);
