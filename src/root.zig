@@ -276,6 +276,11 @@ pub fn fileCallbackReadAll(filename: [*:0]const u8) ![]u8 {
     return buf;
 }
 
+/// Largest file any load path will read into memory. A game's asset bundle is
+/// far below this; a larger length is a corrupt or hostile stat result, and
+/// honouring it means allocating whatever the caller claims.
+pub const max_file_load_bytes: u64 = 256 * 1024 * 1024;
+
 /// Read a whole file via the app's file callbacks when set, otherwise directly
 /// from the filesystem. Caller frees the returned buffer with global_allocator.
 pub fn readWholeFile(path: []const u8) ![]u8 {
@@ -289,7 +294,7 @@ pub fn readWholeFile(path: []const u8) ![]u8 {
     const f = fs_compat.openFile(io, path, .{}) catch return error.FileNotFound;
     defer f.close(io);
     const sz = f.length(io) catch return error.UnknownSize;
-    if (sz == 0 or sz > 256 * 1024 * 1024) return error.BadSize;
+    if (sz == 0 or sz > max_file_load_bytes) return error.BadSize;
     const buf = try global_allocator.alloc(u8, @intCast(sz));
     errdefer global_allocator.free(buf);
     const n = f.readPositionalAll(io, buf, 0) catch return error.ReadFailed;
@@ -338,8 +343,8 @@ pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
         setFileError("Stat failed");
         return null;
     };
-    if (file_len == 0) {
-        setFileError("Empty file");
+    if (file_len == 0 or file_len > max_file_load_bytes) {
+        setFileError("Empty or oversized file");
         return null;
     }
     const size: usize = @intCast(file_len);
@@ -513,6 +518,9 @@ pub fn releaseAllTimers() void {
 pub var last_digital_driver: ?*DigitalDriver = null;
 pub var last_midi_driver: ?*MidiDriver = null;
 
+/// Handles of every live digital driver. `isKnownDriver` uses this table to
+/// tell a driver handle from a Sample3D handle, so a driver that fails to land
+/// in it is misclassified and its handle is written through the wrong layout.
 var known_drivers_buf: [8]?*DigitalDriver = [_]?*DigitalDriver{null} ** 8;
 
 pub fn registerDriver(driver: *DigitalDriver) void {
@@ -522,6 +530,9 @@ pub fn registerDriver(driver: *DigitalDriver) void {
             return;
         }
     }
+    // Table full: the handle is live but untrackable, so isKnownDriver will
+    // treat it as a sample. Say so instead of dropping it silently.
+    log("registerDriver: more than {d} digital drivers open; this handle is untracked\n", .{known_drivers_buf.len});
 }
 
 pub fn unregisterDriver(driver: *DigitalDriver) void {

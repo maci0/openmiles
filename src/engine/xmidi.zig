@@ -17,7 +17,9 @@ pub fn parseSmfTimeSigNumerator(smf: []const u8) i32 {
     // MThd = 14 bytes, MTrk tag = 4 bytes, MTrk length = 4 bytes → track data starts at 22
     if (smf.len < 22) return 4;
     const trk_len: usize = std.mem.readInt(u32, smf[18..22][0..4], .big);
-    const trk_end = @min(22 + trk_len, smf.len);
+    // Saturating: untrusted 32-bit size must not overflow (the sibling chunk
+    // walkers below do the same).
+    const trk_end = @min(22 +| trk_len, smf.len);
     var i: usize = 22;
     while (i < trk_end) {
         // Skip VLQ delta time

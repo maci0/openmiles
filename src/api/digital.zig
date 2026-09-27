@@ -665,11 +665,21 @@ fn decodeAdpcmSource(info: *const AILSOUNDINFO) ?MixSrc {
         var fr: u64 = 0;
         _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk.ptr, cap_frames, &fr);
         if (fr == 0) break;
-        list.appendSlice(openmiles.global_allocator, chunk[0..@intCast(fr * dch)]) catch break;
+        // An OOM abandons the decode; the errdefer frees the partial list.
+        list.appendSlice(openmiles.global_allocator, chunk[0..@intCast(fr * dch)]) catch return null;
     }
-    const buf = list.toOwnedSlice(openmiles.global_allocator) catch return null;
+    // A failed toOwnedSlice is an optional return, not an error return, so the
+    // errdefer does not cover it; free the list explicitly.
+    const buf = list.toOwnedSlice(openmiles.global_allocator) catch {
+        list.deinit(openmiles.global_allocator);
+        return null;
+    };
     return .{ .s16 = buf, .owned = buf, .channels = dch, .points = buf.len / @max(dch, 1), .rate = if (info.rate == 0) 22050 else info.rate };
 }
+
+/// SDK cap on the `operations[]` array an AILMIXINFO mixer call may name
+/// (wavefile.cpp bounds `num_srcs` to 256 before walking it).
+pub const max_mix_operations: usize = 256;
 
 // S32 AIL_process_digital_audio(void *dest, S32 dest_size, U32 dest_rate, U32 dest_format, S32 num_srcs, AILMIXINFO *src)
 // Offline software mixer (wavefile.cpp): resample each source to dest_rate, sum,
@@ -680,10 +690,10 @@ fn decodeAdpcmSource(info: *const AILSOUNDINFO) ?MixSrc {
 // contract matches the SDK.
 pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u32, dest_format: u32, num_srcs: i32, src: ?*anyopaque) callconv(.winapi) i32 {
     if (dest == null or src == null or num_srcs <= 0 or dest_rate == 0 or dest_size <= 0) return 0;
-    const n: usize = @min(@as(usize, @intCast(num_srcs)), 256); // SDK caps at operations[256]
+    const n: usize = @min(@as(usize, @intCast(num_srcs)), max_mix_operations);
     const srcs: [*]const openmiles.AILMIXINFO = @ptrCast(@alignCast(src.?));
 
-    var cur: [256]MixCursor = undefined;
+    var cur: [max_mix_operations]MixCursor = undefined;
     var ncur: usize = 0;
     defer for (cur[0..ncur]) |c| {
         if (c.src.owned) |o| openmiles.global_allocator.free(o);
@@ -705,7 +715,9 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
             } else if (info.bits == 8) {
                 const u8d: [*]const u8 = @ptrCast(info.data_ptr.?);
                 const total: usize = info.data_len;
-                const buf = openmiles.global_allocator.alloc(i16, total) catch break;
+                // An allocation failure drops this source only; the remaining
+                // sources must still be mixed.
+                const buf = openmiles.global_allocator.alloc(i16, total) catch continue;
                 for (0..total) |k| buf[k] = (@as(i16, u8d[k]) - 128) << 8;
                 ms.owned = buf;
                 ms.s16 = buf;
@@ -794,9 +806,12 @@ pub fn AIL_size_processed_digital_audio(dest_rate: u32, dest_format: u32, num_sr
     // 16-bit uses 2 bytes/sample, a stereo point is 2 samples. Take the largest
     // source's point count after resampling to dest_rate, then size the dest.
     const srcs: [*]const openmiles.AILMIXINFO = @ptrCast(@alignCast(sp));
+    // Same SDK cap as AIL_process_digital_audio: the caller's array is
+    // operations[num_srcs], and num_srcs is attacker-supplied.
+    const n: usize = @min(@as(usize, @intCast(num_srcs)), max_mix_operations);
     var max_points: u64 = 0;
     var i: usize = 0;
-    while (i < @as(usize, @intCast(num_srcs))) : (i += 1) {
+    while (i < n) : (i += 1) {
         const info = &srcs[i].Info;
         var points: u64 = info.data_len;
         if (info.format == 0x0011) { // WAVE_FORMAT_IMA_ADPCM
@@ -984,7 +999,7 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
         _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk_buf.ptr, chunk_frames, &fr);
         if (fr == 0) break;
         const nbytes: usize = @intCast(fr * @as(u64, bpf));
-        pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..nbytes]) catch break;
+        pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..nbytes]) catch return 0;
     }
     if (pcm.items.len == 0) return 0;
 

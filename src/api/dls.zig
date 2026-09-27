@@ -23,7 +23,13 @@ pub fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flag
         if (openmiles.fileCallbackReadAll(filename)) |b| {
             defer openmiles.global_allocator.free(b);
             const tsf_mod = openmiles.tsf;
-            const loaded = tsf_mod.tsf_load_memory(b.ptr, @intCast(@min(b.len, @as(usize, std.math.maxInt(c_int)))));
+            // tsf_load_memory takes a C `int`; see AIL_DLS_load_memory for why a
+            // buffer past that is bogus rather than something to truncate.
+            if (b.len > std.math.maxInt(c_int)) {
+                openmiles.setLastError("DLS/SoundFont file exceeds the addressable size");
+                return null;
+            }
+            const loaded = tsf_mod.tsf_load_memory(b.ptr, @intCast(b.len));
             if (loaded == null) {
                 openmiles.setLastError("Failed to load DLS/SF2 from callback");
                 return null;

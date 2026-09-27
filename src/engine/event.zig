@@ -198,7 +198,12 @@ pub const EventConstruct = struct {
     }
     fn print(self: *EventConstruct, comptime fmt: []const u8, args: anytype) void {
         var buf: [64]u8 = undefined;
-        const s = std.fmt.bufPrint(&buf, fmt, args) catch return;
+        // An overflow of the scratch buffer is a construction failure like any
+        // other: a field silently dropped would decode as garbage downstream.
+        const s = std.fmt.bufPrint(&buf, fmt, args) catch {
+            self.failed = true;
+            return;
+        };
         self.bytes.appendSlice(self.allocator, s) catch {
             self.failed = true;
         };

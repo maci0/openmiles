@@ -74,10 +74,10 @@ fn smfImageSize(data: []const u8) usize {
 const max_ptr_image_size: usize = 256 * 1024 * 1024;
 
 /// Pointer-based XMI/SMF image sizing for callers that lack an explicit length
-/// (e.g. `AIL_merge_DLS_with_XMI`). Relies on the IFF format guarantee that an
-/// `XDIR` group is always followed by its `CAT  XMID` group, so the look-ahead
-/// reads stay inside the supplied image. Header-declared extents are bounded
-/// by max_ptr_image_size; beyond it (or for unrecognized data) returns 0.
+/// (e.g. `AIL_merge_DLS_with_XMI`). Every offset is bounded by
+/// max_ptr_image_size, so a lying 32-bit size field can only make this read up
+/// to that far past the caller's buffer; beyond it (or for unrecognized data)
+/// returns 0.
 pub fn xmiImageSizePtr(raw: [*]const u8) usize {
     if (std.mem.eql(u8, raw[0..4], "MThd")) {
         const hdr_len = std.mem.readInt(u32, raw[4..8], .big);
@@ -99,8 +99,10 @@ pub fn xmiImageSizePtr(raw: [*]const u8) usize {
     var end = align2(8 +| @as(usize, form_body));
     if (end > max_ptr_image_size) return 0;
     // Only an XDIR group is guaranteed to be followed by a CAT group; a bare
-    // `FORM XMID` is the whole image, so do not read past it.
-    if (std.mem.eql(u8, raw[8..12], "XDIR") and
+    // `FORM XMID` is the whole image, so do not read past it. The 12-byte
+    // look-ahead needs the same bound as the reads above it.
+    if (end +| 12 <= max_ptr_image_size and
+        std.mem.eql(u8, raw[8..12], "XDIR") and
         std.mem.eql(u8, raw[end .. end + 4], "CAT ") and
         std.mem.eql(u8, raw[end + 8 .. end + 12], "XMID"))
     {

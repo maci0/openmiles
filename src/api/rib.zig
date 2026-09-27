@@ -419,7 +419,12 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
         var fr: u64 = 0;
         _ = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk_buf.ptr, 4096, &fr);
         if (fr == 0) break;
-        all_pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..@intCast(fr * 4)]) catch break;
+        // A partial decode must be reported as a failure, not wrapped in a WAV
+        // and handed back as a complete one.
+        all_pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..@intCast(fr * 4)]) catch {
+            openmiles.setLastError("AIL_decompress_ASI: out of memory");
+            return 0;
+        };
     }
     if (all_pcm.items.len == 0) return 0;
 

@@ -84,6 +84,10 @@ pub const LimiterNode = extern struct {
     base: ma.ma_node_base,
 
     const knee: f32 = 0.7;
+    /// ma_node_init zeroes the node allocation; this one has no state to restore.
+    pub fn postInit(node: *LimiterNode) void {
+        _ = node;
+    }
     pub fn softClip(x: f32) f32 {
         const a = @abs(x);
         if (a <= knee) return x;
@@ -122,6 +126,9 @@ pub const CompressorNode = extern struct {
     const ratio: f32 = 4.0;
     const attack: f32 = 0.25; // per-sample smoothing toward a lower gain
     const release: f32 = 0.0015; // slower recovery
+    pub fn postInit(node: *CompressorNode) void {
+        node.env = 1.0; // unity gain
+    }
     pub fn process(node: ?*ma.ma_node, ppIn: [*c][*c]const f32, pInCount: [*c]u32, ppOut: [*c][*c]f32, pOutCount: [*c]u32) callconv(.c) void {
         const self: *CompressorNode = @ptrCast(@alignCast(node.?));
         const n = @min(pInCount.*, pOutCount.*);
@@ -164,81 +171,67 @@ pub const MixBus = struct {
         ma.ma_sound_group_set_volume(&self.group, vol);
     }
 
+    /// Insert the node into the bus's single effect slot, wiring it between the
+    /// bus and the engine endpoint. No-op when the slot is already occupied.
+    fn installEffect(self: *MixBus, comptime Node: type, slot: *?*Node) void {
+        if (slot.* != null) return;
+        const eng = &self.driver.engine;
+        const node = self.driver.allocator.create(Node) catch {
+            // No error channel on this void API; say why the effect is absent
+            // or a later query will lie.
+            log("MixBus: {s} node allocation failed\n", .{@typeName(Node)});
+            return;
+        };
+        var chans = [_]u32{2};
+        var cfg = ma.ma_node_config_init();
+        cfg.vtable = &Node.vtable;
+        cfg.inputBusCount = 1;
+        cfg.outputBusCount = 1;
+        cfg.pInputChannels = &chans;
+        cfg.pOutputChannels = &chans;
+        if (ma.ma_node_init(ma.ma_engine_get_node_graph(eng), &cfg, null, @ptrCast(node)) != ma.MA_SUCCESS) {
+            self.driver.allocator.destroy(node);
+            return;
+        }
+        Node.postInit(node); // ma_node_init zeroed the allocation
+        _ = ma.ma_node_attach_output_bus(@ptrCast(node), 0, ma.ma_engine_get_endpoint(eng), 0);
+        _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, @ptrCast(node), 0);
+        slot.* = node;
+    }
+
+    /// Route the bus straight back to the endpoint, then free the node.
+    fn removeEffect(self: *MixBus, comptime Node: type, slot: *?*Node) void {
+        const node = slot.* orelse return;
+        _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, ma.ma_engine_get_endpoint(&self.driver.engine), 0);
+        ma.ma_node_uninit(@ptrCast(node), null);
+        self.driver.allocator.destroy(node);
+        slot.* = null;
+    }
+
     /// Insert (on) or remove (off) a peak limiter between this bus and the
     /// engine endpoint.
     pub fn enableLimiter(self: *MixBus, on: bool) void {
-        const eng = &self.driver.engine;
-        const endpoint = ma.ma_engine_get_endpoint(eng);
-        if (on and self.limiter == null) {
-            // One effect node per bus: tear down a compressor first, else both
-            // would attach to the same insert point and the second attach would
-            // orphan (and leak) the first while corrupting the bus routing.
-            if (self.compressor != null) self.installCompressor(false);
-            const node = self.driver.allocator.create(LimiterNode) catch {
-                // No error channel on this void API; say why the effect is absent
-                // or a later enableLimiter(true) query will lie.
-                log("MixBus.enableLimiter: node allocation failed\n", .{});
-                return;
-            };
-            var chans = [_]u32{2};
-            var cfg = ma.ma_node_config_init();
-            cfg.vtable = &LimiterNode.vtable;
-            cfg.inputBusCount = 1;
-            cfg.outputBusCount = 1;
-            cfg.pInputChannels = &chans;
-            cfg.pOutputChannels = &chans;
-            if (ma.ma_node_init(ma.ma_engine_get_node_graph(eng), &cfg, null, @ptrCast(node)) != ma.MA_SUCCESS) {
-                self.driver.allocator.destroy(node);
-                return;
-            }
-            _ = ma.ma_node_attach_output_bus(@ptrCast(node), 0, endpoint, 0);
-            _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, @ptrCast(node), 0);
-            self.limiter = node;
-        } else if (!on and self.limiter != null) {
-            // Route the bus straight back to the endpoint, then free the node.
-            _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, endpoint, 0);
-            ma.ma_node_uninit(@ptrCast(self.limiter.?), null);
-            self.driver.allocator.destroy(self.limiter.?);
-            self.limiter = null;
+        if (!on) {
+            self.removeEffect(LimiterNode, &self.limiter);
+            return;
         }
+        // One effect node per bus: tear down a compressor first, else both
+        // would attach to the same insert point and the second attach would
+        // orphan (and leak) the first while corrupting the bus routing.
+        if (self.compressor != null) self.removeEffect(CompressorNode, &self.compressor);
+        self.installEffect(LimiterNode, &self.limiter);
     }
 
     /// Install (or, with on=false, remove) a compressor between this bus and the
     /// engine endpoint. One effect node per bus; installing replaces any
     /// existing limiter on the slot.
     pub fn installCompressor(self: *MixBus, on: bool) void {
-        const eng = &self.driver.engine;
-        const endpoint = ma.ma_engine_get_endpoint(eng);
-        if (on and self.compressor == null) {
-            // One effect node per bus: tear down a limiter first so the two
-            // slots can't both point at the same insert (which would leak the
-            // displaced node and leave the bus graph in an inconsistent state).
-            if (self.limiter != null) self.enableLimiter(false);
-            const node = self.driver.allocator.create(CompressorNode) catch {
-                log("MixBus.installCompressor: node allocation failed\n", .{});
-                return;
-            };
-            var chans = [_]u32{2};
-            var cfg = ma.ma_node_config_init();
-            cfg.vtable = &CompressorNode.vtable;
-            cfg.inputBusCount = 1;
-            cfg.outputBusCount = 1;
-            cfg.pInputChannels = &chans;
-            cfg.pOutputChannels = &chans;
-            if (ma.ma_node_init(ma.ma_engine_get_node_graph(eng), &cfg, null, @ptrCast(node)) != ma.MA_SUCCESS) {
-                self.driver.allocator.destroy(node);
-                return;
-            }
-            node.env = 1.0; // ma_node_init zeroed our state; restore unity gain
-            _ = ma.ma_node_attach_output_bus(@ptrCast(node), 0, endpoint, 0);
-            _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, @ptrCast(node), 0);
-            self.compressor = node;
-        } else if (!on and self.compressor != null) {
-            _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, endpoint, 0);
-            ma.ma_node_uninit(@ptrCast(self.compressor.?), null);
-            self.driver.allocator.destroy(self.compressor.?);
-            self.compressor = null;
+        if (!on) {
+            self.removeEffect(CompressorNode, &self.compressor);
+            return;
         }
+        if (self.limiter != null) self.removeEffect(LimiterNode, &self.limiter);
+        self.installEffect(CompressorNode, &self.compressor);
     }
 
     /// Route a sample's output through this bus instead of straight to the
@@ -1003,7 +996,7 @@ pub const Sample = struct {
         const file = fs_compat.openFile(io, path, .{}) catch return error.FileNotFound;
         defer file.close(io);
         const file_len = file.length(io) catch return error.FileNotFound;
-        if (file_len == 0) return error.FileNotFound;
+        if (file_len == 0 or file_len > root.max_file_load_bytes) return error.FileNotFound;
         const size: usize = @intCast(file_len);
         const buf = try self.driver.allocator.alloc(u8, size);
         errdefer self.driver.allocator.free(buf);
