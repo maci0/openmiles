@@ -155,27 +155,70 @@ var g_next_id: u64 = 1;
 // purge_sounds("KICK") unable to remove a cached "kick": the entry survived its
 // own invalidation, so LoadedSoundCount never fell and the name was never
 // freed.
-var g_cached: std.ArrayListUnmanaged([:0]u8) = .empty;
 
-fn cacheIndexOf(name: []const u8) ?usize {
-    for (g_cached.items, 0..) |n, i| {
-        if (std.ascii.eqlIgnoreCase(n, name)) return i;
+// Every name-keyed registry in this file keys a hash map on the lowercased
+// name and owns the key, so a name match is a hash lookup rather than a scan
+// with a case-insensitive compare per entry. Same shape as the bank's name
+// index (soundbank.zig), which resolves event and sound names the same way.
+
+// A case-lowercased probe key, in a stack buffer when the name fits (the
+// common case, no allocation) and on the heap otherwise. Same shape as the
+// bank's index probe. Filled in place: `key` points into the NameKey, so the
+// NameKey has to outlive the probe, not be returned by value.
+const NameKey = struct {
+    buf: [128]u8 = undefined,
+    key: []const u8 = "",
+    heap: ?[]u8 = null,
+
+    fn init(self: *NameKey, name: []const u8) void {
+        self.* = .{};
+        if (name.len < self.buf.len) {
+            for (name, 0..) |c, i| self.buf[i] = std.ascii.toLower(c);
+            self.key = self.buf[0..name.len];
+            return;
+        }
+        // Too long to probe from the stack. A failed copy leaves the key empty,
+        // so the name reads as absent: the same direction a failed insert takes.
+        const dup = openmiles.global_allocator.alloc(u8, name.len) catch return;
+        for (name, 0..) |c, i| dup[i] = std.ascii.toLower(c);
+        self.heap = dup;
+        self.key = dup;
     }
-    return null;
+
+    fn deinit(self: *NameKey) void {
+        if (self.heap) |h| openmiles.global_allocator.free(h);
+    }
+};
+
+/// An owned lowercased copy of `name`, for a registry key.
+fn lowerDupe(name: []const u8) ?[]u8 {
+    const dup = openmiles.global_allocator.alloc(u8, name.len) catch return null;
+    for (name, 0..) |c, i| dup[i] = std.ascii.toLower(c);
+    return dup;
 }
+
+var g_cached: std.StringHashMapUnmanaged(void) = .empty;
+
 fn cacheAdd(name: []const u8) void {
-    if (name.len == 0 or cacheIndexOf(name) != null) return;
-    const dup = openmiles.global_allocator.dupeZ(u8, name) catch return;
-    g_cached.append(openmiles.global_allocator, dup) catch openmiles.global_allocator.free(dup);
+    if (name.len == 0) return;
+    var probe: NameKey = undefined;
+    probe.init(name);
+    defer probe.deinit();
+    if (g_cached.contains(probe.key)) return;
+    const key = lowerDupe(name) orelse return;
+    g_cached.put(openmiles.global_allocator, key, {}) catch openmiles.global_allocator.free(key);
 }
 fn cacheRemove(name: []const u8) void {
-    if (cacheIndexOf(name)) |i| {
-        openmiles.global_allocator.free(g_cached.swapRemove(i));
+    var probe: NameKey = undefined;
+    probe.init(name);
+    defer probe.deinit();
+    if (g_cached.fetchRemove(probe.key)) |kv| {
+        openmiles.global_allocator.free(kv.key);
     }
 }
 fn cacheClear() void {
-    for (g_cached.items) |n| openmiles.global_allocator.free(n);
-    g_cached.clearRetainingCapacity();
+    g_cached.deinit(openmiles.global_allocator);
+    g_cached = .empty;
 }
 
 // Persisted presets (persist event steps); enumerated by MilesEnumeratePresetPersists
@@ -198,12 +241,15 @@ fn persistClear() void {
 // Per-label concurrent-sound caps (MilesSetSoundLabelLimits / set_limits steps).
 // Format: "label count:label2 count2" (mss.h). A new sound must fit under the cap
 // of every label it carries; the oldest matching instance is evicted to make room.
-const Limit = struct { label: [:0]u8, count: u32 };
-var g_limits: std.ArrayListUnmanaged(Limit) = .empty;
+// Keyed on the lowercased label (see NameKey); the count is the value, so the
+// label is stored once, as the key the map owns.
+var g_limits: std.StringHashMapUnmanaged(u32) = .empty;
 
 fn limitsClear() void {
-    for (g_limits.items) |l| openmiles.global_allocator.free(l.label);
-    g_limits.clearRetainingCapacity();
+    var it = g_limits.keyIterator();
+    while (it.next()) |k| openmiles.global_allocator.free(k.*);
+    g_limits.deinit(openmiles.global_allocator);
+    g_limits = .empty;
 }
 fn setLimits(limits_str: []const u8) void {
     limitsClear();
@@ -213,15 +259,15 @@ fn setLimits(limits_str: []const u8) void {
         const label = pit.next() orelse continue;
         const count_s = pit.next() orelse continue;
         const count = std.fmt.parseInt(u32, count_s, 10) catch continue;
-        const dup = openmiles.global_allocator.dupeZ(u8, label) catch continue;
-        g_limits.append(openmiles.global_allocator, .{ .label = dup, .count = count }) catch openmiles.global_allocator.free(dup);
+        const key = lowerDupe(label) orelse continue;
+        g_limits.put(openmiles.global_allocator, key, count) catch openmiles.global_allocator.free(key);
     }
 }
 fn limitFor(label: []const u8) ?u32 {
-    for (g_limits.items) |l| {
-        if (std.ascii.eqlIgnoreCase(l.label, label)) return l.count;
-    }
-    return null;
+    var probe: NameKey = undefined;
+    probe.init(label);
+    defer probe.deinit();
+    return g_limits.get(probe.key);
 }
 fn instanceHasLabel(inst: *const SoundInstance, label: []const u8) bool {
     var lit = std.mem.tokenizeAny(u8, inst.labels, ", ");
@@ -403,17 +449,22 @@ fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: 
     return qid;
 }
 
+// One event variable. The name is the map key, lowercased and owned by the
+// table, so a get or set is a hash lookup however many variables a game's
+// event script declares; the previous linked list scanned the whole table,
+// with a case-insensitive compare per node, on every read and write.
 const Var = struct {
-    next: ?*Var = null,
-    name: []u8,
     is_float: bool,
     i: i32 = 0,
     f: f32 = 0,
 };
 
+// The variables of one event system, keyed on the lowercased name.
+const VarTable = std.StringHashMapUnmanaged(Var);
+
 const EventSystem = struct {
     next: ?*EventSystem = null,
-    vars: ?*Var = null,
+    vars: VarTable = .empty,
     driver: ?*anyopaque = null,
     command_buffer_size: i32 = 0,
 };
@@ -435,53 +486,41 @@ fn resolveSystem(ctx: usize) ?*EventSystem {
 }
 
 fn setVar(sys: *EventSystem, name: [*:0]const u8, is_float: bool, ival: i32, fval: f32) void {
-    const key = std.mem.span(name);
-    var v = sys.vars;
-    while (v) |vd| : (v = vd.next) {
-        if (std.ascii.eqlIgnoreCase(vd.name, key)) {
-            vd.is_float = is_float;
-            vd.i = ival;
-            vd.f = fval;
-            return;
-        }
-    }
-    const dup = openmiles.global_allocator.dupe(u8, key) catch return;
-    const nv = openmiles.global_allocator.create(Var) catch {
-        openmiles.global_allocator.free(dup);
+    const value: Var = .{ .is_float = is_float, .i = ival, .f = fval };
+    var probe: NameKey = undefined;
+    probe.init(std.mem.span(name));
+    defer probe.deinit();
+    if (sys.vars.getPtr(probe.key)) |slot| {
+        slot.* = value;
         return;
-    };
-    nv.* = .{ .next = sys.vars, .name = dup, .is_float = is_float, .i = ival, .f = fval };
-    sys.vars = nv;
+    }
+    // Not a name already in the table (the case-blind probe above would have
+    // found it), so the key is a copy the table owns.
+    const key = lowerDupe(probe.key) orelse return;
+    sys.vars.put(openmiles.global_allocator, key, value) catch openmiles.global_allocator.free(key);
 }
 
 fn getVar(ctx: usize, name: [*:0]const u8, is_float: bool, out: *anyopaque) i32 {
     const sys = resolveSystem(ctx) orelse return 0;
-    const key = std.mem.span(name);
-    var v = sys.vars;
-    while (v) |vd| : (v = vd.next) {
-        if (std.ascii.eqlIgnoreCase(vd.name, key)) {
-            if (vd.is_float != is_float) return 0;
-            if (is_float) {
-                const o: *f32 = @ptrCast(@alignCast(out));
-                o.* = vd.f;
-            } else {
-                const o: *i32 = @ptrCast(@alignCast(out));
-                o.* = vd.i;
-            }
-            return 1;
-        }
+    var probe: NameKey = undefined;
+    probe.init(std.mem.span(name));
+    defer probe.deinit();
+    const vd = sys.vars.get(probe.key) orelse return 0;
+    if (vd.is_float != is_float) return 0;
+    if (is_float) {
+        const o: *f32 = @ptrCast(@alignCast(out));
+        o.* = vd.f;
+    } else {
+        const o: *i32 = @ptrCast(@alignCast(out));
+        o.* = vd.i;
     }
-    return 0;
+    return 1;
 }
 
 fn freeSystem(sys: *EventSystem) void {
-    var v = sys.vars;
-    while (v) |vd| {
-        const nxt = vd.next;
-        openmiles.global_allocator.free(vd.name);
-        openmiles.global_allocator.destroy(vd);
-        v = nxt;
-    }
+    var it = sys.vars.keyIterator();
+    while (it.next()) |k| openmiles.global_allocator.free(k.*);
+    sys.vars.deinit(openmiles.global_allocator);
     openmiles.global_allocator.destroy(sys);
 }
 
@@ -537,7 +576,7 @@ pub fn MilesGetEventSystemState(system: ?*anyopaque, state: ?*MILESEVENTSTATE) c
     const o = state orelse return;
     o.* = std.mem.zeroes(MILESEVENTSTATE);
     o.LoadedBankCount = @intCast(openmiles.soundbank.loadedCount());
-    o.LoadedSoundCount = @intCast(g_cached.items.len);
+    o.LoadedSoundCount = @intCast(g_cached.count());
     o.PersistCount = @intCast(g_persists.items.len);
     updateInstances();
     for (g_instances.items) |inst| {
@@ -765,7 +804,7 @@ pub fn MilesTextDumpEventSystem() callconv(.winapi) ?[*:0]u8 {
     var buf: [512]u8 = undefined;
     const text = std.fmt.bufPrint(&buf, "Event System Count: {d}\nSystem #1\nSound Source Count: {d}\nSound Instance Count: {d}\nPersistent Preset Count: {d}\nLoaded Bank Count: {d}\n", .{
         sys_count,
-        g_cached.items.len,
+        g_cached.count(),
         g_instances.items.len,
         g_persists.items.len,
         openmiles.soundbank.loadedCount(),

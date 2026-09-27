@@ -6302,6 +6302,53 @@ test "Miles event-system variables roundtrip on default and named systems" {
     try testing.expectEqual(@as(i32, 7), iv);
 }
 
+// bufPrint leaves the buffer unterminated; the AIL_* calls take C strings.
+fn zprint(buf: []u8, comptime fmt: []const u8, args: anytype) [:0]const u8 {
+    const written = std.fmt.bufPrint(buf, fmt, args) catch unreachable;
+    buf[written.len] = 0;
+    return buf[0..written.len :0];
+}
+
+test "Miles event variables hold a long name and many entries" {
+    // The variable table is keyed on a lowercased name held in a fixed stack
+    // buffer, so a name longer than that buffer has to be found on the heap
+    // and still match case-insensitively, and a table with many entries has to
+    // return the right one for each of them.
+    const sys = api_miles_t.MilesStartupEventSystem(null, 0, null, 0);
+    defer api_miles_t.MilesShutdownEventSystem();
+    try testing.expect(sys != null);
+
+    // A name past the 128-byte stack buffer the key probe holds it in, so the
+    // table has to keep the name on the heap and still match it case-blind.
+    const long_name = "var" ++ ("x" ** 200) ++ "end";
+    var long_buf: [long_name.len + 1]u8 = undefined;
+    for (long_name, 0..) |c, i| long_buf[i] = c;
+    long_buf[long_name.len] = 0;
+    const long_z: [:0]const u8 = long_buf[0..long_name.len :0];
+
+    api_miles_t.MilesSetVarI(0, long_z, 5);
+    var iv: i32 = 0;
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesGetVarI(0, long_z, &iv));
+    try testing.expectEqual(@as(i32, 5), iv);
+
+    var up_buf: [long_name.len + 1]u8 = undefined;
+    for (long_name, 0..) |c, i| up_buf[i] = std.ascii.toUpper(c);
+    up_buf[long_name.len] = 0;
+    const upper: [:0]const u8 = up_buf[0..long_name.len :0];
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesGetVarI(0, upper, &iv));
+
+    var buf: [32]u8 = undefined;
+    for (0..64) |n| {
+        const name = zprint(&buf, "v{d}", .{n});
+        api_miles_t.MilesSetVarI(0, name, @intCast(n));
+    }
+    for (0..64) |n| {
+        const name = zprint(&buf, "V{d}", .{n});
+        try testing.expectEqual(@as(i32, 1), api_miles_t.MilesGetVarI(0, name, &iv));
+        try testing.expectEqual(@as(i32, @intCast(n)), iv);
+    }
+}
+
 test "Miles empty-state queries return documented empty values" {
     _ = api_miles_t.MilesStartupEventSystem(null, 256, null, 0);
     defer api_miles_t.MilesShutdownEventSystem();
