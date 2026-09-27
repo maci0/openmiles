@@ -697,11 +697,23 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
     const n: usize = @min(@as(usize, @intCast(num_srcs)), max_mix_operations);
     const srcs: [*]const openmiles.AILMIXINFO = @ptrCast(@alignCast(src.?));
 
-    var cur: [max_mix_operations]MixCursor = undefined;
-    var ncur: usize = 0;
-    defer for (cur[0..ncur]) |c| {
-        if (c.src.owned) |o| openmiles.global_allocator.free(o);
-    };
+    // Cursors are partitioned by channel count at build time: the mix loop is
+    // per output frame over every source, and a mono/stereo test inside it
+    // kept the accumulation scalar and branchy. Each partition also drops
+    // exhausted cursors (pos only grows) instead of re-testing them every
+    // frame.
+    var stereo: [max_mix_operations]MixCursor = undefined;
+    var nstereo: usize = 0;
+    var mono: [max_mix_operations]MixCursor = undefined;
+    var nmono: usize = 0;
+    defer {
+        for (stereo[0..nstereo]) |c| {
+            if (c.src.owned) |o| openmiles.global_allocator.free(o);
+        }
+        for (mono[0..nmono]) |c| {
+            if (c.src.owned) |o| openmiles.global_allocator.free(o);
+        }
+    }
 
     var max_points: u64 = 0;
     var i: usize = 0;
@@ -734,8 +746,14 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
             if (ms.owned) |owned| openmiles.global_allocator.free(owned);
             continue;
         }
-        cur[ncur] = .{ .src = ms, .step_q = ms.rate / dest_rate, .step_r = ms.rate % dest_rate };
-        ncur += 1;
+        const cursor: MixCursor = .{ .src = ms, .step_q = ms.rate / dest_rate, .step_r = ms.rate % dest_rate };
+        if (ms.channels == 2) {
+            stereo[nstereo] = cursor;
+            nstereo += 1;
+        } else {
+            mono[nmono] = cursor;
+            nmono += 1;
+        }
         const pts: u64 = @as(u64, ms.points) *| dest_rate / ms.rate;
         if (pts > max_points) max_points = pts;
     }
@@ -753,19 +771,19 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
     while (j < dest_points) : (j += 1) {
         var accL: i32 = 0;
         var accR: i32 = 0;
-        for (cur[0..ncur]) |*c| {
-            // Exhausted sources stay exhausted (pos only grows), so they can
-            // stop advancing entirely.
-            if (c.pos >= c.src.points) continue;
-            const spi: usize = @intCast(c.pos);
-            if (c.src.channels == 2) {
-                accL += c.src.s16[spi * 2];
-                accR += c.src.s16[spi * 2 + 1];
-            } else {
-                const v: i32 = c.src.s16[spi];
-                accL += v;
-                accR += v;
+        var si: usize = 0;
+        while (si < nstereo) {
+            const c = &stereo[si];
+            // Exhausted sources stay exhausted (pos only grows), so they are
+            // dropped from the partition instead of being re-tested each frame.
+            if (c.pos >= c.src.points) {
+                nstereo -= 1;
+                stereo[si] = stereo[nstereo];
+                continue;
             }
+            const spi: usize = @intCast(c.pos);
+            accL += c.src.s16[spi * 2];
+            accR += c.src.s16[spi * 2 + 1];
             // Advance pos from frame j's position floor(j*rate/dest_rate) to
             // frame j+1's: add the whole-point quotient, plus one more when
             // the carried remainder crosses dest_rate.
@@ -775,6 +793,26 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
                 c.rem -= dest_rate;
                 c.pos += 1;
             }
+            si += 1;
+        }
+        var mi: usize = 0;
+        while (mi < nmono) {
+            const c = &mono[mi];
+            if (c.pos >= c.src.points) {
+                nmono -= 1;
+                mono[mi] = mono[nmono];
+                continue;
+            }
+            const v: i32 = c.src.s16[@intCast(c.pos)];
+            accL += v;
+            accR += v;
+            c.pos += c.step_q;
+            c.rem += c.step_r;
+            if (c.rem >= dest_rate) {
+                c.rem -= dest_rate;
+                c.pos += 1;
+            }
+            mi += 1;
         }
         const L: i32 = std.math.clamp(accL, -32768, 32767);
         const R: i32 = std.math.clamp(accR, -32768, 32767);

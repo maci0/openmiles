@@ -709,6 +709,13 @@ pub fn unregisterDriver(driver: *DigitalDriver) void {
 }
 
 pub fn isKnownDriver(ptr: *anyopaque) bool {
+    // Fast path: the current driver is always in the table (it is registered
+    // before it is published, and unregisterDriver runs after
+    // clearLastDigitalDriver), so the per-frame 3D setters can dispatch on an
+    // atomic load instead of taking the table mutex and walking it.
+    if (lastDigitalDriver()) |d| {
+        if (@as(*anyopaque, @ptrCast(d)) == ptr) return true;
+    }
     driver_table_mutex.lockUncancelable(io);
     defer driver_table_mutex.unlock(io);
     for (known_drivers.items) |d| {
