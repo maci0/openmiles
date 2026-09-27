@@ -244,7 +244,10 @@ An unmodified game already ships its own `mss.h` and needs none of this. If
 you are calling the API from new code, `src/mss.h` declares the core surface.
 Set `OPENMILES_MSS_VERSION` to the build you linked (default `90`, the build
 `zig build` produces); the header only declares what that build exports, so a
-mismatched version fails at compile time instead of at link time.
+mismatched version fails at compile time instead of at link time. The valid
+values are 30, 40, 50, 60, 61, 65, 66, 70, 80, and 90 (`major*10+minor`); any
+other value is rejected by `#error` rather than read as "at least this
+version", which would silently select a declaration set no release has.
 
 ```c
 #define OPENMILES_MSS_VERSION 90
@@ -334,7 +337,7 @@ Set `OPENMILES_DEBUG=1` in your environment to enable verbose logging to `openmi
 OPENMILES_DEBUG=1 wine YourGame.exe
 ```
 
-Debug builds enable logging by default; set `OPENMILES_DEBUG=0` to turn it off. Release builds log only when `OPENMILES_DEBUG` names a true value (`1`, `true`, `yes`, or `on`). The on-disk log is capped at 64 MiB per process to prevent unbounded growth.
+Debug builds enable logging by default; set `OPENMILES_DEBUG=0` to turn it off. Release builds log only when `OPENMILES_DEBUG` names a true value (`1`, `true`, `yes`, or `on`). The on-disk log is capped at 64 MiB per process to prevent unbounded growth. Its first line is the effective configuration, naming whether `OPENMILES_DEBUG` or the build default decided it, so a log that never appears reads back as a configuration answer.
 
 ## Architecture
 

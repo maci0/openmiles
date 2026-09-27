@@ -18,6 +18,7 @@ var log_offset: u64 = 0;
 var initialized = false;
 var config_logged = false;
 var debug_enabled = false;
+var debug_source: []const u8 = "the build default";
 var mutex: std.Io.Mutex = .init;
 
 // The W (UTF-16) entry points, not the A ones: the value of a UTF-8 env var
@@ -44,6 +45,10 @@ fn parseDebugFlag(value: []const u8) ?bool {
 fn applyDebugEnvValue(value: []const u8) void {
     if (parseDebugFlag(value)) |enabled| {
         debug_enabled = enabled;
+        // The config line below names where the value came from, so a log
+        // that says "off" is readable as "the environment asked for off" and
+        // not as "nothing asked for anything".
+        debug_source = "OPENMILES_DEBUG";
         return;
     }
     // stderr, not log(): the log is what the operator was trying to turn on,
@@ -67,6 +72,7 @@ pub fn init() void {
     // max_log_bytes on every run and floods the test output. OPENMILES_DEBUG
     // still turns it on for whichever run wants the trace.
     debug_enabled = builtin.mode == .Debug and build_options.log_by_default;
+    debug_source = "the build default";
 
     if (builtin.os.tag == .windows) {
         // The UTF-8 destination is sized in bytes from the unit count: a value
@@ -121,12 +127,15 @@ pub fn deinit() void {
 }
 
 /// Record the effective configuration once per init, so a log that opens can be
-/// read back as "logging is on, from the build mode, into this file" without
-/// the reader having to know the variable that asked for it.
+/// read back as "logging is on or off, from the build default or from
+/// OPENMILES_DEBUG, into this file" without the reader having to know the
+/// variable that asked for it.
 fn logConfigOnce() void {
     if (@atomicLoad(bool, &config_logged, .acquire)) return;
     @atomicStore(bool, &config_logged, true, .release);
-    log("openmiles: debug log on ({s} build, default {s}), appending to openmiles.log in the current directory, cap {d} bytes\n", .{
+    log("openmiles: debug log {s}, enabled by {s} ({s} build, default {s}), appending to openmiles.log in the current directory, cap {d} bytes\n", .{
+        if (debug_enabled) "on" else "off",
+        debug_source,
         @tagName(builtin.mode),
         if (build_options.log_by_default) "on" else "off",
         max_log_bytes,

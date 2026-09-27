@@ -41,8 +41,15 @@ MAIN_ZIG = ROOT / "src" / "main.zig"
 MSS_H = ROOT / "src" / "mss.h"
 ROOT_ZIG = ROOT / "src" / "root.zig"
 
-# Every value -Dmss-version accepts, encoded as major*10+minor.
+# Every value -Dmss-version accepts, encoded as major*10+minor. The list
+# mss.h validates OPENMILES_MSS_VERSION against, so a version added to one and
+# not the other is caught by compile_problems rather than by a caller.
 SUPPORTED_VERSIONS = [30, 40, 50, 60, 61, 65, 66, 70, 80, 90]
+
+# Values a consumer can plausibly write that name no build: a minor release
+# that does not exist, a version past the newest, an uninitialized define
+# reading as 0. Each must fail to compile, not resolve a declaration set.
+UNSUPPORTED_VERSIONS = [0, 45, 62, 91, 100]
 
 # The encoding of 8.0: the first release that drops the symbols in
 # REMOVED_AT_80 and switches MSS_RIB_CALL to __cdecl.
@@ -474,6 +481,13 @@ def compile_problems():
     The version guards are ten different preprocessed headers, so all ten are
     compiled: `zig cc` is already the toolchain this project requires, and
     compiling to an object file needs no DLL to link against.
+
+    The same compile runs the other way for values no -Dmss-version build
+    produces. Every guard in the header compares the version with >= or <, so
+    an unsupported one selects a declaration set belonging to no release and
+    reaches the caller as a link error (or, worse, a struct layout the header
+    misdescribes). mss.h rejects those with #error, and SUPPORTED_VERSIONS is
+    the list it names, so a version added to one and not the other fails here.
     """
     problems = []
     # `make check-toolchain` owns the version; this only needs the binary, and
@@ -495,47 +509,66 @@ def compile_problems():
                 f'#include "{MSS_H}"\n'
                 "int main(void) { return 0; }\n"
             )
-            # S603: a fixed argv list with no shell, built here rather than from
-            # input, running the zig resolved above. The only path handed to it
-            # is the temp file this function just wrote; nothing from the
-            # repository reaches argv.
-            #
-            # The warning set is the one c_flags carries in build.zig, so a
-            # construct the build would reject fails here too. A copy, not a
-            # source of truth: build.zig owns the list, and
-            # scripts/check_toolchain_pins.py asserts the two agree.
-            proc = subprocess.run(  # noqa: S603
-                [
-                    zig,
-                    "cc",
-                    "-c",
-                    "-std=c99",
-                    "-Wall",
-                    "-Wextra",
-                    "-Werror",
-                    "-Wpedantic",
-                    "-Wno-c11-extensions",
-                    "-Wshadow",
-                    "-Wstrict-prototypes",
-                    "-Wold-style-definition",
-                    "-Wvla",
-                    "-Wformat=2",
-                    "-Wno-format-nonliteral",
-                    "-Wwrite-strings",
-                    str(tu),
-                    "-o",
-                    str(Path(tmp) / "header_check.o"),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            proc = compile_header(zig, tu, tmp)
         if proc.returncode != 0:
             problems.append(
                 f"v{version} COMPILE    mss.h does not compile as C99: "
                 + " ".join(proc.stderr.split())[:400]
             )
+    for version in UNSUPPORTED_VERSIONS:
+        with tempfile.TemporaryDirectory() as tmp:
+            tu = Path(tmp) / "header_check.c"
+            tu.write_text(
+                f"#define OPENMILES_MSS_VERSION {version}\n"
+                f'#include "{MSS_H}"\n'
+                "int main(void) { return 0; }\n"
+            )
+            proc = compile_header(zig, tu, tmp)
+        if proc.returncode == 0:
+            problems.append(
+                f"v{version} COMPILE    mss.h accepts OPENMILES_MSS_VERSION="
+                f"{version}, which names no -Dmss-version build; the guards "
+                "pick a declaration set belonging to no release instead of "
+                "rejecting it"
+            )
     return problems
+
+
+# S603: a fixed argv list with no shell, built here rather than from input,
+# running the zig resolved by the caller. The only path handed to it is the
+# temp file compile_problems just wrote; nothing from the repository reaches
+# argv.
+#
+# The warning set is the one c_flags carries in build.zig, so a construct the
+# build would reject fails here too. A copy, not a source of truth: build.zig
+# owns the list, and scripts/check_toolchain_pins.py asserts the two agree.
+def compile_header(zig, tu, out_dir):
+    return subprocess.run(  # noqa: S603
+        [
+            zig,
+            "cc",
+            "-c",
+            "-std=c99",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-Wpedantic",
+            "-Wno-c11-extensions",
+            "-Wshadow",
+            "-Wstrict-prototypes",
+            "-Wold-style-definition",
+            "-Wvla",
+            "-Wformat=2",
+            "-Wno-format-nonliteral",
+            "-Wwrite-strings",
+            str(tu),
+            "-o",
+            str(Path(out_dir) / "header_check.o"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def main():

@@ -1,16 +1,41 @@
 const std = @import("std");
 
+/// Every -Dmss-version value, in the order the help text and the rejection
+/// message list them. The encoded column is the packed major*10+minor form a
+/// caller passes to src/mss.h as OPENMILES_MSS_VERSION; it is spelled out
+/// rather than computed because a computed message is a build failure to
+/// reproduce, and the list is short enough to read as a table.
+const mss_version_map = [_]struct { k: []const u8, v: u16 }{
+    .{ .k = "3", .v = 30 },   .{ .k = "4", .v = 40 },
+    .{ .k = "5", .v = 50 },   .{ .k = "6", .v = 66 },
+    .{ .k = "6.0", .v = 60 }, .{ .k = "6.1", .v = 61 },
+    .{ .k = "6.5", .v = 65 }, .{ .k = "6.6", .v = 66 },
+    .{ .k = "7", .v = 70 },   .{ .k = "8", .v = 80 },
+    .{ .k = "9", .v = 90 },
+};
+
+/// The accepted values as one comma-separated string, derived from the map so
+/// the help text and the rejection message cannot name a different set. The
+/// buffer is a global const rather than a comptime var because a slice that
+/// points into a comptime var is not allowed at container scope.
+const mss_version_help_buf: [mss_version_map.len * 8]u8 = blk: {
+    var buf: [mss_version_map.len * 8]u8 = [_]u8{0} ** (mss_version_map.len * 8);
+    var n: usize = 0;
+    for (mss_version_map, 0..) |m, i| {
+        if (i != 0) {
+            buf[n] = ',';
+            n += 1;
+        }
+        @memcpy(buf[n..][0..m.k.len], m.k);
+        n += m.k.len;
+    }
+    break :blk buf;
+};
+const mss_version_help: []const u8 = std.mem.trimEnd(u8, mss_version_help_buf[0..], "\x00");
+
 /// Map an MSS version string to the packed major*10+minor encoding.
 fn parseMssVersion(s: []const u8) ?u16 {
-    const map = [_]struct { k: []const u8, v: u16 }{
-        .{ .k = "3", .v = 30 },   .{ .k = "4", .v = 40 },
-        .{ .k = "5", .v = 50 },   .{ .k = "6", .v = 66 },
-        .{ .k = "6.0", .v = 60 }, .{ .k = "6.1", .v = 61 },
-        .{ .k = "6.5", .v = 65 }, .{ .k = "6.6", .v = 66 },
-        .{ .k = "7", .v = 70 },   .{ .k = "8", .v = 80 },
-        .{ .k = "9", .v = 90 },
-    };
-    for (map) |m| {
+    for (mss_version_map) |m| {
         if (std.mem.eql(u8, s, m.k)) return m.v;
     }
     return null;
@@ -108,10 +133,14 @@ pub fn build(b: *std.Build) void {
     // DLL is ABI-shaped like a specific Miles release. Encoded major*10+minor:
     // 30=3.x, 40=4.x, 50=5.x, 60=6.0, 61=6.1, 65=6.5, 66=6.6, 70=7.x, 80=8.x,
     // 90=9.x (default 9, the newest).
-    const mss_version_str = b.option([]const u8, "mss-version", "Target MSS version (3,4,5,6,6.0,6.1,6.5,6.6,7,8,9)") orelse "9";
+    // The accepted values are listed once, in mss_version_map, and rendered
+    // from it for both the --help text and the rejection message. A version
+    // that could be added to the map without either of those naming it is a
+    // typo reported against a stale list.
+    const mss_version_str = b.option([]const u8, "mss-version", b.fmt("Target MSS version ({s})", .{mss_version_help})) orelse "9";
     const mss_version: u16 = parseMssVersion(mss_version_str) orelse {
         std.debug.print("error: invalid -Dmss-version='{s}'\n", .{mss_version_str});
-        std.debug.print("       valid values: 3,4,5,6,6.0,6.1,6.5,6.6,7,8,9\n", .{});
+        std.debug.print("       valid values: {s}\n", .{mss_version_help});
         std.process.exit(2);
     };
     // Run only the tests whose name contains this substring. The full suite

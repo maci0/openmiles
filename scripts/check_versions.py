@@ -3,10 +3,12 @@
 
 The export table is the whole consumer contract: a game links mss32.dll by
 import name, so a select that ships without being diffed against a real Miles
-DLL is a select nobody has checked. Three places have to agree on which
+DLL is a select nobody has checked. Four places have to agree on which
 selects exist and which of them are swept:
 
   build.zig               parseMssVersion: the values `-Dmss-version` accepts
+  src/mss.h               the #error listing the values OPENMILES_MSS_VERSION
+                          accepts, which is what rejects the rest at compile time
   scripts/check_header.py SUPPORTED_VERSIONS: the header resolves its guards for
   scripts/check_all_versions.sh VERSIONS / UNSWEPT: the export-parity sweep
 
@@ -16,6 +18,7 @@ Reported per value:
   UNGUARDED  an accepted value the header checker does not resolve
   UNSWEPT    an accepted value with no reference DLL, or a reference entry
              with no reason beside it
+  CONFLICT   two of the four lists disagree
 
 Exit code 0 when every accepted value is either swept against a reference DLL
 or declared unswept with a reason.
@@ -29,6 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BUILD_ZIG = ROOT / "build.zig"
 CHECK_HEADER = ROOT / "scripts" / "check_header.py"
+MSS_H = ROOT / "src" / "mss.h"
 CHECK_ALL_VERSIONS = ROOT / "scripts" / "check_all_versions.sh"
 
 # .k = "<name>", .v = <encoded>, the last field of each entry line.
@@ -84,6 +88,22 @@ def parse_script_entries(text: str, name: str) -> dict[str, str | None]:
     return entries
 
 
+def parse_header_error_versions(text: str) -> set[int]:
+    """The encoded values src/mss.h's #error names in its rejection message.
+
+    mss.h validates OPENMILES_MSS_VERSION against a list spelled out in the
+    #error text, because a preprocessor cannot loop over it. That makes the
+    message a third place the accepted set is written down; this reads it back
+    so a version added to the map and dropped from the header is a reported
+    problem rather than a consumer's compile error.
+    """
+    match = re.search(r'#error\s+"OPENMILES_MSS_VERSION must be one of ([\d,\s]+?)\s*\(', text)
+    if not match:
+        msg = "no OPENMILES_MSS_VERSION #error in src/mss.h"
+        raise ValueError(msg)
+    return {int(v) for v in re.findall(r"\d+", match.group(1))}
+
+
 def main():
     argparse.ArgumentParser(
         prog="check_versions.py",
@@ -94,11 +114,19 @@ def main():
 
     build_versions = parse_build_versions(BUILD_ZIG.read_text())
     header_versions = parse_header_versions(CHECK_HEADER.read_text())
+    header_error_versions = parse_header_error_versions(MSS_H.read_text())
     sweep_text = CHECK_ALL_VERSIONS.read_text()
     swept = set(parse_script_entries(sweep_text, "VERSIONS"))
     unswept = parse_script_entries(sweep_text, "UNSWEPT")
 
     problems = []
+
+    if header_error_versions != header_versions:
+        problems.append(
+            "CONFLICT   mss.h rejects "
+            f"{sorted(header_error_versions)} but check_header.py resolves "
+            f"{sorted(header_versions)}; the two must be the same set"
+        )
 
     problems += [
         f"UNKNOWN    {name}: swept but -Dmss-version does not accept it"

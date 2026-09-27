@@ -24,7 +24,7 @@ to set both.
 
 | # | Threat | Boundary | Impact | Status |
 |---|--------|----------|--------|--------|
-| 1 | Untrusted plugin image written to the temp directory and `LoadLibrary`'d | file/env to process | Code execution as the game user | Mitigated: unpredictable name, exclusive create (`src/api/rib.zig:220 randomSecure`, `src/api/rib.zig:214 exclusive`) |
+| 1 | Untrusted plugin image written to the temp directory and `LoadLibrary`'d | file/env to process | Code execution as the game user | Mitigated: unpredictable name, exclusive create (`src/api/rib.zig:220 randomSecure`, `src/api/rib.zig:240 exclusive`) |
 | 2 | `.asi`/`.m3d`/`.flt` files in the game directory, or in a game-named redist directory, loaded and executed at startup | file to process | Code execution as the game user | Unmitigated by design: the host game's own directory is trusted. Listed in [Deployment](#4-deployment-artifact-boundary) |
 | 3 | A plugin image parsed by the ELF fixup on a static-musl Linux build (`applyElfFixups`) | file to process | Crash, in-process memory corruption | Partial: program header table and `DT_RELA` slots bounded in `u64`/image space (`src/utils/dynlib.zig:58 programHeaderTableFits`) |
 | 4 | `AIL_WAV_file_write` creates or truncates a game-named path | game to DLL, DLL to disk | Overwrite of any file the game user can write | Unmitigated by ABI necessity (`src/api/digital.zig:943 AIL_WAV_file_write`) |
@@ -105,14 +105,14 @@ Two environment variables are read, both through the process environment rather
 than any validated config file. Both values are checked before use, and a
 rejected one is reported on stderr with the reason.
 
-- `OPENMILES_DEBUG` (`src/utils/logger.zig:82 GetEnvironmentVariableW`):
+- `OPENMILES_DEBUG` (`src/utils/logger.zig:88 GetEnvironmentVariableW`):
   enables verbose logging to `openmiles.log` in the current directory, capped at
   64 MiB (`src/utils/logger.zig:14 max_log_bytes`). Debug builds enable it by
-  default (`src/utils/logger.zig:69 builtin.mode`), so a debug build in a shared
+  default (`src/utils/logger.zig:74 builtin.mode`), so a debug build in a shared
   directory discloses asset names, file paths, and internal state to any local
   user who can read the file. A value outside the documented set is refused
   rather than read as off, so a typo cannot silently suppress the only trace a
-  failure leaves (`src/utils/logger.zig:34 parseDebugFlag`).
+  failure leaves (`src/utils/logger.zig:35 parseDebugFlag`).
 - `TMPDIR` (`src/api/rib.zig:143 TMPDIR`): the non-Windows directory the
   in-memory ASI image is written to. Any process that can set the game
   process's environment chooses where a PE image is written and loaded from.
@@ -182,7 +182,7 @@ Controls present:
 - The file name is `om_asi_<random>.dll` with 64 bits of entropy from
   `io.randomSecure`; failure to obtain entropy fails closed rather than falling
   back to a guessable name (`src/api/rib.zig:220 randomSecure`).
-- The file is created with `.exclusive = true` (`src/api/rib.zig:214 exclusive`),
+- The file is created with `.exclusive = true` (`src/api/rib.zig:240 exclusive`),
   so a planted name cannot be opened for overwrite and a race replacement loses.
 - The file is deleted after the module is unloaded (`src/rib/provider.zig:156 deinit`).
 
@@ -284,4 +284,4 @@ Single points of failure:
 8. `TMPDIR` chooses the directory the ASI image is written to
    (`src/api/rib.zig:143 TMPDIR`).
 9. Debug logging of paths and asset names in a game directory a second local
-   user can read (`src/utils/logger.zig:69 builtin.mode`).
+   user can read (`src/utils/logger.zig:74 builtin.mode`).

@@ -27,6 +27,29 @@
 #define OPENMILES_MSS_VERSION 90
 #endif
 
+/* The version is the one build-time value a consumer supplies, and every guard
+ * below compares it with >= and <, so an unsupported value is not a build this
+ * project produces: it silently selects a declaration set that belongs to no
+ * release (45 reads as "between 4 and 5", 95 as "at least 9") and the caller
+ * only finds out at link time, or worse, links against a DLL whose
+ * AILSOUNDINFO layout the header just misdescribed. Reject it here instead,
+ * where the value came from and where the fix is. Keep this list and
+ * SUPPORTED_VERSIONS in scripts/check_header.py in step; that script compiles
+ * the header once per supported version and once per unsupported value, so a
+ * version dropped from one and not the other is caught. */
+#if OPENMILES_MSS_VERSION != 30 && \
+    OPENMILES_MSS_VERSION != 40 && \
+    OPENMILES_MSS_VERSION != 50 && \
+    OPENMILES_MSS_VERSION != 60 && \
+    OPENMILES_MSS_VERSION != 61 && \
+    OPENMILES_MSS_VERSION != 65 && \
+    OPENMILES_MSS_VERSION != 66 && \
+    OPENMILES_MSS_VERSION != 70 && \
+    OPENMILES_MSS_VERSION != 80 && \
+    OPENMILES_MSS_VERSION != 90
+#error "OPENMILES_MSS_VERSION must be one of 30, 40, 50, 60, 61, 65, 66, 70, 80, 90 (major*10+minor); it selects a -Dmss-version build, default 9 (90)"
+#endif
+
 #define MSS_AT_LEAST(v) (OPENMILES_MSS_VERSION >= (v))
 #define MSS_BEFORE(v) (OPENMILES_MSS_VERSION < (v))
 
