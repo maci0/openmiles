@@ -837,7 +837,7 @@ pub fn AIL_us_count() callconv(.winapi) u32 {
 }
 pub fn AIL_delay(ms: u32) callconv(.winapi) void {
     const duration = std.Io.Duration.fromNanoseconds(@as(i96, ms) * std.time.ns_per_ms);
-    openmiles.io.sleep(duration, .awake) catch {};
+    openmiles.sleep(duration);
 }
 pub fn AIL_lock() callconv(.winapi) void {}
 pub fn AIL_unlock() callconv(.winapi) void {}

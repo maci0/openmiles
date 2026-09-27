@@ -145,7 +145,39 @@ fn logResolvedPath(original: []const u8, resolved: []const u8) void {
     }
 }
 
+/// Fault injection at the library's only file-I/O seam. Every open the engine
+/// performs goes through this module, so a schedule installed here is what a
+/// simulation replays to produce a failing open or a read that comes up
+/// short. Null in production: one load of a global per open.
+pub const Fault = struct {
+    /// Fails the open of `path` with the error returned. Null lets it pass.
+    open: ?*const fn (path: []const u8) ?anyerror = null,
+    /// Bytes a whole-file read of `path` actually delivers, fewer than the
+    /// file holds. Models a write that never finished, which a real disk
+    /// cannot be made to do on demand. Null for no truncation.
+    truncate_read: ?*const fn (path: []const u8) ?usize = null,
+};
+
+pub var fault: ?*const Fault = null;
+
+/// Fail the open of `path` if the installed schedule says so.
+fn checkOpenFault(path: []const u8) ?anyerror {
+    const f = fault orelse return null;
+    const hook = f.open orelse return null;
+    return hook(path);
+}
+
+/// Bytes a whole-file read of `path` should ask for, after any injected
+/// truncation. `len` when no fault is installed.
+pub fn readLength(path: []const u8, len: usize) usize {
+    const f = fault orelse return len;
+    const hook = f.truncate_read orelse return len;
+    const want = hook(path) orelse return len;
+    return @min(want, len);
+}
+
 pub fn openFile(io: std.Io, path: []const u8, options: std.Io.File.OpenFlags) !std.Io.File {
+    if (checkOpenFault(path)) |err| return err;
     const cwd = std.Io.Dir.cwd();
     if (std.fs.path.isAbsolute(path)) {
         return std.Io.Dir.openFileAbsolute(io, path, options) catch |err| {
@@ -167,6 +199,7 @@ pub fn openFile(io: std.Io, path: []const u8, options: std.Io.File.OpenFlags) !s
 }
 
 pub fn openDir(io: std.Io, path: []const u8, options: std.Io.Dir.OpenOptions) !std.Io.Dir {
+    if (checkOpenFault(path)) |err| return err;
     const cwd = std.Io.Dir.cwd();
     if (std.fs.path.isAbsolute(path)) {
         return std.Io.Dir.openDirAbsolute(io, path, options) catch |err| {

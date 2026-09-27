@@ -81,6 +81,10 @@ pub const Timer = struct {
         if (@atomicLoad(bool, &self.is_running, .acquire)) return;
         @atomicStore(bool, &self.is_running, true, .release);
         self.thread_id.store(0, .release);
+        // No thread under a virtual clock: nothing advances time on its own, so
+        // the run loop would fire the callback as fast as the CPU allows. The
+        // timer still counts as running; tick() drives it one period at a time.
+        if (root.clock.isVirtual()) return;
         self.thread = std.Thread.spawn(.{}, run, .{self}) catch |err| {
             @atomicStore(bool, &self.is_running, false, .release);
             // A dead timer thread means the app's callbacks never fire; that
@@ -110,10 +114,21 @@ pub const Timer = struct {
         }
     }
 
+    /// Fire one period of the callback and move virtual time forward by one
+    /// period. How a timer runs while a virtual clock is installed: a test or
+    /// simulation calls this once per period it means to elapse, so the
+    /// callback sequence is a function of the step sequence alone. Does
+    /// nothing unless a virtual clock is installed and the timer is running.
+    pub fn tick(self: *Timer) void {
+        if (!root.clock.isVirtual()) return;
+        if (!@atomicLoad(bool, &self.is_running, .acquire)) return;
+        self.callback(self.getUserData());
+        root.clock.advance(@as(i64, self.getPeriodUs()) * std.time.ns_per_us);
+    }
+
     pub fn getUserData(self: *Timer) u32 {
         return @atomicLoad(u32, &self.user_data, .acquire);
     }
-
     pub fn setUserData(self: *Timer, data: u32) void {
         @atomicStore(u32, &self.user_data, data, .release);
     }
@@ -126,7 +141,7 @@ pub const Timer = struct {
 
     fn run(self: *Timer) void {
         self.thread_id.store(std.Thread.getCurrentId(), .release);
-        var next_ns: i128 = std.Io.Timestamp.now(io, .awake).nanoseconds;
+        var next_ns: i128 = root.nowNs();
         while (@atomicLoad(bool, &self.is_running, .acquire)) {
             self.callback(self.getUserData());
             const period_ns: i128 = @as(i128, self.getPeriodUs()) * std.time.ns_per_us;
@@ -135,17 +150,20 @@ pub const Timer = struct {
             // every following iteration would then fire back-to-back with no
             // sleep. Resync to now so a late callback delays one tick instead of
             // spinning the loop.
-            const after_cb = std.Io.Timestamp.now(io, .awake).nanoseconds;
+            const after_cb: i128 = root.nowNs();
             if (next_ns < after_cb) next_ns = after_cb;
             // Sleep toward next_ns in bounded slices, bailing out promptly once
             // stop() clears is_running.
             while (@atomicLoad(bool, &self.is_running, .acquire)) {
-                const now = std.Io.Timestamp.now(io, .awake).nanoseconds;
+                // A virtual clock installed under a running thread has no wall
+                // time left to wait on; exit rather than spin on a deadline that
+                // only moves when someone steps it.
+                if (root.clock.isVirtual()) return;
+                const now: i128 = root.nowNs();
                 const remaining = next_ns - now;
                 if (remaining <= 0) break;
                 const slice = @min(remaining, max_slice_ns);
-                const dur = std.Io.Duration.fromNanoseconds(@intCast(slice));
-                io.sleep(dur, .awake) catch {};
+                root.sleep(std.Io.Duration.fromNanoseconds(@intCast(slice)));
             }
         }
     }

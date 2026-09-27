@@ -3191,6 +3191,136 @@ test "Timer concurrent start/stop never runs overlapping loops" {
     try testing.expect(!timer.is_running);
 }
 
+test "virtual clock replays a timer run from its step sequence" {
+    // The point of the virtual clock: the callback sequence and the timestamps
+    // it sees come from the steps taken, not from how fast the host is. The
+    // same steps replay to the same trace, and no wall time is spent.
+    const Recorder = struct {
+        var stamps: [8]i64 = undefined;
+        var count: u32 = 0;
+        fn cb(_: u32) callconv(.winapi) void {
+            if (count < stamps.len) {
+                stamps[count] = openmiles.nowNs();
+                count += 1;
+            }
+        }
+        fn reset() void {
+            count = 0;
+        }
+    };
+    const periods = [_]u32{ 1000, 1000, 2500, 1000, 1000, 1000, 1000, 1000 };
+    var first: [8]i64 = undefined;
+    var second: [8]i64 = undefined;
+
+    for (0..2) |replay| {
+        openmiles.useVirtualClock(0);
+        defer openmiles.useRealClock();
+        Recorder.reset();
+
+        const timer = try openmiles.Timer.init(testing.allocator, Recorder.cb);
+        defer timer.deinit();
+
+        // Counters are re-based on the virtual epoch, not on process start.
+        try testing.expectEqual(@as(u32, 0), openmiles.getMsCount());
+
+        timer.start();
+        // No thread under a virtual clock: the steps below are the whole run.
+        try testing.expectEqual(@as(?std.Thread, null), timer.thread);
+        for (periods) |us| {
+            timer.setPeriodUs(us);
+            timer.tick();
+        }
+        timer.stop();
+        try testing.expectEqual(@as(u32, periods.len), Recorder.count);
+        @memcpy(if (replay == 0) &first else &second, &Recorder.stamps);
+    }
+
+    // Each stamp is the sum of the periods before it, exactly.
+    var expected: i64 = 0;
+    for (periods, 0..) |us, i| {
+        try testing.expectEqual(expected, first[i]);
+        expected += @as(i64, us) * std.time.ns_per_us;
+    }
+    try testing.expectEqualSlices(i64, &first, &second);
+}
+
+test "virtual clock sleep advances time instead of blocking" {
+    openmiles.useVirtualClock(1_000_000);
+    defer openmiles.useRealClock();
+    try testing.expectEqual(@as(i64, 1_000_000), openmiles.nowNs());
+
+    // AIL_delay(250) would block a quarter second on the real clock.
+    @import("api/digital.zig").AIL_delay(250);
+    try testing.expectEqual(@as(i64, 1_000_000 + 250 * std.time.ns_per_ms), openmiles.nowNs());
+    try testing.expectEqual(@as(u32, 250), openmiles.getMsCount());
+
+    api_v9.AIL_sleep(50);
+    try testing.expectEqual(@as(u32, 300), openmiles.getMsCount());
+    try testing.expectEqual(@as(u32, 300_000), openmiles.getUsCount());
+}
+
+test "real clock restored after a virtual-clock run" {
+    openmiles.useVirtualClock(0);
+    openmiles.clock.advance(std.time.ns_per_s);
+    openmiles.useRealClock();
+    // Off the virtual epoch and back on a monotonic one that is not zero.
+    const real_now = openmiles.nowNs();
+    try testing.expect(real_now > std.time.ns_per_s);
+    try testing.expect(openmiles.getMsCount() < 60_000);
+}
+
+test "injected file faults reach the whole-file read path" {
+    // A failing open and a short read are the two faults a real disk will not
+    // produce on demand, and both are the sort a simulation has to replay.
+    const io = openmiles.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const body = "RIFFxxxxWAVEfmt ";
+    const file = try tmp.dir.createFile(io, "bank.mbnk", .{});
+    try file.writeStreamingAll(io, body);
+    file.close(io);
+
+    // Relative to the cwd, which is where the test binary runs from.
+    var path_buf: [256]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, ".zig-cache/tmp/{s}/bank.mbnk", .{&tmp.sub_path});
+
+    const whole = try openmiles.readWholeFile(path);
+    defer openmiles.global_allocator.free(whole);
+    try testing.expectEqualStrings(body, whole);
+
+    const Faults = struct {
+        var fail_open: bool = true;
+        var keep: usize = 8;
+        fn open(p: []const u8) ?anyerror {
+            if (!fail_open) return null;
+            return if (std.mem.endsWith(u8, p, "bank.mbnk")) error.AccessDenied else null;
+        }
+        fn truncate(p: []const u8) ?usize {
+            _ = p;
+            return keep;
+        }
+    };
+    const open_fault: openmiles.fs_compat.Fault = .{ .open = Faults.open };
+    const truncate_fault: openmiles.fs_compat.Fault = .{ .truncate_read = Faults.truncate };
+    defer openmiles.fs_compat.fault = null;
+
+    openmiles.fs_compat.fault = &open_fault;
+    // The seam itself reports the injected error verbatim; readWholeFile maps
+    // every open failure to FileNotFound, which is what its callers see.
+    try testing.expectError(error.AccessDenied, openmiles.fs_compat.openFile(io, path, .{}));
+    try testing.expectError(error.FileNotFound, openmiles.readWholeFile(path));
+    // Other paths are untouched by a schedule that names this one.
+    Faults.fail_open = false;
+    Faults.keep = 4;
+    openmiles.fs_compat.fault = &truncate_fault;
+    try testing.expectError(error.ReadFailed, openmiles.readWholeFile(path));
+
+    openmiles.fs_compat.fault = null;
+    const again = try openmiles.readWholeFile(path);
+    defer openmiles.global_allocator.free(again);
+    try testing.expectEqualStrings(body, again);
+}
+
 test "Sequence setChannelMap out-of-range physical clamps" {
     const allocator = testing.allocator;
     const driver = try openmiles.MidiDriver.init(allocator);

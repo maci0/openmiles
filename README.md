@@ -83,6 +83,25 @@ make test FILTER=redbook           # or: zig build test -Dtest-filter=redbook
 `OPENMILES_DEBUG=0` silences the engine trace that otherwise fills the test
 output; a Debug build logs by default, and that is what writes `openmiles.log`.
 
+### Driving time in tests
+
+Every deadline, period, and elapsed counter in the library reads one clock,
+`openmiles.clock`. Production reads the platform clock. A test can install a
+virtual one instead:
+
+```zig
+openmiles.useVirtualClock(0);        // elapsed counters re-base on ns 0
+openmiles.clock.advance(ns);          // move simulated time forward
+openmiles.sleep(.fromMilliseconds(250)); // advances it instead of blocking
+```
+
+`AIL_sleep`, `AIL_delay`, `AIL_ms_count`, and `AIL_us_count` all follow the
+installed clock, so a test that sleeps 250 ms spends no wall time and reads
+back exactly 250. A `Timer` started under a virtual clock spawns no thread;
+call `timer.tick()` once per period you want to elapse, and the callback sees
+the exact simulated timestamp. Replaying the same step sequence replays the
+same run, which is what makes a failing sequence reproducible.
+
 ### Release archive
 
 `scripts/package_release.sh <out.zip>` packages `zig-out/bin/mss32.dll` with

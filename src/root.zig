@@ -300,7 +300,10 @@ pub fn readWholeFile(path: []const u8) ![]u8 {
     if (sz == 0 or sz > max_file_load_bytes) return error.BadSize;
     const buf = try global_allocator.alloc(u8, @intCast(sz));
     errdefer global_allocator.free(buf);
-    const n = f.readPositionalAll(io, buf, 0) catch return error.ReadFailed;
+    // A truncated read stops short of the size stat reported, which is the
+    // shape of a write that never finished; the length check below rejects it.
+    const read_len = fs_compat.readLength(path, buf.len);
+    const n = f.readPositionalAll(io, buf[0..read_len], 0) catch return error.ReadFailed;
     if (n < buf.len) return error.ReadFailed;
     return buf;
 }
@@ -890,16 +893,93 @@ pub fn panToMss(pan: f32) i32 {
     return satI32(@min(127.0, @max(0.0, (pan * 64.0) + 64.0)));
 }
 
+// --- Clock ---
+
+/// The library's only source of monotonic time. Every deadline, period, and
+/// elapsed-counter read goes through here, so a test or simulation can install
+/// a virtual clock and get the same run back from the same step sequence.
+pub const Clock = struct {
+    // A mutex, not an atomic: the 32-bit target has no 64-bit atomics, and
+    // virtual time is only read while a virtual clock is installed.
+    virtual_ns: i64 = 0,
+    virtual_mutex: std.Io.Mutex = .init,
+    virtual_enabled: std.atomic.Value(bool) = .init(false),
+
+    pub fn isVirtual(self: *const Clock) bool {
+        return self.virtual_enabled.load(.acquire);
+    }
+
+    /// Replace the platform clock with one the caller drives. Tests and
+    /// simulation only: the library always starts on the real clock, and
+    /// production code never calls this. Install before starting a timer,
+    /// whose thread loop would otherwise spin on a deadline no wall time
+    /// reaches.
+    pub fn installVirtual(self: *Clock, start_ns: i64) void {
+        self.virtual_mutex.lockUncancelable(io);
+        self.virtual_ns = start_ns;
+        self.virtual_mutex.unlock(io);
+        self.virtual_enabled.store(true, .release);
+    }
+
+    /// Back to the platform clock. Virtual time is kept, not discarded, so a
+    /// test that restores the clock can still read where it left off.
+    pub fn restoreReal(self: *Clock) void {
+        self.virtual_enabled.store(false, .release);
+    }
+
+    /// Jump virtual time to an absolute value. Only meaningful virtually.
+    pub fn setVirtual(self: *Clock, ns: i64) void {
+        self.virtual_mutex.lockUncancelable(io);
+        self.virtual_ns = ns;
+        self.virtual_mutex.unlock(io);
+    }
+
+    /// Move virtual time forward by `ns`. Never moves it backwards.
+    pub fn advance(self: *Clock, ns: i64) void {
+        self.virtual_mutex.lockUncancelable(io);
+        self.virtual_ns += ns;
+        self.virtual_mutex.unlock(io);
+    }
+
+    pub fn nowNs(self: *Clock) i64 {
+        if (self.isVirtual()) {
+            self.virtual_mutex.lockUncancelable(io);
+            defer self.virtual_mutex.unlock(io);
+            return self.virtual_ns;
+        }
+        return @intCast(std.Io.Timestamp.now(io, .awake).nanoseconds);
+    }
+
+    /// Wait `dur`. Under a virtual clock this moves virtual time instead of
+    /// blocking, so a simulated run costs no wall time and its durations are
+    /// exact rather than "at least".
+    pub fn sleep(self: *Clock, dur: std.Io.Duration) void {
+        if (self.isVirtual()) {
+            self.advance(@intCast(@max(0, dur.nanoseconds)));
+            return;
+        }
+        io.sleep(dur, .awake) catch {};
+    }
+};
+
+pub var clock: Clock = .{};
+
+/// Nanoseconds on the library clock. Virtual when a test or simulation has
+/// installed one.
+pub fn nowNs() i64 {
+    return clock.nowNs();
+}
+
+/// Wait `dur` on the library clock; see `Clock.sleep`.
+pub fn sleep(dur: std.Io.Duration) void {
+    clock.sleep(dur);
+}
+
 // --- Startup time ---
 
 var startup_ns: i64 = 0;
 var startup_ns_mutex: std.Io.Mutex = .init;
 var startup_ns_ready: bool = false;
-
-fn nowNs() i64 {
-    const ts = std.Io.Timestamp.now(io, .awake);
-    return @intCast(ts.nanoseconds);
-}
 
 pub fn ensureStartupTime() void {
     if (@atomicLoad(bool, &startup_ns_ready, .acquire)) return;
@@ -909,6 +989,27 @@ pub fn ensureStartupTime() void {
         startup_ns = nowNs();
         @atomicStore(bool, &startup_ns_ready, true, .release);
     }
+}
+
+/// Install a virtual clock and re-base the elapsed counters on it, so
+/// AIL_ms_count and friends read from the simulated epoch rather than from
+/// the wall time the process happened to start at.
+pub fn useVirtualClock(start_ns: i64) void {
+    clock.installVirtual(start_ns);
+    startup_ns_mutex.lockUncancelable(io);
+    defer startup_ns_mutex.unlock(io);
+    startup_ns = nowNs();
+    @atomicStore(bool, &startup_ns_ready, true, .release);
+}
+
+/// Restore the platform clock and drop the elapsed-counter base, so the next
+/// count starts from the new clock.
+pub fn useRealClock() void {
+    clock.restoreReal();
+    startup_ns_mutex.lockUncancelable(io);
+    defer startup_ns_mutex.unlock(io);
+    startup_ns = 0;
+    @atomicStore(bool, &startup_ns_ready, false, .release);
 }
 
 fn elapsedNs() u64 {

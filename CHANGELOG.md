@@ -29,6 +29,16 @@ everything below is unreleased.
 
 ### Added
 
+- One clock for the whole library (`openmiles.clock`). Every period, deadline,
+  and elapsed counter now reads it, so a test or simulation can install a
+  virtual one: `openmiles.useVirtualClock(0)` re-bases the elapsed counters,
+  `openmiles.clock.advance(ns)` steps time, and `openmiles.sleep(d)` moves it
+  instead of blocking. A `Timer` started under a virtual clock spawns no
+  thread; `timer.tick()` fires one period at a time, so a run replays from its
+  step sequence. `AIL_sleep` and `AIL_delay` follow the installed clock.
+- File-fault injection at the library's only I/O seam (`fs_compat.fault`):
+  a schedule can fail an open by path or cut a whole-file read short, which a
+  real disk will not do on demand. Null in production.
 - `AIL_set_timer_divisor` for the legacy 8254 PIT timer rate.
 - CI runs the project's own `make lint` (zig fmt + ruff + shellcheck) and
   compiles C with warnings as errors.
@@ -42,6 +52,10 @@ everything below is unreleased.
 
 ### Fixed
 
+- The timer run loop, the Redbook clock, and `AIL_delay` / `AIL_sleep` read
+  `std.Io.Timestamp` and slept on the real clock directly, so their timing did
+  not pass through the library's elapsed-time base. They read the central
+  clock now.
 - The test build failed to compile: `AIL_open_digital_driver` and
   `AIL_open_midi_driver` tests read and cleared the current-driver handle
   directly, which stopped compiling when the handle was made private. They go

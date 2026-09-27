@@ -1,11 +1,9 @@
 const std = @import("std");
 const root = @import("../root.zig");
 const log = root.log;
-const io = root.io;
 
 fn nowMs() i64 {
-    const ts = std.Io.Timestamp.now(io, .awake);
-    return @intCast(@divTrunc(ts.nanoseconds, std.time.ns_per_ms));
+    return @divTrunc(root.nowNs(), std.time.ns_per_ms);
 }
 
 // REDBOOK_* codes as src/mss.h defines them: STOPPED=0, PLAYING=1, PAUSED=2.

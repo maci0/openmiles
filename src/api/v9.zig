@@ -190,7 +190,7 @@ pub fn AIL_sample_ms_lookup(s_opt: ?*Sample, milliseconds: i32, actualms: ?*i32)
     return openmiles.satU32(datapos);
 }
 pub fn AIL_sleep(ms: u32) callconv(.winapi) void {
-    openmiles.io.sleep(std.Io.Duration.fromNanoseconds(@as(u64, ms) *| std.time.ns_per_ms), .awake) catch {};
+    openmiles.sleep(std.Io.Duration.fromNanoseconds(@as(i96, ms) *| std.time.ns_per_ms));
 }
 // AIL_sound_asset_info(SoundBank* bank, char const* name, char* out_filename,
 // MILESBANKSOUNDINFO* out_info) @16 — fills info + path, returns buffer requirement.
