@@ -289,6 +289,16 @@ test "Preference get and set" {
 test "Preference out of bounds returns 0" {
     try testing.expectEqual(@as(i32, 0), openmiles.getPreference(999));
     try testing.expectEqual(@as(i32, 0), openmiles.setPreference(999, 1));
+
+    // The table is 512 slots: 511 is the last valid index and must store and
+    // read back, 512 is the first invalid one and must be dropped. Probing
+    // only 999 would not catch an off-by-one that reserved the last slot.
+    const last: u32 = 511;
+    const old_last = openmiles.setPreference(last, 0x5A5A);
+    defer _ = openmiles.setPreference(last, old_last);
+    try testing.expectEqual(@as(i32, 0x5A5A), openmiles.getPreference(last));
+    try testing.expectEqual(@as(i32, 0), openmiles.setPreference(last + 1, 7));
+    try testing.expectEqual(@as(i32, 0), openmiles.getPreference(last + 1));
 }
 
 test "buildWavFromPcm produces valid RIFF header" {
@@ -632,9 +642,14 @@ test "getUsCount returns monotonically increasing values" {
     try testing.expect(openmiles.getUsCount() > t1);
 }
 
-test "getRedistDirectory returns empty initially" {
-    const dir = openmiles.getRedistDirectory();
-    try testing.expectEqual(@as(usize, 0), dir.len);
+test "getRedistDirectory is empty when none is set" {
+    // The redist directory is a process global. Asserting that it "starts"
+    // empty only holds while no earlier test left a value behind, so pin the
+    // state the API actually promises: a cleared directory reads back empty.
+    openmiles.setRedistDirectory("./om_redist_probe");
+    openmiles.setRedistDirectory("");
+    defer openmiles.setRedistDirectory("");
+    try testing.expectEqual(@as(usize, 0), openmiles.getRedistDirectory().len);
 }
 
 test "setRedistDirectory and getRedistDirectory roundtrip" {
@@ -943,6 +958,24 @@ test "DigitalDriver getActiveSampleCount" {
     const s2 = try openmiles.Sample.init(driver);
     defer s2.deinit();
     // Uninitialized samples are stopped, not playing
+    try testing.expectEqual(@as(u32, 0), driver.getActiveSampleCount());
+
+    // The counter is what AIL_digital_CPU_percent scales by, so a sample that
+    // is actually playing must raise it and stopping that sample must lower it
+    // again. Asserting only the zero cases would pass if the loop counted
+    // nothing at all.
+    const wav = try zeroWav(allocator);
+    defer allocator.free(wav);
+    try s1.loadFromMemory(wav, true);
+    try s2.loadFromMemory(wav, true);
+    s1.start();
+    try testing.expectEqual(openmiles.SampleStatus.playing, s1.status());
+    try testing.expectEqual(@as(u32, 1), driver.getActiveSampleCount());
+    s2.start();
+    try testing.expectEqual(@as(u32, 2), driver.getActiveSampleCount());
+    s1.stop();
+    try testing.expectEqual(@as(u32, 1), driver.getActiveSampleCount());
+    s2.end(); // done, not stopped: still not playing
     try testing.expectEqual(@as(u32, 0), driver.getActiveSampleCount());
 }
 
@@ -1309,8 +1342,20 @@ test "DigitalDriver get3DActiveSampleCount" {
 
     try testing.expectEqual(@as(u32, 0), driver.get3DActiveSampleCount());
 
+    // 3D voices live in their own list: a playing 3D sample must raise the 3D
+    // count and leave the 2D count alone (AIL_digital_CPU_percent adds them).
+    // Without the playing case this would pass on a counter that never counts.
+    const wav = try zeroWav(allocator);
+    defer allocator.free(wav);
     const s = try openmiles.Sample3D.init(driver);
     defer s.deinit();
+    try s.loadFromMemory(wav, true);
+    try testing.expectEqual(@as(u32, 0), driver.get3DActiveSampleCount());
+    s.start();
+    try testing.expectEqual(openmiles.SampleStatus.playing, s.status());
+    try testing.expectEqual(@as(u32, 1), driver.get3DActiveSampleCount());
+    try testing.expectEqual(@as(u32, 0), driver.getActiveSampleCount());
+    s.stop();
     try testing.expectEqual(@as(u32, 0), driver.get3DActiveSampleCount());
 }
 
@@ -1327,8 +1372,36 @@ test "Sample setVolumePan sets both" {
     try testing.expectEqual(@as(f32, -0.5), sample.pan);
 }
 
-test "getActiveSequenceCount returns 0 with no sequences" {
-    try testing.expectEqual(@as(u32, 0), openmiles.getActiveSequenceCount());
+// The registry is global and shared: AIL_active_sequence_count reports how
+// many tracked sequences are playing, so registering, playing, stopping and
+// releasing must each move it. Asserting only the empty-registry zero would
+// pass if the counter always answered 0 or if register/unregister did nothing.
+test "getActiveSequenceCount follows register, play, stop and release" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.MidiDriver.init(allocator);
+    defer driver.deinit();
+
+    const before = openmiles.getActiveSequenceCount();
+
+    const s1 = try openmiles.Sequence.init(driver);
+    // A registered but unplayed sequence is not active.
+    try testing.expectEqual(before, openmiles.getActiveSequenceCount());
+    s1.is_playing.store(true, .release);
+    try testing.expectEqual(before + 1, openmiles.getActiveSequenceCount());
+
+    const s2 = try openmiles.Sequence.init(driver);
+    s2.is_playing.store(true, .release);
+    try testing.expectEqual(before + 2, openmiles.getActiveSequenceCount());
+    // Stopping one leaves the other counted.
+    s1.is_playing.store(false, .release);
+    try testing.expectEqual(before + 1, openmiles.getActiveSequenceCount());
+
+    // deinit unregisters, so a released sequence stops being counted even
+    // while its is_playing flag is still set.
+    s2.deinit();
+    try testing.expectEqual(before, openmiles.getActiveSequenceCount());
+    s1.deinit();
+    try testing.expectEqual(before, openmiles.getActiveSequenceCount());
 }
 
 test "Sample end sets done status" {

@@ -74,7 +74,8 @@ test "coverage: digital.zig exports" {
     dg.AIL_serve();
     _ = dg.AIL_set_redist_directory("x");
     // Reset: this global outlives the test binary's other files, and main_test
-    // asserts it starts empty ("getRedistDirectory returns empty initially").
+    // asserts a cleared directory reads back empty ("getRedistDirectory is
+    // empty when none is set").
     openmiles.setRedistDirectory("");
 
     // A real device-less driver + initialized sample + filter for the params
