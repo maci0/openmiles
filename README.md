@@ -103,6 +103,58 @@ The output DLL is at `zig-out/bin/mss32.dll`.
 3. Copy `zig-out/bin/mss32.dll` to the game directory (as both `mss32.dll` and `MSS32.DLL` on case-sensitive filesystems)
 4. Run the game (natively on Windows, or via Wine on Linux/macOS)
 
+### Linking from your own code
+
+An unmodified game already ships its own `mss.h` and needs none of this. If
+you are calling the API from new code, `src/mss.h` declares the core surface.
+Set `OPENMILES_MSS_VERSION` to the build you linked (default `90`, the build
+`zig build` produces); the header only declares what that build exports, so a
+mismatched version fails at compile time instead of at link time.
+
+```c
+#define OPENMILES_MSS_VERSION 90
+#include "mss.h"
+
+int main(void)
+{
+    AIL_startup();
+
+    HDIGDRIVER dig = AIL_open_digital_driver(44100, 16, 2, 0);
+    if (dig == NULL) {
+        /* AIL_last_error() is a stable buffer; it is "" until something fails. */
+        const char *err = AIL_last_error();
+        (void)err;
+        AIL_shutdown();
+        return 1;
+    }
+
+    static const unsigned char image[] = { 0 }; /* a WAV/OGG/MP3 file in memory */
+    HSAMPLE S = AIL_allocate_sample_handle(dig);
+    if (S != NULL) {
+        if (AIL_set_sample_file(S, image, 0) == 0) {
+            AIL_start_sample(S);
+            while ((AIL_sample_status(S) & SMP_PLAYING) != 0) {
+                AIL_serve();
+            }
+        }
+        AIL_release_sample_handle(S);
+    }
+
+    AIL_close_digital_driver(dig);
+    AIL_shutdown();
+    return 0;
+}
+```
+
+The header covers playback, streaming, MIDI, 3D, RIB, filters, and the Quick
+API. The v7 DSP-stage, v8/v9 event and SoundBank, and legacy `waveOut`/`midiOut`
+exports are not declared; see [docs/API_STATUS.md](docs/API_STATUS.md) for the
+full list, and add your own declaration from the export table in
+`src/main.zig` if you need one.
+
+`make check-header` re-checks every declaration in `mss.h` against that export
+table, for all ten `-Dmss-version` values; it runs as part of `make lint`.
+
 ### Debug logging
 
 Set `OPENMILES_DEBUG=1` in your environment to enable verbose logging to `openmiles.log` in the game directory.

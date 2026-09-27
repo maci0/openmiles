@@ -42,7 +42,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-zig-
 
-      - name: Lint (zig fmt + shellcheck, same rules as `make lint`)
+      - name: Lint (zig fmt + shellcheck + C header parity, same rules as `make lint`)
         if: matrix.os == 'ubuntu-latest'
         run: make lint
 

@@ -9,6 +9,19 @@ every exported function is exercised by the fuzz harness plus unit/C-integration
 tests. The status below describes *behaviour* — whether a function does real work,
 has known limitations, or is a compatibility stub.
 
+**A listed function is not necessarily callable.** A handful of names below
+(`AIL_open_midi_driver`, `AIL_close_midi_driver`, `AIL_pause_sample`,
+`AIL_pause_sequence`, `AIL_set_timer_user_data`, `AIL_set_sample_filter`,
+`AIL_set_filter_attribute`, `AIL_open_ASI_provider`, `AIL_close_ASI_provider`,
+`AIL_ASI_provider_attribute`, `AIL_quick_stop`, `AIL_DLS_unload_file`) appear in
+no Miles export table, so `src/main.zig` lists them as `never_export`: they are
+implemented and unit-tested internally, but the DLL does not export them, and a
+call from your own code will not link. `src/mss.h` therefore does not declare
+them; `make check-header` enforces that.
+
+`src/main.zig` is the authoritative list of what a build actually exports. The
+`ver` / `ver_max` on each entry says which `-Dmss-version` values provide it.
+
 ## Core System
 *(Appeared in MSS v3+)*
 | Function | Status | Notes |
