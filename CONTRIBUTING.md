@@ -70,14 +70,37 @@ Windows Python; only their launcher is platform-specific.
 version-sweep, vendored-checksum, threat-model-reference, and pin-agreement
 checks. `make format` applies the two formatters.
 
+## The harnesses in `tests/`
+
+`make test` runs the Zig test binaries only. Nothing runs the files in `tests/`,
+locally or in CI, so a change needs a Zig test; a harness there covers ground
+the Zig binaries cannot and does not replace one.
+
+`play_test`, `midi_test`, `full_suite`, and `rib_test` are Windows harnesses
+that `LoadLibrary` the built `mss32.dll` and call its exports, and
+`native_rib_test` is a Zig harness that exercises the plugin `dlopen` path the
+test binaries cannot (they link musl statically, where `dlopen` is a stub).
+Run them on Windows, from `zig-out/bin` so each finds `mss32.dll` and
+`plugins/mock.asi` next to itself:
+
+```
+zig build
+cd zig-out/bin && full_suite.exe && native_rib_test.exe
+```
+
+`play_test`, `midi_test`, and `full_suite` take the fixture paths as arguments
+(`test_media/test.wav`, `test_media/test.mid`, `test_media/test.sf2`) and
+report the missing file when it is absent. On Linux they build but cannot run:
+`deps/windows_stub.h` resolves no export, so every call is a null pointer.
+
 ## What a change is expected to carry
 
 - A changelog entry under `## [Unreleased]` in `CHANGELOG.md`, in the
   Keep-a-Changelog section for its kind.
 - Tests. A bug fix gets the failing test first; the Zig tests live in the
   `test` blocks of the module they cover, with the module-level suites in
-  `src/test_root.zig` and `src/engine_test_root.zig`, and the C harnesses in
-  `tests/`.
+  `src/test_root.zig` and `src/engine_test_root.zig`. The harnesses in `tests/`
+  are a separate thing, described below.
 - An entry in `docs/API_STATUS.md` when a function's implementation status
   changes, and the relevant table in `README.md` when a coverage claim does.
 

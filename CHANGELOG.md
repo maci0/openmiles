@@ -199,11 +199,33 @@ everything below is unreleased.
   message chain when it was freed. The swap of the handle and the fields
   rewritten from the new list now happen under that mutex; the parse stays
   outside it.
+- `make lint` failed on a clean tree: two `src/root.zig` `else` clauses were
+  wrapped across two lines, which `zig fmt` joins, so the first check a
+  contributor runs reported a formatting violation with nothing changed on
+  their side. Both are on one line now.
+- `make lint` failed on a clean tree: 36 `docs/THREAT_MODEL.md` `file:line`
+  anchors named lines their definitions had moved off, in `src/root.zig`,
+  `src/api/digital.zig`, `src/engine/digital.zig` and
+  `src/engine/soundbank.zig`, so the threat model read as claiming a mitigation
+  at a place a reader would not find it. Every reference points at the line its
+  anchor is on again, including the three that name a call site rather than a
+  definition.
 - `make lint` failed on a clean tree: eight `docs/THREAT_MODEL.md` `file:line`
   anchors in `src/engine/midi.zig` and `src/engine/digital.zig` named lines
   their definitions had moved off, so the threat model read as claiming a
   mitigation at a place a reader would not find it. The references point at the
   line each anchor is on again.
+- `make check-header`, `check-versions`, `check-vendored`, `check-pins`, and
+  `check-threat-model` ran their script as a program on a machine with neither
+  `python3` nor `python`, so they failed with the shell's own `env: ... No such
+  file or directory` and exit 127, naming neither the missing interpreter nor
+  the target that needs it. They depend on a new `check-interpreter`
+  preflight, which reports the same message the other preflights use.
+- The tests in `tests/` are named in `CONTRIBUTING.md` as the place a change
+  carries its tests, but nothing runs them, locally or in CI: the C harnesses
+  `LoadLibrary` the built DLL and `native_rib_test` needs a `dlopen` the musl
+  test binaries cannot do, so they are Windows-only and hand-run. The file
+  says so, and says how to run them.
 - A malformed line in `deps/SHA256SUMS` was printed and then ignored, so
   `make check-vendored` reported the finding and still exited 0 while claiming
   every vendored file matched. The line is a finding now, and the gate fails on

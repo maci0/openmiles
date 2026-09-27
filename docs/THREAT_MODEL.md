@@ -261,7 +261,7 @@ Single points of failure:
 
 1. Unsigned plugin execution from the game directory (`src/root.zig:565 loadApplicationProviders`),
    and from any directory the game hands to `AIL_set_redist_directory`
-   (`src/engine/digital.zig:519 loadAllAsi`). Inherent to the compatibility
+   (`src/engine/digital.zig:531 loadAllAsi`). Inherent to the compatibility
    target; a documented deployment note is the available mitigation.
 2. `AIL_WAV_file_write` truncates and overwrites a caller-named path
    (`src/api/digital.zig:972 createFile`) with no extension check, no path

@@ -1,4 +1,4 @@
-.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-yaml check-threat-model check-toolchain check-host-tools check-parity-tools check-vendored check-sbom cross parity help
+.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-yaml check-threat-model check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -52,21 +52,31 @@ check: lint build test cross
 cross: check-toolchain
 	zig build -Dtarget=x86-windows -Doptimize=ReleaseFast
 
+# Every gate under scripts/ needs an interpreter, and $(PYTHON) is resolved
+# when make reads the makefile, so on a machine with neither name the recipe
+# would run the script as a program and fail with the shell's own error (exit
+# 127), naming neither the missing tool nor the fix. `make lint` catches this
+# through check-host-tools; the individual targets are what a contributor runs
+# while iterating, so they ask first. The message is the one the sibling
+# preflights use.
+check-interpreter:
+	@[ -n "$(PYTHON)" ] || { echo "error: neither python3 nor python found on PATH; the scripts/*.py gates need one" >&2; exit 1; }
+
 # src/mss.h declares the C surface; src/main.zig is the export table it must
 # agree with, and src/root.zig the struct layouts, for every -Dmss-version.
 # See scripts/check_header.py.
-check-header:
+check-header: check-interpreter
 	$(PYTHON) scripts/check_header.py
 
 # Every -Dmss-version value must be swept against a reference DLL or declared
 # unswept with a reason, and the three places that list the values must agree.
 # See scripts/check_versions.py.
-check-versions:
+check-versions: check-interpreter
 	$(PYTHON) scripts/check_versions.py
 
 # deps/ holds vendored upstream headers, not package-manager downloads, so
 # deps/SHA256SUMS is the only record of which bytes were reviewed.
-check-vendored:
+check-vendored: check-interpreter
 	$(PYTHON) scripts/check_vendored.py
 
 # The CycloneDX inventory of the third-party code this release carries, derived
@@ -90,14 +100,14 @@ YAMLLINT_VERSION := 1.38.0
 # The Zig, ruff, and yamllint pins live in the Makefile, ci.yml, and
 # build.zig.zon; a stale one in CI installs the old tool and the gate quietly
 # stops matching.
-check-pins:
+check-pins: check-interpreter
 	$(PYTHON) scripts/check_toolchain_pins.py
 
 # The threat model names a file:line and an anchor for every control it claims
 # exists. Edits move those lines, so a stale reference is a mitigation claim
 # nobody re-verified, which reads the same as a real one. Assert the anchors
 # still sit where the model says they do.
-check-threat-model:
+check-threat-model: check-interpreter
 	$(PYTHON) scripts/check_threat_model_refs.py
 
 check-python:
@@ -172,6 +182,7 @@ help:
 	@echo "  check-threat-model  assert every file:line anchor in docs/THREAT_MODEL.md resolves"
 	@echo "  check-python        assert ruff on PATH is the pinned version, then lint and format-check"
 	@echo "  check-yaml          assert yamllint on PATH is the pinned version, then lint .github/workflows"
+	@echo "  check-interpreter   assert a Python 3 interpreter is named python3 or python"
 	@echo "  check-parity-tools  assert pefile is importable (only make parity needs it)"
 	@echo "  check-pins          assert the zig and ruff pins agree across the tree"
 	@echo ""
