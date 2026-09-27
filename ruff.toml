@@ -8,8 +8,10 @@
 #
 # Not selected, and why: COM (COM812/COM819 fight the formatter over trailing
 # commas, and the formatter wins), S (the scripts read vendored headers and a
-# local DLL, never network input), ANN and D (annotating 60-line scripts and
-# documenting every three-line accessor is a separate pass).
+# local DLL, never network input), T20 (printing the report is the job), ANN
+# and D (annotating 60-line scripts and documenting every three-line accessor
+# is a separate pass), TCH and ASYNC (no typing-only imports and no async yet,
+# so both are no-ops until ANN lands).
 
 line-length = 100
 target-version = "py38"
@@ -25,12 +27,16 @@ select = [
     "UP",   # pyupgrade
     "B",    # bugbear
     "A",    # shadowing a builtin
+    "ARG",  # unused function argument
     "C4",   # comprehensions
     "DTZ",  # naive datetime
     "EM",   # exception message handling
+    "ERA",  # commented-out code
     "EXE",  # shebang/executable-bit agreement
+    "FBT",  # boolean positional argument
     "FURB", # refurb
     "G",    # logging format
+    "ICN",  # import conventions
     "ISC",  # implicit string concatenation
     "LOG",  # logging misuse
     "PERF", # per-file performance
@@ -38,6 +44,7 @@ select = [
     "PL",   # pylint
     "PTH",  # use pathlib
     "PT",   # pytest style
+    "PYI",  # typing stub conventions
     "Q",    # quotes
     "RET",  # return statements
     "RUF",  # ruff-specific

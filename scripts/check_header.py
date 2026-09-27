@@ -142,12 +142,10 @@ def eval_guard(expr, version):
     return True
 
 
+# One branch per preprocessor directive, mirroring what cpp does; splitting it
+# would put the #if/#elif/#else/#endif chain apart from the parse it guards.
 def resolve_header(text, version):  # noqa: PLR0912
-    """Return the declarations mss.h makes when OPENMILES_MSS_VERSION is `version`.
-
-    One branch per preprocessor directive, mirroring what cpp does; splitting it
-    would put the #if/#elif/#else/#endif chain apart from the parse it guards.
-    """
+    """Return the declarations mss.h makes when OPENMILES_MSS_VERSION is `version`."""
     decls = []
     stack = []
     for raw in text.splitlines():

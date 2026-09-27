@@ -211,8 +211,8 @@ pub const Sequence = struct {
     // AIL_map_sequence_channel writes it from the game's thread while the audio
     // thread resolves channels in onRead, so each slot is atomic.
     channel_map: [16]std.atomic.Value(i32) = .{
-        .init(0),  .init(1),  .init(2),  .init(3),  .init(4),  .init(5),  .init(6),  .init(7),
-        .init(8),  .init(9),  .init(10), .init(11), .init(12), .init(13), .init(14), .init(15),
+        .init(0), .init(1), .init(2),  .init(3),  .init(4),  .init(5),  .init(6),  .init(7),
+        .init(8), .init(9), .init(10), .init(11), .init(12), .init(13), .init(14), .init(15),
     },
     // Tempo fade state: gradually transition tempo_ratio over a duration
     tempo_fade_start_ratio: f64 = 1.0,

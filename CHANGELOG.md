@@ -33,12 +33,21 @@ everything below is unreleased.
 - CI runs the project's own `make lint` (zig fmt + ruff + shellcheck) and
   compiles C with warnings as errors.
 - `ruff check` and `ruff format` over `scripts/`, so the lint gate's own
-  scripts are linted; `ruff.toml` pins the rule set.
+  scripts are linted; `ruff.toml` pins the rule set, including the ARG, ERA,
+  FBT, ICN, and PYI groups.
 - `make check-pins` (run by `make lint`) fails when the Zig and ruff versions
-  named in the Makefile, `ci.yml`, and `build.zig.zon` disagree.
+  named in the Makefile, `ci.yml`, and `build.zig.zon` disagree, and when a
+  workflow that builds the tree stops taking its Zig from `build.zig.zon`.
 - Vendored dependency checksums are documented for `deps/`.
 
 ### Fixed
+
+- The test build failed to compile: `AIL_open_digital_driver` and
+  `AIL_open_midi_driver` tests read and cleared the current-driver handle
+  directly, which stopped compiling when the handle was made private. They go
+  through `lastDigitalDriver` / `setLastDigitalDriver` and their MIDI
+  counterparts.
+- `zig fmt` clean again (`src/engine/midi.zig`), so `make lint` passes.
 
 - Repeated opens no longer duplicate state: `AIL_open_digital_driver` records
   the driver it opened, so a second call returns that driver instead of

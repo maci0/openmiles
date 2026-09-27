@@ -1143,24 +1143,24 @@ test "AIL_open_digital_driver twice returns the driver already open" {
     // The second open must be the first driver: a second miniaudio engine would
     // keep playing past the close the caller makes on the handle it holds.
     defer {
-        if (openmiles.last_digital_driver) |d| openmiles.closeDigitalDriver(d);
+        if (openmiles.lastDigitalDriver()) |d| openmiles.closeDigitalDriver(d);
     }
-    openmiles.last_digital_driver = null;
+    openmiles.setLastDigitalDriver(null);
     const first = openmiles.openDigitalDriver(44100, 16, 2) orelse return error.NoDriver;
     const second = openmiles.openDigitalDriver(22050, 8, 1) orelse return error.NoDriver;
     try testing.expectEqual(first, second);
-    try testing.expectEqual(first, openmiles.last_digital_driver.?);
+    try testing.expectEqual(first, openmiles.lastDigitalDriver().?);
 }
 
 test "AIL_open_midi_driver twice returns the driver already open" {
     defer {
-        if (openmiles.last_midi_driver) |m| openmiles.closeMidiDriver(m);
+        if (openmiles.lastMidiDriver()) |m| openmiles.closeMidiDriver(m);
     }
-    openmiles.last_midi_driver = null;
+    openmiles.setLastMidiDriver(null);
     const first = openmiles.openMidiDriver() orelse return error.NoDriver;
     const second = openmiles.openMidiDriver() orelse return error.NoDriver;
     try testing.expectEqual(first, second);
-    try testing.expectEqual(first, openmiles.last_midi_driver.?);
+    try testing.expectEqual(first, openmiles.lastMidiDriver().?);
 }
 
 test "setRedistDirectory with the same path does not rescan it" {
@@ -1168,10 +1168,10 @@ test "setRedistDirectory with the same path does not rescan it" {
     // games; an identical path must not push a second copy of every .asi into
     // the open driver.
     defer {
-        if (openmiles.last_digital_driver) |d| openmiles.closeDigitalDriver(d);
+        if (openmiles.lastDigitalDriver()) |d| openmiles.closeDigitalDriver(d);
         openmiles.setRedistDirectory("");
     }
-    openmiles.last_digital_driver = null;
+    openmiles.setLastDigitalDriver(null);
     const driver = openmiles.openDigitalDriver(44100, 16, 2) orelse return error.NoDriver;
 
     openmiles.setRedistDirectory("zig-out/bin/plugins");
