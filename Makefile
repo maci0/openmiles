@@ -34,7 +34,8 @@ cross:
 	zig build -Dtarget=x86-windows -Doptimize=ReleaseFast
 
 # src/mss.h declares the C surface; src/main.zig is the export table it must
-# agree with, for every -Dmss-version. See scripts/check_header.py.
+# agree with, and src/root.zig the struct layouts, for every -Dmss-version.
+# See scripts/check_header.py.
 check-header:
 	./scripts/check_header.py
 
@@ -85,7 +86,7 @@ help:
 	@echo "  test       run the test suite (zig build test); FILTER=<substr> runs a subset"
 	@echo "  check      run every CI check in order: lint, build, test, cross"
 	@echo "  lint       zig fmt, ruff, shellcheck, header/vendored parity, pin agreement"
-	@echo "  check-header  assert src/mss.h matches the export table for every -Dmss-version"
+	@echo "  check-header  assert src/mss.h matches the export table and struct layouts per -Dmss-version"
 	@echo "  cross      cross-compile the shipped x86-windows DLL"
 	@echo "  format     apply zig fmt and ruff format"
 	@echo "  parity     diff every -Dmss-version export table against its reference DLL"

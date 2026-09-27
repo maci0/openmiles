@@ -19,6 +19,7 @@ each resulting declaration, reports:
   RANGE       the symbol is declared for a version range that does not export it
   NOTEXPORTED the symbol is never emitted, or is dropped from 8.0 on
   UNDEFINED   a macro is used in the header but never defined
+  LAYOUT      a shared struct's field order disagrees with the implementation
 
 Symbols the header does not declare are listed at the end as a coverage count.
 The header is a documented core subset, so that part is informational.
@@ -36,6 +37,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MAIN_ZIG = ROOT / "src" / "main.zig"
 MSS_H = ROOT / "src" / "mss.h"
+ROOT_ZIG = ROOT / "src" / "root.zig"
 
 # Every value -Dmss-version accepts, encoded as major*10+minor.
 SUPPORTED_VERSIONS = [30, 40, 50, 60, 61, 65, 66, 70, 80, 90]
@@ -322,6 +324,107 @@ def decl_problems(version, decl, exports, never_export, rets):
     return problems
 
 
+def zig_struct_fields(text, name):
+    """Return {cutoff: [field, ...]} for the version-branched Zig extern struct `name`.
+
+    root.zig spells the two MSS layouts as
+    `pub const X = if (mss_version >= 80) extern struct { ... } else extern struct { ... };`
+    so the branch condition and the fields of each side are both recoverable,
+    and the field order is what the ABI is made of. The key is the version from
+    which that branch applies, so a caller can pick the layout a build uses.
+    """
+    branch = r" = if \(mss_version >= (\d+)\) extern struct \{(.*?)\}"
+    pattern = r"pub const " + re.escape(name) + branch + r"\s*else extern struct \{(.*?)\};"
+    m = re.search(pattern, text, re.DOTALL)
+    if not m:
+        return None
+    cutoff, modern, legacy = int(m.group(1)), m.group(2), m.group(3)
+    return {
+        cutoff: re.findall(r"^\s*(\w+):", modern, re.MULTILINE),
+        cutoff - 1: re.findall(r"^\s*(\w+):", legacy, re.MULTILINE),
+    }
+
+
+def c_struct_fields(text, tag):
+    """Return the field names of the C struct typedef'd on `_tag`."""
+    m = re.search(r"typedef struct " + re.escape(tag) + r" \{(.*?)\}", text, re.DOTALL)
+    if not m:
+        return None
+    # Handles `S32 format;` and `void const* data_ptr;` alike: the qualifier and
+    # the pointer star sit between the type and the name.
+    return re.findall(
+        r"^\s*[A-Za-z_][A-Za-z0-9_]*(?:\s+const)?\s*\*?\s*\*?([A-Za-z_]\w*)\s*;",
+        m.group(1),
+        re.MULTILINE,
+    )
+
+
+def live_header_lines(text, version):
+    """The header's lines with every MSS_AT_LEAST/MSS_BEFORE guard resolved.
+
+    Same #if/#elif/#else/#endif walk resolve_header does, but keeping the lines
+    instead of only the declarations, so a struct typedef can be located in the
+    branch that is actually compiled for `version`.
+    """
+    lines = []
+    stack = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        directive = re.match(r"#(if|elif)\s+(.*)$", line)
+        if directive:
+            outer_live = all(s != DONE for s in stack)
+            live = outer_live and eval_guard(directive.group(2), version)
+            stack.append(TAKEN if live else PENDING)
+            continue
+        if re.match(r"#elif\s+", line):
+            if stack:
+                if stack[-1] == PENDING and eval_guard(re.sub(r"^#elif\s+", "", line), version):
+                    stack[-1] = TAKEN
+                elif stack[-1] == TAKEN:
+                    stack[-1] = DONE
+            continue
+        if line == "#else":
+            if stack:
+                stack[-1] = PENDING if stack[-1] == TAKEN else TAKEN
+            continue
+        if line == "#endif":
+            if stack:
+                stack.pop()
+            continue
+        if all(s == TAKEN for s in stack):
+            lines.append(raw)
+    return lines
+
+
+def layout_problems(header):
+    """Field-order agreement between AILSOUNDINFO in root.zig and in mss.h.
+
+    AILSOUNDINFO crosses the boundary by pointer (AIL_set_sample_info,
+    AIL_compress_ADPCM, AIL_decompress_ADPCM), so the DLL reads the caller's
+    struct by offset. A field the header omits or places differently is a
+    misread at runtime with no link-time or compile-time signal anywhere else,
+    and the v8/v9 layout really does differ from the v3-v7 one.
+    """
+    zig = zig_struct_fields(ROOT_ZIG.read_text(), "AILSOUNDINFO")
+    if zig is None:
+        return ["LAYOUT    the version-branched AILSOUNDINFO struct was not found in src/root.zig"]
+    cutoff = max(k for k in zig)
+
+    problems = []
+    for version in SUPPORTED_VERSIONS:
+        branches = c_struct_fields("\n".join(live_header_lines(header, version)), "_AILSOUNDINFO")
+        if not branches:
+            problems.append(f"v{version} LAYOUT     the _AILSOUNDINFO typedef is not declared")
+            continue
+        want = zig[cutoff] if version >= cutoff else zig[cutoff - 1]
+        if want != branches:
+            problems.append(
+                f"v{version} LAYOUT     AILSOUNDINFO fields {branches} do not match "
+                f"the implementation's {want}"
+            )
+    return problems
+
+
 def main():
     verbose = "--verbose" in sys.argv[1:]
     main_zig = MAIN_ZIG.read_text()
@@ -332,6 +435,8 @@ def main():
 
     problems = []
     declared_by_version = {}
+
+    problems += layout_problems(header)
 
     problems += [
         f"UNDEFINED   macro {macro} is used but never #defined in mss.h"

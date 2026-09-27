@@ -39,7 +39,27 @@ everything below is unreleased.
 - File-fault injection at the library's only I/O seam (`fs_compat.fault`):
   a schedule can fail an open by path or cut a whole-file read short, which a
   real disk will not do on demand. Null in production.
+- `mss.h` declares the file I/O surface: `AIL_file_error`, `AIL_file_read`,
+  `AIL_file_size`, `AIL_file_write`, `AIL_file_type`, `AIL_file_type_named`,
+  `AIL_set_file_callbacks` and `AIL_set_file_async_callbacks`, plus the
+  `AIL_FILE_*` callback typedefs and the `SEEK_SET`/`SEEK_CUR`/`SEEK_END`
+  constants the seek callback takes. A game that installs a VFS had no way to
+  declare the calls it makes, and a file failure had no declaration for the
+  only signal that reports it.
+- `make check-header` now compares the `AILSOUNDINFO` field order in `mss.h`
+  against `src/root.zig` for every `-Dmss-version`.
 - `AIL_set_timer_divisor` for the legacy 8254 PIT timer rate.
+
+### Fixed
+
+- `mss.h` declared the pre-8.0 `AILSOUNDINFO` (9 fields, 36 bytes) for every
+  version, so a v8 or v9 build read `channel_mask` at +0x18 and `block_size` at
+  +0x20 out of a 36-byte caller struct. `channel_mask` is now declared from
+  8.0 on, and the x86 layout is pinned with `_Static_assert`.
+- `DigitalDriver.init` dereferenced `pDevice.pContext` to name the audio backend
+  after checking only `pDevice`. `ma_engine_init` succeeds with a null
+  `pContext` on a machine with no output device, so the diagnostic line crashed
+  the process on the one machine most likely to have no device.
 - CI runs the project's own `make lint` (zig fmt + ruff + shellcheck) and
   compiles C with warnings as errors.
 - `ruff check` and `ruff format` over `scripts/`, so the lint gate's own

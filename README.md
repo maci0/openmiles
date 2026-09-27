@@ -201,7 +201,10 @@ int main(void)
         return 1;
     }
 
-    static const unsigned char image[] = { 0 }; /* a WAV/OGG/MP3 file in memory */
+    /* A real WAV/OGG/MP3 in memory. The one-byte stub below is a placeholder:
+       AIL_set_sample_file reads a header out of it, so it always fails, and
+       that is the branch a caller has to handle anyway. */
+    static const unsigned char image[] = { 0 };
     HSAMPLE S = AIL_allocate_sample_handle(dig);
     if (S != NULL) {
         if (AIL_set_sample_file(S, image, 0) == 0) {
@@ -219,14 +222,17 @@ int main(void)
 }
 ```
 
-The header covers playback, streaming, MIDI, 3D, RIB, filters, and the Quick
-API. The v7 DSP-stage, v8/v9 event and SoundBank, and legacy `waveOut`/`midiOut`
+The header covers playback, streaming, MIDI, 3D, RIB, filters, the Quick API,
+and file I/O (`AIL_file_read`, `AIL_file_size`, `AIL_file_type`, and
+`AIL_set_file_callbacks` for routing file access through the game's own VFS).
+The v7 DSP-stage, v8/v9 event and SoundBank, and legacy `waveOut`/`midiOut`
 exports are not declared; see [docs/API_STATUS.md](docs/API_STATUS.md) for the
 full list, and add your own declaration from the export table in
 `src/main.zig` if you need one.
 
 `make check-header` re-checks every declaration in `mss.h` against that export
-table, for all ten distinct version encodings; it runs as part of `make lint`.
+table, and the `AILSOUNDINFO` layout against `src/root.zig`, for all ten distinct
+version encodings; it runs as part of `make lint`.
 
 ### Debug logging
 

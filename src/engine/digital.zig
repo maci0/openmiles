@@ -408,8 +408,16 @@ pub const DigitalDriver = struct {
             allocator.destroy(self);
             return error.EngineInitFailed;
         }
-        if (self.engine.pDevice != null) {
-            log("ma_engine_init success. Backend: {s}\n", .{ma.ma_get_backend_name(self.engine.pDevice.*.pContext.*.backend)});
+        // Both pointers have to be checked: ma_engine_init reports success on a
+        // machine with no output device, leaving pDevice set and pContext null,
+        // and reading the backend out of it then crashes the process on what is
+        // only a diagnostic line.
+        if (self.engine.pDevice) |device| {
+            if (device.*.pContext != null) {
+                log("ma_engine_init success. Backend: {s}\n", .{ma.ma_get_backend_name(device.*.pContext.*.backend)});
+            } else {
+                log("ma_engine_init success. (No Device)\n", .{});
+            }
         } else {
             log("ma_engine_init success. (No Device)\n", .{});
         }

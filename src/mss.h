@@ -15,11 +15,11 @@
  * is 90, the build `zig build` produces with no options.
  *
  * This header covers the core surface a title needs for playback, streaming,
- * MIDI, 3D, RIB, filters, timers, and the Quick API. Nothing else is declared:
- * the v7 DSP-stage and v8/v9 event/SoundBank surfaces, and the legacy
- * midiOut/DLS spellings, are exported by the DLL but absent here. For the full
- * per-function list see docs/API_STATUS.md, and the export table itself in
- * src/main.zig.
+ * MIDI, 3D, RIB, filters, timers, the Quick API, and file I/O. Nothing else is
+ * declared: the v7 DSP-stage and v8/v9 event/SoundBank surfaces, and the
+ * legacy midiOut/DLS spellings, are exported by the DLL but absent here. For
+ * the full per-function list see docs/API_STATUS.md, and the export table
+ * itself in src/main.zig.
  */
 
 #ifndef OPENMILES_MSS_VERSION
@@ -28,6 +28,20 @@
 
 #define MSS_AT_LEAST(v) (OPENMILES_MSS_VERSION >= (v))
 #define MSS_BEFORE(v) (OPENMILES_MSS_VERSION < (v))
+
+/* x86 AILSOUNDINFO layout this DLL build reads, asserted against the typedef
+ * below. Kept next to the version macros because that is the only place the
+ * version is known. */
+#if MSS_AT_LEAST(80)
+#define MSS_AILSOUNDINFO_SIZE 40
+#define MSS_AILSOUNDINFO_CHANNEL_MASK_OFFSET 24
+#define MSS_AILSOUNDINFO_SAMPLES_OFFSET 28
+#define MSS_AILSOUNDINFO_BLOCK_SIZE_OFFSET 32
+#else
+#define MSS_AILSOUNDINFO_SIZE 36
+#define MSS_AILSOUNDINFO_SAMPLES_OFFSET 24
+#define MSS_AILSOUNDINFO_BLOCK_SIZE_OFFSET 28
+#endif
 
 #ifdef _WIN32
 #define MSS_CALLBACK __stdcall
@@ -80,6 +94,27 @@ typedef void* HREDBOOK;
 #define REDBOOK_PAUSED           2
 #define REDBOOK_ERROR            3
 
+/* MSS 8.0 inserted `channel_mask` (U32) between `channels` and `samples` for
+ * multichannel WAVE_FORMAT_EXTENSIBLE data, taking the struct from 9 fields /
+ * 36 bytes to 10 fields / 40 bytes. The v8 and v9 builds read channel_mask at
+ * +0x18 and block_size at +0x20; declaring the pre-8 layout for a v8+ build
+ * makes the caller write block_size where the DLL reads channel_mask, and the
+ * DLL then reads 4 bytes past the caller's struct. Verified by disassembling
+ * AIL_API_set_sample_info in the reference DLLs (see src/root.zig). */
+#if MSS_AT_LEAST(80)
+typedef struct _AILSOUNDINFO {
+    S32 format;
+    void const* data_ptr;
+    U32 data_len;
+    U32 rate;
+    S32 bits;
+    S32 channels;
+    U32 channel_mask;
+    U32 samples;
+    U32 block_size;
+    void const* initial_ptr;
+} AILSOUNDINFO;
+#else
 typedef struct _AILSOUNDINFO {
     S32 format;
     void const* data_ptr;
@@ -91,6 +126,23 @@ typedef struct _AILSOUNDINFO {
     U32 block_size;
     void const* initial_ptr;
 } AILSOUNDINFO;
+#endif
+
+/* The offsets are ABI, not documentation: AIL_set_sample_info, AIL_compress_ADPCM
+ * and AIL_decompress_ADPCM all take an AILSOUNDINFO* the DLL reads by offset.
+ * Pin the x86 layout here so a drift in this header is a compile error in the
+ * consumer's build instead of a misread at runtime. Pointer width is part of
+ * it, which is why the check is conditioned on the 32-bit target this DLL is. */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#if defined(_WIN32) && !defined(_WIN64)
+_Static_assert(sizeof(AILSOUNDINFO) == MSS_AILSOUNDINFO_SIZE, "AILSOUNDINFO size does not match this MSS version");
+_Static_assert(offsetof(AILSOUNDINFO, samples) == MSS_AILSOUNDINFO_SAMPLES_OFFSET, "AILSOUNDINFO.samples offset does not match this MSS version");
+_Static_assert(offsetof(AILSOUNDINFO, block_size) == MSS_AILSOUNDINFO_BLOCK_SIZE_OFFSET, "AILSOUNDINFO.block_size offset does not match this MSS version");
+#if MSS_AT_LEAST(80)
+_Static_assert(offsetof(AILSOUNDINFO, channel_mask) == MSS_AILSOUNDINFO_CHANNEL_MASK_OFFSET, "AILSOUNDINFO.channel_mask offset does not match this MSS version");
+#endif
+#endif
+#endif
 
 typedef struct _AILREDBOOKTEXT {
     U32 count;
@@ -105,6 +157,19 @@ typedef void (MSS_CALLBACK *AILTIMERCB)(U32 user);
  * finished. HSAMPLE and HSTREAM are both void*, so one typedef covers both. */
 typedef void (MSS_CALLBACK *AILSTREAMCB)(void* handle);
 typedef S32  (MSS_CALLBACK *AILLENGTHYCB)(U32 done, U32 total);
+
+/* VFS callbacks for AIL_set_file_callbacks. AIL_FILE_OPEN returns the file
+ * length and writes the handle it opened to *FileHandle; a 0 length is
+ * ambiguous (closed, or open-but-sizeless), so the DLL falls back to a
+ * SEEK_END seek before giving up. AIL_FILE_READ returns the byte count, and
+ * the DLL treats a short read as a failure. */
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+typedef U32  (MSS_CALLBACK *AIL_FILE_OPEN)(char const* filename, U32* file_handle);
+typedef void (MSS_CALLBACK *AIL_FILE_CLOSE)(U32 file_handle);
+typedef S32  (MSS_CALLBACK *AIL_FILE_SEEK)(U32 file_handle, S32 offset, U32 type);
+typedef U32  (MSS_CALLBACK *AIL_FILE_READ)(U32 file_handle, void* buffer, U32 bytes_to_read);
 
 typedef void* HSEQUENCE;
 typedef void* HDLSDRIVER;
@@ -364,6 +429,40 @@ S32         MSS_CALLBACK AIL_decompress_ASI(void const* indata, U32 insize, char
 #if MSS_AT_LEAST(30)
 void*      MSS_CALLBACK AIL_mem_alloc_lock(U32 size);
 void       MSS_CALLBACK AIL_mem_free_lock(void* ptr);
+#endif
+
+// File I/O
+/* AIL_file_* reads and classifies files through the application's own VFS when
+ * AIL_set_file_callbacks has installed one, and from disk otherwise. Every
+ * failure sets the string AIL_file_error returns, which is the only
+ * programmatic signal these calls give: they report absence with 0/null.
+ * The buffer is stable until the next AIL_file_* call. */
+char*      MSS_CALLBACK AIL_file_error(void);
+void*      MSS_CALLBACK AIL_file_read(char const* filename, void* dest);
+U32        MSS_CALLBACK AIL_file_size(char const* filename);
+S32        MSS_CALLBACK AIL_file_write(char const* filename, void const* data, U32 len);
+#if MSS_AT_LEAST(50)
+/* Returns an AILFILETYPE_* code, or AILFILETYPE_UNKNOWN for a buffer shorter
+ * than 8 bytes and for an unrecognised one. */
+S32        MSS_CALLBACK AIL_file_type(void const* data, U32 size);
+#endif
+#if MSS_AT_LEAST(70)
+/* AIL_file_type with the filename's extension consulted first, for the
+ * Voxware/Speex voice suffixes that carry no distinguishing magic. */
+S32        MSS_CALLBACK AIL_file_type_named(void const* data, char const* filename, U32 size);
+#endif
+
+#if MSS_AT_LEAST(61)
+/* Routes every later file access through the game's own VFS. The four
+ * arguments are the AIL_FILE_* callback pointers below, or 0 to go back to
+ * reading from disk. The order is (open, close, seek, read).
+ * AIL_set_file_async_callbacks takes the same four plus a completion callback
+ * the DLL ignores: the async path is served synchronously, so a callback
+ * posted from a worker thread would never be the caller's own. */
+void       MSS_CALLBACK AIL_set_file_callbacks(void* open_fn, void* close_fn, void* seek_fn, void* read_fn);
+#if MSS_BEFORE(81)
+void       MSS_CALLBACK AIL_set_file_async_callbacks(void* open_fn, void* close_fn, void* seek_fn, void* read_fn, void* callback_fn);
+#endif
 #endif
 
 #ifdef __cplusplus
