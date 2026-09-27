@@ -172,8 +172,13 @@ pub fn wavInfoBounded(raw: [*]const u8, max_len: usize, info: *anyopaque) i32 {
     const out: *root.AILSOUNDINFO = @ptrCast(@alignCast(info));
     // Use the RIFF chunk size to determine the file end boundary, clamped to the
     // known buffer length so a lying RIFF size cannot read past the allocation.
+    // The add saturates: riff_body is a file-controlled u32, and on the 32-bit
+    // target (where usize is u32) a body of 0xffffffff plus 8 is a checked
+    // overflow, so a 12-byte file would trap the host process instead of
+    // parsing. Saturating makes it clamp to max_len, which is the same bound the
+    // min already applies.
     const riff_body = std.mem.readInt(u32, raw[4..8][0..4], .little);
-    const file_end: usize = @min(@as(usize, riff_body) + 8, max_len);
+    const file_end: usize = @min(@as(usize, riff_body) +| 8, max_len);
     var offset: usize = 12;
     var audio_format: u16 = 1;
     var num_channels: u16 = 1;

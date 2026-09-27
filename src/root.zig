@@ -888,23 +888,23 @@ var redist_mutex: std.Io.Mutex = .init;
 
 pub fn setRedistDirectory(path: []const u8) void {
     log("Setting redist directory to: {s}\n", .{path});
-    // A path cut mid-character is not the directory that was set: the scan
-    // below would walk a path that names nothing. Drop the character the cut
-    // landed in rather than storing half of it.
-    const cut = wide.utf8Prefix(path, redist_directory.len - 1);
-    const len = cut.len;
-    // A path longer than the buffer is stored truncated, so the scan below walks
-    // a directory that is not the one the caller named and loads no plugins. Say
-    // so on stderr, where the OPENMILES_DEBUG and TMPDIR reports go as well: a
-    // caller with a too-long path has no reason to have a debug log turned on,
-    // and the empty plugin list is otherwise indistinguishable from a
-    // redist directory that holds none.
-    if (cut.len < path.len) {
+    // A path too long for the buffer is refused, not cut. What is stored here
+    // is the directory the scan below loads and executes .asi/.m3d/.flt images
+    // from, and a byte prefix of a long path is very often a different real
+    // directory, most obviously a parent of the intended one, so storing the
+    // prefix would move the plugin search somewhere the game and the operator
+    // never named. The refusal goes to stderr, where the OPENMILES_DEBUG and
+    // TMPDIR reports go as well: a caller with a too-long path has no reason to
+    // have a debug log turned on.
+    if (path.len > redist_directory.len - 1) {
         std.debug.print(
-            "openmiles: AIL_set_redist_directory: path is {d} bytes, the {d}-byte limit stored the first {d}; plugins are searched in the truncated path\n",
-            .{ path.len, redist_directory.len - 1, cut.len },
+            "openmiles: AIL_set_redist_directory: refusing a {d}-byte path (limit {d}); the previous directory is kept and no plugins are loaded\n",
+            .{ path.len, redist_directory.len - 1 },
         );
+        return;
     }
+    const cut = path;
+    const len = cut.len;
     redist_mutex.lockUncancelable(io);
     const unchanged = std.mem.eql(u8, getRedistDirectoryLocked(), cut);
     @memcpy(redist_directory[0..len], cut);

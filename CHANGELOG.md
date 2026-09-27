@@ -51,6 +51,25 @@ everything below is unreleased.
 
 ### Fixed
 
+- `AIL_set_redist_directory` stored a path longer than its 255-byte buffer
+  truncated to that buffer, and then scanned the truncated prefix for `.asi`,
+  `.m3d`, and `.flt` images to load and execute. A byte prefix of a long path is
+  usually a different real directory, most often a parent of the intended one,
+  so an over-long install path silently moved the plugin search somewhere the
+  game and the operator never named. A path that does not fit is now refused:
+  the previous directory stays, no plugins are loaded, and the refusal is
+  reported on stderr. Paths that fit behave exactly as before.
+- `AIL_WAV_info` and every `AIL_file_type` that inspects a WAV header computed
+  the chunk-walk end as `riff_size + 8` without saturating, on a size read from
+  four file-controlled bytes. On the 32-bit target `usize` is `u32`, so a file
+  declaring a 0xffffffff RIFF body trapped the host process from a 12-byte
+  header; the add now saturates and clamps to the known buffer length, matching
+  the three sibling size computations in the same file.
+- The event name-list bound in `AIL_next_event_step` summed the scratch
+  cursor, the pointer array, and the field length without saturating. A
+  bank-supplied string large enough to wrap the sum on the 32-bit target would
+  pass the check and write outside the caller's scratch buffer. The chain now
+  saturates, so a wrapped sum fails the bound instead of passing it.
 - `AIL_set_sample_playback_delay` stored its value and read it back, and no
   start ever applied it, so a game that staggered sounds by a few hundred
   milliseconds heard them all at once. The delay is a sample attribute, so

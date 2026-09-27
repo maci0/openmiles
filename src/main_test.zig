@@ -847,12 +847,42 @@ test "AIL_set_redist_directory returns the stored directory pointer (SDK char*)"
     try testing.expectEqual(@as(i32, 1), mh.AIL_MIDI_handle_release(@ptrCast(&scratch)));
 }
 
-test "setRedistDirectory truncates long paths" {
+test "setRedistDirectory refuses a path longer than the buffer" {
+    // A long path is refused, not cut. A byte prefix of it is usually a real
+    // directory (a parent of the intended one), and the stored value is the
+    // directory .asi/.m3d/.flt images are loaded and executed from, so cutting
+    // would move the plugin search somewhere the caller never named. The
+    // previous directory survives the refusal.
+    openmiles.setRedistDirectory("./test_plugins");
+    defer openmiles.setRedistDirectory("");
     const long_path = "/" ++ "a" ** 300;
     openmiles.setRedistDirectory(long_path);
-    defer openmiles.setRedistDirectory("");
-    const stored = openmiles.getRedistDirectory();
-    try testing.expectEqual(@as(usize, 255), stored.len);
+    try testing.expectEqualStrings("./test_plugins", openmiles.getRedistDirectory());
+    openmiles.setRedistDirectory("");
+    openmiles.setRedistDirectory(long_path);
+    try testing.expectEqual(@as(usize, 0), openmiles.getRedistDirectory().len);
+}
+
+test "a WAV declaring a 4 GiB RIFF body is inspected, not trapped" {
+    // The RIFF body size is a file-controlled u32. On the 32-bit target
+    // (mss32.dll) usize is u32, so an unchecked `body + 8` is a checked
+    // overflow and a 12-byte file traps the host process. The header walk must
+    // clamp to the known length instead, which leaves no data chunk here.
+    var hdr = [_]u8{ 'R', 'I', 'F', 'F', 0xFF, 0xFF, 0xFF, 0xFF, 'W', 'A', 'V', 'E' };
+    var info: openmiles.AILSOUNDINFO = undefined;
+    try testing.expectEqual(@as(i32, 0), openmiles.wavInfoBounded(&hdr, hdr.len, &info));
+    // With a data chunk inside the declared body, the parse still succeeds and
+    // reports only the bytes actually present.
+    const full = [_]u8{
+        'R', 'I', 'F', 'F', 0xFF, 0xFF, 0xFF, 0xFF, 'W', 'A', 'V', 'E', //
+        'f', 'm', 't', ' ', 16, 0, 0, 0, //
+        1, 0, 1, 0, 0x44, 0xAC, 0, 0, //
+        0x88, 0x58, 0x01, 0,   2, 0, 16, 0, //
+        'd',  'a',  't',  'a', 4, 0, 0,  0,
+        1,    2,    3,    4,
+    };
+    try testing.expectEqual(@as(i32, 1), openmiles.wavInfoBounded(&full, full.len, &info));
+    try testing.expectEqual(@as(u32, 4), info.data_len);
 }
 
 test "mssVolumeToGain boundary values" {
@@ -1051,11 +1081,13 @@ test "error and path buffers cut on a character boundary" {
     defer openmiles.clearFileError();
     try testing.expect(std.unicode.utf8ValidateSlice(std.mem.sliceTo(&openmiles.last_file_error_buf, 0)));
 
+    // A path that does not fit the redist buffer is refused rather than cut, so
+    // nothing is stored; the two error buffers above are the ones that cut, and
+    // each has to drop a partial character whole.
     openmiles.setRedistDirectory("/games/" ++ "\u{1F600}" ** 64);
     defer openmiles.setRedistDirectory("");
     const stored = openmiles.getRedistDirectory();
-    try testing.expect(stored.len <= 255);
-    try testing.expect(std.unicode.utf8ValidateSlice(stored));
+    try testing.expectEqual(@as(usize, 0), stored.len);
 }
 
 test "xmidiToSmf returns error on invalid data" {

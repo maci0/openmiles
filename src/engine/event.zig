@@ -605,7 +605,11 @@ const Decoder = struct {
         const ptr_size = @sizeOf(usize);
         const w = (@intFromPtr(self.wp) + ptr_size - 1) & ~@as(usize, ptr_size - 1);
         const list_bytes = ncount * ptr_size;
-        if (w + list_bytes + str_len + 1 >= @intFromPtr(self.wlimit)) {
+        // Saturating throughout: ncount and str_len both come out of a
+        // bank-supplied string, so on the 32-bit target a large enough field
+        // wraps the sum below and the bound would pass for a write that lands
+        // past wlimit.
+        if (w +| list_bytes +| str_len + 1 >= @intFromPtr(self.wlimit)) {
             self.overflow = true;
             self.p = pp;
             if (self.p[0] == ';') self.p += 1;
