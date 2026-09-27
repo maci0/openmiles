@@ -46,7 +46,7 @@ test "fuzz: invoke every export with adversarial inputs" {
     defer alloc.free(wav);
     const hm = openmiles.MidiDriver.init(alloc) catch return;
     defer hm.deinit();
-    const hr = openmiles.Redbook.init(alloc, 0) catch return;
+    const hr = openmiles.Redbook.init(alloc) catch return;
     defer hr.deinit();
     const ht_h = api_timer.AIL_register_timer(dummyTimerCb);
     const ht: ?*openmiles.Timer = if (ht_h) |t| @ptrCast(@alignCast(t)) else null;

@@ -2790,7 +2790,7 @@ test "AIL_redbook_status returns REDBOOK_* codes (STOPPED=0, ERROR=3)" {
     try testing.expectEqual(@as(u32, 1), @intFromEnum(openmiles.RedbookStatus.playing));
     try testing.expectEqual(@as(u32, 2), @intFromEnum(openmiles.RedbookStatus.paused));
     const allocator = testing.allocator;
-    const rb = try openmiles.Redbook.init(allocator, 0);
+    const rb = try openmiles.Redbook.init(allocator);
     defer rb.deinit();
     try testing.expectEqual(@as(u32, 0), api_redbook.AIL_redbook_status(rb)); // REDBOOK_STOPPED
     try testing.expectEqual(@as(u32, 3), api_redbook.AIL_redbook_status(null)); // REDBOOK_ERROR
@@ -3444,7 +3444,7 @@ test "AIL_size_processed_digital_audio takes the max over multiple sources (SDK)
 
 test "Redbook init deinit and default state" {
     const allocator = testing.allocator;
-    const rb = try openmiles.Redbook.init(allocator, 0);
+    const rb = try openmiles.Redbook.init(allocator);
     defer rb.deinit();
 
     try testing.expectEqual(openmiles.RedbookStatus.stopped, rb.status);
@@ -3455,7 +3455,7 @@ test "Redbook init deinit and default state" {
 
 test "Redbook play sets playing state" {
     const allocator = testing.allocator;
-    const rb = try openmiles.Redbook.init(allocator, 0);
+    const rb = try openmiles.Redbook.init(allocator);
     defer rb.deinit();
 
     rb.play(1, 5);
@@ -3466,7 +3466,7 @@ test "Redbook play sets playing state" {
 
 test "Redbook stop resets state" {
     const allocator = testing.allocator;
-    const rb = try openmiles.Redbook.init(allocator, 0);
+    const rb = try openmiles.Redbook.init(allocator);
     defer rb.deinit();
 
     rb.play(3, 10);
@@ -3478,7 +3478,7 @@ test "Redbook stop resets state" {
 
 test "Redbook pause and resume lifecycle" {
     const allocator = testing.allocator;
-    const rb = try openmiles.Redbook.init(allocator, 0);
+    const rb = try openmiles.Redbook.init(allocator);
     defer rb.deinit();
 
     rb.pause();
@@ -3497,7 +3497,7 @@ test "Redbook pause and resume lifecycle" {
 
 test "Redbook getPosition returns 0 when stopped" {
     const allocator = testing.allocator;
-    const rb = try openmiles.Redbook.init(allocator, 0);
+    const rb = try openmiles.Redbook.init(allocator);
     defer rb.deinit();
 
     try testing.expectEqual(@as(u32, 0), rb.getPosition());
@@ -3505,7 +3505,7 @@ test "Redbook getPosition returns 0 when stopped" {
 
 test "Redbook getPosition advances during playback" {
     const allocator = testing.allocator;
-    const rb = try openmiles.Redbook.init(allocator, 0);
+    const rb = try openmiles.Redbook.init(allocator);
     defer rb.deinit();
 
     rb.play(1, 5);
@@ -3523,7 +3523,7 @@ test "Redbook getPosition advances during playback" {
 
 test "Redbook paused position is stable" {
     const allocator = testing.allocator;
-    const rb = try openmiles.Redbook.init(allocator, 0);
+    const rb = try openmiles.Redbook.init(allocator);
     defer rb.deinit();
 
     rb.play(1, 5);
@@ -4811,7 +4811,7 @@ test "Sample setPosition on initialized sample" {
 
 test "Redbook trackCount returns 0" {
     const allocator = testing.allocator;
-    const rb = try openmiles.Redbook.init(allocator, 0);
+    const rb = try openmiles.Redbook.init(allocator);
     defer rb.deinit();
 
     try testing.expectEqual(@as(u32, 0), rb.trackCount());
@@ -7695,7 +7695,7 @@ test "AIL_3D_position/velocity/orientation round-trip (H3DPOBJECT: sample + list
 }
 
 test "AIL_redbook_set_volume_level returns the previous volume (F32)" {
-    const rb = try openmiles.Redbook.init(testing.allocator, 0);
+    const rb = try openmiles.Redbook.init(testing.allocator);
     defer rb.deinit();
     _ = api_v7.AIL_redbook_set_volume_level(rb, 0.8);
     const prev = api_v7.AIL_redbook_set_volume_level(rb, 0.3); // returns the prior 0.8

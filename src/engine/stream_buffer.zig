@@ -50,7 +50,6 @@ pub const StreamSource = struct {
     current: usize = 0,
     cursor_frames: u64 = 0,
     starved: bool = false,
-    ended: bool = false,
     eob_hook: ?EobHook = null,
     hook_ctx: ?*anyopaque = null,
 
@@ -114,7 +113,6 @@ pub const StreamSource = struct {
             self.slots[index] = .{ .data = @ptrCast(data), .len = len, .pos = 0 };
         }
         self.starved = false;
-        self.ended = false;
     }
 
     /// Resize the active ring. Under the lock because `onRead` (audio thread)
@@ -241,7 +239,6 @@ pub const StreamSource = struct {
             total += take_frames;
         }
         self.cursor_frames += total;
-        if (at_end) self.ended = true;
         self.mutex.unlock(io);
 
         // Fire EOB callbacks outside the lock.

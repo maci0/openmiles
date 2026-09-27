@@ -28,7 +28,6 @@ pub const redbook_status_error: u32 = 3;
 /// drive.
 pub const Redbook = struct {
     allocator: std.mem.Allocator,
-    drive: u32 = 0,
     current_track: u32 = 0,
     track_end: u32 = 0,
     status: RedbookStatus = .stopped,
@@ -38,9 +37,9 @@ pub const Redbook = struct {
     play_start_ms: i64 = 0,
     paused_position_ms: i64 = 0,
 
-    pub fn init(allocator: std.mem.Allocator, drive: u32) !*Redbook {
+    pub fn init(allocator: std.mem.Allocator) !*Redbook {
         const self = try allocator.create(Redbook);
-        self.* = .{ .allocator = allocator, .drive = drive };
+        self.* = .{ .allocator = allocator };
         return self;
     }
 
