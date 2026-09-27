@@ -11,7 +11,8 @@ CI installs the old tool, the old tool is happy with the old tree, and the merge
 goes green.
 
 The same drift applies to the C warning set, which build.zig declares once and
-check_header.py repeats to compile mss.h on its own.
+the two gates that compile C on their own repeat: check_header.py for mss.h,
+check_examples.py for the snippets in the documentation.
 
 So this reads the pins back out of each file and compares them, reporting:
 
@@ -31,6 +32,7 @@ RELEASE_YML = ROOT / ".github" / "workflows" / "release.yml"
 ZON = ROOT / "build.zig.zon"
 BUILD_ZIG = ROOT / "build.zig"
 CHECK_HEADER = ROOT / "scripts" / "check_header.py"
+CHECK_EXAMPLES = ROOT / "scripts" / "check_examples.py"
 
 # Makefile variable -> (files that must repeat it, pattern naming the pin).
 PINS = {
@@ -42,12 +44,18 @@ PINS = {
 # rather than repeating it.
 ZIG_WORKFLOWS = (CI_YML, RELEASE_YML)
 
-# The C warning set is declared once, as c_flags in build.zig, and
-# check_header.py repeats it to compile mss.h on its own. The two are the same
-# list, so a warning added to the build and not to the header gate compiles in
-# one place and not the other, which is the drift this reports.
+# The C warning set is declared once, as c_flags in build.zig, and repeated by
+# the two gates that compile C on their own: check_header.py for mss.h, and
+# check_examples.py for the snippets in the documentation. All three are the
+# same list, so a warning added to the build and to only one gate compiles in
+# one place and not the others, which is the drift this reports. Leaving the
+# examples gate out of the comparison is the same defect one step further
+# down: a documentation snippet would then pass under a laxer set than the
+# build compiles the library with, and the copy a consumer starts from is the
+# one least worth trusting.
 C_FLAGS_BUILD_ZIG_RE = re.compile(r"const c_flags = \[_\]\[\]const u8\{(?P<body>.*?)\};", re.DOTALL)
 C_FLAGS_HEADER_RE = re.compile(r'"cc",(?P<body>.*?)str\(tu\)', re.DOTALL)
+C_FLAGS_EXAMPLES_RE = re.compile(r"CFLAGS = \[(?P<body>.*?)\n\]", re.DOTALL)
 QUOTED_RE = re.compile(r'"(-W[A-Za-z0-9=-]+|-std=[A-Za-z0-9]+)"')
 
 
@@ -125,11 +133,12 @@ def zig_workflow_problems(path, text):
 
 
 def c_flag_problems():
-    """Report any disagreement between the two copies of the C warning set."""
+    """Report any disagreement between the copies of the C warning set."""
     bad = []
     sources = (
         (BUILD_ZIG, C_FLAGS_BUILD_ZIG_RE, "c_flags"),
         (CHECK_HEADER, C_FLAGS_HEADER_RE, "the zig cc argv list"),
+        (CHECK_EXAMPLES, C_FLAGS_EXAMPLES_RE, "the zig cc CFLAGS list"),
     )
     found = {}
     for path, pattern, label in sources:
@@ -146,19 +155,20 @@ def c_flag_problems():
     if len(found) != len(sources):
         return bad
     build_flags = found[BUILD_ZIG]
-    header_flags = found[CHECK_HEADER]
     if "-Werror" not in build_flags:
         print("build.zig DRIFT     c_flags does not promote warnings to errors")
         bad.append("build.zig C flags")
-    if build_flags != header_flags:
-        only_build = sorted(set(build_flags) - set(header_flags))
-        only_header = sorted(set(header_flags) - set(build_flags))
+    for path, flags in found.items():
+        if path == BUILD_ZIG or flags == build_flags:
+            continue
+        only_build = sorted(set(build_flags) - set(flags))
+        only_other = sorted(set(flags) - set(build_flags))
         print(
-            f"{CHECK_HEADER.relative_to(ROOT)} DRIFT     the C warning set differs from "
+            f"{path.relative_to(ROOT)} DRIFT     the C warning set differs from "
             f"c_flags in build.zig (build only: {', '.join(only_build) or 'none'}; "
-            f"header only: {', '.join(only_header) or 'none'})"
+            f"gate only: {', '.join(only_other) or 'none'})"
         )
-        bad.append("check_header.py C flags")
+        bad.append(f"{path.name} C flags")
     return bad
 
 

@@ -13,8 +13,8 @@ ZIG_VERSION := $(shell sed -n 's/^[[:space:]]*\.minimum_zig_version[[:space:]]*=
 # invoked as `$(PYTHON) scripts/...` so one resolution covers every call site.
 PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
 
-# Exported so the `test` recipe reads FILTER from the environment rather than
-# splicing a caller's argument into the recipe text.
+# Exported so the `test` and `sanitize` recipes read FILTER from the
+# environment rather than splicing a caller's argument into the recipe text.
 export FILTER
 
 all: build
@@ -53,7 +53,11 @@ test: check-toolchain
 # sources and the vendored headers translate-C pulls in, which is where the
 # interpreter code in src/ actually lives.
 sanitize: check-toolchain
-	zig build test -Dsanitize $(if $(FILTER),-Dtest-filter=$(FILTER))
+	@if [ -n "$$FILTER" ]; then \
+	  zig build test -Dsanitize -Dtest-filter="$$FILTER"; \
+	else \
+	  zig build test -Dsanitize; \
+	fi
 
 # Everything .github/workflows/ci.yml runs, in the same order, so a failure
 # here is the same failure CI would give.
