@@ -241,8 +241,7 @@ pub fn setLastError(msg: []const u8) void {
 pub fn setLastErrorFmt(comptime fmt: []const u8, args: anytype) void {
     error_buf_mutex.lockUncancelable(io);
     defer error_buf_mutex.unlock(io);
-    if (std.fmt.bufPrintZ(&last_error_buf, fmt, args)) |_| {} else |_|
-        writeLastErrorLocked("Error message too long");
+    if (std.fmt.bufPrintZ(&last_error_buf, fmt, args)) |_| {} else |_| writeLastErrorLocked("Error message too long");
 }
 
 pub fn clearLastError() void {
@@ -264,8 +263,7 @@ pub fn setFileError(msg: []const u8) void {
 pub fn setFileErrorFmt(comptime fmt: []const u8, args: anytype) void {
     error_buf_mutex.lockUncancelable(io);
     defer error_buf_mutex.unlock(io);
-    if (std.fmt.bufPrintZ(&last_file_error_buf, fmt, args)) |_| {} else |_|
-        writeFileErrorLocked("Error message too long");
+    if (std.fmt.bufPrintZ(&last_file_error_buf, fmt, args)) |_| {} else |_| writeFileErrorLocked("Error message too long");
 }
 
 fn writeLastErrorLocked(msg: []const u8) void {

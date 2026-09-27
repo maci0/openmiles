@@ -15,6 +15,11 @@ All notable changes to OpenMiles are recorded here. The format follows
   with its notes still sitting under `## [Unreleased]`.
 - The release workflow runs the test suite, cross-compiles the DLL, and smoke
   tests the produced binary (32-bit PE, core exports present) before packaging.
+- A published version is immutable. A `workflow_dispatch` re-run of a tag is the
+  retry for a run that failed before it published, and the workflow refuses one
+  for a tag that already has a release, so a retry cannot replace the archive a
+  consumer has already fetched and recorded against `SHA256SUMS`. A fix to a
+  published release ships as a new version.
 - Compatibility is per `-Dmss-version`, not per OpenMiles release. Each value
   swept by `scripts/check_all_versions.sh` (`3`, `4`, `5`, `6.1`, `6.5`, `7`,
   `8`, `9`) reproduces its reference `mss32.dll` export table with zero missing
@@ -39,6 +44,15 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 No version has been tagged yet. `build.zig.zon` still reads `0.0.0`, so
 everything below is unreleased.
+
+### Breaking
+
+- `Provider.init` takes only the allocator. It previously took a second
+  `module: ?*anyopaque` argument and discarded it (`_ = module`), so a Zig
+  caller passes one argument now instead of two. No `Provider` field changes,
+  and the C export `RIB_alloc_provider_handle(module)` still takes the module
+  pointer, so `mss32.dll`'s export table and every C consumer are unaffected.
+  This is the only public-surface break in this release, and it is Zig-only.
 
 ### Added
 
@@ -90,6 +104,12 @@ everything below is unreleased.
   freed a sequence that had locked a channel, permanently spent one of the 15
   lockable channels until `AIL_lock_channel` answered -1 for the rest of the
   process.
+- `openmiles.copyLastError(out)` and `openmiles.copyFileError(out)` copy a
+  stored message into a caller-supplied buffer under the lock the writers take,
+  and return the slice written. `AIL_last_error` and `AIL_file_error` hand back
+  a raw pointer into a buffer any other thread may be rewriting, so a reader on
+  the game thread could see a half-written or spliced message; these are the
+  race-free way in from Zig.
 - `make lint` runs yamllint over `.github/workflows`, with the rule set in
   `.yamllint` and the version pinned by `YAMLLINT_VERSION` the same way ruff
   is. `make check-pins` now fails when the Makefile and `ci.yml` disagree on
@@ -125,9 +145,60 @@ everything below is unreleased.
   ignored. `scripts/package_release.sh` writes both into the tree it runs in,
   and the release workflow publishes them, so a local run no longer leaves an
   artifact that can be committed by accident.
+- The release workflow refuses a `workflow_dispatch` re-run of a tag that
+  already has a release, so a retry after a failed run cannot republish over an
+  archive a consumer has already fetched. A published version is republished
+  only as a new version.
 
 ### Fixed
 
+- `make lint` was red on a clean tree: 32 `docs/THREAT_MODEL.md` `file:line`
+  anchors in `src/root.zig`, `src/api/digital.zig`, `src/api/v8.zig` and
+  `src/engine/soundbank.zig` named lines their anchors had moved off, and
+  `zig fmt --check` rejected `src/root.zig`. Every mitigation the model claims
+  was a claim nobody re-checked. All 103 references resolve again, and the
+  anchors point at the line each symbol is defined on.
+- `AIL_shutdown` tore the engine down on the first call, not the last. A game
+  that calls `AIL_startup` twice and `AIL_shutdown` once per startup was left
+  with no startup provider and no drivers, while the use count still reported
+  one outstanding use, so the same call sequence ended in a different state
+  depending on how many times startup had run. The count now gates the teardown
+  and `openmiles.shutdown()` is reached only at zero; a repeated shutdown past
+  zero stays harmless.
+- `AIL_last_error` and `AIL_file_error` name a process-wide buffer that every
+  entry point writes from whichever thread called, with no lock. A reader could
+  see a body with no terminator, or two threads' messages spliced. The writes
+  are serialized now, and `copyLastError` / `copyFileError` are the locked way
+  in (see Added).
+- `AIL_set_redist_directory` returned a pointer into the library's live path
+  buffer, which another thread's call rewrites under the reader. It returns a
+  per-thread snapshot of the same string now, so the pointer is as stable as
+  the SDK's own.
+- `startAllTimers` / `stopAllTimers` held the global timer registry lock across
+  a per-timer `start` / `stop`, and both join a timer thread whose callback is
+  free to call `AIL_register_timer` and take that same lock: a timer that
+  registered itself deadlocked the shutdown it was running on. Each snapshots
+  the registry under the lock and works with it released.
+- `releaseAllTimers` stopped and destroyed each timer outside the registry lock,
+  so a snapshot taken by `startAllTimers` / `stopAllTimers` could be left
+  holding a freed pointer. The unlink and the free happen under the lock, once
+  the thread is joined.
+- `Timer.deinit` released its state mutex between the stop and the join, so a
+  concurrent `AIL_start_timer` could spawn a fresh run loop onto a struct that
+  was about to be destroyed. It holds the mutex across the whole teardown, and a
+  `deinit` called from inside the callback (the run loop's own thread, which
+  cannot be joined and still reads the struct on the way out) hands the destroy
+  to the run loop instead of freeing under it.
+- A soundbank's reference drop and its unregister from the registry were two
+  separate steps, so a concurrent open of the same file could find the bank,
+  take a reference, and then have it torn down under it, and two concurrent
+  closes could lose a decrement. The decrement, the last-reference test and the
+  unregister are one step under the registry lock.
+- Reloading a MIDI sequence freed the previous `tml` handle without holding the
+  sequence state mutex, so the audio thread could still be walking the old
+  message chain when it was freed. The swap of the handle and the fields
+  rewritten from the new list now happen under that mutex; the parse stays
+  outside it.
 - `make lint` failed on a clean tree: eight `docs/THREAT_MODEL.md` `file:line`
   anchors in `src/engine/midi.zig` and `src/engine/digital.zig` named lines
   their definitions had moved off, so the threat model read as claiming a

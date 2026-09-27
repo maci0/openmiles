@@ -59,6 +59,25 @@ jobs:
           fi
           echo "releasing ${declared}"
 
+      # A published version is immutable: the tag, the archive under it, and
+      # the checksum beside it are what a consumer has already pinned. A
+      # workflow_dispatch re-run exists for a run that failed before it
+      # published; if a release for this tag exists, the run is not that case,
+      # and re-uploading would replace bytes a consumer may have fetched and
+      # recorded against SHA256SUMS. Publish the fix as a new version instead.
+      - name: Refuse to overwrite a published release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "release ${TAG} already exists; a published version is not republished"
+            echo "bump .version in build.zig.zon and tag the new version"
+            exit 1
+          fi
+          echo "no release published for ${TAG} yet"
+
       # build.zig.zon declares the toolchain once; CI and the Makefile read the
       # same field, so a Zig bump cannot land in one place and miss the others.
       - name: Read pinned Zig version

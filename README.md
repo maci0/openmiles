@@ -168,8 +168,10 @@ Publishing is a tag push: set `.version` in `build.zig.zon`, push `v<version>`,
 and the workflow builds, smoke-tests the DLL, verifies the archive is
 reproducible, and creates the GitHub release. The workflow refuses a tag whose
 version does not match `build.zig.zon`. A failed run is retried with a manual
-dispatch of the same tag from the Actions tab, which republishes over the
-existing release without moving the tag.
+dispatch of the same tag from the Actions tab. That re-run is refused once the
+release for the tag exists: a published version is not republished, because a
+consumer may have pinned the archive and its recorded checksum. A fix to a
+published release ships as a new version.
 
 ### Targeting an MSS version
 
