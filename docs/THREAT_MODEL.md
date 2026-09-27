@@ -26,11 +26,11 @@ to set both.
 | 1 | Untrusted plugin image written to the temp directory and `LoadLibrary`'d | file/env to process | Code execution as the game user | Mitigated: unpredictable name, exclusive create (`src/api/rib.zig:194 randomSecure`, `src/api/rib.zig:214 exclusive`) |
 | 2 | `.asi`/`.m3d`/`.flt` files in the game directory loaded and executed at startup | file to process | Code execution as the game user | Unmitigated by design: the host game's own directory is trusted. Listed in [Deployment](#4-deployment-artifact-boundary) |
 | 3 | Malformed soundbank / event bytecode (`.BANK`) | file to process | Crash, in-process memory corruption, audio DoS | Partial: bounds chokepoint in `src/engine/soundbank.zig:158 rdU32`, step decode bounded in `src/engine/event.zig:483 copyString` |
-| 4 | Malformed XMIDI / MIDI sequence | file to process | Crash, memory exhaustion | Partial: saturating cursor arithmetic, fixed loop stack (`src/engine/xmidi.zig:377 xmidiToSmf`, `src/engine/midi.zig:213 xmidi_loop_stack`) |
+| 4 | Malformed XMIDI / MIDI sequence | file to process | Crash, memory exhaustion | Partial: saturating cursor arithmetic, fixed loop stack (`src/engine/xmidi.zig:377 xmidiToSmf`, `src/engine/midi.zig:229 xmidi_loop_stack`) |
 | 5 | Malformed or oversized audio file (MP3/OGG/WAV/FLAC) | file to process | Crash, memory exhaustion | Partial: declared-size caps in `src/engine/audio_detect.zig:15 max_declared_image_size`; no cap on the raw file read (`src/engine/digital.zig:1110 loadFromFile`) |
-| 6 | App VFS callback reports an arbitrary file size | game to DLL | Heap exhaustion in the game process | Unmitigated (`src/root.zig:250 fileCallbackReadAll`) |
+| 6 | App VFS callback reports an arbitrary file size | game to DLL | Heap exhaustion in the game process | Unmitigated (`src/root.zig:251 fileCallbackReadAll`) |
 | 7 | Caller-supplied pointer/length pairs trusted verbatim | game to DLL | Read/write of game memory on a bad call | Unmitigated by ABI necessity (see [Game process boundary](#1-game-process-boundary)) |
-| 8 | Debug logging enabled by environment variable | environment to process | Verbose internal logging to disk, paths and asset names disclosed | Mitigated: opt-in, 64 MiB cap (`src/utils/logger.zig:13 max_log_bytes`) |
+| 8 | Debug logging enabled by environment variable | environment to process | Verbose internal logging to disk, paths and asset names disclosed | Mitigated: opt-in, 64 MiB cap (`src/utils/logger.zig:14 max_log_bytes`) |
 | 9 | `TMPDIR` redirects the ASI image write | environment to process | PE image written into an attacker-chosen directory | Unmitigated (`src/api/rib.zig:137 TMPDIR`) |
 
 ## 1. Game process boundary
@@ -48,7 +48,7 @@ these are not remote attack vectors, they are the ABI contract.
 - `AIL_file_read` (`src/api/file.zig:11 AIL_file_read`) returns a pointer to a
   whole file the caller must `AIL_mem_free_lock`, or writes it into a
   caller-supplied `dest` of unknown size. With `dest` null it `malloc`s a second
-  buffer of the same size (`src/root.zig:335 std.c.malloc`), so the size reported
+  buffer of the same size (`src/root.zig:336 std.c.malloc`), so the size reported
   by the VFS is trusted twice.
 - Game-supplied VFS function pointers installed as globals and then called by
   the loader: `AIL_set_file_callbacks` (`src/api/file.zig:35 AIL_set_file_callbacks`).
@@ -64,7 +64,7 @@ these are not remote attack vectors, they are the ABI contract.
   (`src/api/rib.zig:40 RIB_load_application_providers`).
 
 There is no `AIL_open_file`/`AIL_close_file`/`HSFILE` handle API. The whole file
-service surface is `src/api/file.zig` plus the callback VFS in `src/root.zig:243 cb_file_open`.
+service surface is `src/api/file.zig` plus the callback VFS in `src/root.zig:244 cb_file_open`.
 
 ## 2. File system to process
 
@@ -73,9 +73,9 @@ hostile file, download, or mod pack reaches.
 
 | Input | Entry point | Notes |
 |-------|-------------|-------|
-| Audio file | `AIL_load_sample` / `AIL_open_stream` / `AIL_quick_load` -> `Sample.loadFromFile` (`src/engine/digital.zig:1110 loadFromFile`) | Rejects only a zero length, then allocates the whole file. The 256 MiB cap in `readWholeFile` (`src/root.zig:285 max_file_load_bytes`) applies only to that helper. |
+| Audio file | `AIL_load_sample` / `AIL_open_stream` / `AIL_quick_load` -> `Sample.loadFromFile` (`src/engine/digital.zig:1110 loadFromFile`) | Rejects only a zero length, then allocates the whole file. The 256 MiB cap in `readWholeFile` (`src/root.zig:286 max_file_load_bytes`) applies only to that helper. |
 | Audio in memory | `Sample.load` (`src/engine/digital.zig:1128 load`) | Caller length used as a slice length with no cap. |
-| XMIDI / MIDI | `AIL_init_sequence` -> `xmidiToSmf` (`src/engine/xmidi.zig:377 xmidiToSmf`) | Declared extents clamped to the buffer with saturating arithmetic; VLQ continuation capped at 4 bytes (`src/engine/xmidi.zig:80 bytes_read`); FOR/NEXT loop stack fixed at 8 with a depth check (`src/engine/midi.zig:443 xmidi_loop_depth`). |
+| XMIDI / MIDI | `AIL_init_sequence` -> `xmidiToSmf` (`src/engine/xmidi.zig:377 xmidiToSmf`) | Declared extents clamped to the buffer with saturating arithmetic; VLQ continuation capped at 4 bytes (`src/engine/xmidi.zig:80 bytes_read`); FOR/NEXT loop stack fixed at 8 with a depth check (`src/engine/midi.zig:460 xmidi_loop_depth`). |
 | BANK soundbank | `AIL_open_soundbank` (`src/api/v8.zig:514 AIL_open_soundbank`), `AIL_open_soundbank_v8` (`src/api/v8.zig:920 AIL_open_soundbank_v8`) -> `loadFromMemory` (`src/engine/soundbank.zig:443 loadFromMemory`) | Tag, version, and `meta_size` validated before any allocation; every offset read passes through the bounds-checked `rdU32` (`src/engine/soundbank.zig:158 rdU32`); metadata is NUL-terminated by an allocated sentinel. |
 | Event bytecode | `AIL_next_event_step` (`src/api/v8.zig:498 AIL_next_event_step`) -> `nextStep` (`src/engine/event.zig:624 nextStep`) | Step type is range-checked before the enum conversion, the header chain is depth-limited, and string copies refuse to pass `wlimit` (`src/engine/event.zig:483 copyString`). |
 | DLS container | `AIL_extract_DLS` / `AIL_find_DLS` / `AIL_list_DLS` / `AIL_merge_DLS_with_XMI` | Pointer images capped at 256 MiB (`src/engine/dls_container.zig:74 max_ptr_image_size`); merged image size checked with `std.math.add`. `AIL_list_DLS` takes a pointer with no length and derives one from the header, so a lying RIFF size drives a scan past the caller's buffer (`src/api/dls.zig:348 AIL_list_DLS`). |
@@ -92,10 +92,10 @@ chunk size from a caller-supplied image, with `OutOfMemory` as the only backstop
 Two environment variables are read, both through the process environment rather
 than any validated config file.
 
-- `OPENMILES_DEBUG` (`src/utils/logger.zig:49 GetEnvironmentVariableW`): enables
+- `OPENMILES_DEBUG` (`src/utils/logger.zig:55 GetEnvironmentVariableW`): enables
   verbose logging to `openmiles.log` in the current directory, capped at 64 MiB
-  (`src/utils/logger.zig:13 max_log_bytes`). Debug builds enable it by default
-  (`src/utils/logger.zig:36 builtin.mode`), so a debug build in a shared
+  (`src/utils/logger.zig:14 max_log_bytes`). Debug builds enable it by default
+  (`src/utils/logger.zig:42 builtin.mode`), so a debug build in a shared
   directory discloses asset names, file paths, and internal state to any local
   user who can read the file.
 - `TMPDIR` (`src/api/rib.zig:137 TMPDIR`): the non-Windows directory the
@@ -112,17 +112,17 @@ than any validated config file.
 ## 4. Deployment artifact boundary
 
 `AIL_startup` (`src/api/digital.zig:17 AIL_startup`) reaches `startup()`
-(`src/root.zig:1073 loadApplicationProviders`), which scans the current working
+(`src/root.zig:1067 loadApplicationProviders`), which scans the current working
 directory and loads every file with a plugin extension through the OS loader:
-`loadApplicationProviders(".")` (`src/root.zig:466 loadApplicationProviders`).
+`loadApplicationProviders(".")` (`src/root.zig:467 loadApplicationProviders`).
 
 Controls present:
 
-- Extension allowlist `.asi`, `.m3d`, `.flt` (`src/root.zig:442 isPluginExtension`).
+- Extension allowlist `.asi`, `.m3d`, `.flt` (`src/root.zig:443 isPluginExtension`).
 - Filename rejection of `..`, `/`, `\` so a directory entry cannot escape the
-  scan directory (`src/root.zig:448 isSafePluginFilename`).
+  scan directory (`src/root.zig:449 isSafePluginFilename`).
 - A rescan that finds an already-loaded module skips it, so one module is
-  loaded once per process (`src/root.zig:511 isPluginAlreadyLoaded`).
+  loaded once per process (`src/root.zig:512 isPluginAlreadyLoaded`).
 - The loaded module runs in-process with the game's full authority. This is the
   original MSS design, and plugins are unsigned.
 
@@ -187,23 +187,23 @@ Gaps:
 
 | Control | Where | Covers |
 |---------|-------|--------|
-| Whole-file read cap, 256 MiB | `src/root.zig:285 max_file_load_bytes` | Oversized file allocation on the direct-filesystem read path only |
+| Whole-file read cap, 256 MiB | `src/root.zig:286 max_file_load_bytes` | Oversized file allocation on the direct-filesystem read path only |
 | Declared container size cap, 256 MiB | `src/engine/audio_detect.zig:15 max_declared_image_size` | Lying RIFF/FORM headers |
 | Pointer image cap, 256 MiB | `src/engine/dls_container.zig:74 max_ptr_image_size` | Lying DLS container sizes over bare pointers |
 | Bounds-checked offset read | `src/engine/soundbank.zig:158 rdU32` | Every BANK offset and count |
 | Saturating cursor arithmetic and clamped chunk ends | `src/engine/xmidi.zig:377 xmidiToSmf` | Lying XMIDI chunk sizes |
-| Fixed loop stack with depth check | `src/engine/midi.zig:213 xmidi_loop_stack` | XMIDI FOR/NEXT recursion |
+| Fixed loop stack with depth check | `src/engine/midi.zig:229 xmidi_loop_stack` | XMIDI FOR/NEXT recursion |
 | Unpredictable exclusive temp file | `src/api/rib.zig:214 exclusive` | Temp-file pre-planting and name race |
-| Plugin extension allowlist and separator rejection | `src/root.zig:442 isPluginExtension` | Directory traversal in the CWD plugin scan |
+| Plugin extension allowlist and separator rejection | `src/root.zig:443 isPluginExtension` | Directory traversal in the CWD plugin scan |
 | Step-type range check, header depth limit, `wlimit`-bounded string copies | `src/engine/event.zig:483 copyString` | Crafted event bytecode |
-| Log cap, 64 MiB | `src/utils/logger.zig:13 max_log_bytes` | Unbounded debug log growth |
+| Log cap, 64 MiB | `src/utils/logger.zig:14 max_log_bytes` | Unbounded debug log growth |
 | Fuzz harness over every export that takes input | `src/fuzz_all_test.zig:37 test` | Regression coverage on the export surface |
-| Native-path fuzz harness | `src/fuzz_native_test.zig:221 test` | Regression coverage on non-Windows paths |
+| Native-path fuzz harness | `src/fuzz_native_test.zig:222 test` | Regression coverage on non-Windows paths |
 | Export-parity and unit suites | `src/main_test.zig:28 test`, `src/api_coverage_test.zig:57 test` | ABI regressions |
 
 Single points of failure:
 
-- `fileCallbackReadAll` (`src/root.zig:250 fileCallbackReadAll`) is the only place
+- `fileCallbackReadAll` (`src/root.zig:251 fileCallbackReadAll`) is the only place
   a VFS-reported file length becomes an allocation, and the size cap lives only
   on the direct path in `readWholeFile`. Fixing the size cap in one function and
   not the other leaves the boundary open.
@@ -225,16 +225,16 @@ Single points of failure:
 
 ## Unmitigated threats, ranked
 
-1. Unsigned plugin execution from the game directory (`src/root.zig:466 loadApplicationProviders`).
+1. Unsigned plugin execution from the game directory (`src/root.zig:467 loadApplicationProviders`).
    Inherent to the compatibility target; a documented deployment note is the
    available mitigation.
 2. Uncapped whole-file allocation whenever a VFS is installed. `readWholeFile`
    returns `fileCallbackReadAll` before reaching its own cap
-   (`src/root.zig:290 cb_file_open`), and `ailFileRead` takes the same
-   uncapped path (`src/root.zig:318 cb_file_open`): a large or lying file
+   (`src/root.zig:291 cb_file_open`), and `ailFileRead` takes the same
+   uncapped path (`src/root.zig:319 cb_file_open`): a large or lying file
    size turns into a large allocation, with `OutOfMemory` as the only outcome.
 3. Game-VFS-reported size trusted for allocation, and trusted a second time by
-   `AIL_file_read`'s `malloc` (`src/root.zig:335 std.c.malloc`).
+   `AIL_file_read`'s `malloc` (`src/root.zig:336 std.c.malloc`).
 4. `AIL_list_DLS` derives a length from a caller pointer's header and scans up
    to 256 MiB past it (`src/api/dls.zig:348 AIL_list_DLS`).
 5. XMIDI event pre-allocation with no ceiling (`src/engine/xmidi.zig:204 ensureTotalCapacity`).
@@ -244,4 +244,4 @@ Single points of failure:
 7. `TMPDIR` chooses the directory the ASI image is written to
    (`src/api/rib.zig:137 TMPDIR`).
 8. Debug logging of paths and asset names in a game directory a second local
-   user can read (`src/utils/logger.zig:36 builtin.mode`).
+   user can read (`src/utils/logger.zig:42 builtin.mode`).

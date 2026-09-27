@@ -27,6 +27,14 @@ cd "$(dirname "$0")/.." || exit 1
 
 command -v zig >/dev/null || { echo "error: zig not found on PATH" >&2; exit 1; }
 
+# Every build below is compared against a reference DLL, so a stray zig on PATH
+# would produce a verdict nobody audited. Makefile's check-toolchain refuses
+# exactly that; the sweep calls zig directly, so it repeats the check.
+zig_version=$(sed -n 's/^[[:space:]]*\.minimum_zig_version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' build.zig.zon)
+[ -n "$zig_version" ] || { echo "error: no .minimum_zig_version in build.zig.zon" >&2; exit 1; }
+have=$(zig version)
+[ "$have" = "$zig_version" ] || { echo "error: zig $zig_version required, found $have" >&2; exit 1; }
+
 usage() {
   cat <<EOF
 Usage: scripts/check_all_versions.sh [--strict]

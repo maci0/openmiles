@@ -83,6 +83,16 @@ everything below is unreleased.
 - Vendored dependency checksums are documented for `deps/`.
 - `CONTRIBUTING.md`: pinned-tool setup, the edit-test loop, what a change is
   expected to carry, and how the vendored and generated files are checked.
+- `scripts/requirements-dev.txt` pins the one third-party Python package the
+  gates need, `pefile`, which `scripts/check_exports.py` imports to read a
+  reference DLL's export table. `make parity` checked for it up front and
+  named the install command, and `CONTRIBUTING.md` documents it as the single
+  exception to "nothing else is fetched": `make lint` and CI still need
+  nothing beyond the standard library.
+- The release archive and its checksum file, `*.zip` and `release/`, are
+  ignored. `scripts/package_release.sh` writes both into the tree it runs in,
+  and the release workflow publishes them, so a local run no longer leaves an
+  artifact that can be committed by accident.
 
 ### Fixed
 
@@ -154,6 +164,15 @@ everything below is unreleased.
 - Load failures that were previously swallowed are now reported, with the
   VFS handle leak and dangling filter pointer on the error path fixed.
 - `openmiles.log` and mock plugin loading after Windows cross-builds.
+- 26 `file:line` anchors in `docs/THREAT_MODEL.md` pointed at lines the named
+  symbol had since moved off, so `make check-threat-model` (run by
+  `make lint`, and by CI) failed on a clean tree and every mitigation claim
+  the model makes was unresolvable. The anchors now name the line the
+  referenced code is on.
+- `scripts/check_all_versions.sh` built each `-Dmss-version` with whatever zig
+  was on PATH, so a parity verdict could be produced by a compiler nobody
+  audited. It refuses any version other than the one `build.zig.zon` declares,
+  as `make check-toolchain` already does for the rest of the build.
 
 ### Changed
 

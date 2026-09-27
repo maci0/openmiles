@@ -1,0 +1,11 @@
+# Python packages the developer-only gates import. Nothing in the build or in CI
+# needs these: `make lint` runs on the standard library alone, and pefile is
+# read only by scripts/check_exports.py, which scripts/check_all_versions.sh
+# (`make parity`) drives. Install with:
+#
+#   uv pip install -r scripts/requirements-dev.txt
+#
+# Pinned so a parity verdict is comparable across machines; pefile parses the
+# reference DLLs' export tables, and a different release could read them
+# differently.
+pefile==2024.8.26

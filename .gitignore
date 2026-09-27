@@ -2,6 +2,12 @@
 zig-out/
 .zig-cache/
 .zig-global-cache/
+# Release packaging output. scripts/package_release.sh writes the archive and
+# its checksum file into the tree it is run from; the release workflow publishes
+# them as release assets, so committing a copy of either only risks shipping a
+# stale build.
+*.zip
+release/
 *.o
 *.dll
 *.lib

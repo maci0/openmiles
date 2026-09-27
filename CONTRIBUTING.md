@@ -2,7 +2,7 @@
 
 ## Setup
 
-Two tools, both version-pinned in the tree:
+Three tools, the first two version-pinned in the tree:
 
 | Tool | Version | Declared in | Install (any equivalent works) |
 |------|---------|-------------|---------------------------------|
@@ -15,6 +15,15 @@ any other one; `make check-pins` (part of `make lint`) fails when the Makefile,
 `ci.yml`, and `build.zig.zon` disagree. Nothing else is fetched: every
 dependency is a vendored header under `deps/`, verified by
 `make check-vendored` against `deps/SHA256SUMS`.
+
+`make parity` is the one exception. It diffs each `-Dmss-version` build against
+a reference DLL under `references/`, which is copyrighted and not distributed,
+so it never runs in CI and is not part of `make check`. It also needs one
+third-party Python package, declared in `scripts/requirements-dev.txt`:
+
+```bash
+uv pip install -r scripts/requirements-dev.txt
+```
 
 Optional: a `test_media/` directory holding `test.wav`, `test.mid`, and
 `test.sf2`. The build installs it next to the test binaries and the fixtures

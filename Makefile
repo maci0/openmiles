@@ -1,4 +1,4 @@
-.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-threat-model check-toolchain check-host-tools check-vendored cross parity help
+.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-threat-model check-toolchain check-host-tools check-parity-tools check-vendored cross parity help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -78,6 +78,13 @@ check-host-tools:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "error: shellcheck not found on PATH; 'make lint' shellchecks scripts/*.sh" >&2; exit 1; }
 	@command -v python3 >/dev/null 2>&1 || { echo "error: python3 not found on PATH; the scripts/*.py gates need it" >&2; exit 1; }
 
+# The parity sweep alone needs a third-party package. `make lint` deliberately
+# does not depend on it, so CI and a contributor without the reference DLLs
+# never have to install anything; `make parity` checks for it here instead of
+# failing later on an import.
+check-parity-tools:
+	@python3 -c 'import pefile' 2>/dev/null || { echo "error: pefile not found; uv pip install -r scripts/requirements-dev.txt" >&2; exit 1; }
+
 lint: check-host-tools
 	zig fmt --check .
 	shellcheck scripts/*.sh
@@ -96,7 +103,7 @@ clean:
 	rm -rf zig-out .zig-cache
 
 # Per-version export-parity sweep; needs the reference DLLs under references/.
-parity:
+parity: check-parity-tools
 	./scripts/check_all_versions.sh
 
 help:
@@ -110,6 +117,6 @@ help:
 	@echo "  check-threat-model  assert every file:line anchor in docs/THREAT_MODEL.md resolves"
 	@echo "  cross      cross-compile the shipped x86-windows DLL"
 	@echo "  format     apply zig fmt and ruff format"
-	@echo "  parity     diff every -Dmss-version export table against its reference DLL"
+	@echo "  parity     diff every -Dmss-version export table against its reference DLL (needs scripts/requirements-dev.txt)"
 	@echo "  clean      remove zig-out and .zig-cache"
 	@echo "  help       show this message"
