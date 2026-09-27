@@ -71,7 +71,7 @@ def read(path):
     if not path.is_file():
         print(f"{path.relative_to(ROOT)} MISSING   expected file is absent")
         return None
-    return path.read_text()
+    return path.read_text(encoding="utf-8")
 
 
 def makefile_var(text, name):

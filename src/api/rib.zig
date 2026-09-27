@@ -120,6 +120,33 @@ pub fn RIB_find_files_provider(name: [*:0]const u8, property: [*:0]const u8, fil
 /// the UTF-8 form of a path that long needs up to three bytes per unit.
 const max_temp_path_units: usize = 260;
 
+/// Length of the unpacked image's file name whatever the random id in it is:
+/// "om_asi_", sixteen hex digits, ".dll".
+const temp_image_name_units: usize = "om_asi_".len + 16 + ".dll".len;
+
+/// Whether `dir` plus that file name still fits inside `limit_units` UTF-16
+/// units, terminator included. Windows opens a path longer than MAX_PATH only
+/// with the long-path opt-in, a registry setting a game install has not made,
+/// and GetTempPathW hands back a directory of up to 259 units: a %TEMP% that
+/// leaves no room for the name tail yields a path no create call can open, and
+/// the image is then written to the game directory instead, the same fallback a
+/// machine with no TMPDIR gets. Counted in UTF-16 units because that is what
+/// the Windows limit counts, so a temp directory holding a non-ASCII character
+/// is measured by the units it takes and not by the UTF-8 bytes it spells.
+fn pathFitsUnitLimit(dir: []const u8, limit_units: usize) bool {
+    var buf: [max_temp_path_units * 3]u16 = undefined;
+    const w = wide.toWide(dir, &buf) catch return false;
+    return w.len + temp_image_name_units + 1 <= limit_units;
+}
+
+/// Whether the temp directory this process resolved is one the image can be
+/// written under. No other target carries a bound the path of a temp directory
+/// can reach, so the check is Windows' alone.
+fn tempPathFits(dir: []const u8) bool {
+    if (comptime builtin.os.tag != .windows) return true;
+    return pathFitsUnitLimit(dir, std.os.windows.PATH_MAX_WIDE);
+}
+
 /// Directory for the unpacked ASI image, with a trailing separator so callers
 /// can append a file name to it. Returns null when no temp directory can be
 /// determined, leaving the caller to fall back to the current directory.
@@ -214,6 +241,14 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
 
     var tmp_dir_buf: [max_temp_path_units * 3]u8 = undefined;
     const tmp_dir = tempDir(&tmp_dir_buf);
+    // A temp directory that leaves no room for the file name under the
+    // platform's path limit is no more usable than no temp directory at all:
+    // both write the image next to the game.
+    const use_tmp_dir = if (tmp_dir) |dir| blk: {
+        const fits = tempPathFits(dir);
+        if (!fits) log("AIL_open_ASI_provider: temp directory '{s}' leaves no room for the image name under the path limit; writing it to the current directory\n", .{dir});
+        break :blk fits;
+    } else false;
 
     // The image is written to TEMP and then LoadLibrary'd, so the file name must
     // not be predictable: a sequential counter would let a local process plant
@@ -234,29 +269,28 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     var id = std.mem.readInt(u64, &id_bytes, .little);
     const name_attempts = 4;
     for (0..name_attempts) |_| {
-        path = if (tmp_dir) |dir|
-            std.fmt.bufPrintZ(&path_buf, "{s}om_asi_{x:016}.dll", .{ dir, id }) catch |err| {
-                log("AIL_open_ASI_provider: cannot format temp path: {any}\n", .{err});
-                openmiles.setLastError("Failed to format temp path for ASI provider");
-                return null;
+        path = if (use_tmp_dir) std.fmt.bufPrintZ(&path_buf, "{s}om_asi_{x:016}.dll", .{ tmp_dir.?, id }) catch |err| {
+            log("AIL_open_ASI_provider: cannot format temp path: {any}\n", .{err});
+            openmiles.setLastError("Failed to format temp path for ASI provider");
+            return null;
+        } else std.fmt.bufPrintZ(&path_buf, ".{c}om_asi_{x:016}.dll", .{ std.fs.path.sep, id }) catch |err| {
+            log("AIL_open_ASI_provider: cannot format temp path: {any}\n", .{err});
+            openmiles.setLastError("Failed to format temp path for ASI provider");
+            return null;
+        };
+        if (use_tmp_dir) {
+            if (std.Io.Dir.createFileAbsolute(io, path, .{ .exclusive = true })) |f| {
+                created = f;
+                break;
+            } else |abs_err| switch (abs_err) {
+                // An occupied name retries with a fresh id; any other absolute-open
+                // failure falls through to the cwd-relative attempt.
+                error.PathAlreadyExists => {
+                    id +%= 1;
+                    continue;
+                },
+                else => {},
             }
-        else
-            std.fmt.bufPrintZ(&path_buf, ".{c}om_asi_{x:016}.dll", .{ std.fs.path.sep, id }) catch |err| {
-                log("AIL_open_ASI_provider: cannot format temp path: {any}\n", .{err});
-                openmiles.setLastError("Failed to format temp path for ASI provider");
-                return null;
-            };
-        if (std.Io.Dir.createFileAbsolute(io, path, .{ .exclusive = true })) |f| {
-            created = f;
-            break;
-        } else |abs_err| switch (abs_err) {
-            // An occupied name retries with a fresh id; any other absolute-open
-            // failure falls through to the cwd-relative attempt.
-            error.PathAlreadyExists => {
-                id +%= 1;
-                continue;
-            },
-            else => {},
         }
         if (openmiles.fs_compat.createFile(io, path, .{ .exclusive = true })) |f| {
             created = f;
@@ -638,4 +672,22 @@ test "a rejected TMPDIR returns null instead of a partial path" {
     try testing.expectEqual(@as(?[]const u8, null), configuredTempDir(".", &buf));
     // Longer than the buffer, with room for the separator it would need.
     try testing.expectEqual(@as(?[]const u8, null), configuredTempDir("/" ++ "a" ** 32, &buf));
+}
+
+test "a temp directory is used only while the image name still fits the limit" {
+    // A directory that exactly fits the tail plus the terminator opens; one
+    // character more does not, and a name over the limit is not one any create
+    // call can make without the long-path opt-in.
+    const fits_units = 64;
+    const room = fits_units - temp_image_name_units - 1;
+    try testing.expect(pathFitsUnitLimit("/" ++ "a" ** (room - 2) ++ "/", fits_units));
+    try testing.expect(!pathFitsUnitLimit("/" ++ "a" ** (room - 1) ++ "/", fits_units));
+    // Counted in UTF-16 units, not UTF-8 bytes: a directory of characters
+    // outside ASCII spends fewer units than it spends bytes, so a byte count
+    // would reject a path that opens.
+    const accented = "C:\\Users\\Jos\\Aventura Épica\\Temp\\";
+    const accented_units = 33; // one per character, É included once
+    try testing.expect(pathFitsUnitLimit(accented, accented_units + temp_image_name_units + 1));
+    try testing.expect(!pathFitsUnitLimit(accented, accented_units + temp_image_name_units));
+    try testing.expect(accented.len > accented_units);
 }

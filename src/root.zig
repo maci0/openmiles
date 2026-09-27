@@ -551,7 +551,33 @@ pub fn isSafePluginFilename(name: []const u8) bool {
     if (std.mem.indexOf(u8, name, "..") != null) return false;
     if (std.mem.indexOfScalar(u8, name, '/') != null) return false;
     if (std.mem.indexOfScalar(u8, name, '\\') != null) return false;
+    // A trailing dot or space is stripped by the Windows filesystem before the
+    // name is stored, so the entry a scan reads back is not the name the scan
+    // listed, and "decoder.asi " names a different file from "decoder.asi".
+    if (name.len > 0 and (name[name.len - 1] == '.' or name[name.len - 1] == ' ')) return false;
+    // ':' opens a named stream on NTFS ("decoder.asi:payload"), so what the
+    // loader opens is not the file the directory entry named.
+    if (std.mem.indexOfScalar(u8, name, ':') != null) return false;
+    // A DOS device name resolves to the device, not to the file. Under Wine,
+    // where the game directory is a POSIX path, "nul.asi" is a real entry that
+    // a scan lists and the loader then resolves to the null device.
+    const stem_end = std.mem.indexOfScalar(u8, name, '.') orelse name.len;
+    if (isDosDeviceName(name[0..stem_end])) return false;
     return true;
+}
+
+/// Whether `stem`, the part of a filename before its first dot, is one of the
+/// device names DOS and Windows resolve without a file behind them.
+fn isDosDeviceName(stem: []const u8) bool {
+    const fixed = [_][]const u8{ "CON", "PRN", "AUX", "NUL", "CLOCK$" };
+    for (fixed) |d| {
+        if (std.ascii.eqlIgnoreCase(stem, d)) return true;
+    }
+    // COM1-COM9 and LPT1-LPT9 are the numbered devices. COM0 and LPT0 name no
+    // device, so a file by that name is an ordinary file on every target.
+    if (stem.len != 4) return false;
+    if (!std.ascii.startsWithIgnoreCase(stem, "COM") and !std.ascii.startsWithIgnoreCase(stem, "LPT")) return false;
+    return stem[3] >= '1' and stem[3] <= '9';
 }
 
 /// Read one directory entry, or null at end of directory. A read error is

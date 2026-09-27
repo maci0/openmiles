@@ -93,7 +93,7 @@ def main():
     for doc in DOCS:
         if not doc.is_file():
             continue
-        text = doc.read_text()
+        text = doc.read_text(encoding="utf-8")
         for index, block in enumerate(BLOCK_RE.findall(text), start=1):
             checked += 1
             line = text[: text.index(block)].count("\n") + 1
@@ -101,11 +101,11 @@ def main():
             version = version_match.group(1) if version_match else "90"
             with tempfile.TemporaryDirectory() as tmp:
                 unit = Path(tmp) / "example.c"
-                unit.write_text(block)
                 # S603: a fixed argv list with no shell, built here rather than
                 # from input, running the zig resolved by the caller. The only
                 # path handed to it is the temp file this block was just
                 # written to; nothing from a document reaches argv.
+                unit.write_text(block, encoding="utf-8")
                 proc = subprocess.run(  # noqa: S603
                     [
                         zig,
@@ -117,7 +117,11 @@ def main():
                         str(Path(tmp) / "example.o"),
                     ],
                     capture_output=True,
-                    text=True,
+                    # The compiler's output is UTF-8 whatever the console code
+                    # page is; a Windows run on a legacy code page would
+                    # otherwise fail to decode it.
+                    encoding="utf-8",
+                    errors="replace",
                     check=False,
                 )
             if proc.returncode != 0:

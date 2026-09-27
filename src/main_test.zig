@@ -672,6 +672,53 @@ test "isPluginExtension rejects invalid extensions" {
     try testing.expect(!openmiles.isPluginExtension(""));
 }
 
+test "isSafePluginFilename rejects names that do not name a file" {
+    // Escaping the scan directory.
+    try testing.expect(!openmiles.isSafePluginFilename("../decoder.asi"));
+    try testing.expect(!openmiles.isSafePluginFilename("sub/decoder.asi"));
+    try testing.expect(!openmiles.isSafePluginFilename("sub\\decoder.asi"));
+    // A trailing dot or space is dropped before the name is stored, so the
+    // entry read back is not the name that was scanned.
+    try testing.expect(!openmiles.isSafePluginFilename("decoder.asi "));
+    try testing.expect(!openmiles.isSafePluginFilename("decoder.asi."));
+    // ':' opens an NTFS named stream rather than the file the entry names.
+    try testing.expect(!openmiles.isSafePluginFilename("decoder.asi:payload"));
+    // DOS device names resolve to a device, and under Wine such an entry is a
+    // real file in a POSIX game directory.
+    for ([_][]const u8{
+        "NUL.asi",
+        "nul.asi",
+        "CON.asi",
+        "prn.asi",
+        "aux.m3d",
+        "CLOCK$.flt",
+        "COM1.asi",
+        "lpt9.flt",
+        "NUL",
+    }) |name| {
+        testing.expect(!openmiles.isSafePluginFilename(name)) catch |err| {
+            std.debug.print("expected '{s}' to be rejected\n", .{name});
+            return err;
+        };
+    }
+}
+
+test "isSafePluginFilename accepts ordinary plugin names" {
+    for ([_][]const u8{
+        "decoder.asi",
+        "Miles Sound Decoder.asi",
+        "reverb_v2.m3d",
+        "COM0.asi",
+        "NULL.asi",
+        "CONSOLE.asi",
+    }) |name| {
+        testing.expect(openmiles.isSafePluginFilename(name)) catch |err| {
+            std.debug.print("expected '{s}' to be accepted\n", .{name});
+            return err;
+        };
+    }
+}
+
 test "registerDriver and isKnownDriver" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
@@ -1509,6 +1556,28 @@ test "unregistering by handle drops only the interface it names" {
     p.unregisterInterfaceHandle(0);
     try testing.expectEqual(@as(usize, 1), p.interfaces.items.len);
     p.unregisterInterfaceHandle(keep_iface.handle);
+    try testing.expectEqual(@as(usize, 0), p.interfaces.items.len);
+}
+
+test "an interface handle counter that has run out refuses to reuse a handle" {
+    const allocator = testing.allocator;
+    const p = try openmiles.Provider.init(allocator);
+    defer p.deinit();
+
+    var entry = openmiles.RIB_INTERFACE_ENTRY{
+        .entry_type = .RIB_ATTRIBUTE,
+        .name = "gain",
+        .token = 7,
+        .subtype = 0,
+    };
+    // The counter is pointer-sized: the handle reaches a plugin as a
+    // pointer-sized integer, so on the 32-bit build that ships it cannot run
+    // past what that integer holds.
+    p.next_handle = std.math.maxInt(usize);
+    try testing.expectError(
+        error.InterfaceHandlesExhausted,
+        p.registerInterface("exhausted", 1, &entry),
+    );
     try testing.expectEqual(@as(usize, 0), p.interfaces.items.len);
 }
 

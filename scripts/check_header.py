@@ -258,7 +258,7 @@ def zig_returns():
     for src in sorted((ROOT / "src" / "api").glob("*.zig")):
         for m in re.finditer(
             r"^pub fn ([A-Za-z0-9_]+)\(.*?callconv\(\.winapi\)\s+(.+?)\s*\{",
-            src.read_text(),
+            src.read_text(encoding="utf-8"),
             re.MULTILINE,
         ):
             ret = m.group(2).strip()
@@ -442,7 +442,7 @@ def layout_problems(header):
     misread at runtime with no link-time or compile-time signal anywhere else,
     and the v8/v9 layout really does differ from the v3-v7 one.
     """
-    zig = zig_struct_fields(ROOT_ZIG.read_text(), "AILSOUNDINFO")
+    zig = zig_struct_fields(ROOT_ZIG.read_text(encoding="utf-8"), "AILSOUNDINFO")
     if zig is None:
         return ["LAYOUT    the version-branched AILSOUNDINFO struct was not found in src/root.zig"]
     cutoff = max(k for k in zig)
@@ -577,7 +577,8 @@ def compile_problems():
             tu.write_text(
                 f"#define OPENMILES_MSS_VERSION {version}\n"
                 f'#include "{MSS_H}"\n'
-                "int main(void) { return 0; }\n"
+                "int main(void) { return 0; }\n",
+                encoding="utf-8",
             )
             proc = compile_header(zig, tu, tmp)
         if proc.returncode != 0:
@@ -591,7 +592,8 @@ def compile_problems():
             tu.write_text(
                 f"#define OPENMILES_MSS_VERSION {version}\n"
                 f'#include "{MSS_H}"\n'
-                "int main(void) { return 0; }\n"
+                "int main(void) { return 0; }\n",
+                encoding="utf-8",
             )
             proc = compile_header(zig, tu, tmp)
         if proc.returncode == 0:
@@ -636,7 +638,10 @@ def compile_header(zig, tu, out_dir):
             str(Path(out_dir) / "header_check.o"),
         ],
         capture_output=True,
-        text=True,
+        # The compiler's output is UTF-8 whatever the console code page is; a
+        # Windows run on a legacy code page would otherwise fail to decode it.
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
 
@@ -659,18 +664,18 @@ def main():
     args = parser.parse_args()
     verbose = args.verbose
 
-    main_zig = MAIN_ZIG.read_text()
+    main_zig = MAIN_ZIG.read_text(encoding="utf-8")
     exports = parse_exports(main_zig)
     never_export = parse_never_export(main_zig)
     rets = zig_returns()
-    header = MSS_H.read_text()
+    header = MSS_H.read_text(encoding="utf-8")
 
     problems = []
     declared_by_version = {}
 
     problems += layout_problems(header)
 
-    problems += preference_problems(header, ROOT_ZIG.read_text())
+    problems += preference_problems(header, ROOT_ZIG.read_text(encoding="utf-8"))
 
     problems += [
         f"UNDEFINED   macro {macro} is used but never #defined in mss.h"

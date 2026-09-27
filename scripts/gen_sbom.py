@@ -222,7 +222,7 @@ def vendored_components(sums):
 def pip_components():
     """One component per exactly pinned package in scripts/requirements.txt."""
     components = []
-    for lineno, raw in enumerate(REQUIREMENTS.read_text().splitlines(), 1):
+    for lineno, raw in enumerate(REQUIREMENTS.read_text(encoding="utf-8").splitlines(), 1):
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
@@ -253,7 +253,7 @@ def pip_components():
 
 
 def project_version():
-    match = ZON_VERSION_RE.search(ZON.read_text())
+    match = ZON_VERSION_RE.search(ZON.read_text(encoding="utf-8"))
     if not match:
         sys.exit(f"error: no .version in {ZON.relative_to(ROOT)}")
     return match.group(1)
@@ -262,7 +262,7 @@ def project_version():
 def document():
     """The CycloneDX document, in a fixed key order so the bytes are stable."""
     version = project_version()
-    if PROJECT_LICENSE_BANNER not in LICENSE.read_text():
+    if PROJECT_LICENSE_BANNER not in LICENSE.read_text(encoding="utf-8"):
         sys.exit(f"error: {LICENSE.relative_to(ROOT)} is not the license {PROJECT_LICENSE} names")
     # read_sums returns (recorded, malformed); the malformed lines are
     # check_vendored.py's to report, so only the recorded digests are looked up
@@ -313,7 +313,7 @@ def main():
         if not SBOM.exists():
             print(f"{SBOM.relative_to(ROOT)} MISSING  run scripts/gen_sbom.py")
             return 1
-        if SBOM.read_text() != text:
+        if SBOM.read_text(encoding="utf-8") != text:
             print(
                 f"{SBOM.relative_to(ROOT)} STALE  does not match the tree; run scripts/gen_sbom.py"
             )
@@ -321,7 +321,9 @@ def main():
         print(f"{SBOM.relative_to(ROOT)} matches the tree")
         return 0
 
-    SBOM.write_text(text)
+    # Bytes, not write_text: a Windows run would otherwise write CRLF and leave
+    # a file the next run's comparison (and git) reads as a diff.
+    SBOM.write_bytes(text.encode("utf-8"))
     print(f"wrote {SBOM.relative_to(ROOT)} ({len(document()['components'])} components)")
     return 0
 

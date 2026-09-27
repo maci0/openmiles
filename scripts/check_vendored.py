@@ -119,7 +119,7 @@ def readme_entries():
     gen_sbom.py reads the same records, so the provenance in the SBOM and the
     provenance this check enforces come from one parse of one file.
     """
-    text = README.read_text()
+    text = README.read_text(encoding="utf-8")
     entries = {}
     for m in SECTION_RE.finditer(text):
         rest = text[m.end() :]
@@ -193,7 +193,7 @@ def read_sums():
     """
     recorded = {}
     malformed = []
-    for lineno, raw in enumerate(SUMS.read_text().splitlines(), 1):
+    for lineno, raw in enumerate(SUMS.read_text(encoding="utf-8").splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -226,7 +226,10 @@ def main():
     on_disk = {p.name: digest(p) for p in files}
 
     if args.update:
-        SUMS.write_text("".join(f"{on_disk[n]}  {n}\n" for n in sorted(on_disk)))
+        # Bytes, not write_text: deps/ is `-text` in .gitattributes so the digests
+        # are checked against the bytes on disk, and a Windows run would
+        # otherwise write CRLF into them.
+        SUMS.write_bytes("".join(f"{on_disk[n]}  {n}\n" for n in sorted(on_disk)).encode())
         print(f"updated {SUMS.relative_to(ROOT)} with {len(on_disk)} entries")
         return 0
 

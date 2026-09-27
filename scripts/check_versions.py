@@ -113,10 +113,10 @@ def main():
         "2 bad invocation.",
     ).parse_args()
 
-    build_versions = parse_build_versions(BUILD_ZIG.read_text())
-    header_versions = parse_header_versions(CHECK_HEADER.read_text())
-    header_error_versions = parse_header_error_versions(MSS_H.read_text())
-    sweep_text = CHECK_ALL_VERSIONS.read_text()
+    build_versions = parse_build_versions(BUILD_ZIG.read_text(encoding="utf-8"))
+    header_versions = parse_header_versions(CHECK_HEADER.read_text(encoding="utf-8"))
+    header_error_versions = parse_header_error_versions(MSS_H.read_text(encoding="utf-8"))
+    sweep_text = CHECK_ALL_VERSIONS.read_text(encoding="utf-8")
     swept = set(parse_script_entries(sweep_text, "VERSIONS"))
     unswept = parse_script_entries(sweep_text, "UNSWEPT")
 

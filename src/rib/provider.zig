@@ -100,8 +100,10 @@ pub const Provider = struct {
     system_data: [8]usize = [_]usize{0} ** 8,
     // Source of the interface handles handed to the plugin. Monotonic and
     // never reused, so a handle a plugin still holds cannot name a different
-    // interface registered after the one it was given.
-    next_handle: u64 = 1,
+    // interface registered after the one it was given. usize, not u64: the
+    // handle travels to a plugin as a pointer-sized integer, and the 32-bit
+    // build that ships is where the counter has to fit.
+    next_handle: usize = 1,
 
     pub fn init(allocator: std.mem.Allocator) !*Provider {
         log("Provider.init called\n", .{});
@@ -276,6 +278,9 @@ pub const Provider = struct {
                 try iface.add(std.mem.span(entry.name), entry.token);
             }
         }
+        // A counter that wrapped would hand out a handle an earlier interface
+        // already had, which is the reuse the counter exists to prevent.
+        if (self.next_handle == std.math.maxInt(usize)) return error.InterfaceHandlesExhausted;
         iface.handle = self.next_handle;
         self.next_handle += 1;
         try self.interfaces.append(self.allocator, iface);

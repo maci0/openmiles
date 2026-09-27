@@ -157,6 +157,28 @@ everything below is unreleased.
   `openmiles.shutdown()` deliberately stays outside that lock: it joins the
   timer threads, and a timer callback is free to call `AIL_startup`, so holding
   the lock across the joins would deadlock that game.
+- A plugin file whose name Windows resolves to a device rather than a file was
+  scanned and loaded: `isSafePluginFilename` rejected `..`, `/` and `\` but
+  accepted `NUL.asi`, `COM1.asi` and friends, which DOS and Windows resolve to
+  the device, `decoder.asi:payload`, an NTFS named stream, and a name with a
+  trailing dot or space, which the filesystem drops before storing it. Under
+  Wine the game directory is a POSIX path, so such an entry is a real file that
+  the scan lists and the loader then resolves to something else. The name check
+  rejects all of them now.
+- The ASI image was written under `%TEMP%` whatever the path length that made.
+  `GetTempPathW` returns a directory of up to 259 units and the fixed file name
+  adds more, and Windows opens a path over `MAX_PATH` only with the long-path
+  opt-in, so a deep `%TEMP%` produced a path no create call could open and the
+  provider failed to load. The temp directory is now used only while the
+  composed path fits the platform's unit limit, and the game directory is the
+  fallback, the same one a machine with no `TMPDIR` already got. The limit is
+  measured in UTF-16 units, so a `%TEMP%` holding a non-ASCII character is not
+  rejected for spending more bytes than it spends units.
+- The 32-bit build that ships, `zig build -Dtarget=x86-windows`, did not
+  compile: the per-provider interface handle counter was a `u64` assigned to a
+  `usize` handle, which the x86 target cannot hold. The counter is pointer-sized
+  now, and a counter that has run out of handles fails the registration instead
+  of wrapping into a handle an earlier interface already had.
 - The unregister callback a plugin is handed at `RIB_Main` did nothing:
   `rib_unregister_interface` discarded its handle, and `rib_register_interface`
   returned 0 or 1 rather than an interface handle, so a plugin that dropped an
