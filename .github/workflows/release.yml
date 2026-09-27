@@ -58,6 +58,12 @@ jobs:
       - name: Run Tests
         run: zig build test
 
+      # deps/ is vendored upstream source, not a package-manager download, so
+      # nothing else in the tree records which bytes went into the DLL. A header
+      # edited in place after review would otherwise ship unnoticed.
+      - name: Verify vendored dependencies
+        run: ./scripts/check_vendored.py
+
       - name: Cross-compile Windows DLL
         run: zig build -Dtarget=x86-windows -Doptimize=ReleaseFast
 
@@ -79,12 +85,25 @@ jobs:
             fi
           done
 
+      # VENDORED.md and DEPS-SHA256SUMS travel with the DLL: the project license
+      # covers redistribution of the vendored headers under their own terms, and
+      # a consumer who wants to trace that grant back to an upstream release
+      # needs the attribution and the digests, not just this repository's URL.
       - name: Package release
         run: ./scripts/package_release.sh "openmiles-${GITHUB_REF_NAME}-win32.zip"
 
       - name: Verify the archive is reproducible
         run: |
           set -euo pipefail
+          mkdir -p release
+          cp zig-out/bin/mss32.dll release/
+          cp LICENSE release/
+          cp README.md release/
+          cp CHANGELOG.md release/
+          cp deps/README.md release/VENDORED.md
+          cp deps/SHA256SUMS release/DEPS-SHA256SUMS
+          (cd release && sha256sum LICENSE README.md CHANGELOG.md VENDORED.md \
+            DEPS-SHA256SUMS mss32.dll > SHA256SUMS)
           ./scripts/package_release.sh repeat.zip
           cmp "openmiles-${GITHUB_REF_NAME}-win32.zip" repeat.zip
           rm repeat.zip
@@ -92,5 +111,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         with:
-          files: openmiles-${{ github.ref_name }}-win32.zip
+          files: |
+            openmiles-${{ github.ref_name }}-win32.zip
+            release/SHA256SUMS
           generate_release_notes: true

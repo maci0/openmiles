@@ -262,6 +262,11 @@ All dependencies are vendored single-header C libraries in `deps/`:
 | [TinySoundFont](https://github.com/schellingb/TinySoundFont) | v0.9 | MIT | SF2 synthesis |
 | [TinyMidiLoader](https://github.com/schellingb/TinySoundFont) | v0.7 | Zlib | MIDI parsing |
 
+There is nothing to install and nothing a package manager resolves. The exact
+bytes of each vendored file are pinned in [`deps/SHA256SUMS`](deps/SHA256SUMS)
+and verified by `make check-vendored`, which `make lint` and CI run. See
+[`deps/README.md`](deps/README.md) for provenance and the update procedure.
+
 ## License
 
 This project is licensed under the [GNU General Public License v3.0](LICENSE).

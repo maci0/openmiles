@@ -8,3 +8,9 @@
 *.c text eol=lf
 *.h text eol=lf
 Makefile text eol=lf
+
+# Vendored third-party headers are kept byte-for-byte. tsf.h and tml.h ship
+# from upstream with CRLF line endings, and their SHA-256 digests in
+# deps/SHA256SUMS are only reproducible if git does not rewrite line endings
+# on checkout. This overrides *.h text eol=lf above.
+deps/* -text

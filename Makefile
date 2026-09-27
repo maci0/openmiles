@@ -1,4 +1,4 @@
-.PHONY: all build test clean lint format check-header check-toolchain parity help
+.PHONY: all build test clean lint format check-header check-toolchain check-vendored parity help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -25,10 +25,16 @@ test: check-toolchain
 check-header:
 	./scripts/check_header.py
 
+# deps/ holds vendored upstream headers, not package-manager downloads, so
+# deps/SHA256SUMS is the only record of which bytes were reviewed.
+check-vendored:
+	./scripts/check_vendored.py
+
 lint:
 	zig fmt --check .
 	shellcheck scripts/*.sh
 	./scripts/check_header.py
+	./scripts/check_vendored.py
 
 format:
 	zig fmt .
