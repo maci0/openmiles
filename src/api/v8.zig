@@ -385,7 +385,7 @@ pub fn AIL_indent(a0: i32) callconv(.c) void {
 pub fn AIL_mem_close(mem: ?*anyopaque, data_out: ?*?*anyopaque, size_out: ?*u32) callconv(.winapi) i32 {
     const m: *MemStream = @ptrCast(@alignCast(mem orelse return 1));
     var ret: i32 = 1;
-    if (size_out) |s| s.* = @intCast(m.len); // SDK: *size = m->totalsize, regardless of buf
+    if (size_out) |s| s.* = @intCast(@min(m.len, @as(usize, std.math.maxInt(u32)))); // SDK: *size = m->totalsize; m.len is never clamped, so saturate as AIL_mem_size does
     if (data_out) |d| {
         if (m.len > 0) {
             if (std.c.malloc(m.len)) |raw| {

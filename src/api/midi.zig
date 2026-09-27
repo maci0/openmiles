@@ -318,8 +318,13 @@ pub fn AIL_send_sysex_message(mdi_opt: ?*MidiDriver, data: *anyopaque) callconv(
     if (bytes[0] != 0xF0) return;
     var body_len: usize = 0;
     var i: usize = 1;
+    // The SDK passes no length, so the scan needs both of its stop bytes. A
+    // caller that hands over a short buffer without a terminator would
+    // otherwise be read 511 bytes past its end; a NUL is the conventional
+    // SysEx end-of-message marker and appears nowhere in a reset header, so
+    // stopping on one only discards messages this function ignores anyway.
     while (i < 512) : (i += 1) {
-        if (bytes[i] == 0xF7) break;
+        if (bytes[i] == 0xF7 or bytes[i] == 0) break;
         body_len = i;
     }
     if (body_len == 0) return;

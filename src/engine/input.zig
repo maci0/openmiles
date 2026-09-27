@@ -45,14 +45,25 @@ pub const Input = struct {
         }
         self.is_initialized = true;
         self.max_buffer_bytes = self.sample_rate * self.channels * (self.bits / 8);
-        // Pre-allocate so the audio-thread callback never hits the allocator.
-        // Failure here only degrades to dropping captured chunks (the callback
-        // never grows the buffer), but say so in the log.
+        // Pre-allocate both buffers so the audio-thread callback never hits the
+        // allocator. getInfo swaps the two, so each one is at some point the
+        // capture target: a buffer that failed to pre-allocate has no capacity
+        // and silently drops every chunk until the process exits. That is a
+        // capture device that can never capture, so fail the open instead.
         self.buffer.ensureTotalCapacity(self.allocator, self.max_buffer_bytes) catch {
-            log("Input.init: capture ring pre-allocation failed; captured audio may be dropped\n", .{});
+            log("Input.init: capture ring pre-allocation of {d} bytes failed\n", .{self.max_buffer_bytes});
+            ma.ma_device_uninit(&self.device);
+            self.is_initialized = false;
+            allocator.destroy(self);
+            return error.CaptureBufferAllocFailed;
         };
         self.snapshot.ensureTotalCapacity(self.allocator, self.max_buffer_bytes) catch {
-            log("Input.init: snapshot pre-allocation failed; captured audio may be dropped\n", .{});
+            log("Input.init: snapshot pre-allocation of {d} bytes failed\n", .{self.max_buffer_bytes});
+            self.buffer.deinit(self.allocator);
+            ma.ma_device_uninit(&self.device);
+            self.is_initialized = false;
+            allocator.destroy(self);
+            return error.CaptureBufferAllocFailed;
         };
         return self;
     }

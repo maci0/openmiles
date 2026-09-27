@@ -473,6 +473,15 @@ const Decoder = struct {
         if (w > 9) w = c -% 'a' +% 10;
         return w;
     }
+    // Step past the type byte and its ';' separator. A string that ends at the
+    // type byte carries no step body, so the terminator is checked before the
+    // advance: stepping over it would leave the cursor past the end of the
+    // string, and every field read after this walks from there.
+    fn stepTypeSep(self: *Decoder) bool {
+        if (self.p[1] == 0) return false;
+        self.p += 2;
+        return true;
+    }
     fn setupString(self: *Decoder, x: *MSSStringC) void {
         x.str = self.p;
         var len: i32 = 0;
@@ -642,55 +651,51 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
     switch (st) {
         .version => {
             if (version_headers >= max_version_headers) return null;
-            // The separator after the type byte must be there: a string that
-            // ends at the type byte carries no version field, and stepping
-            // over the terminator would read past the end of the string.
-            if (d.p[1] == 0) return null;
-            d.p += 2; // type + ';'
+            if (!d.stepTypeSep()) return null;
             const ver = std.fmt.parseInt(i32, d.fieldText(), 10) catch -1;
             if (ver != CURRENT_EVENT_VERSION) return null;
             if (d.p[0] == 0 or d.p[0] == '\r' or d.p[0] == '\n') return null;
             return nextStepDepth(@ptrCast(d.p), step, scratch, version_headers + 1);
         },
         .comment => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             d.setupString(&step.u.comment.comment);
             d.copyString(&step.u.comment.comment);
         },
         .clear_state => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
         },
         .exec_event => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             d.setupString(&step.u.exec.eventname);
             d.copyString(&step.u.exec.eventname);
         },
         .apply_env => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             d.setupString(&step.u.env.envname);
             d.copyString(&step.u.env.envname);
             d.copyDigit(&step.u.env.isdynamic);
         },
         .enable_limit => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             d.setupString(&step.u.enablelimit.limitname);
             d.copyString(&step.u.enablelimit.limitname);
         },
         .cache_sounds, .purge_sounds => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             d.setupString(&step.u.load.lib);
             d.copyString(&step.u.load.lib);
             d.parseNameList(&step.u.load);
         },
         .set_limits => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             d.setupString(&step.u.limits.name);
             d.copyString(&step.u.limits.name);
             d.setupString(&step.u.limits.limits);
             d.copyString(&step.u.limits.limits);
         },
         .persist => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             d.setupString(&step.u.persist.presetname);
             d.copyString(&step.u.persist.presetname);
             d.setupString(&step.u.persist.name);
@@ -700,7 +705,7 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
             d.copyDigit(&step.u.persist.isdynamic);
         },
         .ramp => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             d.setupString(&step.u.ramp.name);
             d.copyString(&step.u.ramp.name);
             d.setupString(&step.u.ramp.labels);
@@ -713,7 +718,7 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
             d.copyDigit(&step.u.ramp.interpolate_type);
         },
         .control_sounds => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             d.setupString(&step.u.control.labels);
             d.copyString(&step.u.control.labels);
             d.setupString(&step.u.control.markerstart);
@@ -730,7 +735,7 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
             d.copyDigit(&step.u.control.presetapplytype);
         },
         .set_lfo => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             d.setupString(&step.u.setlfo.name);
             d.copyString(&step.u.setlfo.name);
             d.setupString(&step.u.setlfo.base);
@@ -746,7 +751,7 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
             d.copyDigit(&step.u.setlfo.islfo);
         },
         .set_blend => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             d.setupString(&step.u.blend.name);
             d.copyString(&step.u.blend.name);
             var count: i32 = 0;
@@ -763,7 +768,7 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
             }
         },
         .move_var => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             d.setupString(&step.u.movevar.name);
             d.copyString(&step.u.movevar.name);
             d.copyFloat(&step.u.movevar.times[0]);
@@ -775,7 +780,7 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
             d.copyFloat(&step.u.movevar.values[2]);
         },
         .start_sound => {
-            d.p += 2;
+            if (!d.stepTypeSep()) return null;
             const s = &step.u.start;
             d.setupString(&s.soundname);
             d.copyString(&s.soundname);
@@ -851,4 +856,38 @@ test "nextStep stops at a version header cut off after the type byte" {
     const after = nextStep("9;4;<;", &step, &scratch).?;
     try testing.expectEqual(@intFromEnum(StepType.clear_state), step.type);
     try testing.expect(after[0] == 0);
+}
+
+test "nextStep refuses every step type whose body is cut off after the type byte" {
+    const testing = std.testing;
+    var step: EVENT_STEP_INFO = undefined;
+    var scratch: [256]u8 align(8) = undefined;
+
+    // Every step type steps past its type byte and the ';' separator before it
+    // reads any field. A string that ends at the type byte has neither, so the
+    // step would advance the cursor onto the terminator and every field read
+    // from there would walk off the end of the buffer. One representative per
+    // step type, all of which take the same path. The type byte is '0' + the
+    // StepType value, so the values past 9 run into punctuation.
+    const truncated = [_][*:0]const u8{
+        "1", // start_sound
+        "2", // control_sounds
+        "3", // apply_env
+        "4", // comment
+        "5", // cache_sounds
+        "6", // purge_sounds
+        "7", // set_limits
+        "8", // persist
+        "9;", // version, separator present but no field
+        ":", // ramp
+        ";", // set_blend
+        "<", // clear_state
+        "=", // exec_event
+        ">", // enable_limit
+        "?", // set_lfo
+        "@", // move_var
+    };
+    for (truncated) |s| {
+        try testing.expectEqual(@as(?[*:0]const u8, null), nextStep(s, &step, &scratch));
+    }
 }

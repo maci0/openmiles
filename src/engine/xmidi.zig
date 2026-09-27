@@ -354,7 +354,7 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
     // Assemble final SMF — exact size is known: 14 (MThd) + 8 (MTrk header) + track data
     var smf: std.ArrayListUnmanaged(u8) = .empty;
     try smf.ensureTotalCapacity(allocator, 22 + track.items.len);
-
+    errdefer smf.deinit(allocator); // toOwnedSlice takes over on success only
     // MThd
     try smf.appendSlice(allocator, "MThd");
     try smf.appendSlice(allocator, &[_]u8{ 0x00, 0x00, 0x00, 0x06 }); // chunk size = 6

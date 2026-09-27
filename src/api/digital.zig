@@ -954,7 +954,10 @@ pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, r
     // state flag -- so only the stereo bit applies. Gate to match each release.
     const channels: u16 = blk: {
         if (openmiles.mss_version >= 80 and (format & 16) != 0) {
-            break :blk @intCast(@as(u32, @bitCast(format)) >> 16);
+            // A caller can set the multichannel bit without packing a count in
+            // the high half; a zero-channel WAV would carry blockAlign and
+            // byteRate of 0, so clamp to the same one channel the other arm uses.
+            break :blk @intCast(@max(@as(u32, @bitCast(format)) >> 16, 1));
         }
         break :blk if (format & 2 != 0) 2 else 1;
     };
@@ -1065,7 +1068,9 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
     }
     defer _ = openmiles.ma.ma_decoder_uninit(&decoder);
 
-    const channels = @as(u32, decoder.outputChannels);
+    // A decoder that reports zero channels would make the frames-per-chunk
+    // division below divide by zero; decodeAdpcmSource clamps the same field.
+    const channels = @max(@as(u32, decoder.outputChannels), 1);
     const rate = @as(u32, decoder.outputSampleRate);
     const bpf = channels * 2; // 16-bit = 2 bytes/sample
 

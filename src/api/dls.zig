@@ -133,14 +133,14 @@ pub fn AIL_DLS_load_memory(driver_opt: ?*MidiDriver, mem: *anyopaque, flags: u32
         openmiles.setLastError("DLS/SF2 header declares an implausible size");
         return null;
     }
-    // Load the replacement before releasing the one in use, as loadSoundfont
-    // does: closing first left a failed load with no bank at all, so a reload
-    // handed over bad bytes silenced a driver that was still playing.
+    // Load before releasing the current bank, the order AIL_DLS_load_file uses:
+    // a rejected image must leave the driver holding the bank it already had.
     const loaded = tsf_mod.tsf_load_memory(data, @intCast(size));
-    if (loaded == null) return null;
-    if (driver.soundfont) |sf| {
-        if (driver.owns_soundfont) tsf_mod.tsf_close(sf);
+    if (loaded == null) {
+        openmiles.setLastError("Failed to load DLS/SF2 from memory");
+        return null;
     }
+    if (driver.soundfont) |sf| if (driver.owns_soundfont) tsf_mod.tsf_close(sf);
     driver.soundfont = loaded;
     driver.owns_soundfont = true;
     driver.soundfont_size_bytes = @intCast(@min(size, std.math.maxInt(u32)));
