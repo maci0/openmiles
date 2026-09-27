@@ -24,6 +24,7 @@ pub const io: std.Io = std.Io.Threaded.global_single_threaded.io();
 const digital_mod = @import("engine/digital.zig");
 pub const DigitalDriver = digital_mod.DigitalDriver;
 pub const Sample = digital_mod.Sample;
+pub const fireSampleCallback = digital_mod.fireSampleCallback;
 pub const MixBus = digital_mod.MixBus;
 pub const LimiterNode = digital_mod.LimiterNode;
 pub const CompressorNode = digital_mod.CompressorNode;
@@ -281,17 +282,48 @@ pub fn clearFileError() void {
 // seek takes (handle, offset, type) where type is 0=SET, 1=CUR, 2=END.
 pub const SEEK_SET: u32 = 0;
 pub const SEEK_END: u32 = 2;
-pub var cb_file_open: ?*const fn ([*:0]const u8, *u32) callconv(.winapi) u32 = null;
-pub var cb_file_close: ?*const fn (u32) callconv(.winapi) void = null;
-pub var cb_file_read: ?*const fn (u32, *anyopaque, u32) callconv(.winapi) u32 = null;
-pub var cb_file_seek: ?*const fn (u32, i32, u32) callconv(.winapi) i32 = null;
+
+pub const FileCallbacks = struct {
+    open: ?*const fn ([*:0]const u8, *u32) callconv(.winapi) u32 = null,
+    close: ?*const fn (u32) callconv(.winapi) void = null,
+    read: ?*const fn (u32, *anyopaque, u32) callconv(.winapi) u32 = null,
+    seek: ?*const fn (u32, i32, u32) callconv(.winapi) i32 = null,
+};
+
+var file_callbacks: FileCallbacks = .{};
+var file_callbacks_mutex: std.Io.Mutex = .init;
+
+/// Install the app's VFS, or remove it when every argument is null. The four
+/// pointers are published together: a reader copies the whole set, so a load
+/// cannot open with one VFS and read or close with the next one installed.
+/// Argument order matches AIL_set_file_callbacks: open, close, seek, read.
+pub fn setFileCallbacks(
+    open_fn: ?*const fn ([*:0]const u8, *u32) callconv(.winapi) u32,
+    close_fn: ?*const fn (u32) callconv(.winapi) void,
+    seek_fn: ?*const fn (u32, i32, u32) callconv(.winapi) i32,
+    read_fn: ?*const fn (u32, *anyopaque, u32) callconv(.winapi) u32,
+) void {
+    file_callbacks_mutex.lockUncancelable(io);
+    defer file_callbacks_mutex.unlock(io);
+    file_callbacks = .{ .open = open_fn, .close = close_fn, .read = read_fn, .seek = seek_fn };
+}
+
+/// The installed VFS, or null when the app registered no open callback. The
+/// result is a copy, so the caller keeps this generation for the whole load.
+pub fn currentFileCallbacks() ?FileCallbacks {
+    file_callbacks_mutex.lockUncancelable(io);
+    defer file_callbacks_mutex.unlock(io);
+    if (file_callbacks.open == null) return null;
+    return file_callbacks;
+}
 
 /// If file callbacks are set, open the file via the game's VFS, read it all into
 /// a freshly-allocated slice (caller must free with global_allocator), and close it.
 pub fn fileCallbackReadAll(filename: [*:0]const u8) ![]u8 {
-    const open_fn = cb_file_open orelse return error.NoCallbacks;
-    const close_fn = cb_file_close orelse return error.NoCallbacks;
-    const read_fn = cb_file_read orelse return error.NoCallbacks;
+    const cbs = currentFileCallbacks() orelse return error.NoCallbacks;
+    const open_fn = cbs.open orelse return error.NoCallbacks;
+    const close_fn = cbs.close orelse return error.NoCallbacks;
+    const read_fn = cbs.read orelse return error.NoCallbacks;
 
     // open returns the file length and writes the handle to the out-param;
     // a 0 length means the file could not be opened.
@@ -299,7 +331,7 @@ pub fn fileCallbackReadAll(filename: [*:0]const u8) ![]u8 {
     var file_size = open_fn(filename, &handle);
     if (file_size == 0) {
         // Some VFS return 0 from open and require a seek-to-end to learn the size.
-        if (cb_file_seek) |seek_fn| {
+        if (cbs.seek) |seek_fn| {
             const end_pos = seek_fn(handle, 0, SEEK_END);
             if (end_pos > 0) {
                 file_size = @intCast(end_pos);
@@ -334,7 +366,7 @@ pub const max_file_load_bytes: u64 = 256 * 1024 * 1024;
 /// Read a whole file via the app's file callbacks when set, otherwise directly
 /// from the filesystem. Caller frees the returned buffer with global_allocator.
 pub fn readWholeFile(path: []const u8) ![]u8 {
-    if (cb_file_open != null) {
+    if (currentFileCallbacks() != null) {
         var zbuf: [std.fs.max_path_bytes:0]u8 = undefined;
         if (path.len >= zbuf.len) return error.NameTooLong;
         @memcpy(zbuf[0..path.len], path);
@@ -362,7 +394,7 @@ pub fn readWholeFile(path: []const u8) ![]u8 {
 /// AIL_mem_free_lock). Returns null and sets the file error on failure.
 pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
     clearFileError();
-    if (cb_file_open != null) {
+    if (currentFileCallbacks() != null) {
         const buf = fileCallbackReadAll(filename) catch |err| {
             // Name the real failure mode: a blanket "not found" would send an
             // operator chasing a missing file when the VFS read or its
@@ -439,9 +471,9 @@ pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
 /// error set.
 pub fn ailFileSize(filename: [*:0]const u8) u32 {
     clearFileError();
-    if (cb_file_open != null) {
-        const open_fn = cb_file_open.?;
-        const close_fn = cb_file_close orelse return 0;
+    if (currentFileCallbacks()) |cbs| {
+        const open_fn = cbs.open orelse return 0;
+        const close_fn = cbs.close orelse return 0;
         // open returns the file length and fills the handle out-param.
         var handle: u32 = 0;
         var size = open_fn(filename, &handle);
@@ -451,7 +483,7 @@ pub fn ailFileSize(filename: [*:0]const u8) u32 {
             // size. From here on the handle may be live, so every path below
             // must close it -- returning early here leaked one VFS handle per
             // AIL_file_size call on an empty/sizeless file.
-            if (cb_file_seek) |seek_fn| {
+            if (cbs.seek) |seek_fn| {
                 const end_pos = seek_fn(handle, 0, SEEK_END);
                 if (end_pos > 0) {
                     size = @intCast(end_pos);

@@ -20,7 +20,18 @@ extern fn openmiles_tml_get_pitch_bend(m: *tsf.tml_message) u16;
 
 pub const MidiDriver = struct {
     allocator: std.mem.Allocator,
+    // The audio thread renders from this pointer while the game thread can
+    // replace or close the bank. tsf_close frees it, so a swap that closed the
+    // displaced bank inline is a use-after-free the moment a sequence is playing.
+    //
+    // A renderer claims the bank by bumping render_readers before it loads the
+    // pointer, and drops the claim when it is done. A swap publishes the
+    // replacement first, then waits until the claim count is zero before
+    // closing what it displaced. Only the swapping thread waits, so the audio
+    // thread never blocks. Every write goes through swapSoundfont.
     soundfont: ?*tsf.tsf = null,
+    render_readers: std.atomic.Value(u32) = .init(0),
+    soundfont_mutex: std.Io.Mutex = .init,
     master_volume: f32 = 1.0,
     sample_rate: u32 = 44100,
     owns_soundfont: bool = true, // false when soundfont is borrowed (AIL_create_wave_synthesizer)
@@ -79,11 +90,40 @@ pub const MidiDriver = struct {
     pub fn deinit(self: *MidiDriver) void {
         root.clearLastMidiDriver(self);
         releaseAllChannels(@ptrCast(self));
-        if (self.soundfont) |sf| {
-            if (self.owns_soundfont) tsf.tsf_close(sf);
-        }
+        self.swapSoundfont(null, true);
         self.clearSoundfontSource();
         self.allocator.destroy(self);
+    }
+
+    /// Claim the soundfont for rendering, or null when none is loaded. Every
+    /// non-null claim pairs with releaseSoundfontClaim, which is what lets a
+    /// concurrent swap know the bank is idle enough to close.
+    pub fn claimSoundfont(self: *MidiDriver) ?*tsf.tsf {
+        _ = self.render_readers.fetchAdd(1, .seq_cst);
+        const sf = self.soundfont;
+        if (sf == null) self.releaseSoundfontClaim();
+        return sf;
+    }
+
+    pub fn releaseSoundfontClaim(self: *MidiDriver) void {
+        _ = self.render_readers.fetchSub(1, .seq_cst);
+    }
+
+    /// Publish `next` as the driver's soundfont and close the one it replaces,
+    /// after in-flight renders finish with it. The displaced bank is closed
+    /// only when it was owned, which is the flag as it stood before this call.
+    pub fn swapSoundfont(self: *MidiDriver, next: ?*tsf.tsf, next_owned: bool) void {
+        self.soundfont_mutex.lockUncancelable(io);
+        defer self.soundfont_mutex.unlock(io);
+        const previous = self.soundfont;
+        const previous_owned = self.owns_soundfont;
+        self.soundfont = next;
+        self.owns_soundfont = next_owned;
+        if (previous == next) return;
+        while (self.render_readers.load(.seq_cst) != 0) std.atomic.spinLoopHint();
+        if (previous) |sf| {
+            if (previous_owned) tsf.tsf_close(sf);
+        }
     }
 
     /// Forget which source the loaded soundfont came from, so the next load of
@@ -146,14 +186,10 @@ pub const MidiDriver = struct {
             self.allocator.free(path_z);
             return error.SoundFontLoadFailed;
         }
-        if (self.soundfont) |sf| {
-            if (self.owns_soundfont) tsf.tsf_close(sf);
-        }
+        self.swapSoundfont(loaded, true);
         self.clearSoundfontSource();
         self.soundfont_path = path_z;
         self.soundfont_refs = 1;
-        self.owns_soundfont = true;
-        self.soundfont = loaded;
         self.captureSoundfontSize(filename);
         self.adoptOutputRate();
         tsf.tsf_set_output(self.soundfont, tsf.TSF_STEREO_INTERLEAVED, @intCast(self.sample_rate), 0);
@@ -171,12 +207,8 @@ pub const MidiDriver = struct {
         const loaded = tsf.tsf_load_memory(data, @intCast(size));
         if (loaded == null) return error.SoundFontLoadFailed;
         const bank = loaded.?;
-        if (self.soundfont) |sf| {
-            if (self.owns_soundfont) tsf.tsf_close(sf);
-        }
+        self.swapSoundfont(bank, true);
         self.clearSoundfontSource();
-        self.soundfont = bank;
-        self.owns_soundfont = true;
         self.soundfont_image_ptr = @intFromPtr(data);
         self.soundfont_image_size = size;
         self.soundfont_refs = 1;
@@ -221,9 +253,7 @@ pub const MidiDriver = struct {
                     self.soundfont_refs -= 1;
                     return;
                 }
-                if (self.owns_soundfont) tsf.tsf_close(sf);
-                self.soundfont = null;
-                self.owns_soundfont = true;
+                self.swapSoundfont(null, true);
                 self.clearSoundfontSource();
                 // AIL_DLS_get_info reports the size unconditionally, so a
                 // released bank must not keep reporting its length.
@@ -306,6 +336,25 @@ fn bpmFromUsPerBeat(us_per_beat: anytype) i32 {
     return @max(min_tempo_bpm, root.satI32(60_000.0 / ms_per_beat));
 }
 
+/// Nested XMIDI FOR loops a sequence may keep open at once.
+const max_xmidi_loop_depth = 8;
+
+/// XMIDI FOR/NEXT jumps one buffer refill may take before the loop is dropped.
+/// A jump costs no frames, so a body that never advances the clock (CC116 with
+/// count 0 whose next message is CC117) would otherwise re-dispatch that NEXT
+/// forever. Real bodies advance; the budget only bounds the degenerate one.
+const max_xmidi_jumps_per_buffer: u32 = 256;
+
+/// True when an XMIDI NEXT should jump back to its FOR. `budget` is the jumps
+/// still allowed in this buffer; a finished loop (count 1) and an exhausted
+/// budget both decline, and only a taken jump spends the budget.
+fn xmidiShouldJump(count: i32, budget: *u32) bool {
+    if (!((count == 0) or (count > 1))) return false;
+    if (budget.* == 0) return false;
+    budget.* -= 1;
+    return true;
+}
+
 /// Truncate an f64 beat count into i32, clamping the high side one unit below
 /// maxInt so every caller's `+ 1` (beat/measure bookkeeping) stays overflow-free.
 /// ms_per_beat can be as small as 0.001 (a crafted 1-us-per-beat tempo event),
@@ -365,9 +414,10 @@ pub const Sequence = struct {
     sequence_callback: std.atomic.Value(usize) = .init(0),
     // Per-channel bank select (CC0 MSB) for timbre_callback
     channel_bank: [16]i32 = [_]i32{0} ** 16,
-    // XMIDI FOR/NEXT loop stack
+    // XMIDI FOR/NEXT loop stack. A deeper FOR is ignored; the NEXT that would
+    // have closed it then finds the enclosing loop instead.
     xmidi_loop_depth: usize = 0,
-    xmidi_loop_stack: [8]XmidiLoopEntry = [_]XmidiLoopEntry{.{}} ** 8,
+    xmidi_loop_stack: [max_xmidi_loop_depth]XmidiLoopEntry = [_]XmidiLoopEntry{.{}} ** max_xmidi_loop_depth,
     // Channel mapping: channel_map[logical] = physical. Identity by default.
     // AIL_map_sequence_channel writes it from the game's thread while the audio
     // thread resolves channels in onRead, so each slot is atomic.
@@ -412,12 +462,14 @@ pub const Sequence = struct {
     }
 
     /// Send CC 123 (All Notes Off) on all 16 MIDI channels to avoid stuck notes.
+    /// Claims the bank the way render does: this runs from the audio thread and
+    /// from control methods, and a swap must not free the bank under either.
     fn allNotesOff(self: *Sequence) void {
-        if (self.driver.soundfont) |sf| {
-            var ch: i32 = 0;
-            while (ch < 16) : (ch += 1) {
-                _ = tsf.tsf_channel_midi_control(sf, ch, 123, 0);
-            }
+        const sf = self.driver.claimSoundfont() orelse return;
+        defer self.driver.releaseSoundfontClaim();
+        var ch: i32 = 0;
+        while (ch < 16) : (ch += 1) {
+            _ = tsf.tsf_channel_midi_control(sf, ch, 123, 0);
         }
     }
 
@@ -571,21 +623,29 @@ pub const Sequence = struct {
 
     fn onRead(pDataSource: ?*ma.ma_data_source, pFramesOut: ?*anyopaque, frameCount: ma.ma_uint64, pFramesRead: ?*ma.ma_uint64) callconv(.c) ma.ma_result {
         const self: *Sequence = @fieldParentPtr("data_source", @as(*ma.ma_data_source_base, @ptrCast(@alignCast(pDataSource.?))));
-        if (!self.is_playing.load(.acquire) or self.driver.soundfont == null) {
+        if (!self.is_playing.load(.acquire)) {
             if (pFramesRead) |pr| pr.* = 0;
             return ma.MA_SUCCESS;
         }
         // tryLock so the audio thread never blocks waiting for a control-path
         // method (start/stop/setMsPosition/etc.). If contended, render silence
-        // for this buffer — the next callback will retry.
+        // for this buffer. The next callback retries.
         if (!self.state_mutex.tryLock()) {
             if (pFramesRead) |pr| pr.* = 0;
             return ma.MA_SUCCESS;
         }
         defer self.state_mutex.unlock(io);
+        // Hold the bank for the whole callback, so a game thread that swaps it
+        // waits out this render instead of freeing the bank mid-callback.
+        const soundfont = self.driver.claimSoundfont() orelse {
+            if (pFramesRead) |pr| pr.* = 0;
+            return ma.MA_SUCCESS;
+        };
+        defer self.driver.releaseSoundfontClaim();
 
         const msPerFrame = self.driver.msPerFrame();
         var framesProcessed: ma.ma_uint64 = 0;
+        var xmidi_jump_budget: u32 = max_xmidi_jumps_per_buffer;
         const buffer: [*]f32 = @ptrCast(@alignCast(pFramesOut.?));
 
         while (framesProcessed < frameCount) {
@@ -599,10 +659,10 @@ pub const Sequence = struct {
                         tsf.TML_NOTE_ON => {
                             // Use channel-aware API: tsf_note_on's second arg is preset_index,
                             // not channel. tsf_channel_note_on dispatches via channel's assigned patch.
-                            _ = tsf.tsf_channel_note_on(self.driver.soundfont, phys_ch, openmiles_tml_get_key(msg), @as(f32, @floatFromInt(openmiles_tml_get_velocity(msg))) / 127.0);
+                            _ = tsf.tsf_channel_note_on(soundfont, phys_ch, openmiles_tml_get_key(msg), @as(f32, @floatFromInt(openmiles_tml_get_velocity(msg))) / 127.0);
                         },
                         tsf.TML_NOTE_OFF => {
-                            tsf.tsf_channel_note_off(self.driver.soundfont, phys_ch, openmiles_tml_get_key(msg));
+                            tsf.tsf_channel_note_off(soundfont, phys_ch, openmiles_tml_get_key(msg));
                         },
                         tsf.TML_PROGRAM_CHANGE => {
                             const prog = openmiles_tml_get_program(msg);
@@ -617,7 +677,7 @@ pub const Sequence = struct {
                                 allow = cb(@ptrCast(self.driver), self.channel_bank[@intCast(@as(u32, @intCast(phys_ch)))], @intCast(prog));
                             }
                             if (allow != 0) {
-                                _ = tsf.tsf_channel_set_presetnumber(self.driver.soundfont, phys_ch, prog, if (phys_ch == 9) 1 else 0);
+                                _ = tsf.tsf_channel_set_presetnumber(soundfont, phys_ch, prog, if (phys_ch == 9) 1 else 0);
                             }
                         },
                         tsf.TML_CONTROL_CHANGE => {
@@ -626,7 +686,7 @@ pub const Sequence = struct {
                             if (ctrl == 116) {
                                 // XMIDI FOR: push loop stack entry. value=0 means infinite,
                                 // value=N means play the loop body N times total.
-                                if (self.xmidi_loop_depth < 8) {
+                                if (self.xmidi_loop_depth < max_xmidi_loop_depth) {
                                     const loop_start = msg.*.next;
                                     const loop_time = if (loop_start) |lm| @as(f64, @floatFromInt(lm.*.time)) else self.time_ms;
                                     self.xmidi_loop_stack[self.xmidi_loop_depth] = .{
@@ -636,13 +696,13 @@ pub const Sequence = struct {
                                     };
                                     self.xmidi_loop_depth += 1;
                                 } else {
-                                    log("XMIDI: FOR/NEXT loop stack full (depth=8), ignoring nested loop\n", .{});
+                                    log("XMIDI: FOR/NEXT loop stack full (depth={d}), ignoring nested loop\n", .{max_xmidi_loop_depth});
                                 }
                             } else if (ctrl == 117) {
                                 // XMIDI NEXT: check whether to loop back or exit
                                 if (self.xmidi_loop_depth > 0) {
                                     const top = &self.xmidi_loop_stack[self.xmidi_loop_depth - 1];
-                                    const should_loop = (top.count == 0) or (top.count > 1);
+                                    const should_loop = xmidiShouldJump(top.count, &xmidi_jump_budget);
                                     if (should_loop) {
                                         if (top.count > 1) top.count -= 1;
                                         self.allNotesOff();
@@ -677,7 +737,7 @@ pub const Sequence = struct {
                                     const ch_idx: usize = @intCast(@as(u32, @intCast(phys_ch)));
                                     self.channel_bank[ch_idx] = @intCast(val);
                                 }
-                                _ = tsf.tsf_channel_midi_control(self.driver.soundfont, phys_ch, ctrl, val);
+                                _ = tsf.tsf_channel_midi_control(soundfont, phys_ch, ctrl, val);
                                 // AILEVENTCB(HMDIDRIVER hmi, HSEQUENCE seq, S32 status, S32 data_1, S32 data_2)
                                 // status = 0xB0 | logical channel for a control-change event.
                                 const event_raw = self.driver.event_callback.load(.acquire);
@@ -688,7 +748,7 @@ pub const Sequence = struct {
                             }
                         },
                         tsf.TML_PITCH_BEND => {
-                            _ = tsf.tsf_channel_set_pitchwheel(self.driver.soundfont, phys_ch, openmiles_tml_get_pitch_bend(msg));
+                            _ = tsf.tsf_channel_set_pitchwheel(soundfont, phys_ch, openmiles_tml_get_pitch_bend(msg));
                         },
                         tsf.TML_SET_TEMPO => {
                             self.applyTempoEvent(msg);
@@ -705,14 +765,14 @@ pub const Sequence = struct {
                 const rawFramesUntilEvent = @max(0.0, @min(timeToNextEvent / msPerFrameEffective, @as(f64, @floatFromInt(frameCount))));
                 const framesUntilEvent = @as(ma.ma_uint64, @intFromFloat(rawFramesUntilEvent));
                 const framesToRender = @min(framesRemaining, @max(1, framesUntilEvent));
-                tsf.tsf_render_float(self.driver.soundfont, buffer + (@as(usize, @intCast(framesProcessed)) * 2), @intCast(@as(usize, @intCast(framesToRender))), 0);
+                tsf.tsf_render_float(soundfont, buffer + (@as(usize, @intCast(framesProcessed)) * 2), @intCast(@as(usize, @intCast(framesToRender))), 0);
                 const realMs = @as(f64, @floatFromInt(framesToRender)) * msPerFrame;
                 self.advanceTempoFade(realMs);
                 framesProcessed += framesToRender;
                 self.time_ms += @as(f64, @floatFromInt(framesToRender)) * msPerFrameEffective;
                 self.fireBeatCallbacks();
             } else {
-                tsf.tsf_render_float(self.driver.soundfont, buffer + (@as(usize, @intCast(framesProcessed)) * 2), @intCast(@as(usize, @intCast(framesRemaining))), 0);
+                tsf.tsf_render_float(soundfont, buffer + (@as(usize, @intCast(framesProcessed)) * 2), @intCast(@as(usize, @intCast(framesRemaining))), 0);
                 const realMsPost = @as(f64, @floatFromInt(framesRemaining)) * msPerFrame;
                 self.advanceTempoFade(realMsPost);
                 framesProcessed += framesRemaining;
@@ -1021,9 +1081,11 @@ pub const Sequence = struct {
         // (program changes, control changes, pitch bends, tempo changes).  This ensures channels have
         // the correct patches, volumes, pans etc. after seeking — as if the MIDI had played through.
         self.current_msg = self.midi;
+        const soundfont = self.driver.claimSoundfont();
+        defer if (soundfont != null) self.driver.releaseSoundfontClaim();
         while (self.current_msg) |msg| {
             if (@as(f64, @floatFromInt(msg.*.time)) >= target_ms) break;
-            if (self.driver.soundfont) |sf| {
+            if (soundfont) |sf| {
                 // Apply channel mapping so seek-replay state targets the same
                 // physical channel that onRead will use for live events.
                 const phys_ch = self.mapChannel(msg.*.channel);
@@ -1116,6 +1178,20 @@ test "bpmFromUsPerBeat never truncates a slow tempo to zero" {
     // reports and no tempo-ratio consumer can divide by.
     try testing.expectEqual(@as(i32, 1), bpmFromUsPerBeat(60_000_001));
     try testing.expectEqual(@as(i32, 1), bpmFromUsPerBeat(std.math.maxInt(u32)));
+}
+
+test "an XMIDI loop that never advances the clock stops after the jump budget" {
+    var budget: u32 = 3;
+    try testing.expect(xmidiShouldJump(0, &budget));
+    try testing.expect(xmidiShouldJump(0, &budget));
+    try testing.expect(xmidiShouldJump(0, &budget));
+    try testing.expect(!xmidiShouldJump(0, &budget));
+    try testing.expectEqual(@as(u32, 0), budget);
+    budget = 4;
+    try testing.expect(!xmidiShouldJump(1, &budget));
+    try testing.expectEqual(@as(u32, 4), budget);
+    try testing.expect(xmidiShouldJump(2, &budget));
+    try testing.expectEqual(@as(u32, 3), budget);
 }
 
 test "satBeats truncates in range and clamps extremes with +1 headroom" {

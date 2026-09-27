@@ -41,7 +41,10 @@ Options:
 Environment:
   SOURCE_DATE_EPOCH  mtime stamped on every archive entry, as a Unix epoch.
                      Defaults to the HEAD commit time; set it to reproduce an
-                     archive from a tree that is not a git checkout.
+                     archive from a tree that is not a git checkout. Must be an
+                     integer in 315532800..253402300799 (1980-01-01..9999-12-31):
+                     a zip entry cannot record anything outside that, and an
+                     older value would be clamped to 1980-01-01.
 
 Exit status: 0 archive written, 1 packaging failed, 2 bad invocation.
 EOF
@@ -76,6 +79,32 @@ fi
 if [ "$#" -gt 2 ]; then
   printf '%s: expected at most 2 arguments, got %s\n' "${0##*/}" "$#" >&2
   usage >&2
+  exit 2
+fi
+
+# Bounds are what a zip entry can actually record: the MS-DOS epoch it clamps
+# anything older to, and the last instant representable as a timestamp.
+min_epoch=315532800    # 1980-01-01T00:00:00Z
+max_epoch=253402300799 # 9999-12-31T23:59:59Z
+epoch=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || true)}
+if [ -z "$epoch" ]; then
+  echo "error: no commit time available; set SOURCE_DATE_EPOCH" >&2
+  exit 1
+fi
+# touch -d "@<n>" wants seconds since the epoch. An unvalidated value reaches
+# it as-is and comes back as "invalid date", which says nothing about the
+# variable that has to change. A pre-1980 integer stamps successfully and zip
+# then clamps it, so the archive would not carry the time that was asked for.
+case $epoch in
+  *[!0-9]*)
+    echo "error: SOURCE_DATE_EPOCH='$epoch' is not a non-negative integer" >&2
+    echo "  expected seconds since the Unix epoch, e.g. SOURCE_DATE_EPOCH=1750000000" >&2
+    exit 2
+    ;;
+esac
+if [ "${#epoch}" -gt 12 ] || [ "$((10#$epoch))" -lt "$min_epoch" ] || [ "$((10#$epoch))" -gt "$max_epoch" ]; then
+  echo "error: SOURCE_DATE_EPOCH=$epoch is outside $min_epoch..$max_epoch (1980-01-01..9999-12-31)" >&2
+  echo "  a zip entry cannot record it: older stamps are clamped to 1980-01-01" >&2
   exit 2
 fi
 
@@ -151,14 +180,9 @@ for e in "${entries[@]}"; do
   fi
 done
 
-# Stamped once, so every entry shares it. Outside a git checkout there is no
-# commit time to read, and a fallback to the host clock would quietly make two
-# packagings differ, so say what to set instead.
-epoch=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || true)}
-if [ -z "$epoch" ]; then
-  echo "error: no commit time available; set SOURCE_DATE_EPOCH" >&2
-  exit 1
-fi
+# Stamped once, so every entry shares it. `epoch` was checked above, before
+# any file is required, so a bad SOURCE_DATE_EPOCH fails as a usage error
+# rather than as a missing DLL.
 
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT

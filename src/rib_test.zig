@@ -52,7 +52,34 @@ test "RIB_enumerate_interface yields entries in registration order" {
     for (registered, got) |want, seen| {
         try testing.expectEqualStrings(std.mem.span(want.name), std.mem.span(seen.name));
         try testing.expectEqual(want.token, seen.token);
+        try testing.expectEqual(want.entry_type, seen.entry_type);
+        try testing.expectEqual(want.subtype, seen.subtype);
     }
+}
+
+test "RIB entry lookup is filtered by the registered type and reports its subtype" {
+    const registered = [_]Entry{
+        .{ .entry_type = .RIB_FUNCTION, .name = "rate", .token = 0x10, .subtype = 0 },
+        .{ .entry_type = .RIB_ATTRIBUTE, .name = "volume", .token = 0x20, .subtype = 3 },
+    };
+    const p = try providerWith("ASI digital audio engine", &registered);
+    defer p.deinit();
+
+    var token: usize = 0;
+    try testing.expectEqual(0, rib.RIB_request_interface_entry(p, "ASI digital audio engine", 1, "rate", &token));
+    try testing.expectEqual(1, rib.RIB_request_interface_entry(p, "ASI digital audio engine", 0, "rate", &token));
+    try testing.expectEqual(@as(usize, 0x10), token);
+    try testing.expectEqual(1, rib.RIB_request_interface_entry(p, "ASI digital audio engine", 1, "volume", &token));
+    try testing.expectEqual(@as(usize, 0x20), token);
+
+    var cursor: ?*anyopaque = null;
+    var out: Entry = undefined;
+    try testing.expectEqual(1, rib.RIB_enumerate_interface(p, "ASI digital audio engine", 1, &cursor, &out));
+    try testing.expectEqualStrings("volume", std.mem.span(out.name));
+    try testing.expectEqual(openmiles.RIB_ENTRY_TYPE.RIB_ATTRIBUTE, out.entry_type);
+    try testing.expectEqual(@as(u32, 3), out.subtype);
+    var past: Entry = undefined;
+    try testing.expectEqual(0, rib.RIB_enumerate_interface(p, "ASI digital audio engine", 1, &cursor, &past));
 }
 
 test "RIB_enumerate_interface entry names stay readable after later registrations" {
@@ -92,11 +119,14 @@ test "a repeated entry name updates its token in place" {
     const iface = try openmiles.Interface.init(testing.allocator, "filter");
     defer iface.deinit();
 
-    try iface.add("cutoff", 1);
-    try iface.add("order", 2);
-    try iface.add("cutoff", 99);
+    try iface.add("cutoff", 1, .RIB_FUNCTION, 0);
+    try iface.add("order", 2, .RIB_ATTRIBUTE, 4);
+    try iface.add("cutoff", 99, .RIB_ATTRIBUTE, 7);
 
     try testing.expectEqual(@as(?usize, 99), iface.tokenFor("cutoff"));
+    try testing.expectEqual(@as(?usize, null), iface.tokenForType("cutoff", .RIB_FUNCTION));
+    try testing.expectEqual(@as(?usize, 99), iface.tokenForType("cutoff", .RIB_ATTRIBUTE));
+    try testing.expectEqual(@as(u32, 7), iface.entryAt(0).?.subtype);
     try testing.expectEqual(@as(?usize, 2), iface.tokenFor("order"));
     try testing.expectEqual(@as(?usize, null), iface.tokenFor("resonance"));
 

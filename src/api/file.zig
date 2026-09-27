@@ -43,12 +43,38 @@ pub fn AIL_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32) callc
 // SDK arg order is (open, close, SEEK, READ) — not (open, close, read, seek).
 pub fn AIL_set_file_callbacks(open_fn: ?*anyopaque, close_fn: ?*anyopaque, seek_fn: ?*anyopaque, read_fn: ?*anyopaque) callconv(.winapi) void {
     log("AIL_set_file_callbacks\n", .{});
-    openmiles.cb_file_open = if (open_fn) |f| @ptrCast(f) else null;
-    openmiles.cb_file_close = if (close_fn) |f| @ptrCast(f) else null;
-    openmiles.cb_file_seek = if (seek_fn) |f| @ptrCast(f) else null;
-    openmiles.cb_file_read = if (read_fn) |f| @ptrCast(f) else null;
+    openmiles.setFileCallbacks(
+        if (open_fn) |f| @ptrCast(f) else null,
+        if (close_fn) |f| @ptrCast(f) else null,
+        if (seek_fn) |f| @ptrCast(f) else null,
+        if (read_fn) |f| @ptrCast(f) else null,
+    );
 }
 pub fn AIL_set_file_async_callbacks(open_fn: ?*anyopaque, close_fn: ?*anyopaque, seek_fn: ?*anyopaque, read_fn: ?*anyopaque, callback_fn: ?*anyopaque) callconv(.winapi) void {
     _ = callback_fn;
     AIL_set_file_callbacks(open_fn, close_fn, seek_fn, read_fn);
+}
+
+test "file callbacks install and clear as one set" {
+    const Ops = struct {
+        fn open(_: [*:0]const u8, _: *u32) callconv(.winapi) u32 {
+            return 0;
+        }
+        fn close(_: u32) callconv(.winapi) void {}
+        fn seek(_: u32, _: i32, _: u32) callconv(.winapi) i32 {
+            return 0;
+        }
+        fn read(_: u32, _: *anyopaque, _: u32) callconv(.winapi) u32 {
+            return 0;
+        }
+    };
+    AIL_set_file_callbacks(@ptrCast(@constCast(&Ops.open)), @ptrCast(@constCast(&Ops.close)), @ptrCast(@constCast(&Ops.seek)), @ptrCast(@constCast(&Ops.read)));
+    try std.testing.expect(openmiles.currentFileCallbacks() != null);
+    const got = openmiles.currentFileCallbacks().?;
+    try std.testing.expectEqual(@intFromPtr(&Ops.open), @intFromPtr(got.open));
+    try std.testing.expectEqual(@intFromPtr(&Ops.close), @intFromPtr(got.close));
+    try std.testing.expectEqual(@intFromPtr(&Ops.seek), @intFromPtr(got.seek));
+    try std.testing.expectEqual(@intFromPtr(&Ops.read), @intFromPtr(got.read));
+    AIL_set_file_callbacks(null, null, null, null);
+    try std.testing.expect(openmiles.currentFileCallbacks() == null);
 }

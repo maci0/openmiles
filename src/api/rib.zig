@@ -395,14 +395,13 @@ pub fn RIB_free_provider_library(provider_opt: ?*Provider) callconv(.c) void {
     provider.deinit();
 }
 pub fn RIB_request_interface_entry(provider_opt: ?*Provider, name: [*:0]const u8, entry_type: u32, entry_name: [*:0]const u8, token: ?*usize) callconv(.c) i32 {
-    _ = entry_type; // RIB_FUNCTION/RIB_PROPERTY filter; we match by name alone
     const provider = provider_opt orelse return 0;
+    const want: openmiles.RIB_ENTRY_TYPE = if (entry_type == 1) .RIB_ATTRIBUTE else .RIB_FUNCTION;
     for (provider.interfaces.items) |iface| {
-        if (std.mem.eql(u8, iface.name, std.mem.span(name))) {
-            if (iface.tokenFor(std.mem.span(entry_name))) |tok| {
-                if (token) |t| t.* = tok;
-                return 1;
-            }
+        if (!std.mem.eql(u8, iface.name, std.mem.span(name))) continue;
+        if (iface.tokenForType(std.mem.span(entry_name), want)) |tok| {
+            if (token) |t| t.* = tok;
+            return 1;
         }
     }
     return 0;
@@ -413,17 +412,29 @@ pub fn RIB_request_interface_entry(provider_opt: ?*Provider, name: [*:0]const u8
 pub fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const u8, entry_type: u32, next: *?*anyopaque, dest: *openmiles.RIB_INTERFACE_ENTRY) callconv(.c) i32 {
     const provider = provider_opt orelse return 0;
     const iface_name = std.mem.span(name);
+    const want: openmiles.RIB_ENTRY_TYPE = if (entry_type == 1) .RIB_ATTRIBUTE else .RIB_FUNCTION;
     for (provider.interfaces.items) |iface| {
         if (!std.mem.eql(u8, iface.name, iface_name)) continue;
-        const idx: usize = if (next.*) |v| @intFromPtr(v) else 0;
-        if (iface.entryAt(idx)) |entry| {
+        // The cursor counts entries of the requested type, and `order` is
+        // registration order, so repeated calls walk that type once. Each
+        // record carries the type and subtype it was registered with:
+        // RIB_type_string needs the real subtype, and echoing the caller's
+        // filter would make that read a no-op.
+        const start: usize = if (next.*) |v| @intFromPtr(v) else 0;
+        var seen: usize = 0;
+        for (iface.order.items) |entry| {
+            if (entry.entry_type != want) continue;
+            if (seen < start) {
+                seen += 1;
+                continue;
+            }
             dest.* = .{
-                .entry_type = if (entry_type == 1) .RIB_ATTRIBUTE else .RIB_FUNCTION,
+                .entry_type = entry.entry_type,
                 .name = entry.name.ptr,
                 .token = entry.token,
-                .subtype = 0,
+                .subtype = entry.subtype,
             };
-            next.* = @ptrFromInt(idx + 1);
+            next.* = @ptrFromInt(start + 1);
             return 1;
         }
         break;

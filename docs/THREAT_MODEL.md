@@ -79,7 +79,7 @@ these are not remote attack vectors, they are the ABI contract.
   arbitrary bytes.
 
 There is no `AIL_open_file`/`AIL_close_file`/`HSFILE` handle API. The whole file
-service surface is `src/api/file.zig` plus the callback VFS in `src/root.zig:294 cb_file_open`.
+service surface is `src/api/file.zig` plus the callback VFS in `src/root.zig:300 setFileCallbacks`.
 
 ## 2. File system to process
 
@@ -106,18 +106,21 @@ demand past the cap.
 
 ## 3. Environment boundary
 
-Two environment variables are read, both through the process environment rather
-than any validated config file. Both values are checked before use, and a
+Three environment variables are read, each through the process environment
+rather than any validated config file. Each value is checked before use, and a
 rejected one is reported on stderr with the reason.
 
-- `OPENMILES_DEBUG` (`src/utils/logger.zig:93 GetEnvironmentVariableW`):
-  enables verbose logging to `openmiles.log` in the current directory, capped at
-  64 MiB (`src/utils/logger.zig:14 max_log_bytes`). Debug builds enable it by
-  default (`src/utils/logger.zig:79 builtin.mode`), so a debug build in a shared
-  directory discloses asset names, file paths, and internal state to any local
-  user who can read the file. A value outside the documented set is refused
-  rather than read as off, so a typo cannot silently suppress the only trace a
-  failure leaves (`src/utils/logger.zig:40 parseDebugFlag`).
+- `OPENMILES_DEBUG` (`src/utils/logger.zig:141 GetEnvironmentVariableW`):
+  enables verbose logging, capped at 64 MiB (`src/utils/logger.zig:14 max_log_bytes`).
+  Debug builds enable it by default (`src/utils/logger.zig:126 builtin.mode`), so
+  a debug build in a shared directory discloses asset names, file paths, and
+  internal state to any local user who can read the file. A value outside the
+  documented set is refused rather than read as off, so a typo cannot silently
+  suppress the only trace a failure leaves (`src/utils/logger.zig:52 parseDebugFlag`).
+- `OPENMILES_LOG_PATH` (`src/utils/logger.zig:151 GetEnvironmentVariableW`):
+  chooses the debug log file. Unset, empty, or longer than 1024 bytes keeps
+  `openmiles.log` in the current directory. A path the process can write is
+  otherwise followed, so the log can be placed outside a shared game directory.
 - `TMPDIR` (`src/api/rib.zig:170 TMPDIR`): the non-Windows directory the
   in-memory ASI image is written to. Any process that can set the game
   process's environment chooses where a PE image is written and loaded from.
