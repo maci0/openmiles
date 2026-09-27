@@ -98,9 +98,9 @@ substring of its name:
 make test FILTER=redbook           # or: zig build test -Dtest-filter=redbook
 ```
 
-A `FILTER` that matches no test name is a typo, so `make test` refuses it and
-names the problem; the raw `zig build test -Dtest-filter=...` reports a
-zero-test run as success.
+A filter that matches no test name is a typo, so both routes refuse it and name
+the problem: `zig build` rejects a `-Dtest-filter` that matches nothing before
+any compile work, because zig otherwise exits 0 on a zero-test run.
 
 A test run is quiet: the test build does not enable the debug log by default
 (a Debug library build does), so a run neither floods the terminal nor appends
@@ -435,7 +435,7 @@ Set `OPENMILES_DEBUG=1` in your environment to enable verbose logging to `openmi
 OPENMILES_DEBUG=1 wine YourGame.exe
 ```
 
-Debug builds enable logging by default; set `OPENMILES_DEBUG=0` to turn it off. Release builds log only when `OPENMILES_DEBUG` names a true value (`1`, `true`, `yes`, or `on`). The on-disk log is capped at 64 MiB per process to prevent unbounded growth. Its first line is the effective configuration, naming whether `OPENMILES_DEBUG` or the build default decided it, so a log that never appears reads back as a configuration answer.
+Debug builds enable logging by default; set `OPENMILES_DEBUG=0` to turn it off. Release builds log only when `OPENMILES_DEBUG` names a true value (`1`, `true`, `yes`, or `on`). The on-disk log is capped at 64 MiB per process to prevent unbounded growth. Its first line is the effective configuration, naming whether `OPENMILES_DEBUG` or the build default decided it and which `-Dmss-version` the loaded DLL was built for, so a log that never appears reads back as a configuration answer and a game compiled against a different `OPENMILES_MSS_VERSION` than the DLL it loads is visible in the first line.
 
 ## Architecture
 

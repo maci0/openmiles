@@ -32,22 +32,18 @@ build: check-toolchain
 # make test FILTER=<substring> runs only the tests whose name contains it;
 # the full suite takes minutes, the filtered run seconds.
 #
-# A filter that matches no test name is a typo, not a green run, so it is
-# checked here: zig reports a zero-test run as success, which is how a
-# contributor ends up believing a fix is covered when nothing ran. FILTER goes
-# through the environment, not into the recipe text. The names are read with
-# find + grep rather than a GNU-only `grep --include` scan, and matched
-# with the shell's own substring test, so the check does not depend on a grep
-# that BSD (macOS) does not ship.
+# A filter that matches no test name is a typo, not a green run, and zig
+# reports a zero-test run as success, so build.zig rejects such a filter before
+# any compile work; the check lives there so `zig build test -Dtest-filter=...`
+# is covered on its own, not just through this recipe. FILTER reaches zig as
+# a quoted shell argument read from the environment, so a value carrying
+# spaces or shell metacharacters is passed through rather than re-split.
 test: check-toolchain
 	@if [ -n "$$FILTER" ]; then \
-	  names=$$(find src -name '*.zig' -exec grep -hoE 'test "[^"]*"' {} +); \
-	  case "$$names" in \
-	    *"$$FILTER"*) ;; \
-	    *) echo "error: no test name in src/ contains '$$FILTER'; run 'make test' with no FILTER" >&2; exit 1 ;; \
-	  esac; \
+	  zig build test -Dtest-filter="$$FILTER"; \
+	else \
+	  zig build test; \
 	fi
-	zig build test $(if $(FILTER),-Dtest-filter=$(FILTER))
 
 # The undefined-behaviour sanitizer build. Separate from `test` on purpose: it
 # rebuilds every C translation unit with instrumentation, so it is minutes

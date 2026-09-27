@@ -74,6 +74,10 @@ everything below is unreleased.
 - `make check-pins` fails when the C warning set in `scripts/check_header.py`
   drifts from `c_flags` in `build.zig`, so the header gate cannot compile
   `mss.h` under a weaker set than the one the build uses.
+- `zig build` rejects a `-Dtest-filter` that names no test before it compiles
+  anything, instead of running zero tests and exiting 0. The check used to live
+  only in the `make test` recipe, so `zig build test -Dtest-filter=typo`
+  reported a green run that had tested nothing.
 - ruff's `BLE`, `PGH`, `SLF` and `T10` groups are selected in `ruff.toml`, so
   the gate scripts are checked for a swallowed `except`, a bare `# noqa` that
   silences every rule on the line, a reach into another object's private
@@ -472,6 +476,10 @@ everything below is unreleased.
   relocating the ASI image to the game directory. The README now has a
   *Configuration* section listing both variables, their values, and their
   defaults.
+- The debug log's first line names the `-Dmss-version` the loaded DLL was built
+  for. A game compiled against a different `OPENMILES_MSS_VERSION` than the DLL
+  it loads had no way to see the mismatch: nothing in the image reports the
+  version it was built as.
 - The shipped `mss32.dll` is linked stripped. It no longer carries a CodeView
   directory, so the build directory cannot reach the artifact through the PDB
   GUID, and two builds of one commit at different paths produce the same bytes.

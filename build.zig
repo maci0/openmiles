@@ -41,6 +41,46 @@ fn parseMssVersion(s: []const u8) ?u16 {
     return null;
 }
 
+/// Upper bound for one source file read while looking for test names. The
+/// largest file in src/ is a fraction of this; a bigger one is skipped rather
+/// than failing the configure step over a read limit.
+const max_test_scan_bytes: usize = 16 * 1024 * 1024;
+
+/// True when a `test "name"` in the sources under src/ contains `filter`. The
+/// same shape the test runner matches, read from the sources rather than from
+/// the compiled test list, so a rejected filter never costs a build.
+fn anyTestNameContains(b: *std.Build, filter: []const u8) bool {
+    const io = b.graph.io;
+    var dir = std.Io.Dir.cwd().openDir(io, "src", .{ .iterate = true }) catch return false;
+    defer dir.close(io);
+    var walker = dir.walk(b.allocator) catch return false;
+    defer walker.deinit();
+    while (walker.next(io) catch return false) |entry| {
+        if (entry.kind != .file or !std.mem.endsWith(u8, entry.basename, ".zig")) continue;
+        // Read through the entry's own directory handle: entry.path is
+        // relative to the directory being walked, not to the cwd.
+        const src = entry.dir.readFileAlloc(io, entry.basename, b.allocator, .limited(max_test_scan_bytes)) catch continue;
+        defer b.allocator.free(src);
+        if (sourceHasTestName(src, filter)) return true;
+    }
+    return false;
+}
+
+/// Match `test "name"` declarations in Zig source. Only the literal form is
+/// read, which is the only one the tree uses; a name built at comptime from
+/// pieces is invisible here, and a filter naming it is reported as unmatched.
+fn sourceHasTestName(src: []const u8, filter: []const u8) bool {
+    const decl = "test \"";
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, src, pos, decl)) |at| {
+        const start = at + decl.len;
+        const end = std.mem.indexOfScalarPos(u8, src, start, '"') orelse return false;
+        if (std.mem.indexOf(u8, src[start..end], filter) != null) return true;
+        pos = end + 1;
+    }
+    return false;
+}
+
 const OpenmilesModule = struct {
     mod: *std.Build.Module,
     c_impl: *std.Build.Step.Compile,
@@ -172,8 +212,17 @@ pub fn build(b: *std.Build) void {
         std.process.exit(2);
     };
     // Run only the tests whose name contains this substring. The full suite
-    // takes minutes; this is the edit-test loop for one test.
+    // takes minutes; this is the edit-test loop for one test. A filter that
+    // names no test is rejected here rather than left to run: zig exits 0 on a
+    // zero-test run, so a typo would read as a pass.
     const test_filter = b.option([]const u8, "test-filter", "Only run tests whose name contains this substring");
+    if (test_filter) |f| {
+        if (!anyTestNameContains(b, f)) {
+            std.debug.print("error: no test name in src/ contains '{s}'\n", .{f});
+            std.debug.print("       run without -Dtest-filter to run the whole suite\n", .{});
+            std.process.exit(2);
+        }
+    }
     const test_filters: []const []const u8 = if (test_filter) |f| &.{f} else &.{};
 
     const build_opts = b.addOptions();

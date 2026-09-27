@@ -130,14 +130,21 @@ pub fn deinit() void {
 /// read back as "logging is on or off, from the build default or from
 /// OPENMILES_DEBUG, into this file" without the reader having to know the
 /// variable that asked for it.
+///
+/// The mss_version the DLL was built for is in the same line because it is the
+/// one piece of configuration a consumer cannot query at runtime: the value a
+/// game was compiled against is the OPENMILES_MSS_VERSION define in its own
+/// build, and nothing in the loaded image confirms the two agree. The log is
+/// where a mismatch becomes visible.
 fn logConfigOnce() void {
     if (@atomicLoad(bool, &config_logged, .acquire)) return;
     @atomicStore(bool, &config_logged, true, .release);
-    log("openmiles: debug log {s}, enabled by {s} ({s} build, default {s}), appending to openmiles.log in the current directory, cap {d} bytes\n", .{
+    log("openmiles: debug log {s}, enabled by {s} ({s} build, default {s}), mss_version {d}, appending to openmiles.log in the current directory, cap {d} bytes\n", .{
         if (debug_enabled) "on" else "off",
         debug_source,
         @tagName(builtin.mode),
         if (build_options.log_by_default) "on" else "off",
+        build_options.mss_version,
         max_log_bytes,
     });
 }
