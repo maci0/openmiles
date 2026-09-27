@@ -62,15 +62,22 @@ per-version ABI quirks (functions whose stdcall arity changed across releases,
 e.g. `init_sample` `@4→@12→@8`, the v4/v5 5-arg 3D-distance variants, the v7-only
 DSP-stage API, and the v8 vs v9 `Miles*` event-API arities).
 
-| Version | Adds | Exports | Parity vs ref |
-|---------|------|---------|---------------|
-| 3 | Core, Digital, Sample, Streaming, MIDI, Redbook, Timer | 251 | 0 missing (vs 3.6f) |
-| 4 | RIB/ASI plugin system + ASI compression, Quick, Input, Memory | 347 | 0 missing (vs 4.0h) |
-| 5 | 3D audio, filters | 375 | 0 missing (vs 5.0r) |
-| 6 | Filter API maturity | 375 | 0 missing (vs 6.0i) |
-| 7 | Unified 2D/3D sample API, master/speaker reverb, DSP stages | 447 | 0 missing (vs 7.0b) |
-| 8 | Event system, soundbanks, channel levels, in-memory I/O | 542 | 0 missing (vs 8.0b) |
-| 9 | `Miles*` event/variable API, environment presets, 64-bit counters | 641 | 0 missing (vs 9.3f) |
+| Version | Adds | Missing vs ref |
+|---------|------|---------------|
+| 3 | Core, Digital, Sample, Streaming, MIDI, Redbook, Timer | 0 |
+| 4 | RIB/ASI plugin system + ASI compression, Quick, Input, Memory | 0 |
+| 5 | 3D audio, filters | 0 |
+| 6 | Filter API maturity | 0 |
+| 7 | Unified 2D/3D sample API, master/speaker reverb, DSP stages | 0 |
+| 8 | Event system, soundbanks, channel levels, in-memory I/O | 0 |
+| 9 | `Miles*` event/variable API, environment presets, 64-bit counters | 0 |
+
+`scripts/check_all_versions.sh` reproduces the zero-missing diff per major
+version against the reference DLLs listed in that script (3.6a, 4.0h, 5.0b,
+6.1d, 6.5h, 7.0k, 8.0e, 9.1d). Those references are proprietary Miles binaries
+and are not committed; drop them under `references/` to run the sweep. Its
+verdict, not this table, is the parity claim: 0 missing and 0 decoration
+mismatch for every version it covers.
 
 Each build is a *superset* of its reference: it exports every name the real DLL
 does (0 missing) plus a small set of harmless cross-era extras. The export count
@@ -188,10 +195,10 @@ graph TD
 
 ## API Coverage
 
-The default (v9) DLL exports **641** functions spanning the v3–v9 API surface
+The default (v9) DLL exports **394** functions spanning the v3–v9 API surface
 (legacy `waveOut`/`midiOut` compatibility included; `DIG_`/`MDI_` prefix aliases
-not yet exported). Every one of the ~686 distinct exported functions is covered
-by the fuzz harness and by unit or C-integration tests. See
+not yet exported). Every exported function is covered by the fuzz harness and by
+unit or C-integration tests. See
 [docs/API_STATUS.md](docs/API_STATUS.md) for the per-function implementation matrix.
 
 Beyond export-table parity, behaviour is cross-checked against the MSS SDK
@@ -222,6 +229,7 @@ section of [docs/API_STATUS.md](docs/API_STATUS.md)).
 
 ## Documentation
 
+- [Changelog](CHANGELOG.md) -- consumer-facing changes per release
 - [API Implementation Status](docs/API_STATUS.md) -- per-function status matrix
 - [API Support Matrix](docs/MSS_API_MATRIX.md) -- version compatibility overview
 - [Plugin & Codec Coverage](docs/MSS_PLUGINS.md) -- ASI/M3D/FLT replacement status

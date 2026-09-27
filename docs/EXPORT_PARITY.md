@@ -89,6 +89,14 @@ those three symbols — an unavoidable trade-off, documented here.
 
 ### Next frontier: EXTRA exports
 
+> The per-version "ours" counts in the tables below are from the sweep runs
+> recorded here, which predate the current export table: the default v9 build
+> now emits 394 distinct exports (`objdump -p` on
+> `zig build -Dtarget=x86-windows`), not the 635/514 those tables carry. Treat
+> them as the record of a past run, not the current count. The live count comes
+> from the built DLL or from `scripts/check_all_versions.sh`; the load-bearing
+> claim is the MISSING/DECORATION diff, not the export total.
+
 `MISSING` and `DECORATION MISMATCH` are both 0 for v5-v9, so every function a
 game *calls* resolves with the correct name and stdcall byte-count. The
 remaining axis is EXTRA exports — symbols we export that a given version's DLL

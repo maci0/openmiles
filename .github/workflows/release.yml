@@ -19,6 +19,25 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      # A release is only correct if the tag, the declared package version, and
+      # the changelog agree. build.zig.zon is the single source of truth: the tag
+      # must carry exactly the version declared there, so a release can never be
+      # published under a name the package does not claim.
+      - name: Verify tag matches build.zig.zon version
+        run: |
+          set -euo pipefail
+          declared=$(sed -n 's/^[[:space:]]*\.version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' build.zig.zon)
+          tag="${GITHUB_REF_NAME#v}"
+          if [ -z "$declared" ]; then
+            echo "no .version found in build.zig.zon"; exit 1
+          fi
+          if [ "$declared" != "$tag" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match build.zig.zon version ${declared}"
+            echo "set .version = \"${tag}\" in build.zig.zon and re-tag"
+            exit 1
+          fi
+          echo "releasing ${declared}"
+
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406 # v2.2.1
         with:
@@ -40,12 +59,32 @@ jobs:
       - name: Cross-compile Windows DLL
         run: zig build -Dtarget=x86-windows -Doptimize=ReleaseFast
 
+      # The shipped artifact is a drop-in mss32.dll: a game that cannot resolve
+      # an import it links against fails to start. Check the built DLL itself
+      # (not the source table) is 32-bit PE and still exports the core entry
+      # points a game links before any of them is published.
+      - name: Smoke-test the built DLL
+        run: |
+          set -euo pipefail
+          dll=zig-out/bin/mss32.dll
+          test -s "$dll" || { echo "missing or empty $dll"; exit 1; }
+          hdr=$(objdump -f "$dll")
+          grep -q 'pei-i386' <<<"$hdr" || { echo "not a 32-bit PE:"; echo "$hdr"; exit 1; }
+          exports=$(objdump -p "$dll")
+          for sym in AIL_startup AIL_shutdown AIL_open_stream AIL_set_sample_position AIL_start_sample; do
+            if ! grep -Eq "(^|[[:space:]_])${sym}@" <<<"$exports"; then
+              echo "missing required export: $sym"; exit 1
+            fi
+          done
+
       - name: Package release
         run: |
+          set -euo pipefail
           mkdir -p release
           cp zig-out/bin/mss32.dll release/
           cp LICENSE release/
           cp README.md release/
+          cp CHANGELOG.md release/
           cd release && zip "../openmiles-${GITHUB_REF_NAME}-win32.zip" *
 
       - name: Create GitHub Release

@@ -11,6 +11,11 @@
 # but, except for the single linker-emitted DllMainCRTStartup entry symbol (and
 # the v9 functions newer than the 9.1d binary snapshot), should stay 0.
 #
+# The reference set covers one mainline binary per selectable major version
+# plus the 6.1 and 6.5 sub-lines. The 6, 6.0, and 6.6 selects share the 6.0
+# mainline surface and are not swept separately; a change to their gating needs
+# a 6.0/6.6 reference added here before the sweep can vouch for it.
+#
 # Usage: scripts/check_all_versions.sh [--strict]
 #   --strict folds EXTRA into the per-version pass/fail too.
 set -u
@@ -22,6 +27,7 @@ STRICT=""
 # version -> canonical reference DLL
 declare -A REF=(
   [3]=references/MSS-3.x/3.6a-mss32.dll
+  [4]=references/MSS-4.x/4.0h-mss32.dll
   [5]=references/MSS-5.x/5.0b-mss32.DLL
   [6.1]=references/MSS-6.1/6.1d-mss32.dll
   [6.5]=references/MSS-6.5/6.5h-mss32.dll
@@ -31,7 +37,7 @@ declare -A REF=(
 )
 
 fail=0
-for ver in 3 5 6.1 6.5 7 8 9; do
+for ver in 3 4 5 6.1 6.5 7 8 9; do
   ref="${REF[$ver]}"
   if [ ! -f "$ref" ]; then echo "v$ver: reference missing ($ref) -- skipped"; continue; fi
   if ! zig build -Dmss-version="$ver" -Dtarget=x86-windows 2>/dev/null; then
