@@ -283,8 +283,10 @@ pub const EventConstruct = struct {
         self.raw(";");
     }
     // A float field, C "%f" (six decimals) + ';' (decoder copyFloat: parse to ';').
+    // A non-finite value would print as "nan"/"inf", text no decoder can use as
+    // a step field, so emit the 0 copyFloat falls back to instead.
     fn fieldFloat(self: *EventConstruct, v: f32) void {
-        self.print("{d:.6};", .{v});
+        self.print("{d:.6};", .{if (std.math.isFinite(v)) v else 0.0});
     }
     // --- faithful multi-field step builders (mirror mssevent.cpp) --------------
     pub fn addCacheSounds(self: *EventConstruct, t: StepType, lib: ?*const anyopaque, sounds: ?*const anyopaque) bool {
@@ -573,7 +575,12 @@ const Decoder = struct {
         return s;
     }
     fn copyFloat(self: *Decoder, x: *f32) void {
-        x.* = std.fmt.parseFloat(f32, self.fieldText()) catch 0;
+        // parseFloat accepts "nan", "-nan", "inf" and "-inf" as valid text, so a
+        // step string carrying one decodes to a non-finite value that every
+        // later comparison silently fails (NaN != NaN, and @min/@max skip it).
+        // Map a non-finite field to the same 0 an unparsable one gets.
+        const v = std.fmt.parseFloat(f32, self.fieldText()) catch 0;
+        x.* = if (std.math.isFinite(v)) v else 0;
     }
     // A decimal integer field written with "%d" (may be more than one digit).
     fn copyDecimal(self: *Decoder, x: *i32) void {
@@ -819,6 +826,25 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
     }
     if (d.overflow) return null;
     return @ptrCast(d.p);
+}
+
+test "a non-finite float field decodes to 0 rather than reaching the step" {
+    const testing = std.testing;
+    var step: EVENT_STEP_INFO = undefined;
+    var scratch: [256]u8 align(8) = undefined;
+
+    // parseFloat reads "nan" and "inf" as valid text, so a step string can
+    // carry a value that every later comparison silently mishandles.
+    _ = nextStep(":n;l;nan;tg;0;0;0;", &step, &scratch) orelse return error.TestUnexpectedResult;
+    try testing.expect(std.math.isFinite(step.u.ramp.time));
+    try testing.expectEqual(@as(f32, 0), step.u.ramp.time);
+
+    _ = nextStep(":n;l;-inf;tg;0;0;0;", &step, &scratch) orelse return error.TestUnexpectedResult;
+    try testing.expectEqual(@as(f32, 0), step.u.ramp.time);
+
+    // A finite field is unaffected.
+    _ = nextStep(":n;l;2.500000;tg;0;0;0;", &step, &scratch) orelse return error.TestUnexpectedResult;
+    try testing.expectEqual(@as(f32, 2.5), step.u.ramp.time);
 }
 
 test "nextStep stops at a premature NUL inside float/decimal fields" {

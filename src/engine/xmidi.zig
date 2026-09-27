@@ -43,13 +43,18 @@ pub fn parseSmfTimeSigNumerator(smf: []const u8) i32 {
             if (meta_type == 0x2F) break; // End of Track
             i +|= meta_len;
         } else if (status == 0xF0 or status == 0xF7) {
-            // SysEx — VLQ length then data
+            // SysEx — VLQ length then data. Bounded by max_vlq_bytes like
+            // readVlq: a run of continuation bytes shifts len past 32 bits
+            // otherwise, which is a checked-shift overflow in a safe build.
             var len: u32 = 0;
+            var bytes_read: u8 = 0;
             while (i < trk_end) {
                 const b = smf[i];
                 i += 1;
                 len = (len << 7) | (b & 0x7F);
+                bytes_read += 1;
                 if (b & 0x80 == 0) break;
+                if (bytes_read >= max_vlq_bytes) break;
             }
             i +|= len;
         } else {

@@ -380,7 +380,9 @@ pub fn AIL_set_3D_sample_preference(s: ?*anyopaque, name: [*:0]const u8, val: *a
         sample.applyCone();
     } else if (std.mem.eql(u8, n, "Cone outer volume")) {
         const v: *const f32 = @ptrCast(@alignCast(val));
-        sample.cone_outer_volume = v.*;
+        // Same NaN guard as the two angle branches above: @min/@max below would
+        // skip a NaN and leave a silent full-volume cone.
+        if (!std.math.isNan(v.*)) sample.cone_outer_volume = v.*;
         sample.applyCone();
     } else if (std.mem.eql(u8, n, "Loop count")) {
         const v: *const i32 = @ptrCast(@alignCast(val));

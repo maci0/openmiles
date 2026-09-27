@@ -312,8 +312,14 @@ pub fn AIL_schedule_start_sample(s_opt: ?*Sample, mix_time_to_start: u64) callco
 }
 pub fn AIL_set_sample_loop_samples(s_opt: ?*Sample, loop_start_samples: i32, loop_end_samples: i32) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    s.loop_start_frame = if (loop_start_samples > 0) @intCast(loop_start_samples) else 0;
-    s.loop_end_frame = if (loop_end_samples > 0) @intCast(loop_end_samples) else 0;
+    // The *_samples form counts per-channel samples; loop_start_frame is a
+    // frame index and AIL_sample_loop_block converts it back with
+    // bytesPerFrame (bytes per frame = bytes per sample * channels). Storing
+    // the raw count put a stereo 16-bit sample's loop a factor of
+    // channels * bytesPerSample too far in, and reported it back that way.
+    const ch = @as(u64, s.channelCount());
+    s.loop_start_frame = if (loop_start_samples > 0) @intCast(@as(u64, @intCast(loop_start_samples)) / ch) else 0;
+    s.loop_end_frame = if (loop_end_samples > 0) @intCast(@as(u64, @intCast(loop_end_samples)) / ch) else 0;
     return 1;
 }
 

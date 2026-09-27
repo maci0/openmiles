@@ -31,6 +31,14 @@ fn satU64(v: anytype) u64 {
     return @intFromFloat(v);
 }
 
+/// Map a non-finite app-supplied float to 0. A NaN axis survives every
+/// comparison downstream as false and would keep a position or a Doppler
+/// computation NaN for the life of the sound; an infinite axis is equally
+/// unusable as a velocity or gain.
+fn finiteOrZero(v: f32) f32 {
+    return if (std.math.isFinite(v)) v else 0.0;
+}
+
 /// Normalize a 3-vector in place, matching MSS RAD_vector_normalize (m3d.cpp):
 /// a vector shorter than 1e-4 is left unchanged (avoids divide-by-zero).
 fn normalize3(v: *[3]f32) void {
@@ -638,7 +646,7 @@ pub const DigitalDriver = struct {
     }
 
     pub fn setListenerVelocity(self: *DigitalDriver, x: f32, y: f32, z: f32) void {
-        ma.ma_engine_listener_set_velocity(&self.engine, 0, x, y, -z);
+        ma.ma_engine_listener_set_velocity(&self.engine, 0, finiteOrZero(x), finiteOrZero(y), -finiteOrZero(z));
     }
 
     pub fn setListenerDirection(self: *DigitalDriver, fx: f32, fy: f32, fz: f32) void {
@@ -1772,6 +1780,15 @@ pub const Sample = struct {
         }
     }
 
+    /// Frames the sample plays at once, i.e. one sample per channel. Derived
+    /// from the same source bytesPerFrame reads, so a sample count converts to
+    /// a frame index and back without a factor of the channel count.
+    pub fn channelCount(self: *const Sample) u32 {
+        if (self.decoder) |d| return @max(1, @as(u32, @intCast(d.outputChannels)));
+        if (self.pcm_format) |fmt| return @max(1, fmt.channels);
+        return 2;
+    }
+
     pub fn bytesPerFrame(self: *const Sample) u32 {
         if (self.decoder) |d| {
             const bps = ma.ma_get_bytes_per_sample(d.outputFormat);
@@ -2267,11 +2284,18 @@ pub const Sample3D = struct {
         }
     }
     pub fn setVelocity(self: *Sample3D, x: f32, y: f32, z: f32) void {
-        self.velocity_x = x;
-        self.velocity_y = y;
-        self.velocity_z = z;
+        // AIL_set_3D_velocity multiplies each axis by an app-supplied factor, so
+        // a NaN or infinite component reaches this setter. Storing one poisons
+        // dead reckoning (pos += velocity * dt) and the Doppler computation
+        // forever, since none of them re-check. Zero is the still source.
+        const vx = finiteOrZero(x);
+        const vy = finiteOrZero(y);
+        const vz = finiteOrZero(z);
+        self.velocity_x = vx;
+        self.velocity_y = vy;
+        self.velocity_z = vz;
         if (self.is_initialized) {
-            ma.ma_sound_set_velocity(&self.sound, x, y, -z);
+            ma.ma_sound_set_velocity(&self.sound, vx, vy, -vz);
         }
     }
 

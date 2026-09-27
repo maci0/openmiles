@@ -291,6 +291,21 @@ pub const XmidiLoopEntry = struct {
     count: i32 = 1, // 0 = infinite, N>0 = N total passes remaining
 };
 
+/// Smallest BPM a SET_TEMPO microseconds value can express. Above 60_000_000 us
+/// per beat (a 60 s beat) the 60000/ms_per_beat quotient falls under 1 and
+/// truncates to 0, which AIL_tempo then reports and every tempo-ratio
+/// consumer reads as "no tempo". Clamp instead of storing a zero beat rate.
+const min_tempo_bpm: i32 = 1;
+
+/// A file's tempo in whole BPM, from its microseconds-per-beat value. Both
+/// callers of this derivation (the live event and the initial-tempo scan)
+/// would otherwise truncate a slow tempo to zero. Any width: the TML accessor
+/// returns a C int while a test literal reads more naturally unsigned.
+fn bpmFromUsPerBeat(us_per_beat: anytype) i32 {
+    const ms_per_beat = @as(f64, @floatFromInt(us_per_beat)) / 1000.0;
+    return @max(min_tempo_bpm, root.satI32(60_000.0 / ms_per_beat));
+}
+
 /// Truncate an f64 beat count into i32, clamping the high side one unit below
 /// maxInt so every caller's `+ 1` (beat/measure bookkeeping) stays overflow-free.
 /// ms_per_beat can be as small as 0.001 (a crafted 1-us-per-beat tempo event),
@@ -411,7 +426,7 @@ pub const Sequence = struct {
         const us_per_beat = tsf.tml_get_tempo_value(msg);
         if (us_per_beat > 0) {
             const file_ms_per_beat = @as(f64, @floatFromInt(us_per_beat)) / 1000.0;
-            const file_bpm: i32 = @intFromFloat(60_000.0 / file_ms_per_beat);
+            const file_bpm: i32 = bpmFromUsPerBeat(us_per_beat);
             self.tempo = file_bpm;
             self.ms_per_beat = file_ms_per_beat;
             self.recalcTempoRatio(file_bpm);
@@ -837,7 +852,7 @@ pub const Sequence = struct {
                     if (us > 0) {
                         const fmpb = @as(f64, @floatFromInt(us)) / 1000.0;
                         self.initial_ms_per_beat = fmpb;
-                        self.initial_tempo = @intFromFloat(60_000.0 / fmpb);
+                        self.initial_tempo = bpmFromUsPerBeat(us);
                     }
                     found_tempo = true;
                 }
@@ -1074,6 +1089,15 @@ pub const Sequence = struct {
         }
     }
 };
+
+test "bpmFromUsPerBeat never truncates a slow tempo to zero" {
+    try testing.expectEqual(@as(i32, 120), bpmFromUsPerBeat(500_000)); // 500 ms/beat
+    try testing.expectEqual(@as(i32, 1), bpmFromUsPerBeat(60_000_000)); // exactly 60 s/beat
+    // Past 60 s/beat the quotient falls under 1: 0 BPM is a value AIL_tempo
+    // reports and no tempo-ratio consumer can divide by.
+    try testing.expectEqual(@as(i32, 1), bpmFromUsPerBeat(60_000_001));
+    try testing.expectEqual(@as(i32, 1), bpmFromUsPerBeat(std.math.maxInt(u32)));
+}
 
 test "satBeats truncates in range and clamps extremes with +1 headroom" {
     try testing.expectEqual(@as(i32, 0), satBeats(0.0));
