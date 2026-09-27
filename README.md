@@ -416,6 +416,13 @@ and the upstream commit each was fetched from is recorded in
 [`deps/README.md`](deps/README.md); `make check-vendored`, which `make lint` and
 CI run, verifies both. See that file for the update procedure.
 
+[`SBOM.cdx.json`](SBOM.cdx.json) is the same inventory as CycloneDX: the
+vendored headers above with their licenses and digests, plus the pip pins the
+parity sweep needs. It is generated from those same records by
+`scripts/gen_sbom.py` and shipped inside the release archive, so a consumer can
+tell what third-party code the DLL carries without cloning this repository.
+`make check-sbom` fails when it no longer matches the tree.
+
 ## License
 
 This project is licensed under the [GNU General Public License v3.0](LICENSE).

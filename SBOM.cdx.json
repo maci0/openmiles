@@ -1,0 +1,160 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "library",
+      "bom-ref": "pkg:generic/openmiles@0.0.0",
+      "name": "openmiles",
+      "version": "0.0.0",
+      "description": "OpenMiles: a reimplementation of the Miles Sound System audio API",
+      "licenses": [
+        {
+          "license": {
+            "id": "GPL-3.0-only"
+          }
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:generic/miniaudio@0.11.25",
+      "name": "miniaudio",
+      "version": "0.11.25",
+      "description": "Cross-platform audio playback, mixing, and 3D spatialization.",
+      "purl": "pkg:generic/miniaudio@0.11.25",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT-0"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ac7af4de748b7e26b777f37e01cee313a308a7296a3eb080e2906b320cc55c89"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mackron/miniaudio"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/mackron/miniaudio/commit/9634bedb5b5a2ca38c1ee7108a9358a4e233f14d"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmiles:file",
+          "value": "deps/miniaudio.h"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:generic/TinySoundFont@0.9",
+      "name": "TinySoundFont",
+      "version": "0.9",
+      "description": "SoundFont (SF2) software synthesis.",
+      "purl": "pkg:generic/TinySoundFont@0.9",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "70d55963c98f60ebb81518eaa1f25d46888d5180eb5f5289fd6b74ffc177d197"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/schellingb/TinySoundFont"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/schellingb/TinySoundFont/commit/790a219810cb0fca5defa8cdbd88e2487e5efc7a"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmiles:file",
+          "value": "deps/tsf.h"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:generic/TinyMidiLoader@0.7",
+      "name": "TinyMidiLoader",
+      "version": "0.7",
+      "description": "MIDI file parsing.",
+      "purl": "pkg:generic/TinyMidiLoader@0.7",
+      "licenses": [
+        {
+          "license": {
+            "id": "Zlib"
+          }
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "93257db259e0efb2ea2037d7157841bec8cb4a2d7986286e43c8090705326546"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/schellingb/TinySoundFont"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/schellingb/TinySoundFont/commit/472abcff8be97ff23f8196412041624fc3e34ce4"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmiles:file",
+          "value": "deps/tml.h"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:pypi/pefile@2024.8.26",
+      "name": "pefile",
+      "version": "2024.8.26",
+      "purl": "pkg:pypi/pefile@2024.8.26",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/project/pefile/"
+        }
+      ],
+      "properties": [
+        {
+          "name": "openmiles:shipped-in-release",
+          "value": "false"
+        }
+      ]
+    }
+  ]
+}

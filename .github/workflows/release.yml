@@ -97,6 +97,12 @@ jobs:
       - name: Verify vendored dependencies
         run: ./scripts/check_vendored.py
 
+      # The SBOM travels in the release archive, so it has to describe the tree
+      # the tag carries: regenerating it here is the only way to know it is not
+      # an inventory left over from an earlier set of headers.
+      - name: Verify the SBOM matches the tree
+        run: ./scripts/gen_sbom.py --check
+
       # The published DLL is a drop-in for the C surface src/mss.h declares, so
       # the export table is checked against that header here too, not only on
       # the merge that produced the tag.
@@ -124,12 +130,12 @@ jobs:
             fi
           done
 
-      # VENDORED.md and DEPS-SHA256SUMS travel with the DLL: the project license
-      # covers redistribution of the vendored headers under their own terms, and
-      # a consumer who wants to trace that grant back to an upstream release
-      # needs the attribution and the digests, not just this repository's URL.
-      # The checksums are written from the packaging script's own entry list, so
-      # they name exactly the files the archive holds.
+      # VENDORED.md, DEPS-SHA256SUMS, and SBOM.cdx.json travel with the DLL: the
+      # project license covers redistribution of the vendored headers under their
+      # own terms, and a consumer who wants to trace that grant back to an
+      # upstream release needs the attribution and the digests, not just this
+      # repository's URL. The checksums are written from the packaging script's
+      # own entry list, so they name exactly the files the archive holds.
       - name: Package release
         run: ./scripts/package_release.sh "openmiles-${TAG}-win32.zip" release/SHA256SUMS
 

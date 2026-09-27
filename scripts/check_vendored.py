@@ -24,6 +24,7 @@ import hashlib
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
 DEPS = ROOT / "deps"
@@ -49,38 +50,68 @@ DIGEST_HEX_CHARS = 64
 
 README = DEPS / "README.md"
 
-# deps/README.md records an upstream commit per vendored header as
-# "**Commit:** `<40 hex>`" in that file's section. The first-party files
-# (tsf_tml.h, windows_stub.h) have no upstream and so carry no commit.
+# deps/README.md records each vendored header's provenance as a bulleted field
+# in that file's section: "**Commit:** `<40 hex>`" for the upstream revision it
+# was fetched from, plus the version, source URL, and license. The first-party
+# files (tsf_tml.h, windows_stub.h) have no upstream and so carry no commit.
 COMMIT_RE = re.compile(r"^[-*]\s+\*\*Commit:\*\*\s*`([0-9a-f]{40})`", re.MULTILINE)
+VERSION_RE = re.compile(r"^[-*]\s+\*\*Version:\*\*\s*(.+?)\s*$", re.MULTILINE)
+PACKAGE_RE = re.compile(r"^[-*]\s+\*\*Package:\*\*\s*`?([A-Za-z0-9_.-]+)`?", re.MULTILINE)
+SOURCE_RE = re.compile(r"^[-*]\s+\*\*Source:\*\*\s*(\S+)", re.MULTILINE)
+LICENSE_RE = re.compile(r"^[-*]\s+\*\*License:\*\*\s*(.+?)\s*$", re.MULTILINE)
+PURPOSE_RE = re.compile(r"^[-*]\s+\*\*Purpose:\*\*\s*(.+?)\s*$", re.MULTILINE)
 SECTION_RE = re.compile(r"^##\s+(.+)$", re.MULTILINE)
 NAME_RE = re.compile(r"[A-Za-z0-9_.-]+\.h")
 FIRST_PARTY_RE = re.compile(r"first-party")
 
 
-def readme_sections():
+class Entry(NamedTuple):
+    """What deps/README.md claims about one file in deps/."""
+
+    package: str | None
+    version: str | None
+    commit: str | None
+    source: str | None
+    license: str | None
+    purpose: str | None
+    first_party: bool
+
+
+def readme_entries():
     """Map each deps/ file named in a README section to how it is claimed.
 
     A file reaches this check one of two ways: a section recording the upstream
     commit it was vendored from, or a section saying it is first-party. A
     section that claims neither leaves the origin of the bytes unrecorded.
+
+    gen_sbom.py reads the same records, so the provenance in the SBOM and the
+    provenance this check enforces come from one parse of one file.
     """
     text = README.read_text()
-    sections = {}
+    entries = {}
     for m in SECTION_RE.finditer(text):
         rest = text[m.end() :]
         nxt = rest.find("\n## ")
         body = rest if nxt < 0 else rest[:nxt]
-        found = COMMIT_RE.search(body)
-        if found:
-            claim = found.group(1)
-        elif FIRST_PARTY_RE.search(body):
-            claim = "first-party"
-        else:
-            claim = None
+        commit = COMMIT_RE.search(body)
+        first_party = not commit and bool(FIRST_PARTY_RE.search(body))
+        version = VERSION_RE.search(body)
+        source = SOURCE_RE.search(body)
+        license_ = LICENSE_RE.search(body)
+        purpose = PURPOSE_RE.search(body)
+        package = PACKAGE_RE.search(body)
+        entry = Entry(
+            package=package.group(1) if package else None,
+            version=version.group(1) if version else None,
+            commit=commit.group(1) if commit else None,
+            source=source.group(1) if source else None,
+            license=license_.group(1) if license_ else None,
+            purpose=purpose.group(1) if purpose else None,
+            first_party=first_party,
+        )
         for name in NAME_RE.findall(m.group(1)):
-            sections[name] = claim
-    return sections
+            entries[name] = entry
+    return entries
 
 
 def vendored_files():
@@ -145,11 +176,12 @@ def main():
         if name not in on_disk
     ]
 
-    sections = readme_sections()
+    entries = readme_entries()
     for name in sorted(on_disk):
-        if name not in sections:
+        entry = entries.get(name)
+        if entry is None:
             problems.append(f"{name} UNDOCUMENTED  no section in {README.relative_to(ROOT)}")
-        elif sections[name] is None:
+        elif entry.commit is None and not entry.first_party:
             problems.append(
                 f"{name} NOPROVENANCE  its {README.relative_to(ROOT)} section names no upstream "
                 f"commit and does not claim the file first-party"

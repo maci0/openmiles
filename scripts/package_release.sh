@@ -81,6 +81,11 @@ entries=(
   # the attribution and the reviewed digests travel with the binary.
   "VENDORED.md:deps/README.md"
   "DEPS-SHA256SUMS:deps/SHA256SUMS"
+  # The CycloneDX inventory, so a consumer or a vulnerability scanner can read
+  # what third-party code the DLL carries without unpacking this repository. It
+  # is generated from the same records VENDORED.md carries and checked by
+  # `make check-sbom`, so it cannot describe a tree it was not built from.
+  "SBOM.cdx.json:SBOM.cdx.json"
 )
 for e in "${entries[@]}"; do
   src=${e#*:}

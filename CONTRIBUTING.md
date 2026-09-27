@@ -16,7 +16,8 @@ any other one; `make check-pins` (part of `make lint`) fails when the Makefile,
 `ci.yml`, and `build.zig.zon` disagree, and when the C warning set in
 `scripts/check_header.py` drifts from `c_flags` in `build.zig`. Nothing else is
 fetched: every dependency is a vendored header under `deps/`, verified by
-`make check-vendored` against `deps/SHA256SUMS`.
+`make check-vendored` against `deps/SHA256SUMS`, and listed for consumers in
+`SBOM.cdx.json`, which `make check-sbom` regenerates and compares.
 
 `make parity` is the one exception. It diffs each `-Dmss-version` build against
 a reference DLL under `references/`, which is copyrighted and not distributed,

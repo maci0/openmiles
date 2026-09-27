@@ -1,4 +1,4 @@
-.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-yaml check-threat-model check-toolchain check-host-tools check-parity-tools check-vendored cross parity help
+.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-yaml check-threat-model check-toolchain check-host-tools check-parity-tools check-vendored check-sbom cross parity help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -69,6 +69,14 @@ check-versions:
 check-vendored:
 	$(PYTHON) scripts/check_vendored.py
 
+# The CycloneDX inventory of the third-party code this release carries, derived
+# from deps/README.md, deps/SHA256SUMS, scripts/requirements.txt, and
+# build.zig.zon. It is checked, not written, here: a header swap or a pip bump
+# that does not regenerate it fails the gate rather than publishing a stale
+# inventory. See scripts/gen_sbom.py.
+check-sbom:
+	$(PYTHON) scripts/gen_sbom.py --check
+
 # The gate scripts are the linter, so ruff checks them too: ruff.toml pins the
 # rule set, and a script that crashes or stops reporting fails the gate
 # silently. Pinned for the same reason as the zig above, so a newer local ruff
@@ -123,6 +131,7 @@ lint: check-host-tools
 	$(PYTHON) scripts/check_header.py
 	$(PYTHON) scripts/check_versions.py
 	$(PYTHON) scripts/check_vendored.py
+	$(PYTHON) scripts/gen_sbom.py --check
 	$(PYTHON) scripts/check_threat_model_refs.py
 	@$(MAKE) --no-print-directory check-python
 	@$(MAKE) --no-print-directory check-yaml
@@ -159,6 +168,7 @@ help:
 	@echo "  check-header        assert src/mss.h matches the export table and struct layouts per -Dmss-version"
 	@echo "  check-versions      assert every -Dmss-version is parity-swept or declared unswept"
 	@echo "  check-vendored      assert deps/ matches the digests in deps/SHA256SUMS, and that each vendored entry names its upstream commit"
+	@echo "  check-sbom          assert SBOM.cdx.json matches the vendored deps and the declared pip pins"
 	@echo "  check-threat-model  assert every file:line anchor in docs/THREAT_MODEL.md resolves"
 	@echo "  check-python        assert ruff on PATH is the pinned version, then lint and format-check"
 	@echo "  check-yaml          assert yamllint on PATH is the pinned version, then lint .github/workflows"
