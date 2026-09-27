@@ -1181,6 +1181,28 @@ test "setRedistDirectory with the same path does not rescan it" {
     try testing.expectEqualStrings("zig-out/bin/plugins", openmiles.getRedistDirectory());
 }
 
+test "a redist directory startup already scanned loads no second copy" {
+    // Startup scans the application directory into the global provider list,
+    // and a game's AIL_set_redist_directory then names that same directory. The
+    // driver must not dlopen a second copy of a module the process already
+    // holds: both copies stay loaded until AIL_shutdown.
+    std.Io.Dir.cwd().access(openmiles.io, "zig-out/bin/plugins/mock.asi", .{}) catch return;
+    defer {
+        if (openmiles.lastDigitalDriver()) |d| openmiles.closeDigitalDriver(d);
+        openmiles.setRedistDirectory("");
+    }
+    openmiles.setLastDigitalDriver(null);
+    const driver = openmiles.openDigitalDriver(44100, 16, 2) orelse return error.NoDriver;
+
+    _ = openmiles.loadApplicationProviders("zig-out/bin/plugins");
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const resolved = openmiles.fs_compat.maybeResolveCaseInsensitivePath("zig-out/bin/plugins/mock.asi", &path_buf) orelse "zig-out/bin/plugins/mock.asi";
+    try testing.expect(openmiles.isPluginLoadedAnywhere(&.{}, resolved));
+    const after_scan = driver.providers.items.len;
+    openmiles.setRedistDirectory("zig-out/bin/plugins");
+    try testing.expectEqual(after_scan, driver.providers.items.len);
+}
+
 test "RIB plugin loading registers the mock provider's interface end to end" {
     // The only automated coverage of the dynamic-plugin path (dlopen/LoadLibrary
     // + RIB_Main + interface registration). The fixture is installed by

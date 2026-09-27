@@ -445,12 +445,14 @@ pub const DigitalDriver = struct {
                 continue;
             };
             defer alloc.free(full_path);
-            // One copy of a plugin per driver: a rescan (a second
+            // One copy of a plugin per process: a rescan (a second
             // AIL_set_redist_directory, a re-open) must not load the same module
-            // again and leave both copies in self.providers.
+            // again and leave both copies in self.providers, and a redist
+            // directory that startup already scanned must not pull in a second
+            // copy beside the one the application list holds.
             var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
             const resolved = fs_compat.maybeResolveCaseInsensitivePath(full_path, &resolved_buf) orelse full_path;
-            if (root.isPluginAlreadyLoaded(self.providers.items, resolved)) continue;
+            if (root.isPluginLoadedAnywhere(self.providers.items, resolved)) continue;
             const p = root.Provider.load(alloc, full_path) catch |err| {
                 log("loadAllAsi: failed to load plugin '{s}': {any}\n", .{ name, err });
                 continue;

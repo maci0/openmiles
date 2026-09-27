@@ -512,6 +512,17 @@ pub fn isPluginAlreadyLoaded(providers: []const *Provider, path: []const u8) boo
     return false;
 }
 
+/// Whether `path` names a module this process already holds open, in the
+/// application list or in `owned` (a driver's own list). A module is one
+/// instance per process: both lists live until AIL_shutdown, so a game whose
+/// redist directory is the directory startup already scanned would otherwise
+/// keep a second dlopen'd copy of every .asi for the life of the process, each
+/// with its own codec state.
+pub fn isPluginLoadedAnywhere(owned: []const *Provider, path: []const u8) bool {
+    if (isPluginAlreadyLoaded(owned, path)) return true;
+    return isPluginAlreadyLoaded(global_providers.items, path);
+}
+
 // --- Timer state ---
 
 pub var global_timers: std.ArrayList(*Timer) = .empty;
