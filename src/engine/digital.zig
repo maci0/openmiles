@@ -21,6 +21,24 @@ pub const FalloffGraphPoint = extern struct { x: f32, y: f32, itx: f32, ity: f32
 pub const max_falloff_points: usize = 5;
 /// The four S3D falloff graphs a sample carries: volume, exclusion, lowpass, spread.
 pub const FalloffKind = enum(usize) { volume = 0, exclusion = 1, lowpass = 2, spread = 3 };
+/// Width of the per-sample falloff arrays. Taken from the enum so a new
+/// variant widens the storage instead of writing past the last kind.
+pub const falloff_kind_count: usize = @typeInfo(FalloffKind).@"enum".fields.len;
+comptime {
+    for (@typeInfo(FalloffKind).@"enum".fields, 0..) |f, i| {
+        if (f.value != i) @compileError("FalloffKind values must be dense from 0: " ++ f.name);
+    }
+}
+
+/// Invoke one AILSAMPLECB slot (void callback(HSAMPLE)), or do nothing when
+/// the slot is empty. The load is atomic: the audio thread fires these while
+/// the game thread swaps the pointer, and a plain read can tear it.
+pub fn fireSampleCallback(slot: *const std.atomic.Value(usize), sample: *anyopaque) void {
+    const raw = slot.load(.acquire);
+    if (raw == 0) return;
+    const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(raw);
+    cb(sample);
+}
 
 /// Saturating float -> u64 (NaN/negative -> 0, overflow -> clamped). Guards the
 /// `@intFromFloat` panic when external callers pass negative/huge positions.
@@ -788,9 +806,9 @@ pub const Sample = struct {
     loop_end_frame: u64 = 0, // 0 = play to end of file
     owned_buffer: ?[]u8 = null,
     driver_is_dead: bool = false,
-    eos_callback: usize = 0,
-    eob_callback: usize = 0,
-    sob_callback: usize = 0,
+    eos_callback: std.atomic.Value(usize) = .init(0),
+    eob_callback: std.atomic.Value(usize) = .init(0),
+    sob_callback: std.atomic.Value(usize) = .init(0),
     pcm_format: ?SamplePcmFormat = null,
     // AILSOUNDINFO channel_mask: ~0U means "default mapping" (standard mono/
     // stereo WAVs); an explicit speaker mask only comes from WAVEFORMATEXTENSIBLE
@@ -804,7 +822,7 @@ pub const Sample = struct {
     stream_head: i32 = 0,
     // Slot most recently resolved by AIL_load_sample_buffer, or the slot that
     // last drained a stream buffer.
-    last_loaded_buffer: i32 = 0,
+    last_loaded_buffer: std.atomic.Value(i32) = .init(0),
     user_data: [8]u32 = [_]u32{0} ** 8,
     // Bounded memory context for streaming formats loaded from raw pointers (freed on deinit)
     bounded_mem_ctx: ?*BoundedMemCtx = null,
@@ -881,8 +899,8 @@ pub const Sample = struct {
     v9_spread: f32 = 0.0,
     // S3D falloff graphs (volume, exclusion, lowpass, spread). Stored verbatim
     // per AIL_set_sample_3D_*_falloff; count 0 = no graph. Mirrors HSAMPLE.S3D.
-    falloff_count: [4]u8 = [_]u8{0} ** 4,
-    falloff_graph: [4][max_falloff_points]FalloffGraphPoint = undefined,
+    falloff_count: [falloff_kind_count]u8 = [_]u8{0} ** falloff_kind_count,
+    falloff_graph: [falloff_kind_count][max_falloff_points]FalloffGraphPoint = undefined,
     // AIL_schedule_start_sample's mix timestamp, in mixer milliseconds, and the
     // absolute engine PCM frame the voice is scheduled to start at (0 =
     // unscheduled, i.e. the next mixed buffer). AIL_set_sample_playback_delay
@@ -905,14 +923,8 @@ pub const Sample = struct {
     /// single arg; the app queries buffer state separately). EOB first so
     /// double-buffer streaming games can refill before seeing end-of-sample.
     fn fireEobThenEosCallbacks(self: *Sample) void {
-        if (self.eob_callback != 0) {
-            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eob_callback);
-            cb(@ptrCast(self));
-        }
-        if (self.eos_callback != 0) {
-            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eos_callback);
-            cb(@ptrCast(self));
-        }
+        fireSampleCallback(&self.eob_callback, self);
+        fireSampleCallback(&self.eos_callback, self);
     }
 
     fn eosCallbackBridge(pUserData: ?*anyopaque, pSound: ?*ma.ma_sound) callconv(.c) void {
@@ -1258,13 +1270,10 @@ pub const Sample = struct {
     /// callback. `ctx` is the owning Sample. Runs outside the stream lock.
     fn streamEobBridge(ctx: ?*anyopaque, buf_index: i32, buf_len: u32, buf_addr: ?*anyopaque) void {
         const self: *Sample = @ptrCast(@alignCast(ctx.?));
-        self.last_loaded_buffer = buf_index;
+        self.last_loaded_buffer.store(buf_index, .release);
         _ = buf_len;
         _ = buf_addr;
-        if (self.eob_callback != 0) {
-            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eob_callback);
-            cb(@ptrCast(self));
-        }
+        fireSampleCallback(&self.eob_callback, self);
     }
 
     /// Feed one buffer into the MSS double-buffer stream (zero-copy: the app
@@ -1326,16 +1335,16 @@ pub const Sample = struct {
         // Re-init returns the sample to the fresh SMP_DONE / never-played state.
         self.was_stopped = false;
         self.has_played = false;
-        self.eos_callback = 0;
-        self.eob_callback = 0;
-        self.sob_callback = 0;
+        self.eos_callback.store(0, .release);
+        self.eob_callback.store(0, .release);
+        self.sob_callback.store(0, .release);
         self.pcm_format = null;
         self.channel_mask = ~@as(u32, 0);
         self.n_buffers = 2; // AIL_init_sample sets the ring count to 2 (mssdig.cpp)
         self.stream_head = 0;
         self.speaker_levels = [_]f32{1.0} ** 9;
         self.user_channel_levels_set = false;
-        self.falloff_count = [_]u8{0} ** 4;
+        self.falloff_count = [_]u8{0} ** falloff_kind_count;
         self.s3d_face = .{ 1, 0, 0 };
         self.s3d_up = .{ 0, 1, 0 };
         self.is_3D = 0; // AIL_init_sample clears 3D state (mssdig.cpp)
@@ -1348,7 +1357,7 @@ pub const Sample = struct {
         self.s3d_cone_outer_deg = 360.0;
         self.s3d_cone_outer_vol = 1.0;
         self.falloff_cb = null;
-        self.last_loaded_buffer = 0;
+        self.last_loaded_buffer.store(0, .release);
         self.user_data = [_]u32{0} ** 8;
         // SDK wavefile.cpp AIL_init_sample also resets the level / reverb / filter
         // / occlusion state of a reused handle to its defaults:
@@ -1448,10 +1457,7 @@ pub const Sample = struct {
             const res = ma.ma_sound_start(&self.sound);
             log("Sample.start: ma_sound_start returned {d}\n", .{res});
         }
-        if (self.sob_callback != 0) {
-            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.sob_callback);
-            cb(@ptrCast(self));
-        }
+        fireSampleCallback(&self.sob_callback, self);
     }
 
     /// AIL_schedule_start_sample: begin playback at an absolute point on the
@@ -1865,7 +1871,7 @@ pub const Sample3D = struct {
     loops_remaining: std.atomic.Value(i32) = .init(1),
     loop_start_frame: u64 = 0,
     loop_end_frame: u64 = 0,
-    eos_callback: usize = 0,
+    eos_callback: std.atomic.Value(usize) = .init(0),
     obstruction: f32 = 0.0,
     occlusion: f32 = 0.0,
     exclusion: f32 = 0.0,
@@ -1909,10 +1915,7 @@ pub const Sample3D = struct {
             return;
         }
         self.is_done.store(true, .release);
-        if (self.eos_callback != 0) {
-            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eos_callback);
-            cb(@ptrCast(self));
-        }
+        fireSampleCallback(&self.eos_callback, self);
     }
 
     fn bytesPerFrame(self: *const Sample3D) u32 {
@@ -2125,10 +2128,7 @@ pub const Sample3D = struct {
         }
         self.is_done.store(true, .release);
         if (already_done) return;
-        if (self.eos_callback != 0) {
-            const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eos_callback);
-            cb(@ptrCast(self));
-        }
+        fireSampleCallback(&self.eos_callback, self);
     }
 
     pub fn pause(self: *Sample3D) void {
@@ -2400,9 +2400,9 @@ test "EOB/EOS callbacks fire with single HSAMPLE arg" {
     s.* = undefined;
     s.loops_remaining.store(1, .release);
     s.is_done.store(false, .release);
-    s.eob_callback = @intFromPtr(&CbProbe.onEob);
-    s.eos_callback = @intFromPtr(&CbProbe.onEos);
-    s.sob_callback = 0;
+    s.eob_callback = .init(@intFromPtr(&CbProbe.onEob));
+    s.eos_callback = .init(@intFromPtr(&CbProbe.onEos));
+    s.sob_callback = .init(0);
     CbProbe.reset();
     // Final-loop completion path: must fire EOB then EOS, each with HSAMPLE only.
     Sample.eosCallbackBridge(s, null);
@@ -2417,13 +2417,13 @@ test "EOB stream bridge fires with single HSAMPLE arg" {
     const s = try std.testing.allocator.create(Sample);
     defer std.testing.allocator.destroy(s);
     s.* = undefined;
-    s.eob_callback = @intFromPtr(&CbProbe.onEob);
-    s.last_loaded_buffer = 0;
+    s.eob_callback = .init(@intFromPtr(&CbProbe.onEob));
+    s.last_loaded_buffer = .init(0);
     CbProbe.reset();
     // Buffer-drain bridge passes through buf_index/len/addr but the app callback
     // receives only HSAMPLE.
     Sample.streamEobBridge(@ptrCast(s), 1, 4096, null);
-    try std.testing.expectEqual(@as(i32, 1), s.last_loaded_buffer);
+    try std.testing.expectEqual(@as(i32, 1), s.last_loaded_buffer.load(.acquire));
     try std.testing.expectEqual(@as(u32, 1), CbProbe.eob_calls);
     try std.testing.expectEqual(@as(?*anyopaque, @ptrCast(s)), CbProbe.eob_hs);
 }

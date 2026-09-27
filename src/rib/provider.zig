@@ -274,7 +274,7 @@ pub const Provider = struct {
         while (i < entry_count) : (i += 1) {
             const entry = rib_entries[i];
             if (entry.name != null) {
-                try iface.add(std.mem.span(entry.name), entry.token);
+                try iface.add(std.mem.span(entry.name), entry.token, entry.entry_type, entry.subtype);
             }
         }
         // A counter that wrapped would hand out a handle an earlier interface
@@ -304,6 +304,8 @@ pub const Provider = struct {
 pub const InterfaceEntry = struct {
     name: [:0]u8,
     token: usize,
+    entry_type: RIB_ENTRY_TYPE,
+    subtype: u32,
 };
 
 pub const Interface = struct {
@@ -338,16 +340,25 @@ pub const Interface = struct {
         return self;
     }
 
-    /// Adds an entry, or updates the token of an already-registered name in
-    /// place so the first registration keeps its position in the enumeration.
-    pub fn add(self: *Interface, name: []const u8, token: usize) !void {
+    /// Adds an entry, or updates the token, type, and subtype of an
+    /// already-registered name in place so the first registration keeps its
+    /// position in the enumeration. One name is one entry: a later registration
+    /// of the same name replaces what the earlier one stored.
+    pub fn add(self: *Interface, name: []const u8, token: usize, entry_type: RIB_ENTRY_TYPE, subtype: u32) !void {
         if (self.index.get(name)) |existing| {
             self.order.items[existing].token = token;
+            self.order.items[existing].entry_type = entry_type;
+            self.order.items[existing].subtype = subtype;
             return;
         }
         const duped = try self.allocator.dupeZ(u8, name);
         errdefer self.allocator.free(duped);
-        try self.order.append(self.allocator, .{ .name = duped, .token = token });
+        try self.order.append(self.allocator, .{
+            .name = duped,
+            .token = token,
+            .entry_type = entry_type,
+            .subtype = subtype,
+        });
         errdefer _ = self.order.pop();
         try self.index.put(self.allocator, duped, self.order.items.len - 1);
     }
@@ -355,6 +366,17 @@ pub const Interface = struct {
     pub fn tokenFor(self: *const Interface, name: []const u8) ?usize {
         const i = self.index.get(name) orelse return null;
         return self.order.items[i].token;
+    }
+
+    /// The token for `name` when that entry was registered as `want`, or null
+    /// when the name is absent or was registered as the other type. A function
+    /// and an attribute can share a name; the caller's type argument is the
+    /// filter, and a name match of the wrong type is a miss.
+    pub fn tokenForType(self: *const Interface, name: []const u8, want: RIB_ENTRY_TYPE) ?usize {
+        const i = self.index.get(name) orelse return null;
+        const entry = self.order.items[i];
+        if (entry.entry_type != want) return null;
+        return entry.token;
     }
 
     /// The `i`th entry in registration order, or null past the end.

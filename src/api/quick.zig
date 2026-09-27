@@ -27,7 +27,7 @@ pub fn AIL_quick_load(filename: [*:0]const u8) callconv(.winapi) ?*Sample {
             openmiles.setLastError("Failed to allocate sample for quick load");
             return null;
         };
-        if (openmiles.cb_file_open != null) {
+        if (openmiles.currentFileCallbacks() != null) {
             if (openmiles.fileCallbackReadAll(filename)) |b| {
                 s.loadFromOwnedMemory(b) catch {
                     openmiles.global_allocator.free(b);
@@ -222,7 +222,7 @@ pub fn AIL_quick_load_and_play(filename: [*:0]const u8, loop_count: i32, start_p
             return null;
         };
         loaded: {
-            if (openmiles.cb_file_open != null) {
+            if (openmiles.currentFileCallbacks() != null) {
                 if (openmiles.fileCallbackReadAll(filename)) |b| {
                     s.loadFromOwnedMemory(b) catch {
                         openmiles.global_allocator.free(b);

@@ -22,7 +22,7 @@ pub fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flag
     const driver = driver_opt orelse return null;
     log("AIL_DLS_load_file(driver={*}, filename={s}, flags={d})\n", .{ driver, filename, flags });
     openmiles.clearLastError();
-    if (openmiles.cb_file_open != null) {
+    if (openmiles.currentFileCallbacks() != null) {
         if (openmiles.fileCallbackReadAll(filename)) |b| {
             defer openmiles.global_allocator.free(b);
             // tsf_load_memory takes a C `int`; see AIL_DLS_load_memory for why a
@@ -451,17 +451,11 @@ pub fn DLSSetAttribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyo
 }
 pub fn DLSUnloadAll(driver_opt: ?*MidiDriver) callconv(.c) void {
     const driver = driver_opt orelse return;
-    if (driver.soundfont) |sf| {
-        if (driver.owns_soundfont) openmiles.tsf.tsf_close(sf);
-        driver.soundfont = null;
-        driver.owns_soundfont = true;
-        driver.soundfont_size_bytes = 0;
-        driver.clearSoundfontSource();
-    } else {
-        // No bank, but the reported size is driver state a later AIL_DLS_get_info
-        // reads; leaving the last bank's size in place reports a phantom bank.
-        driver.soundfont_size_bytes = 0;
-    }
+    driver.swapSoundfont(null, true);
+    driver.clearSoundfontSource();
+    // AIL_DLS_get_info reports the size unconditionally, so a released bank
+    // must not keep reporting its length.
+    driver.soundfont_size_bytes = 0;
 }
 pub fn DLSUnloadFile(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.c) void {
     AIL_DLS_unload(driver_opt, bank);

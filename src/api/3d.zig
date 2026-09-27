@@ -215,9 +215,7 @@ pub fn AIL_set_3D_sample_ms_position(s: ?*anyopaque, ms: i32) callconv(.winapi) 
 pub fn AIL_register_3D_EOS_callback(s: ?*anyopaque, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const p = s orelse return null;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
-    const prev: ?*anyopaque = @ptrFromInt(sample.eos_callback);
-    sample.eos_callback = if (callback) |cb| @intFromPtr(cb) else 0;
-    return prev;
+    return @ptrFromInt(sample.eos_callback.swap(if (callback) |cb| @intFromPtr(cb) else 0, .acq_rel));
 }
 pub fn AIL_active_3D_sample_count(dig_opt: ?*DigitalDriver) callconv(.winapi) u32 {
     const dig = dig_opt orelse return 0;

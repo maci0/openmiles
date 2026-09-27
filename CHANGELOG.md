@@ -46,11 +46,42 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
-No version has been tagged yet. `build.zig.zon` still reads `0.0.0`, so
-everything below is unreleased.
+## [0.1.0] - 2026-09-27
+
+First tagged release. While the version is `0.x`, a minor bump may carry a
+behavioural change. The export table, not this version, is the compatibility
+contract.
 
 ### Fixed
 
+- `OPENMILES_LOG_PATH` chooses the debug log file, absolute or relative to the
+  current directory. Unset, empty, or longer than 1024 bytes keeps
+  `openmiles.log` in the current directory and says so. The log's first line
+  names the path that was opened.
+- `SOURCE_DATE_EPOCH` outside the range a zip entry can record
+  (1980-01-01 through 9999-12-31), or not a non-negative integer, fails
+  `scripts/package_release.sh` instead of clamping the stamp or reporting
+  `invalid date`.
+- `AIL_startup`'s use count and the decision that the last `AIL_shutdown`
+  tears the engine down are one compare-exchange. Two threads shutting down
+  the last use both used to pass the check and both run teardown.
+- Sample EOS, EOB, and SOB callbacks are swapped atomically. The pointer a
+  register call returns is the one it replaced, including when the audio
+  thread is firing the previous callback.
+- The four file VFS callbacks are installed and copied as one set. A load
+  cannot open a file with one VFS and read or close it with the next set a
+  concurrent `AIL_set_file_callbacks` installed.
+- Replacing a soundfont publishes the new bank, waits until in-flight renders
+  release the claim they took, and only then closes the bank it displaced.
+- An XMIDI FOR/NEXT whose body never advances the clock stops after 256 jumps
+  in one buffer. A count of 0 whose next message is the matching NEXT used to
+  re-dispatch that NEXT forever, because a jump costs no frames.
+- A RIB interface entry keeps the type and subtype it was registered with.
+  `RIB_request_interface_entry` misses when the caller asks for the other
+  type, and `RIB_enumerate_interface` reports the stored type and subtype
+  instead of echoing the caller's filter and a subtype of 0.
+- The per-sample falloff graphs are sized from `FalloffKind`, so adding a
+  kind widens the arrays instead of writing past the last one.
 - `AIL_set_redist_directory` stored a path longer than its 255-byte buffer
   truncated to that buffer, and then scanned the truncated prefix for `.asi`,
   `.m3d`, and `.flt` images to load and execute. A byte prefix of a long path is

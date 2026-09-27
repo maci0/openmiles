@@ -13,6 +13,13 @@ const io: std.Io = std.Io.Threaded.global_single_threaded.io();
 // by OPENMILES_DEBUG; this only caps how large the file may become.
 const max_log_bytes: u64 = 64 * 1024 * 1024; // 64 MiB
 
+/// Where the log goes when OPENMILES_LOG_PATH is unset. Relative, so it lands
+/// in the current directory.
+const default_log_name = "openmiles.log";
+/// Longest path OPENMILES_LOG_PATH may name. Longer than this is refused:
+/// the buffer that holds the path for the life of the process is this size.
+const max_log_path_bytes = 1024;
+
 // One formatted record. A record that does not fit is not written silently: see
 // the overflow marker in log(). Sized to hold a long path plus its context.
 const max_log_record_bytes = 1024;
@@ -23,13 +30,18 @@ var initialized = false;
 var config_logged = false;
 var debug_enabled = false;
 var debug_source: []const u8 = "the build default";
+var log_path_buf: [max_log_path_bytes]u8 = undefined;
+var log_path_len: usize = default_log_name.len;
 var write_error_reported = false;
 var mutex: std.Io.Mutex = .init;
 
 // The W (UTF-16) entry points, not the A ones: the value of a UTF-8 env var
 // name and log text is not confined to the process ANSI code page.
 extern "kernel32" fn GetEnvironmentVariableW(lpName: [*:0]const u16, lpBuffer: [*]u16, nSize: u32) callconv(.winapi) u32;
+extern "kernel32" fn GetLastError() callconv(.winapi) u32;
 extern "kernel32" fn OutputDebugStringW(lpOutputString: [*:0]const u16) callconv(.winapi) void;
+
+const error_envvar_not_found: u32 = 203;
 
 // OPENMILES_DEBUG accepts these, case-insensitively. Anything else is a
 // misconfiguration, not a request to disable the log, and is reported on
@@ -45,6 +57,41 @@ fn parseDebugFlag(value: []const u8) ?bool {
     for (debug_on_values) |v| if (std.ascii.eqlIgnoreCase(value, v)) return true;
     for (debug_off_values) |v| if (std.ascii.eqlIgnoreCase(value, v)) return false;
     return null;
+}
+
+fn logPath() []const u8 {
+    return log_path_buf[0..log_path_len];
+}
+
+fn setDefaultLogPath() void {
+    @memcpy(log_path_buf[0..default_log_name.len], default_log_name);
+    log_path_len = default_log_name.len;
+}
+
+/// Install `value` as the log path, or keep the default and say why. Empty
+/// and oversized values are misconfiguration, not a request to write nowhere.
+fn applyLogPath(value: []const u8) void {
+    if (value.len == 0 or value.len >= max_log_path_bytes) {
+        std.debug.print(
+            "openmiles: ignoring OPENMILES_LOG_PATH ({s}); using {s} in the current directory\n",
+            .{ if (value.len == 0) "empty" else "too long", default_log_name },
+        );
+        setDefaultLogPath();
+        return;
+    }
+    @memcpy(log_path_buf[0..value.len], value);
+    log_path_len = value.len;
+}
+
+fn openLog(path: []const u8) ?std.Io.File {
+    const opened = if (std.fs.path.isAbsolute(path))
+        std.Io.Dir.createFileAbsolute(io, path, .{ .truncate = false })
+    else
+        std.Io.Dir.cwd().createFile(io, path, .{ .truncate = false });
+    return opened catch |err| {
+        std.debug.print("openmiles: cannot open '{s}' for appending: {t}\n", .{ path, err });
+        return null;
+    };
 }
 
 fn applyDebugEnvValue(value: []const u8) void {
@@ -78,6 +125,7 @@ pub fn init() void {
     // still turns it on for whichever run wants the trace.
     debug_enabled = builtin.mode == .Debug and build_options.log_by_default;
     debug_source = "the build default";
+    setDefaultLogPath();
 
     if (builtin.os.tag == .windows) {
         // The UTF-8 destination is sized in bytes from the unit count: a value
@@ -97,16 +145,35 @@ pub fn init() void {
                 } else |_| {}
             }
         } else |_| {}
+        if (wide.toWide("OPENMILES_LOG_PATH", &name_wbuf)) |name| {
+            var path_w: [max_log_path_bytes]u16 = undefined;
+            var path_utf8: [max_log_path_bytes * 3]u8 = undefined;
+            const len = GetEnvironmentVariableW(name.ptr, &path_w, path_w.len);
+            if (len == 0) {
+                if (GetLastError() != error_envvar_not_found) applyLogPath("");
+            } else if (len >= path_w.len) {
+                applyLogPath(&[_]u8{'x'} ** max_log_path_bytes);
+            } else if (wide.toUtf8(path_w[0..len], &path_utf8)) |val| {
+                applyLogPath(val);
+            } else |_| {
+                std.debug.print(
+                    "openmiles: ignoring OPENMILES_LOG_PATH (not valid UTF-8); using {s} in the current directory\n",
+                    .{default_log_name},
+                );
+                setDefaultLogPath();
+            }
+        } else |_| {}
     } else {
         if (std.c.getenv("OPENMILES_DEBUG")) |val_ptr| {
             applyDebugEnvValue(std.mem.span(@as([*:0]const u8, val_ptr)));
         }
+        if (std.c.getenv("OPENMILES_LOG_PATH")) |val_ptr| {
+            applyLogPath(std.mem.span(@as([*:0]const u8, val_ptr)));
+        }
     }
 
     if (debug_enabled) {
-        if (std.Io.Dir.cwd().createFile(io, "openmiles.log", .{
-            .truncate = false,
-        })) |f| {
+        if (openLog(logPath())) |f| {
             // Records are written positionally at log_offset, so an offset of 0
             // on a file that already holds records overwrites the ones there.
             // A file whose length cannot be read is therefore not appended to
@@ -118,17 +185,11 @@ pub fn init() void {
                 log_file = f;
             } else |_| {
                 std.debug.print(
-                    "openmiles: cannot size openmiles.log; leaving it untouched and logging to the console only\n",
-                    .{},
+                    "openmiles: cannot size '{s}'; leaving it untouched and logging to the console only\n",
+                    .{logPath()},
                 );
                 f.close(io);
             }
-        } else |err| {
-            // The log is the only record of what this process did. Losing it
-            // silently leaves an operator with no trace at all, and since
-            // log() returns early on any write failure, say so once here,
-            // before the sink is gone.
-            std.debug.print("openmiles: cannot open openmiles.log for appending: {t}\n", .{err});
         }
     }
     @atomicStore(bool, &initialized, true, .release);
@@ -159,12 +220,13 @@ pub fn deinit() void {
 fn logConfigOnce() void {
     if (@atomicLoad(bool, &config_logged, .acquire)) return;
     @atomicStore(bool, &config_logged, true, .release);
-    log("openmiles: debug log {s}, enabled by {s} ({s} build, default {s}), mss_version {d}, appending to openmiles.log in the current directory, cap {d} bytes\n", .{
+    log("openmiles: debug log {s}, enabled by {s} ({s} build, default {s}), mss_version {d}, appending to '{s}', cap {d} bytes\n", .{
         if (debug_enabled) "on" else "off",
         debug_source,
         @tagName(builtin.mode),
         if (build_options.log_by_default) "on" else "off",
         build_options.mss_version,
+        logPath(),
         max_log_bytes,
     });
 }
@@ -251,8 +313,8 @@ fn emit(out: []const u8) void {
                 if (!write_error_reported) {
                     write_error_reported = true;
                     std.debug.print(
-                        "openmiles: cannot write to openmiles.log ({t}); further records are console-only\n",
-                        .{err},
+                        "openmiles: cannot write to '{s}' ({t}); further records are console-only\n",
+                        .{ logPath(), err },
                     );
                 }
                 return;
@@ -279,6 +341,18 @@ test "OPENMILES_DEBUG accepts the documented values in any case" {
     for (debug_off_values) |v| {
         try testing.expectEqual(false, parseDebugFlag(v).?);
     }
+}
+
+test "OPENMILES_LOG_PATH selects the file and rejects an empty or oversized value" {
+    setDefaultLogPath();
+    applyLogPath("traces/om.log");
+    try testing.expectEqualStrings("traces/om.log", logPath());
+    applyLogPath("");
+    try testing.expectEqualStrings(default_log_name, logPath());
+    applyLogPath(&[_]u8{'p'} ** max_log_path_bytes);
+    try testing.expectEqualStrings(default_log_name, logPath());
+    applyLogPath("/var/tmp/openmiles.log");
+    try testing.expectEqualStrings("/var/tmp/openmiles.log", logPath());
 }
 
 test "an unrecognized OPENMILES_DEBUG is rejected, not read as off" {

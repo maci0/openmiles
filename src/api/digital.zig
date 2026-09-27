@@ -27,22 +27,43 @@ const max_wav_channels: u16 = 254;
 // state depending on how many times startup had run. The teardown is what a
 // shutdown at count zero means and stays harmless when repeated, since
 // openmiles.shutdown() releases nothing that is already gone.
-var g_startup_count: i32 = 0;
+var g_startup_count: std.atomic.Value(i32) = .init(0);
 pub fn AIL_startup() callconv(.winapi) i32 {
     log("ENTER AIL_startup\n", .{});
     openmiles.startup();
-    g_startup_count +|= 1;
+    const count = g_startup_count.fetchAdd(1, .acq_rel) + 1;
     log("EXIT AIL_startup\n", .{});
-    return g_startup_count;
+    return count;
 }
 pub fn AIL_shutdown() callconv(.winapi) void {
     log("AIL_shutdown()\n", .{});
-    if (g_startup_count > 0) g_startup_count -= 1;
-    if (g_startup_count > 0) {
-        log("AIL_shutdown: {d} use(s) still open, the engine stays up\n", .{g_startup_count});
-        return;
-    }
+    if (!releaseStartupUse()) return;
     openmiles.shutdown();
+}
+
+/// Drop one use and report whether this call should tear the engine down.
+/// The decrement and the decision are one compare-exchange: two threads
+/// shutting down the last use would otherwise both read 1, both store 0, and
+/// both run teardown. A count that is already 0 still reports teardown,
+/// because startup() can publish a provider without AIL_startup, and
+/// openmiles.shutdown releases nothing that is already gone.
+fn releaseStartupUse() bool {
+    const first = g_startup_count.load(.acquire);
+    if (first <= 0) return true;
+    var remaining = first;
+    while (remaining > 0) {
+        if (g_startup_count.cmpxchgWeak(remaining, remaining - 1, .acq_rel, .acquire)) |actual| {
+            remaining = actual;
+        } else {
+            const last = remaining == 1;
+            if (!last) {
+                log("AIL_shutdown: {d} use(s) still open, the engine stays up\n", .{remaining - 1});
+            }
+            return last;
+        }
+    }
+    // Lost the race for the last use: the thread that stored 0 tears down.
+    return false;
 }
 
 /// The outstanding AIL_startup uses. Not an SDK export: the test suite drains
@@ -50,7 +71,7 @@ pub fn AIL_shutdown() callconv(.winapi) void {
 /// and a hardcoded number of shutdowns would not survive a suite whose earlier
 /// tests left uses of their own behind.
 pub fn startupUseCount() i32 {
-    return g_startup_count;
+    return g_startup_count.load(.acquire);
 }
 pub fn AIL_set_redist_directory(path: [*:0]const u8) callconv(.winapi) [*:0]const u8 {
     // SDK returns char* — a pointer to the stored redist directory so callers
@@ -179,9 +200,7 @@ pub fn AIL_sample_loop_count(s_opt: ?*Sample) callconv(.winapi) i32 {
 pub fn AIL_register_EOS_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
     log("AIL_register_EOS_callback(s={*}, callback={*})\n", .{ s, callback });
-    const prev: ?*anyopaque = @ptrFromInt(s.eos_callback);
-    s.eos_callback = if (callback) |cb| @intFromPtr(cb) else 0;
-    return prev;
+    return @ptrFromInt(s.eos_callback.swap(if (callback) |cb| @intFromPtr(cb) else 0, .acq_rel));
 }
 pub fn AIL_open_digital_driver(frequency: u32, bits: i32, channels: i32, flags: u32) callconv(.winapi) ?*DigitalDriver {
     log("AIL_open_digital_driver(freq={d}, bits={d}, chans={d}, flags={d})\n", .{ frequency, bits, channels, flags });
@@ -424,7 +443,7 @@ pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: i32, data: ?*anyopaque,
         s.stream_head = @mod(bn + 1, n);
     }
     if (bn < 0) return -1; // defensive: SDK would index buf[<0]; we stay safe
-    s.last_loaded_buffer = bn;
+    s.last_loaded_buffer.store(bn, .release);
     if (data == null) {
         // SDK: a null buffer removes the slot from the ring; nothing to feed.
         return bn;
@@ -446,11 +465,8 @@ pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: i32, data: ?*anyopaque,
         };
     }
     // Fire SOB (Start Of Buffer) callback now that a new buffer is accepted.
-    // AILSAMPLECB: void callback(HSAMPLE S) — single arg; app queries buffer state separately.
-    if (s.sob_callback != 0) {
-        const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(s.sob_callback);
-        cb(@ptrCast(s));
-    }
+    // AILSAMPLECB: void callback(HSAMPLE S), single arg; the app queries buffer state separately.
+    openmiles.fireSampleCallback(&s.sob_callback, s);
     return bn;
 }
 pub fn AIL_sample_buffer_ready(s_opt: ?*Sample) callconv(.winapi) i32 {
@@ -514,15 +530,11 @@ pub fn AIL_sample_buffer_info(s_opt: ?*Sample, buff_num: i32, pos: ?*u32, len: ?
 }
 pub fn AIL_register_EOB_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
-    const prev: ?*anyopaque = @ptrFromInt(s.eob_callback);
-    s.eob_callback = if (callback) |cb| @intFromPtr(cb) else 0;
-    return prev;
+    return @ptrFromInt(s.eob_callback.swap(if (callback) |cb| @intFromPtr(cb) else 0, .acq_rel));
 }
 pub fn AIL_register_SOB_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
-    const prev: ?*anyopaque = @ptrFromInt(s.sob_callback);
-    s.sob_callback = if (callback) |cb| @intFromPtr(cb) else 0;
-    return prev;
+    return @ptrFromInt(s.sob_callback.swap(if (callback) |cb| @intFromPtr(cb) else 0, .acq_rel));
 }
 pub fn AIL_set_sample_processor(s_opt: ?*Sample, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
@@ -1177,8 +1189,7 @@ pub fn AIL_create_wave_synthesizer(dig_opt: ?*DigitalDriver, mdi: ?*MidiDriver, 
         // `bank` is a *tsf.tsf returned from AIL_DLS_load_file / AIL_DLS_load_memory.
         // Borrow the soundfont — do not free it when this wave synthesizer is destroyed,
         // since the original MidiDriver that loaded it still owns it.
-        driver.soundfont = @ptrCast(@alignCast(bank));
-        driver.owns_soundfont = false;
+        driver.swapSoundfont(@ptrCast(@alignCast(bank)), false);
     }
     return driver;
 }

@@ -57,8 +57,8 @@ pub fn AIL_open_stream(driver_opt: ?*DigitalDriver, filename_opt: ?[*:0]const u8
     }
     const filename = filename_opt.?;
 
-    if (openmiles.cb_file_open != null) {
-        log("AIL_open_stream: Using custom cb_file_open\n", .{});
+    if (openmiles.currentFileCallbacks() != null) {
+        log("AIL_open_stream: Using custom file callbacks\n", .{});
         const buf = openmiles.fileCallbackReadAll(filename) catch |err| {
             log("AIL_open_stream: fileCallbackReadAll failed ({any})\n", .{err});
             s.deinit();
@@ -112,9 +112,7 @@ pub fn AIL_set_stream_loop_count(s_opt: ?*Sample, count: i32) callconv(.winapi) 
 pub fn AIL_register_stream_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
     log("AIL_register_stream_callback(s={*}, callback={*})\n", .{ s, callback });
-    const prev: ?*anyopaque = @ptrFromInt(s.eos_callback);
-    s.eos_callback = if (callback) |cb| @intFromPtr(cb) else 0;
-    return prev;
+    return @ptrFromInt(s.eos_callback.swap(if (callback) |cb| @intFromPtr(cb) else 0, .acq_rel));
 }
 pub fn AIL_auto_service_stream(s_opt: ?*Sample, onoff: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
@@ -285,9 +283,7 @@ pub fn AIL_service_stream(s_opt: ?*Sample, onoff: i32) callconv(.winapi) i32 {
 }
 pub fn AIL_register_EOF_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
-    const prev: ?*anyopaque = @ptrFromInt(s.eos_callback);
-    s.eos_callback = if (callback) |cb| @intFromPtr(cb) else 0;
-    return prev;
+    return @ptrFromInt(s.eos_callback.swap(if (callback) |cb| @intFromPtr(cb) else 0, .acq_rel));
 }
 pub fn AIL_set_stream_processor(s_opt: ?*Sample, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;

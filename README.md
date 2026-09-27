@@ -254,10 +254,10 @@ The output DLL is at `zig-out/bin/mss32.dll`.
 
 ## Versioning and compatibility
 
-No release has been tagged yet and `build.zig.zon` reads `0.0.0`. While the
-version is `0.x`, SemVer promises nothing: a minor bump may carry a behavioural
-change, so pin by the `-Dmss-version` you build and check the changelog section
-for the tag you upgrade to.
+`0.1.0` is the first tagged release. While the version is `0.x`, SemVer
+promises nothing: a minor bump may carry a behavioural change, so pin by the
+`-Dmss-version` you build and check the changelog section for the tag you
+upgrade to.
 
 The export table, not the version number, is the compatibility contract. A
 release that holds the export counts its `-Dmss-version` values are swept
@@ -266,7 +266,7 @@ against drops into the same game set as the release before it, and
 lowers a count is breaking for that MSS version and says so in a **Breaking**
 section of the changelog.
 
-The first tagged release fixes the stability promise. Reaching `1.0` means
+`0.1.0` does not freeze that promise. Reaching `1.0` means
 every `-Dmss-version` surface, and the struct layouts `mss.h` declares, are
 stable from there: any later change to one is a major bump naming the MSS
 version it affects. The Zig API under `src/` carries no promise before `1.0`;
@@ -447,12 +447,13 @@ the surface it documents.
 ### Configuration
 
 The library reads its runtime configuration from the process environment. It
-reads two variables and has no config file, so the table below is the whole
+reads three variables and has no config file, so the table below is the whole
 surface: nothing else in the environment changes its behaviour.
 
 | Variable | Values | Default | Effect |
 |----------|--------|---------|--------|
-| `OPENMILES_DEBUG` | `1`/`0`, `true`/`false`, `yes`/`no`, `on`/`off`, any case | logging on in a Debug build, off otherwise | Verbose trace to `openmiles.log` in the game directory and to the debugger, capped at 64 MiB |
+| `OPENMILES_DEBUG` | `1`/`0`, `true`/`false`, `yes`/`no`, `on`/`off`, any case | logging on in a Debug build, off otherwise | Verbose trace to the debug log and to the debugger, capped at 64 MiB |
+| `OPENMILES_LOG_PATH` | a file path, absolute or relative to the current directory, at most 1024 bytes | `openmiles.log` in the current directory | Where the debug log is written |
 | `TMPDIR` | an absolute directory path | `%TEMP%` on Windows, the game directory on other systems | Where the in-memory ASI plugin image is unpacked before it is loaded |
 
 An `OPENMILES_DEBUG` value outside that set (including an empty one) is
@@ -466,13 +467,16 @@ selecting a version requires a rebuild.
 
 #### Debug logging
 
-Set `OPENMILES_DEBUG=1` in your environment to enable verbose logging to `openmiles.log` in the game directory.
+Set `OPENMILES_DEBUG=1` in your environment to enable verbose logging. The file
+is `openmiles.log` in the game directory unless `OPENMILES_LOG_PATH` names
+another one.
 
 ```bash
 OPENMILES_DEBUG=1 wine YourGame.exe
+OPENMILES_DEBUG=1 OPENMILES_LOG_PATH=/tmp/openmiles.log wine YourGame.exe
 ```
 
-Debug builds enable logging by default; set `OPENMILES_DEBUG=0` to turn it off. Release builds log only when `OPENMILES_DEBUG` names a true value (`1`, `true`, `yes`, or `on`). The on-disk log is capped at 64 MiB per process to prevent unbounded growth. Its first line is the effective configuration, naming whether `OPENMILES_DEBUG` or the build default decided it and which `-Dmss-version` the loaded DLL was built for, so a log that never appears reads back as a configuration answer and a game compiled against a different `OPENMILES_MSS_VERSION` than the DLL it loads is visible in the first line.
+Debug builds enable logging by default; set `OPENMILES_DEBUG=0` to turn it off. Release builds log only when `OPENMILES_DEBUG` names a true value (`1`, `true`, `yes`, or `on`). The on-disk log is capped at 64 MiB per process to prevent unbounded growth. Its first line is the effective configuration, naming whether `OPENMILES_DEBUG` or the build default decided it, which file it appends to, and which `-Dmss-version` the loaded DLL was built for, so a log that never appears reads back as a configuration answer and a game compiled against a different `OPENMILES_MSS_VERSION` than the DLL it loads is visible in the first line.
 
 ## Architecture
 
