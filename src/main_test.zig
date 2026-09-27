@@ -3756,6 +3756,55 @@ test "real clock restored after a virtual-clock run" {
     try testing.expect(openmiles.getMsCount() < 60_000);
 }
 
+test "simulation seed replays invented names, and production entropy does not" {
+    // The seed is the second half of a replayable run: the virtual clock fixes
+    // the time, this fixes every name the run invents (today, the temporary
+    // file an ASI provider image is written under). Same seed, same names.
+    const Names = struct {
+        fn draw() [3][8]u8 {
+            var out: [3][8]u8 = undefined;
+            for (&out) |*n| openmiles.randomNameBytes(n) catch unreachable;
+            return out;
+        }
+    };
+
+    openmiles.startSimulation(0xC0FFEE);
+    try testing.expect(openmiles.isSimulated());
+    try testing.expectEqual(@as(i64, 0), openmiles.nowNs());
+    const first = Names.draw();
+
+    openmiles.startSimulation(0xC0FFEE);
+    const replay = Names.draw();
+    try testing.expectEqualSlices(u8, &first[0], &replay[0]);
+
+    openmiles.startSimulation(0xC0FFEF);
+    const other = Names.draw();
+    try testing.expect(!std.mem.eql(u8, &first[0], &other[0]));
+
+    // A seed fixes the names, not their shape: consecutive draws differ, so
+    // two providers in one run do not collide on one name.
+    openmiles.startSimulation(0xC0FFEE);
+    const seq = Names.draw();
+    try testing.expect(!std.mem.eql(u8, &seq[0], &seq[1]));
+    try testing.expect(!std.mem.eql(u8, &seq[1], &seq[2]));
+
+    openmiles.endSimulation();
+    try testing.expect(!openmiles.isSimulated());
+
+    // Unseeded, the bytes come from the platform: eight draws in a row all
+    // landing on one value would mean the simulation PRNG is still live.
+    var prev: [8]u8 = undefined;
+    var cur: [8]u8 = undefined;
+    try openmiles.randomNameBytes(&prev);
+    var differs = false;
+    for (0..8) |_| {
+        try openmiles.randomNameBytes(&cur);
+        if (!std.mem.eql(u8, &prev, &cur)) differs = true;
+        prev = cur;
+    }
+    try testing.expect(differs);
+}
+
 test "injected file faults reach the whole-file read path" {
     // A failing open and a short read are the two faults a real disk will not
     // produce on demand, and both are the sort a simulation has to replay.

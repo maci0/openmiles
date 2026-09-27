@@ -215,9 +215,11 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     var path: [:0]const u8 = "";
     var created: ?std.Io.File = null;
     // Entropy for the name; without it the unpredictable-name guarantee is gone,
-    // so fail closed rather than fall back to a guessable pattern.
+    // so fail closed rather than fall back to a guessable pattern. Under a
+    // simulation the draw comes from the run's seed, so the name (and the file
+    // it names) replays with the run.
     var id_bytes: [8]u8 = undefined;
-    io.randomSecure(&id_bytes) catch |err| {
+    openmiles.randomNameBytes(&id_bytes) catch |err| {
         log("AIL_open_ASI_provider: no entropy for temp file name: {any}\n", .{err});
         openmiles.setLastError("No entropy available for ASI temp file name");
         return null;

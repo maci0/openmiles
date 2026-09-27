@@ -1212,6 +1212,56 @@ pub fn sleep(dur: std.Io.Duration) void {
     clock.sleep(dur);
 }
 
+// --- Simulation seed ---
+
+// The library's only source of run-to-run randomness that reaches observable
+// output: the name an ASI provider image is written under. A run that reads
+// its own bytes back cannot be replayed byte-for-byte while that name comes
+// from OS entropy, so the seed is the second half of what a simulated run
+// needs (the virtual clock is the first). Unseeded, the draw is secure
+// entropy and the name stays unguessable; seeded, it is a PRNG sequence, so
+// only a simulation ever gets a predictable name out of here.
+var sim_prng: ?std.Random.DefaultPrng = null;
+var sim_prng_mutex: std.Io.Mutex = .init;
+
+/// Start a simulated run at a fixed epoch with `seed` as the source for every
+/// invented name. The seed and the step sequence together determine the run.
+pub fn startSimulation(seed: u64) void {
+    sim_prng_mutex.lockUncancelable(io);
+    sim_prng = std.Random.DefaultPrng.init(seed);
+    sim_prng_mutex.unlock(io);
+    useVirtualClock(0);
+}
+
+/// End a simulated run: back to the platform clock and to secure entropy.
+pub fn endSimulation() void {
+    sim_prng_mutex.lockUncancelable(io);
+    sim_prng = null;
+    sim_prng_mutex.unlock(io);
+    useRealClock();
+}
+
+/// True while a simulation seed is installed.
+pub fn isSimulated() bool {
+    sim_prng_mutex.lockUncancelable(io);
+    defer sim_prng_mutex.unlock(io);
+    return sim_prng != null;
+}
+
+/// Fill `buf` with bytes for a name that must not be predictable. Secure
+/// entropy in production, the seeded PRNG under a simulation, and an error
+/// rather than a guessable stand-in when entropy is unavailable.
+pub fn randomNameBytes(buf: []u8) !void {
+    sim_prng_mutex.lockUncancelable(io);
+    if (sim_prng) |*prng| {
+        prng.random().bytes(buf);
+        sim_prng_mutex.unlock(io);
+        return;
+    }
+    sim_prng_mutex.unlock(io);
+    try io.randomSecure(buf);
+}
+
 // --- Startup time ---
 
 var startup_ns: i64 = 0;
