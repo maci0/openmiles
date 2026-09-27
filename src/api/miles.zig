@@ -81,6 +81,10 @@ const SoundInstance = struct {
     labels: [:0]u8, // owned (comma/space-separated)
     user_buffer: ?*anyopaque,
     user_buffer_len: i32,
+    // Set while the instance is a selected eviction victim, so the compaction
+    // pass tests membership by field instead of by scanning the victim list
+    // once per instance.
+    evict_mark: bool = false,
 };
 
 // Case-insensitive glob with '*' (any run) and '?' (one character).
@@ -235,6 +239,7 @@ fn instanceHasLabel(inst: *const SoundInstance, label: []const u8) bool {
 fn evictOldestWithLabel(label: []const u8, lim: u32) void {
     var matches: std.ArrayListUnmanaged(*SoundInstance) = .empty;
     defer matches.deinit(openmiles.global_allocator);
+    matches.ensureTotalCapacity(openmiles.global_allocator, g_instances.items.len) catch {};
     for (g_instances.items) |inst| {
         if (!instanceHasLabel(inst, label)) continue;
         matches.append(openmiles.global_allocator, inst) catch return;
@@ -250,22 +255,16 @@ fn evictOldestWithLabel(label: []const u8, lim: u32) void {
     // One slot short of the cap is enough room for the sound being added; a cap
     // of 0 has no slot, so it evicts all matches.
     const victims = matches.items[0..@min(matches.items.len, matches.items.len - cap + 1)];
-    // Compact the array in one pass, matching on the instance pointer. An index
-    // recorded before the first removal is stale by the time it is used: the
-    // survivors shift down, so it names whichever instance was moved into that
-    // slot, and the walk runs off the end of a shortened array. The victims are
-    // ordered by instance_id, not by position, so membership is a scan rather
-    // than a cursor into the list. The write cursor never passes the read
+    // Compact the array in one pass, testing the mark rather than the victim's
+    // identity. The victims are ordered by instance_id, not by position, so
+    // membership by value was a scan of the victim list per instance, an O(N·V)
+    // pass that a cap of 0 over N instances turned into O(N^2) pointer compares
+    // on a single start-sound step. The write cursor never passes the read
     // cursor, so the in-place compaction is safe.
+    for (victims) |victim| victim.evict_mark = true;
     var w: usize = 0;
     for (g_instances.items) |inst| {
-        var is_victim = false;
-        for (victims) |victim| {
-            if (victim != inst) continue;
-            is_victim = true;
-            break;
-        }
-        if (is_victim) {
+        if (inst.evict_mark) {
             destroyInstance(inst);
             continue;
         }
@@ -363,8 +362,11 @@ const StepWalker = struct {
     cur: ?[*:0]const u8,
     guard: u32 = 0,
 
-    fn init(event: ?[*]const u8) StepWalker {
-        return .{ .cur = @ptrCast(event) };
+    // The walker is ~740 bytes (a step record plus a scratch buffer), and it is
+    // built once per enqueued event, so it is initialized in place rather than
+    // returned by value.
+    fn init(self: *StepWalker, event: ?[*]const u8) void {
+        self.* = .{ .cur = @ptrCast(event) };
     }
 
     fn next(self: *StepWalker) ?*const openmiles.event.EVENT_STEP_INFO {
@@ -379,7 +381,8 @@ const StepWalker = struct {
 // Parse an event's bytecode and create an instance per start-sound step.
 fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: i32) u64 {
     if (event == null) return 0;
-    var walker = StepWalker.init(event);
+    var walker: StepWalker = undefined;
+    walker.init(event);
     const qid = nextId();
     while (walker.next()) |st| {
         if (st.type == @intFromEnum(openmiles.event.StepType.start_sound)) {
@@ -739,7 +742,8 @@ pub fn MilesFindEvent(bank: ?*anyopaque, event_name: ?[*:0]const u8) callconv(.w
 pub fn MilesGetEventLength(event_name: ?[*:0]const u8) callconv(.winapi) i32 {
     const name = std.mem.span(event_name orelse return 0);
     const ev = openmiles.soundbank.containerFindEvent(name) orelse return 0;
-    var walker = StepWalker.init(ev);
+    var walker: StepWalker = undefined;
+    walker.init(ev);
     while (walker.next()) |st| {
         if (st.type != @intFromEnum(openmiles.event.StepType.start_sound)) continue;
         const sn = st.u.start.soundname;
