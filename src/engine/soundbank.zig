@@ -144,8 +144,19 @@ pub const Bank = struct {
     event_index: NameIndex = .{},
     sound_index: NameIndex = .{},
 
+    /// True when the `n` bytes at `off` lie inside the metadata block.
+    ///
+    /// Written as a subtraction, never as `off + n > len`: a bank-supplied u32
+    /// offset near the top of the 32-bit address space wraps the sum on the
+    /// 32-bit x86 target the DLL ships for, turning the bounds check into a
+    /// false pass and the slice that follows into an out-of-bounds read. The
+    /// 64-bit host the tests build on never wraps, so it cannot see the bug.
+    fn inBounds(self: *const Bank, off: usize, n: usize) bool {
+        return off <= self.meta.len and self.meta.len - off >= n;
+    }
+
     fn rdU32(self: *const Bank, off: usize) u32 {
-        if (off + 4 > self.meta.len) return 0;
+        if (!self.inBounds(off, 4)) return 0;
         return std.mem.readInt(u32, self.meta[off..][0..4], .little);
     }
     fn rdI32(self: *const Bank, off: usize) i32 {
@@ -176,11 +187,21 @@ pub const Bank = struct {
         };
     }
 
+    /// Byte offset of table entry `idx`, or null when the file's table offset
+    /// and index put it outside the metadata block. Saturating, because both
+    /// operands are u32 and the product overflows a 32-bit usize.
+    fn entryOffset(self: *const Bank, which: AssetKind, idx: u32) ?usize {
+        const base: usize = @intCast(self.tableOff(which));
+        const entry = base +| (@as(usize, idx) *| asset_entry_size);
+        if (!self.inBounds(entry, asset_entry_size)) return null;
+        return entry;
+    }
+
     /// Name of asset `idx` in the given table, or null if out of range / the
     /// name offset escapes the metadata block.
     pub fn assetName(self: *const Bank, which: AssetKind, idx: u32) ?[*:0]const u8 {
         if (idx >= self.countFor(which)) return null;
-        const entry = @as(usize, self.tableOff(which)) + @as(usize, idx) * asset_entry_size;
+        const entry = self.entryOffset(which, idx) orelse return null;
         const name_off = self.rdU32(entry);
         if (name_off == 0 or name_off >= self.meta.len) return null;
         // Require a NUL terminator within bounds.
@@ -239,7 +260,7 @@ pub const Bank = struct {
 
     /// Name of table entry `i`, or null when the offset escapes the metadata.
     fn entryNameAt(self: *const Bank, which: AssetKind, i: u32) ?[]const u8 {
-        const entry = @as(usize, self.tableOff(which)) + @as(usize, i) * asset_entry_size;
+        const entry = self.entryOffset(which, i) orelse return null;
         const name_off = self.rdU32(entry);
         if (name_off == 0 or name_off >= self.meta.len) return null;
         return std.mem.sliceTo(self.meta[name_off..], 0);
@@ -275,7 +296,7 @@ pub const Bank = struct {
     /// Mirrors the SDK FindAsset + AIL_ptr_add(bank, pAsset->DataOffset).
     pub fn assetData(self: *const Bank, which: AssetKind, target: []const u8) ?[*]const u8 {
         const i = self.findEntry(which, target) orelse return null;
-        const entry = @as(usize, self.tableOff(which)) + @as(usize, i) * asset_entry_size;
+        const entry = self.entryOffset(which, i) orelse return null;
         const data_off = self.rdU32(entry + 4);
         if (data_off == 0 or data_off >= self.meta.len) return null;
         return @ptrCast(self.meta.ptr + data_off);
@@ -291,7 +312,7 @@ pub const Bank = struct {
     /// whatever they read from the record.
     fn findSoundDataOffset(self: *const Bank, sound_name: []const u8) ?u32 {
         const i = self.findEntry(.sounds, sound_name) orelse return null;
-        const entry = @as(usize, self.tableOff(.sounds)) + @as(usize, i) * asset_entry_size;
+        const entry = self.entryOffset(.sounds, i) orelse return null;
         return self.rdU32(entry + 4);
     }
 
@@ -303,13 +324,14 @@ pub const Bank = struct {
     /// DataLen at Info+12) is from hlbank.cpp.
     pub fn soundAssetFilename(self: *const Bank, sound_name: []const u8, out: [*]u8) i32 {
         const data_off = self.findSoundDataOffset(sound_name) orelse 0;
-        // Offset math in usize (64-bit): a lying u32 DataOffset from the bank
-        // file must saturate/widen here, not overflow a u32 addition.
-        if (data_off == 0 or @as(usize, data_off) + 8 > self.meta.len) {
+        if (data_off == 0 or !self.inBounds(data_off, 8)) {
             out[0] = 0;
             return -1;
         }
-        const fn_abs = @as(usize, data_off) + self.rdU32(data_off + 4); // pSound + FileNameOffset
+        // Saturating: a bank file can name a FileNameOffset that pushes the sum
+        // past the address space, which must read as "out of range" rather than
+        // wrap around to a small in-bounds offset.
+        const fn_abs = @as(usize, data_off) +| self.rdU32(data_off + 4); // pSound + FileNameOffset
         if (fn_abs >= self.meta.len) {
             out[0] = 0;
             return -1;
@@ -324,7 +346,7 @@ pub const Bank = struct {
         w += sfn.len;
         out[w] = 0;
         // MILESBANKSOUNDINFO.DataLen is at Sound+12 (Info) +12.
-        if (@as(usize, data_off) + 28 > self.meta.len) return 0;
+        if (!self.inBounds(data_off, 28)) return 0;
         return self.rdI32(data_off + 24);
     }
 
@@ -368,17 +390,16 @@ pub const Bank = struct {
     /// found. Mirrors hlbank.cpp.
     pub fn soundAssetInfo(self: *const Bank, sound_name: []const u8, out_filename: ?[*]u8, out_info: ?[*]u8) i32 {
         const data_off = self.findSoundDataOffset(sound_name) orelse 0;
-        // Offset math in usize (64-bit): see soundAssetFilename.
-        if (data_off == 0 or @as(usize, data_off) + 8 > self.meta.len) {
+        if (data_off == 0 or !self.inBounds(data_off, 8)) {
             if (out_filename) |o| o[0] = 0;
             return 0;
         }
         if (out_info) |oi| {
-            if (@as(usize, data_off) + 12 + sound_info_size <= self.meta.len) {
+            if (self.inBounds(data_off, 12 + sound_info_size)) {
                 @memcpy(oi[0..sound_info_size], self.meta[data_off + 12 ..][0..sound_info_size]);
             }
         }
-        const fn_abs = @as(usize, data_off) + self.rdU32(data_off + 4);
+        const fn_abs = @as(usize, data_off) +| self.rdU32(data_off + 4);
         if (fn_abs >= self.meta.len) {
             if (out_filename) |o| o[0] = 0;
             return 0;
@@ -401,7 +422,7 @@ pub const Bank = struct {
     /// MILESBANKSOUNDINFO.DurationMs (Sound+12 Info, +24) for a named sound.
     pub fn soundDurationMs(self: *const Bank, sound_name: []const u8) ?u32 {
         const data_off = self.findSoundDataOffset(sound_name) orelse return null;
-        if (@as(usize, data_off) + 40 > self.meta.len) return 0;
+        if (!self.inBounds(data_off, 40)) return 0;
         return self.rdU32(data_off + 36);
     }
 
@@ -621,4 +642,71 @@ test "container: a duplicated event name resolves by load order, not unload hist
     second.deinit();
     second_live = false;
     try testing.expect(resolvesTo(third, imgs[2].data_off));
+}
+
+test "sound record: a DataOffset near the top of the 32-bit range is rejected" {
+    const testing = std.testing;
+
+    // The DLL ships as a 32-bit x86 PE, so a sound record's u32 DataOffset sits
+    // in a usize that can hold 2^32 - 1 values. Every bound that adds to it
+    // (DataOffset + 4, + 8, + 28, + 40, and DataOffset + FileNameOffset) wraps on
+    // that target, which turns `off + n > len` into a false pass and the slice
+    // behind it into an out-of-bounds read. These offsets cover every point in
+    // the wrap window; each must read as "out of range" rather than as a small
+    // in-bounds offset that resolves to some unrelated byte of the metadata.
+    const out_of_range: []const u32 = &.{
+        0xFFFF_FFFC,
+        0xFFFF_FFF8,
+        0xFFFF_FFF0,
+        0xFFFF_FF00,
+        0xFFFF_F000,
+    };
+
+    for (out_of_range) |data_off| {
+        var img: [256]u8 = undefined;
+        @memset(&img, 0);
+        const w32 = struct {
+            fn f(buf: []u8, off: usize, v: u32) void {
+                std.mem.writeInt(u32, buf[off..][0..4], v, .little);
+            }
+        }.f;
+        const putStr = struct {
+            fn f(buf: []u8, at: usize, s: []const u8) usize {
+                @memcpy(buf[at .. at + s.len], s);
+                buf[at + s.len] = 0;
+                return at + s.len + 1;
+            }
+        }.f;
+
+        // A well-formed one-entry sound table whose record lies out of range.
+        // The table itself is in bounds, so the bank loads and the lookups below
+        // reach the record path rather than failing at table validation.
+        const snd_off: u32 = header_size;
+        var pool: usize = snd_off + asset_entry_size;
+        const s0: u32 = @intCast(pool);
+        pool = putStr(&img, pool, "kick");
+        w32(&img, off_tag, BANK_TAG);
+        w32(&img, off_version, @bitCast(BANK_VERSION));
+        w32(&img, off_sounds, snd_off);
+        w32(&img, off_sound_count, 1);
+        w32(&img, snd_off, s0);
+        w32(&img, snd_off + 4, data_off);
+        w32(&img, off_meta_size, @intCast(pool));
+
+        const bank = try loadFromMemory(testing.allocator, "bad.mbnk", img[0..pool]);
+        defer bank.deinit();
+
+        // The name still resolves: only the record's own offset is a lie.
+        try testing.expectEqual(data_off, bank.findSoundDataOffset("kick") orelse return error.NoSound);
+
+        var out: [256]u8 = undefined;
+        try testing.expectEqual(@as(i32, -1), bank.soundAssetFilename("kick", &out));
+        try testing.expectEqual(@as(u8, 0), out[0]);
+        try testing.expectEqual(@as(i32, 0), bank.soundAssetInfo("kick", &out, &out));
+        try testing.expectEqual(@as(u8, 0), out[0]);
+        // soundDurationMs reports an out-of-range record as a zero duration; the
+        // name resolved, so null is not the answer here.
+        try testing.expectEqual(@as(u32, 0), bank.soundDurationMs("kick") orelse return error.NoSound);
+        try testing.expectEqualStrings("kick", std.mem.span(bank.assetName(.sounds, 0) orelse return error.NoName));
+    }
 }

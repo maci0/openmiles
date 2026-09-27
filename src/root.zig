@@ -554,9 +554,10 @@ pub fn releaseAllTimers() void {
 // The "current driver" handles are read by every API entry point and written by
 // driver open/close, which a game may drive from a worker thread while its main
 // thread is calling into the API. Atomic so a reader never sees a torn
-// pointer.
-var last_digital_driver: std.atomic.Value(?*DigitalDriver) = .init(null);
-var last_midi_driver: std.atomic.Value(?*MidiDriver) = .init(null);
+// pointer. Public so a test can reset the handle between cases; callers should
+// go through lastDigitalDriver()/lastMidiDriver().
+pub var last_digital_driver: std.atomic.Value(?*DigitalDriver) = .init(null);
+pub var last_midi_driver: std.atomic.Value(?*MidiDriver) = .init(null);
 
 pub fn lastDigitalDriver() ?*DigitalDriver {
     return last_digital_driver.load(.acquire);

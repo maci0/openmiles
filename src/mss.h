@@ -244,7 +244,10 @@ HDLSBANK    MSS_CALLBACK AIL_DLS_load_file(HDLSDRIVER driver, char const* filena
 
 // RIB functions
 #if MSS_AT_LEAST(40)
-HPROVIDER   MSS_RIB_CALL RIB_alloc_provider_handle(long module);
+// S32, not long: the exported symbol takes a 4-byte stack slot on every
+// version and target (the SDK spells it long, which is 32-bit under LLP64 but
+// 64-bit under LP64, so a long prototype miscompiles a 64-bit caller).
+HPROVIDER   MSS_RIB_CALL RIB_alloc_provider_handle(S32 module);
 void        MSS_RIB_CALL RIB_free_provider_handle(HPROVIDER provider);
 void        MSS_RIB_CALL RIB_register_interface(HPROVIDER provider, char const* name, S32 count, void const* entries);
 void        MSS_RIB_CALL RIB_unregister_interface(HPROVIDER provider, char const* name, S32 count, void const* entries);
