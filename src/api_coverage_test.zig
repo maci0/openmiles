@@ -38,6 +38,11 @@ extern fn AIL_sprintf(buf: [*:0]u8, fmt: [*:0]const u8, ...) callconv(.c) [*:0]u
 // checking of the parsing paths is done in fuzz_test.zig with testing.allocator.
 const alloc = std.heap.page_allocator;
 
+// Module-level scratch shared by the whole file: one buffer, one set of
+// out-params, one enumeration cursor. Tests below run in declaration order, so
+// this is deterministic, not racy, but a cursor left over from an earlier test
+// makes a test's first enumerate call start mid-list. resetEnumerators() gives
+// every test the same starting enumeration state.
 var scratch: [512]u8 = [_]u8{0} ** 512;
 var u32o: u32 = 0;
 var i32o: i32 = 0;
@@ -51,11 +56,18 @@ fn sc() *anyopaque {
     return @ptrCast(&scratch);
 }
 
+fn resetEnumerators() void {
+    next = null;
+    prov = null;
+    namep = "x";
+}
+
 fn freeLock(p: ?*anyopaque) void {
     if (p) |ptr| mem.AIL_mem_free_lock(ptr);
 }
 
 test "coverage: digital.zig exports" {
+    resetEnumerators();
     // Lifecycle / globals.
     _ = dg.AIL_startup();
     _ = dg.AIL_last_error();
@@ -165,6 +177,7 @@ test "coverage: digital.zig exports" {
     flt.AIL_set_filter_sample_preference(s, "Cutoff", sc());
 
     // Filter-level (real filter handle).
+    resetEnumerators();
     flt.AIL_filter_attribute(filt, "Cutoff", sc());
     flt.AIL_set_filter_attribute(filt, "Cutoff", sc());
     flt.AIL_set_filter_preference(filt, "Cutoff", sc());
@@ -211,6 +224,7 @@ test "coverage: digital.zig exports" {
 }
 
 test "coverage: 3d.zig exports" {
+    resetEnumerators();
     const drv = try openmiles.DigitalDriver.init(alloc, 44100, 16, 2);
     defer drv.deinit();
     const dp: *anyopaque = @ptrCast(drv); // our 3D provider handle IS the driver
@@ -220,7 +234,6 @@ test "coverage: 3d.zig exports" {
     const wav3 = try openmiles.buildWavFromPcm(alloc, &pcm3, 1, 8000, 16);
     defer alloc.free(wav3);
 
-    next = null;
     _ = td.AIL_enumerate_3D_providers(&next, &prov, &namep);
     _ = td.AIL_open_3D_provider(dp);
     td.AIL_close_3D_provider(dp);
@@ -680,6 +693,7 @@ test "coverage: lifecycle / driver open-close exports" {
 }
 
 test "coverage: v7.zig unified exports" {
+    resetEnumerators();
     const v7 = @import("api/v7.zig");
     const drv = try openmiles.DigitalDriver.init(alloc, 44100, 16, 2);
     defer drv.deinit();

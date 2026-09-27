@@ -1,3 +1,30 @@
+//! Unit and behavior tests for the engine and the C-ABI wrappers.
+//!
+//! Scope of this file: a test drives a real exported entry point and asserts
+//! the value the SDK documents it returns, or asserts a documented state
+//! transition (a status word, a write-then-read-back, a buffer parsed byte by
+//! byte). "Did not crash" belongs in fuzz_test.zig / api_coverage_test.zig,
+//! which exist to reach every symbol and every shape of bad input; those are
+//! deliberately not the standard here.
+//!
+//! Conventions:
+//!   * `testing.allocator` everywhere, so a leak fails the test that leaked.
+//!     The exceptions are named in place (fixtures that hand a pointer to
+//!     process-global state, platform paths that only resolve off-device).
+//!   * No sleeps as a substitute for a poll. Where a value advances with the
+//!     clock, the test polls to a bound and then asserts, so a swallowed sleep
+//!     error cannot pass a stalled clock and a slow machine cannot fail.
+//!   * A global the API promises to outlive the test (preferences, the redist
+//!     directory, the file callbacks) is restored through `defer`, because
+//!     every test in the binary shares it.
+//!   * Fixtures are built from known bytes, so the expected value is written
+//!     out rather than recomputed by the same code under test.
+//!
+//! Related files: fuzz_test.zig and fuzz_native_test.zig (random/adversarial
+//! input, crash-only), api_coverage_test.zig (every export reached once),
+//! rib_test.zig (registry ordering), engine_test_root.zig (test blocks inside
+//! the engine modules themselves).
+
 const std = @import("std");
 const testing = std.testing;
 const openmiles = @import("openmiles");
@@ -5103,14 +5130,17 @@ const StreamTestCtx = struct {
     eob_count: u32 = 0,
     last_idx: i32 = -1,
     last_len: u32 = 0,
+    // The address the app submitted, so a drain can be checked against the
+    // bytes the app still owns rather than against a bare count.
+    last_addr: ?*anyopaque = null,
 };
 
 fn streamTestHook(ctx: ?*anyopaque, idx: i32, len: u32, addr: ?*anyopaque) void {
-    _ = addr;
     const c: *StreamTestCtx = @ptrCast(@alignCast(ctx.?));
     c.eob_count += 1;
     c.last_idx = idx;
     c.last_len = len;
+    c.last_addr = addr;
 }
 
 test "StreamSource ping-pongs two buffers and fires EOB on drain" {
@@ -5220,7 +5250,7 @@ test "StreamSource honors a 4-slot ring end to end" {
     var ss: openmiles.StreamSource = undefined;
     try ss.init(16, 2, 44100, streamTestHook, &ctx); // 16-bit stereo → 4 bytes/frame
     defer ss.deinit();
-    ss.slot_count = 4;
+    ss.setSlotCount(4); // the public path the driver's buffer-count setter uses
 
     const buf_a = [_]u8{ 1, 2, 3, 4 }; // 1 frame each
     const buf_b = [_]u8{ 5, 6, 7, 8 };
@@ -5277,6 +5307,11 @@ test "StreamSource a repeated submit into a live slot keeps the first buffer" {
     try testing.expectEqualSlices(u8, &([_]u8{0} ** 8), out[8..16]);
     try testing.expectEqual(@as(u32, 1), ctx.eob_count);
     try testing.expectEqual(@as(i32, 0), ctx.last_idx);
+    try testing.expectEqual(@as(u32, buf_a.len), ctx.last_len);
+    // The hook must hand back the address the app submitted, since that is the
+    // buffer the app now owns again; handing back the repeat instead would
+    // make it free the wrong one.
+    try testing.expectEqualSlices(u8, &buf_a, @as([*]const u8, @ptrCast(ctx.last_addr.?))[0..buf_a.len]);
     // Drained: the slot is free again and takes a new buffer, which plays.
     try testing.expectEqual(@as(i32, 0), ss.bufferReady());
     ss.loadBuffer(0, &buf_b, buf_b.len);
@@ -7965,4 +8000,117 @@ test "AIL_mem_alloc_lock_info actually allocates (the real exported allocator)" 
     try testing.expectEqual(@as(u8, 0xAB), bytes[0]);
     const mem = @import("api/memory.zig");
     mem.AIL_mem_free_lock(p.?);
+}
+
+// The accessors and guards the section above leaves untouched: the init-time
+// parameter check, the ring-depth clamp, the read-back of play position, the
+// underrun flag, and the index bound on submit.
+test "StreamSource.init rejects a zero channel count" {
+    // Zero channels yields frame_size 0, which divides by zero in the read
+    // path, so the ring has to refuse it at the boundary.
+    var ss: openmiles.StreamSource = undefined;
+    try testing.expectError(error.InvalidParam, ss.init(16, 0, 44100, null, null));
+}
+
+test "StreamSource.setSlotCount clamps to the SDK ring range" {
+    var ss: openmiles.StreamSource = undefined;
+    try ss.init(16, 1, 22050, null, null);
+    defer ss.deinit();
+
+    var pos: u32 = 0;
+    var len: u32 = 0;
+    const pcm = [_]u8{0} ** 8;
+
+    // Below mss.h's low end: the ring still offers min_slots fillable slots.
+    ss.setSlotCount(0);
+    ss.loadBuffer(0, &pcm, pcm.len);
+    ss.loadBuffer(1, &pcm, pcm.len);
+    try testing.expectEqual(@as(i32, -1), ss.bufferReady());
+
+    // Above its high end: the deepest ring is max_slots, and an index past it
+    // is not a submission but silently dropped, so the app's fill is reported
+    // as taken by a ring that will never play it.
+    ss.setSlotCount(99);
+    var i: usize = 2;
+    while (i < openmiles.StreamSource.max_slots) : (i += 1) ss.loadBuffer(i, &pcm, pcm.len);
+    try testing.expectEqual(@as(i32, -1), ss.bufferReady());
+    // Past the ring depth, slotInfo reports empty rather than reading outside
+    // the slot array.
+    ss.slotInfo(openmiles.StreamSource.max_slots, &pos, &len);
+    try testing.expectEqual(@as(u32, 0), pos);
+    try testing.expectEqual(@as(u32, 0), len);
+    ss.slotInfo(openmiles.StreamSource.max_slots - 1, &pos, &len);
+    try testing.expectEqual(@as(u32, 0), pos);
+    try testing.expectEqual(@as(u32, pcm.len), len);
+}
+
+test "StreamSource.loadBuffer ignores a slot index past the ring depth" {
+    var ss: openmiles.StreamSource = undefined;
+    try ss.init(16, 1, 22050, null, null);
+    defer ss.deinit();
+
+    // A 2-deep ring is the default; slot 2 belongs to no configured ring.
+    const pcm = [_]u8{0xAB} ** 8;
+    ss.loadBuffer(2, &pcm, pcm.len);
+
+    var pos: u32 = 0;
+    var len: u32 = 0;
+    ss.slotInfo(2, &pos, &len);
+    try testing.expectEqual(@as(u32, 0), pos);
+    try testing.expectEqual(@as(u32, 0), len);
+    // The rejection leaves the real ring untouched, so slot 0 is still free.
+    try testing.expectEqual(@as(i32, 0), ss.bufferReady());
+}
+
+test "StreamSource.bufferInfo reports each slot's play position and length" {
+    var ss: openmiles.StreamSource = undefined;
+    try ss.init(16, 1, 22050, null, null);
+    defer ss.deinit();
+
+    var pos0: u32 = 0;
+    var len0: u32 = 0;
+    var pos1: u32 = 0;
+    var len1: u32 = 0;
+    ss.bufferInfo(&pos0, &len0, &pos1, &len1);
+    try testing.expectEqual(@as(u32, 0), pos0);
+    try testing.expectEqual(@as(u32, 0), len0);
+    try testing.expectEqual(@as(u32, 0), pos1);
+    try testing.expectEqual(@as(u32, 0), len1);
+
+    const first = [_]u8{0} ** 8;
+    const second = [_]u8{0} ** 4;
+    ss.loadBuffer(0, &first, first.len);
+    ss.loadBuffer(1, &second, second.len);
+
+    // Two 16-bit mono frames out of slot 0. Slot 1 has not been touched, so its
+    // position must still read 0 with its full length pending.
+    var out: [4]u8 = undefined;
+    var read: u64 = 0;
+    _ = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, &out, 2, &read);
+    try testing.expectEqual(@as(u64, 2), read);
+
+    ss.bufferInfo(&pos0, &len0, &pos1, &len1);
+    try testing.expectEqual(@as(u32, 4), pos0);
+    try testing.expectEqual(@as(u32, first.len), len0);
+    try testing.expectEqual(@as(u32, 0), pos1);
+    try testing.expectEqual(@as(u32, second.len), len1);
+}
+
+test "StreamSource.isStarved latches until the next submission" {
+    var ss: openmiles.StreamSource = undefined;
+    try ss.init(16, 1, 22050, null, null);
+    defer ss.deinit();
+
+    try testing.expect(!ss.isStarved());
+
+    // An underrun is what a starved ring reports; a submit that lands clears
+    // the flag, which is the "the app refilled in time" signal.
+    var out: [8]u8 = undefined;
+    var read: u64 = 0;
+    _ = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, &out, 4, &read);
+    try testing.expectEqual(@as(u64, 4), read);
+    try testing.expect(ss.isStarved());
+
+    ss.loadBuffer(0, &[_]u8{0} ** 4, 4);
+    try testing.expect(!ss.isStarved());
 }
