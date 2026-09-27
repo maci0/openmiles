@@ -49,6 +49,12 @@ that matches no test name is refused rather than reported as a pass. Test output
 is quiet by default; set `OPENMILES_DEBUG=1` to get the engine trace and the
 `openmiles.log` it writes.
 
+An unfiltered `make test` ends with a `failed command: ... --listen=-` line and
+still exits 0 whenever a test wrote to stderr. Zig 0.16.0 emits it for a run
+that passed (reproducible in an empty project whose only test prints a line),
+so the exit status and the `N/N tests passed` summary the recipe asks for are
+what decide the outcome, not that line.
+
 `make sanitize` is `zig build test -Dsanitize`: it instruments every C
 translation unit (the bindings, the vendored headers translate-C pulls in, the
 `tests/*.c` harnesses) with the undefined-behaviour sanitizer and forces Debug.

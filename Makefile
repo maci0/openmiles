@@ -38,11 +38,17 @@ build: check-toolchain
 # is covered on its own, not just through this recipe. FILTER reaches zig as
 # a quoted shell argument read from the environment, so a value carrying
 # spaces or shell metacharacters is passed through rather than re-split.
+#
+# The unfiltered run asks for --summary all. Zig 0.16.0 prints a "failed
+# command: ... --listen=-" line after a test artifact writes to stderr and
+# exits 0, so a green full run otherwise ends on a line that reads as a
+# failure; the summary's "N/N tests passed" is what settles it. A filtered run
+# is the edit-test loop and stays quiet.
 test: check-toolchain
 	@if [ -n "$$FILTER" ]; then \
 	  zig build test -Dtest-filter="$$FILTER"; \
 	else \
-	  zig build test; \
+	  zig build test --summary all; \
 	fi
 
 # The undefined-behaviour sanitizer build. Separate from `test` on purpose: it
@@ -56,7 +62,7 @@ sanitize: check-toolchain
 	@if [ -n "$$FILTER" ]; then \
 	  zig build test -Dsanitize -Dtest-filter="$$FILTER"; \
 	else \
-	  zig build test -Dsanitize; \
+	  zig build test -Dsanitize --summary all; \
 	fi
 
 # Everything .github/workflows/ci.yml runs, in the same order, so a failure
