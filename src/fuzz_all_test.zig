@@ -292,8 +292,17 @@ test "fuzz: invoke every export with adversarial inputs" {
             _ = api_midi.AIL_lock_channel(hm);
             api_digital.AIL_lock_mutex();
             api_midi.AIL_map_sequence_channel(hq, ri, ri);
-            _ = api_memory.AIL_mem_alloc_lock(rsz);
-            _ = api_v9.AIL_mem_alloc_lock_info(ru, null, ru);
+            {
+                // Both of these are malloc, so the size is a request to the
+                // allocator and not the length of a buffer the harness holds:
+                // an unbounded one asks for up to 4 GiB, which Windows commits
+                // in full and the loop then walks away from, exhausting the
+                // process commit charge. Bounded to the scratch the harness
+                // has, and handed back through the matching free.
+                const lock_size: u32 = @min(ru, g_scratch.len);
+                if (api_memory.AIL_mem_alloc_lock(lock_size)) |lk| api_memory.AIL_mem_free_lock(lk);
+                if (api_v9.AIL_mem_alloc_lock_info(lock_size, null, lock_size)) |lk| api_memory.AIL_mem_free_lock(lk);
+            }
             _ = api_v8.AIL_mem_create();
             _ = api_v8.AIL_mem_create_from_existing(null, rszi);
             _ = api_v8.AIL_mem_error(null);
@@ -634,7 +643,23 @@ test "fuzz: invoke every export with adversarial inputs" {
             api_v7.AIL_update_sample_3D_position(hs, rf);
             _ = api_digital.AIL_us_count();
             _ = api_v9.AIL_us_count64();
+            // AIL_waveOutOpen builds a whole engine for the handle it hands
+            // back -- a node graph, a resource manager and its worker threads --
+            // and DigitalDriver.init publishes it as the current driver. One per
+            // round, neither closed nor replaced, leaks that engine and its
+            // threads every round: on Windows the allocations behind it are
+            // charged to the process commit limit until no allocation succeeds,
+            // which is how this loop used to fail with no assertion to point at.
+            // Close the handle it returns, then put the driver this harness set
+            // up back as the current one, so the next round's
+            // AIL_open_digital_driver hands back that driver instead of building
+            // another engine.
             _ = api_digital.AIL_waveOutOpen(&pd, &uo, ri, null);
+            if (pd) |d| {
+                api_digital.AIL_waveOutClose(d);
+                pd = null;
+                openmiles.setLastDigitalDriver(hd);
+            }
             api_dls.DLSCompactMemory(hm);
             _ = api_dls.DLSLoadFile(hm, rstr, ru);
             _ = api_dls.DLSLoadMemFile(hm, scp, ru);
