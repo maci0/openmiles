@@ -5101,6 +5101,29 @@ test "event constructor + decoder round-trip (byte-faithful text)" {
     try testing.expect(cur == null);
 }
 
+test "event decoder rejects a step-type tag outside the enum range" {
+    // A step-type byte is file data; '0' and '@' decode to tags the StepType enum
+    // has no case for, and must end the walk instead of trapping the conversion.
+    var buf: [256]u8 align(8) = undefined;
+    var step: openmiles.event.EVENT_STEP_INFO = undefined;
+    for ([_][:0]const u8{ "0;4;", "@;4;" }) |bad| {
+        try testing.expect(openmiles.event.nextStep(bad.ptr, &step, &buf) == null);
+    }
+    // A leading version header still decodes into the step after it.
+    const ok = openmiles.event.nextStep("9;4;<;", &step, &buf).?;
+    try testing.expectEqual(@intFromEnum(openmiles.event.StepType.clear_state), step.type);
+    try testing.expect(ok[0] == 0);
+}
+
+test "event decoder bounds the version-header chain" {
+    // A crafted bank can repeat the header; each one re-enters the decoder, so
+    // the chain has to end somewhere instead of eating the stack.
+    var buf: [256]u8 align(8) = undefined;
+    var step: openmiles.event.EVENT_STEP_INFO = undefined;
+    const chained = "9;4;9;4;9;4;9;4;9;4;9;4;<;";
+    try testing.expect(openmiles.event.nextStep(chained.ptr, &step, &buf) == null);
+}
+
 const api_dls_t = @import("api/dls.zig");
 const api_timer_t = @import("api/timer.zig");
 

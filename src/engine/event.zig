@@ -31,6 +31,11 @@ pub const StepType = enum(i32) {
 
 pub const CURRENT_EVENT_VERSION = 4;
 
+/// Version headers one event string may chain. Each header re-enters the decoder,
+/// so an unbounded chain in a crafted bank would exhaust the stack; a real event
+/// string carries at most one leading header.
+const max_version_headers = 4;
+
 /// MSSSTRINGC: a counted string (pointer + length).
 pub const MSSStringC = extern struct { str: ?[*]const u8 = null, len: i32 = 0 };
 
@@ -612,21 +617,29 @@ const Decoder = struct {
 /// start of the caller buffer; strings are copied into `scratch` after it).
 /// Returns the cursor past this step, or null at end. Mirrors AIL_next_event_step.
 pub fn nextStep(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: []u8) ?[*:0]const u8 {
+    return nextStepDepth(event_string, step, scratch, 0);
+}
+
+fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: []u8, version_headers: u32) ?[*:0]const u8 {
     if (event_string[0] == 0) return null;
     var d = Decoder{ .p = event_string, .wp = scratch.ptr, .wlimit = scratch.ptr + scratch.len };
     const t: i32 = @as(i32, event_string[0]) - '0';
+    // The step-type byte is file data: a tag outside the enum range must end the
+    // walk, not trap the conversion.
+    if (t < @intFromEnum(StepType.start_sound) or t > @intFromEnum(StepType.move_var)) return null;
+    const st: StepType = @enumFromInt(t);
     step.type = t;
     // Zero the union so fields the decoder writes partially (e.g. a byte via
     // copyUChar into a wider field) and fields a step doesn't use read back clean.
     step.u = std.mem.zeroes(StepUnion);
-    const st: StepType = @enumFromInt(t);
     switch (st) {
         .version => {
+            if (version_headers >= max_version_headers) return null;
             d.p += 2; // type + ';'
             const ver = std.fmt.parseInt(i32, d.fieldText(), 10) catch -1;
             if (ver != CURRENT_EVENT_VERSION) return null;
             if (d.p[0] == 0 or d.p[0] == '\r' or d.p[0] == '\n') return null;
-            return nextStep(@ptrCast(d.p), step, scratch);
+            return nextStepDepth(@ptrCast(d.p), step, scratch, version_headers + 1);
         },
         .comment => {
             d.p += 2;

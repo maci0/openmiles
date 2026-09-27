@@ -234,6 +234,8 @@ section of [docs/API_STATUS.md](docs/API_STATUS.md)).
 - [API Support Matrix](docs/MSS_API_MATRIX.md) -- version compatibility overview
 - [Plugin & Codec Coverage](docs/MSS_PLUGINS.md) -- ASI/M3D/FLT replacement status
 - [MSS Version History](docs/MSS_VERSION_HISTORY.md) -- historical MSS releases
+- [Threat Model](docs/THREAT_MODEL.md) -- attack surface, trust boundaries, risk ranking
+- [Security Policy](SECURITY.md) -- reporting a vulnerability
 
 ## Dependencies
 
