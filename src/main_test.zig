@@ -2145,8 +2145,10 @@ test "AIL_WAV_info reports the WAVE format tag and SDK fields" {
     try testing.expectEqual(@as(i32, 16), info.bits);
     try testing.expectEqual(@as(i32, 2), info.channels);
     try testing.expectEqual(@as(u32, 44100), info.rate);
-    // samples = (data_len*8)/bits = total interleaved samples (64B -> 32).
-    try testing.expectEqual(@as(u32, 32), info.samples);
+    // samples is the per-channel frame count ((data_len*8)/(bits*channels)):
+    // 64 bytes of 16-bit stereo is 16 frames, and the SDK sizes decoded output
+    // as samples*channels*16/8.
+    try testing.expectEqual(@as(u32, 16), info.samples);
     try testing.expect(info.data_ptr != null);
     try testing.expect(info.initial_ptr != null); // SDK: always data_ptr, not null
     if (@hasField(openmiles.AILSOUNDINFO, "channel_mask")) {
@@ -2246,7 +2248,7 @@ test "AIL_WAV_info handles WAVEFORMATEXTENSIBLE PCM (format->1, channel_mask, re
     try testing.expectEqual(@as(i32, 1), info.format); // reported as plain PCM
     if (@hasField(openmiles.AILSOUNDINFO, "channel_mask"))
         try testing.expectEqual(@as(u32, 0x3), info.channel_mask); // from dwChannelMask
-    try testing.expectEqual(@as(u32, 8), info.samples); // 16 bytes * 8 / 16 bits
+    try testing.expectEqual(@as(u32, 4), info.samples); // 16 bytes * 8 / (16 bits * 2 channels)
     // A non-PCM subformat (IEEE float GUID) is rejected.
     const float_guid = [16]u8{ 0x03, 0, 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71 };
     mk.build(&buf, float_guid);

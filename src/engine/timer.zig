@@ -124,6 +124,12 @@ pub const Timer = struct {
             self.callback(self.getUserData());
             const period_ns: i128 = @as(i128, self.getPeriodUs()) * std.time.ns_per_us;
             next_ns += period_ns;
+            // A callback that overran its period leaves next_ns in the past, and
+            // every following iteration would then fire back-to-back with no
+            // sleep. Resync to now so a late callback delays one tick instead of
+            // spinning the loop.
+            const after_cb = std.Io.Timestamp.now(io, .awake).nanoseconds;
+            if (next_ns < after_cb) next_ns = after_cb;
             // Sleep toward next_ns in bounded slices, bailing out promptly once
             // stop() clears is_running.
             while (@atomicLoad(bool, &self.is_running, .acquire)) {

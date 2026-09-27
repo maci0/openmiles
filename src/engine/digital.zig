@@ -22,9 +22,10 @@ pub const max_falloff_points: usize = 5;
 /// The four S3D falloff graphs a sample carries: volume, exclusion, lowpass, spread.
 pub const FalloffKind = enum(usize) { volume = 0, exclusion = 1, lowpass = 2, spread = 3 };
 
-/// Saturating f32 -> u64 (NaN/negative -> 0, overflow -> clamped). Guards the
+/// Saturating float -> u64 (NaN/negative -> 0, overflow -> clamped). Guards the
 /// `@intFromFloat` panic when external callers pass negative/huge positions.
-fn satU64(v: f32) u64 {
+/// Any float width: f64 callers keep 53-bit position precision.
+fn satU64(v: anytype) u64 {
     if (!(v >= 0)) return 0; // false for NaN and negatives
     if (v >= 1.8446744e19) return std.math.maxInt(u64);
     return @intFromFloat(v);
@@ -41,8 +42,8 @@ fn normalize3(v: *[3]f32) void {
     }
 }
 
-/// Saturating f32 -> i32 (NaN -> 0, out-of-range -> clamped).
-fn satI32(v: f32) i32 {
+/// Saturating float -> i32 (NaN -> 0, out-of-range -> clamped).
+fn satI32(v: anytype) i32 {
     if (std.math.isNan(v)) return 0;
     if (v >= 2147483647.0) return std.math.maxInt(i32);
     if (v <= -2147483648.0) return std.math.minInt(i32);
@@ -1591,9 +1592,12 @@ pub const Sample = struct {
             // datarate and AIL_set_sample_ms_position, so the round-trip holds.
             const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
             const effective = (self.target_rate orelse native) * self.v7_rate_factor;
-            const ms_per_frame: f32 = if (effective > 0) 1000.0 / effective else 0;
-            pos.current = satI32(@as(f32, @floatFromInt(cursor)) * ms_per_frame);
-            pos.total = satI32(@as(f32, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
+            // f64 for the position math: a 64-bit frame counter loses whole
+            // frames in f32 past 2^24 (about six minutes at 44.1 kHz), which
+            // shows up as a jittery ms position and a broken seek round trip.
+            const ms_per_frame: f64 = if (effective > 0) 1000.0 / @as(f64, effective) else 0;
+            pos.current = satI32(@as(f64, @floatFromInt(cursor)) * ms_per_frame);
+            pos.total = satI32(@as(f64, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
         }
         return pos;
     }
@@ -1606,7 +1610,9 @@ pub const Sample = struct {
             const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
             const effective = (self.target_rate orelse native) * self.v7_rate_factor;
             // Negative positions clamp to the start (satU64 maps <0/NaN to 0).
-            const frame = satU64(@as(f32, @floatFromInt(ms)) * effective / 1000.0);
+            // f64 so a large ms value keeps whole-frame accuracy (f32 spacing is
+            // already 256 at a one-day offset).
+            const frame = satU64(@as(f64, @floatFromInt(ms)) * @as(f64, effective) / 1000.0);
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
         }
     }
@@ -2032,9 +2038,9 @@ pub const Sample3D = struct {
             // holds when a 3D sample's playback rate was changed.
             const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
             const effective = self.target_rate orelse native;
-            const ms_per_frame: f32 = if (effective > 0) 1000.0 / effective else 0;
-            pos.current = satI32(@as(f32, @floatFromInt(cursor)) * ms_per_frame);
-            pos.total = satI32(@as(f32, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
+            const ms_per_frame: f64 = if (effective > 0) 1000.0 / @as(f64, effective) else 0;
+            pos.current = satI32(@as(f64, @floatFromInt(cursor)) * ms_per_frame);
+            pos.total = satI32(@as(f64, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
         }
         return pos;
     }
@@ -2046,7 +2052,7 @@ pub const Sample3D = struct {
             // the source position correctly.
             const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
             const effective = self.target_rate orelse native;
-            const frame = satU64(@as(f32, @floatFromInt(ms)) * effective / 1000.0);
+            const frame = satU64(@as(f64, @floatFromInt(ms)) * @as(f64, effective) / 1000.0);
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
         }
     }

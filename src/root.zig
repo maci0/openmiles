@@ -717,6 +717,7 @@ pub fn mssVolumeToGain(value: i32) f32 {
 /// Inverse of mssVolumeToGain: convert a linear gain back to MSS 0-127.
 /// Binary-searches the precomputed gain table, then picks the nearest neighbor.
 pub fn gainToMssVolume(gain: f32) i32 {
+    if (std.math.isNan(gain)) return 0; // otherwise the search below converges on 127
     if (gain <= 0.0) return 0;
     if (gain >= 1.0) return 127;
     var lo: i32 = 1;
@@ -762,8 +763,9 @@ pub fn satI32(v: f64) i32 {
     return @intFromFloat(v);
 }
 
-/// Saturating f32 -> u32 (NaN/negative -> 0, overflow -> clamped).
-pub fn satU32(v: f32) u32 {
+/// Saturating float -> u32 (NaN/negative -> 0, overflow -> clamped). Accepts
+/// f32 or f64 so wide callers keep their precision.
+pub fn satU32(v: anytype) u32 {
     if (!(v >= 0)) return 0; // false for NaN and negatives
     if (v >= 4294967295.0) return std.math.maxInt(u32);
     return @intFromFloat(v);

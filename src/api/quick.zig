@@ -148,7 +148,11 @@ pub fn AIL_quick_set_volume(s_opt: ?*Sample, volume: i32, extravol: i32) callcon
 pub fn AIL_quick_set_volume_f32(s_opt: ?*Sample, volume: f32, extravol: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_quick_set_volume_f32(s={*}, volume={d}, extravol={d})\n", .{ s, volume, extravol });
-    const v = std.math.clamp(volume, 0.0, 1.0) * std.math.clamp(extravol, 0.0, 1.0);
+    // NaN fails safe (silence): clamp() maps NaN to the upper bound, so a
+    // garbage float would otherwise come out at full volume, as the other
+    // volume entry points already avoid.
+    const v = (if (std.math.isNan(volume)) 0.0 else std.math.clamp(volume, 0.0, 1.0)) *
+        (if (std.math.isNan(extravol)) 0.0 else std.math.clamp(extravol, 0.0, 1.0));
     s.setVolume(@intFromFloat(v * 127.0));
 }
 pub fn AIL_quick_set_speed(s_opt: ?*Sample, rate: i32) callconv(.winapi) void {

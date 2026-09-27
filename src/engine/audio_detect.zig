@@ -222,8 +222,11 @@ pub fn wavInfoBounded(raw: [*]const u8, max_len: usize, info: *anyopaque) i32 {
     if (data_ptr == null) return 0;
     // Per AIL_API_WAV_info (wavefile.cpp): info->format is the WAVE format_tag
     // (1=PCM, 0x11=IMA ADPCM, 0x02=MS ADPCM), NOT a DIG_F_ code; channel_mask is
-    // ~0U; initial_ptr is always data_ptr; and `samples` is the total interleaved
-    // sample count: (data_len*8)/bits for PCM, block-derived for IMA ADPCM.
+    // ~0U; initial_ptr is always data_ptr; and `samples` is the per-channel frame
+    // count: (data_len*8)/(bits*channels) for PCM, block-derived for IMA ADPCM.
+    // The SDK sizes decoded output as samples*channels*16/8 and stores the IMA
+    // fact value in the same slot, so a stereo file must not report twice the
+    // per-channel count.
     out.format = audio_format;
     out.data_ptr = data_ptr;
     out.data_len = data_len;
@@ -254,8 +257,8 @@ pub fn wavInfoBounded(raw: [*]const u8, max_len: usize, info: *anyopaque) i32 {
                 out.samples = blocks *| samples_per_block;
             } else out.samples = 0;
         } else out.samples = 0;
-    } else if (bits_per_sample > 0) {
-        out.samples = @intCast(@min((@as(u64, data_len) * 8) / bits_per_sample, std.math.maxInt(u32)));
+    } else if (bits_per_sample > 0 and num_channels > 0) {
+        out.samples = @intCast(@min((@as(u64, data_len) * 8) / (@as(u64, bits_per_sample) * num_channels), std.math.maxInt(u32)));
     } else out.samples = 0;
     return 1;
 }

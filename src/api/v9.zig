@@ -180,8 +180,11 @@ pub fn AIL_sample_ms_lookup(s_opt: ?*Sample, milliseconds: i32, actualms: ?*i32)
     const d = s.decoder orelse return 0;
     const native = @as(f32, @floatFromInt(d.outputSampleRate));
     const effective = (s.target_rate orelse native) * s.v7_rate_factor;
-    const datarate = effective * @as(f32, @floatFromInt(s.bytesPerFrame())); // bytes/sec
-    const datapos = datarate * @as(f32, @floatFromInt(milliseconds)) / 1000.0;
+    // f64: the product runs to ~1e14 bytes over a long position, where f32
+    // spacing is already tens of kilobytes and the byte offset the app gets
+    // back no longer matches its own AIL_set_sample_position.
+    const datarate = @as(f64, effective) * @as(f64, @floatFromInt(s.bytesPerFrame())); // bytes/sec
+    const datapos = datarate * @as(f64, @floatFromInt(milliseconds)) / 1000.0;
     return openmiles.satU32(datapos);
 }
 pub fn AIL_sleep(ms: u32) callconv(.winapi) void {

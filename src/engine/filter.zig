@@ -3,6 +3,9 @@ const root = @import("../root.zig");
 const ma = root.ma;
 const log = root.log;
 
+/// Fallback ceiling for the low-pass cutoff when the engine rate is unusable.
+const DEFAULT_CUTOFF_HZ: f64 = 22050.0;
+
 /// MSS Filter handle backed by miniaudio's ma_lpf_node for low-pass filtering.
 /// Filters are created via AIL_open_filter and attached to samples via
 /// AIL_set_sample_filter. When attached, the sample's audio routes through
@@ -13,7 +16,7 @@ pub const Filter = struct {
     allocator: std.mem.Allocator,
     lpf_node: ma.ma_lpf_node,
     lpf_initialized: bool = false,
-    cutoff_frequency: f64 = 22050.0, // Hz; initLpfNode replaces this with the driver Nyquist
+    cutoff_frequency: f64 = DEFAULT_CUTOFF_HZ, // Hz; initLpfNode replaces this with the driver Nyquist
     order: u32 = 2, // 2nd-order = 12dB/octave rolloff
     // Track which samples are routed through this filter for cleanup
     attached_samples: std.ArrayListUnmanaged(*root.Sample),
@@ -169,10 +172,15 @@ pub const Filter = struct {
     pub fn setCutoff(self: *Filter, frequency: f64) void {
         // MSS's low-pass cutoff is a normalized 0..1 value (1.0 = fully open) and
         // Sample.setLowPassNormalized converts it with cutoff * Nyquist, so the
-        // ceiling has to be the device's actual Nyquist: a fixed 22050 ceiling
+        // ceiling has to be the live engine rate's Nyquist: a fixed 22.05 kHz cap
         // clipped every cutoff above 0.919 on a 48 kHz (or higher) driver.
-        const sample_rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
-        const nyquist: f64 = @as(f64, @floatFromInt(@max(sample_rate, 2))) / 2.0;
+        // A zero or negative rate (uninitialized engine) falls back to that same
+        // 22.05 kHz so the clamp still has a finite bound.
+        const engine_rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
+        const nyquist: f64 = if (engine_rate > 0)
+            @as(f64, @floatFromInt(engine_rate)) / 2.0
+        else
+            DEFAULT_CUTOFF_HZ;
         const clamped = if (std.math.isNan(frequency)) 1000.0 else @max(20.0, @min(frequency, nyquist));
         if (clamped == self.cutoff_frequency) return;
         self.cutoff_frequency = clamped;
@@ -181,7 +189,7 @@ pub const Filter = struct {
             const config = ma.ma_lpf_config_init(
                 ma.ma_format_f32,
                 channels,
-                sample_rate,
+                engine_rate,
                 self.cutoff_frequency,
                 self.order,
             );
