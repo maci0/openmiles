@@ -9,7 +9,10 @@ the data files a game opens through it (audio, MIDI/XMIDI, DLS, MSS soundbanks)
 and the `.asi`/`.m3d`/`.flt` plugin DLLs it loads from the game's directory.
 
 The full model, including the current risk ranking, is in
-[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md). Every control it claims exists is
+cited as `file:line anchor`, and `make check-threat-model` fails the build when
+an anchor no longer sits on that line, so a moved control cannot keep a
+"mitigated" verdict.
 
 ## Supported versions
 
@@ -29,7 +32,10 @@ No disclosure deadline or embargo policy is defined by this project yet.
 - Memory safety problems reached from a data file the game opens (soundbank,
   event bytecode, XMIDI/MIDI, MP3, OGG, WAV, FLAC, DLS).
 - The temporary-file handling in `AIL_open_ASI_provider`, which writes a
-  caller-supplied PE image to `%TEMP%` before loading it.
+  caller-supplied PE image to a temporary file before loading it. On Windows
+  that directory comes from `GetTempPathW`; elsewhere it comes from `TMPDIR`,
+  falling back to the game's own working directory, so a process that controls
+  that variable chooses where the image lands.
 - Anything reachable from `AIL_startup`'s scan of the game directory for
   plugin files.
 
