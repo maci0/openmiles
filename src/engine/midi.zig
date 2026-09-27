@@ -57,6 +57,7 @@ pub const MidiDriver = struct {
 
     pub fn deinit(self: *MidiDriver) void {
         root.clearLastMidiDriver(self);
+        releaseAllChannels(@ptrCast(self));
         if (self.soundfont) |sf| {
             if (self.owns_soundfont) tsf.tsf_close(sf);
         }
@@ -132,6 +133,21 @@ pub fn releaseChannel(owner: *anyopaque, channel: i32) void {
     const idx: usize = @intCast(channel);
     if (locked_channels[idx] == owner) {
         locked_channels[idx] = null;
+    }
+}
+
+/// Drop every lock held by `owner`. A lock outlives the handle that took it
+/// unless the owner is torn down explicitly: a game that closes its MIDI
+/// driver (or frees a sequence that locked a channel) otherwise leaves the
+/// slots reserved by a freed pointer, and each leak costs one of the 15
+/// lockable channels for the life of the process, until AIL_lock_channel
+/// answers -1 forever. Releasing by owner is also the only form a teardown
+/// path can use, since a single release call names one channel.
+pub fn releaseAllChannels(owner: *anyopaque) void {
+    locked_channels_mutex.lockUncancelable(io);
+    defer locked_channels_mutex.unlock(io);
+    for (&locked_channels) |*slot| {
+        if (slot.* == owner) slot.* = null;
     }
 }
 
@@ -376,6 +392,7 @@ pub const Sequence = struct {
 
     pub fn deinit(self: *Sequence) void {
         root.unregisterSequence(self);
+        releaseAllChannels(@ptrCast(self));
         if (self.is_initialized) {
             ma.ma_sound_uninit(&self.sound);
         }

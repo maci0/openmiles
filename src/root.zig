@@ -47,6 +47,7 @@ pub const MidiStatus = midi_mod.MidiStatus;
 pub const locked_channels = &midi_mod.locked_channels;
 pub const lockChannel = midi_mod.lockChannel;
 pub const releaseChannel = midi_mod.releaseChannel;
+pub const releaseAllChannels = midi_mod.releaseAllChannels;
 
 pub const Timer = @import("engine/timer.zig").Timer;
 pub const Filter = @import("engine/filter.zig").Filter;

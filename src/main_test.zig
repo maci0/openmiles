@@ -751,6 +751,43 @@ test "lockChannel skips percussion channel 9" {
     try testing.expectEqual(@as(i32, -1), openmiles.lockChannel(extra_seq));
 }
 
+test "closing a MIDI driver releases the channels it locked" {
+    const allocator = testing.allocator;
+    for (&openmiles.locked_channels.*) |*slot| slot.* = null;
+    defer {
+        for (&openmiles.locked_channels.*) |*slot| slot.* = null;
+    }
+
+    const first = try openmiles.MidiDriver.init(allocator);
+    var owned: usize = 0;
+    while (openmiles.lockChannel(@ptrCast(first)) >= 0) owned += 1;
+    try testing.expectEqual(@as(usize, 15), owned); // channel 9 is not lockable
+    first.deinit();
+
+    // Every slot the dead driver held is free again; otherwise each
+    // open/close cycle would cost the process lockable channels and
+    // AIL_lock_channel would answer -1 for the rest of the run.
+    for (openmiles.locked_channels.*) |slot| {
+        try testing.expectEqual(@as(?*anyopaque, null), slot);
+    }
+    const second = try openmiles.MidiDriver.init(allocator);
+    defer second.deinit();
+    try testing.expect(openmiles.lockChannel(@ptrCast(second)) >= 0);
+}
+
+test "freeing a sequence releases the channels it locked" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.MidiDriver.init(allocator);
+    defer driver.deinit();
+    for (&openmiles.locked_channels.*) |*slot| slot.* = null;
+
+    const seq = try openmiles.Sequence.init(driver);
+    const ch = openmiles.lockChannel(@ptrCast(seq));
+    try testing.expect(ch >= 0);
+    seq.deinit();
+    try testing.expectEqual(@as(?*anyopaque, null), openmiles.locked_channels[@intCast(ch)]);
+}
+
 test "preference defaults match MSS spec at version-correct indices" {
     // The preference *numbers* are ABI: a game passes the mss.h constant for its
     // target version. MSS 9.0 renumbered the table (verified by disassembling
