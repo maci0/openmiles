@@ -89,6 +89,11 @@ pub fn build(b: *std.Build) void {
         std.debug.print("       valid values: 3,4,5,6,6.0,6.1,6.5,6.6,7,8,9\n", .{});
         std.process.exit(2);
     };
+    // Run only the tests whose name contains this substring. The full suite
+    // takes minutes; this is the edit-test loop for one test.
+    const test_filter = b.option([]const u8, "test-filter", "Only run tests whose name contains this substring");
+    const test_filters: []const []const u8 = if (test_filter) |f| &.{f} else &.{};
+
     const build_opts = b.addOptions();
     build_opts.addOption(u16, "mss_version", mss_version);
     const build_opts_mod = build_opts.createModule();
@@ -176,6 +181,7 @@ pub fn build(b: *std.Build) void {
         OpenmilesModule{ .mod = mod, .c_impl = c_impl, .ma = ma_mod, .tsf = tsf_mod };
 
     const mod_tests = b.addTest(.{
+        .filters = test_filters,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/test_root.zig"),
             .target = test_target,
@@ -218,6 +224,7 @@ pub fn build(b: *std.Build) void {
         .flags = &c_flags_tsf,
     });
     const engine_tests = b.addTest(.{
+        .filters = test_filters,
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/engine_test_root.zig"),
             .target = test_target,

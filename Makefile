@@ -1,4 +1,4 @@
-.PHONY: all build test clean lint format check-header check-toolchain check-vendored parity help
+.PHONY: all build test check clean lint format check-header check-toolchain check-vendored cross parity help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -17,8 +17,19 @@ check-toolchain:
 build: check-toolchain
 	zig build
 
+# make test FILTER=<substring> runs only the tests whose name contains it;
+# the full suite takes minutes, the filtered run seconds.
 test: check-toolchain
-	zig build test
+	zig build test $(if $(FILTER),-Dtest-filter=$(FILTER))
+
+# Everything .github/workflows/ci.yml runs, in the same order, so a failure
+# here is the same failure CI would give.
+check: lint build test cross
+
+# The shipped artifact. A build that only passes natively can still fail to
+# link as a 32-bit stdcall DLL, so check what ships.
+cross:
+	zig build -Dtarget=x86-windows -Doptimize=ReleaseFast
 
 # src/mss.h declares the C surface; src/main.zig is the export table it must
 # agree with, for every -Dmss-version. See scripts/check_header.py.
@@ -48,10 +59,13 @@ parity:
 
 help:
 	@echo "Targets:"
-	@echo "  build    build the library and the test binaries (zig build)"
-	@echo "  test     run the test suite (zig build test)"
-	@echo "  lint     check formatting and shellcheck the scripts"
-	@echo "  format   apply zig fmt"
-	@echo "  parity   diff every -Dmss-version export table against its reference DLL"
-	@echo "  clean    remove zig-out and .zig-cache"
-	@echo "  help     show this message"
+	@echo "  build      build the library and the test binaries (zig build)"
+	@echo "  test       run the test suite (zig build test); FILTER=<substr> runs a subset"
+	@echo "  check      run every CI check in order: lint, build, test, cross"
+	@echo "  lint       check formatting, shellcheck the scripts, check the C header"
+	@echo "  check-header  assert src/mss.h matches the export table for every -Dmss-version"
+	@echo "  cross      cross-compile the shipped x86-windows DLL"
+	@echo "  format     apply zig fmt"
+	@echo "  parity     diff every -Dmss-version export table against its reference DLL"
+	@echo "  clean      remove zig-out and .zig-cache"
+	@echo "  help       show this message"

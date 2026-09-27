@@ -60,6 +60,26 @@ zig build -Dtarget=x86-windows -Doptimize=ReleaseFast -Dmss-version=5
 (`scripts/check_all_versions.sh`, which needs the reference DLLs under
 `references/`, not checked in).
 
+`make check` runs every check CI runs, in CI's order: `make lint`, `make build`,
+`make test`, and the Windows cross-compile. Run it before pushing.
+
+`make lint` needs `shellcheck` and `python3` on `PATH` besides Zig; CI installs
+them through the runner image. It checks `zig fmt`, shellchecks `scripts/*.sh`,
+and asserts `src/mss.h` declares every symbol the export table exports, for each
+`-Dmss-version`.
+
+### Running a subset of the tests
+
+The full suite prints a lot of engine trace output and takes a couple of
+minutes. To run one test, filter by a substring of its name:
+
+```bash
+make test FILTER=RIB_open          # or: zig build test -Dtest-filter=RIB_open
+```
+
+`OPENMILES_DEBUG=0` silences the engine trace that otherwise fills the test
+output; a Debug build logs by default, and that is what writes `openmiles.log`.
+
 ### Release archive
 
 `scripts/package_release.sh <out.zip>` packages `zig-out/bin/mss32.dll` with
