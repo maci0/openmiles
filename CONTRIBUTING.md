@@ -64,8 +64,8 @@ Windows Python; only their launcher is platform-specific.
 
 `make lint` is `zig fmt --check`, `ruff check`, `ruff format --check`,
 `shellcheck scripts/*.sh`, `yamllint .github/workflows`, plus the header-parity,
-vendored-checksum, and pin-agreement checks. `make format` applies the two
-formatters.
+version-sweep, vendored-checksum, threat-model-reference, and pin-agreement
+checks. `make format` applies the two formatters.
 
 ## What a change is expected to carry
 

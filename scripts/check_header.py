@@ -452,8 +452,11 @@ def compile_problems():
                 f'#include "{MSS_H}"\n'
                 "int main(void) { return 0; }\n"
             )
-            proc = subprocess.run(
-                [
+            # S603/S607: the tool name is the fixed one the Makefile already
+            # gates on, and the only path handed to it is the temp file this
+            # function just wrote; nothing from the repository reaches argv.
+            proc = subprocess.run(  # noqa: S603
+                [  # noqa: S607
                     "zig",
                     "cc",
                     "-c",

@@ -18,7 +18,7 @@ This matrix tracks the availability of major API groups across different histori
 | Function Group | Intro | AIL v2 | MSS v3 | MSS 6.6 | OpenMiles | Notes |
 |:---|:---:|:---:|:---:|:---:|:---:|:---|
 | Basic Init (`startup`, `shutdown`) | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | rebranded in v3. |
-| Legacy Driver Init (`install_driver`) | v2 | 🟢 | 🟢 | ⚪ | ⚪ Stub | Used in AIL era. |
+| Legacy Driver Init (`install_driver`) | v2 | 🟢 | 🟢 | ⚪ | 🔴 None | AIL-era entry point; no build exports it |
 | Error Handling (`last_error`) | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
 | Preference Management | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
 | Redist Handling (`redist_dir`) | v6 | 🔴 | 🔴 | 🟢 | 🟢 Full | Stores path and scans for .asi/.m3d/.flt plugins |
@@ -36,7 +36,7 @@ This matrix tracks the availability of major API groups across different histori
 | Memory Image Loading | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
 | Streaming (File-based) | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
 | Input API | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | Recording via miniaudio capture device |
-| Compression API | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | IMA-ADPCM WAV encode via the bundled encoder, decode via libtsf |
+| Compression API | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | IMA-ADPCM WAV encode via the bundled encoder, decode by wrapping the raw blocks in a WAV for miniaudio |
 | Filter API | v6 | 🔴 | 🔴 | 🟢 | 🟢 Full | Low-pass filter via miniaudio ma_lpf_node; real-time cutoff/order control |
 
 ## 3. 3D Positional Audio
