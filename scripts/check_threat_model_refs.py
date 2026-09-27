@@ -14,8 +14,6 @@ here rather than silently misdirecting the next pass.
   BADLINE      the line number is outside the file
   NOMATCH      the anchor is not on that line
   UNPARSED     a backticked `path:line` reference carries no anchor
-
-Exit code 0 when every reference resolves.
 """
 
 from __future__ import annotations
@@ -45,6 +43,10 @@ DOC = ROOT / "docs" / "THREAT_MODEL.md"
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="check_threat_model_refs.py",
+        # The docstring is laid out as prose and a column-aligned list of the
+        # four finding kinds; the default formatter reflows both into one
+        # paragraph, losing the list.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
         epilog="Exit status: 0 every reference resolves, 1 one does not, 2 bad invocation.",
     )

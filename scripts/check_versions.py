@@ -19,9 +19,6 @@ Reported per value:
   UNSWEPT    an accepted value with no reference DLL, or a reference entry
              with no reason beside it
   CONFLICT   two of the four lists disagree
-
-Exit code 0 when every accepted value is either swept against a reference DLL
-or declared unswept with a reason.
 """
 
 import argparse
@@ -107,6 +104,10 @@ def parse_header_error_versions(text: str) -> set[int]:
 def main():
     argparse.ArgumentParser(
         prog="check_versions.py",
+        # The docstring is laid out as prose and a column-aligned list of the
+        # four files that must agree; the default formatter reflows both into
+        # one paragraph, losing the alignment that makes it readable.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
         epilog="Exit status: 0 every value is swept or declared unswept, 1 a value is not, "
         "2 bad invocation.",

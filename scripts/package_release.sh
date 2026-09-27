@@ -38,9 +38,25 @@ Options:
 EOF
 }
 
-case "${1:-}" in
-  -h | --help) usage; exit 0 ;;
-esac
+# This script takes positionals only. A leading dash is a mistyped flag, not a
+# file name, and passing it through would create a file named after it (or
+# fail deep inside dirname), so it is rejected as a usage error here where the
+# message can name the mistake. -h and --help are answered from any position,
+# not just the first, so `package_release.sh out.zip --help` prints help
+# instead of packaging with --help as the checksum path.
+for arg in "$@"; do
+  case "$arg" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -?*)
+      printf '%s: unknown option: %s\n' "${0##*/}" "$arg" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
 
 if [ "$#" -eq 0 ]; then
   printf '%s: missing <output.zip>\n' "${0##*/}" >&2

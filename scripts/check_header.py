@@ -24,8 +24,6 @@ each resulting declaration, reports:
 
 Symbols the header does not declare are listed at the end as a coverage count.
 The header is a documented core subset, so that part is informational.
-
-Exit code 0 when the header and the export table agree for every version.
 """
 
 import argparse
@@ -574,6 +572,10 @@ def compile_header(zig, tu, out_dir):
 def main():
     parser = argparse.ArgumentParser(
         prog="check_header.py",
+        # The docstring is laid out as prose and a column-aligned list of the
+        # finding kinds; the default formatter reflows both into one
+        # paragraph, losing the list.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
         epilog="Exit status: 0 header and export table agree, 1 they disagree, 2 bad invocation.",
     )

@@ -12,7 +12,8 @@ two export tables and reports MISSING / DECORATION-MISMATCH / EXTRA on stdout.
 It exits `0` when the tables match, `1` when discrepancies were found, and `2`
 on a bad invocation (unknown flag, missing file, non-PE input), so it gates CI
 on the status alone; `scripts/check_all_versions.sh [--strict]` sweeps every
-version.
+version. The sweep writes the report to stdout and everything about the run to
+stderr, so piping stdout into a reader still yields a well-formed table.
 
 Reference DLLs are not committed (`references/` is gitignored). The canonical
 per-version set the sweep uses is the `REF` map in

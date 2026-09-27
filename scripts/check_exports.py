@@ -51,6 +51,7 @@ def norm(n):
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="check_exports.py",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Diff a built mss32.dll export table against a real Miles DLL.",
         epilog=("Exit status: 0 export tables match, 1 discrepancies found, 2 bad invocation."),
     )

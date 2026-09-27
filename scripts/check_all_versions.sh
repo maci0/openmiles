@@ -24,6 +24,11 @@
 #
 # Exit status: 0 every version matched, 1 a build/diff failed or a version had
 # no reference DLL to check against, 2 bad invocation.
+#
+# stdout is the report: one table row per version, then the values that were
+# not swept, then the RESULT line. Diagnostics about the run (a missing
+# reference, a failed build, whatever the checker wrote to stderr) go to
+# stderr, so piping stdout into a reader still yields a well-formed table.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -52,7 +57,7 @@ Builds every supported -Dmss-version and diffs its export table against the
 canonical reference mss32.dll for that release.
 
 Options:
-  --strict  fail on EXTRA (symbols we export that the reference lacks)
+  --strict    fail on EXTRA (symbols we export that the reference lacks)
   -h, --help  show this help
 EOF
 }
@@ -100,24 +105,33 @@ skipped=()
 # one leaves a stale artifact exactly where the shipped DLL is picked up from.
 out_prefix=zig-out/parity
 dll="$out_prefix/bin/mss32.dll"
+# One scratch file for the checker's stderr, cleared per version so a message
+# is never attributed to the version after it.
+errfile=$(mktemp)
+trap 'rm -f "$errfile"' EXIT
 for ver in "${VERSIONS[@]}"; do
   ref="${REF[$ver]}"
   if [ ! -f "$ref" ]; then
-    echo "v$ver: reference missing ($ref) -- skipped"
+    # stderr, not stdout: stdout carries one table row per version, and a
+    # sentence in the middle of it breaks anything reading the table.
+    echo "v$ver: reference missing ($ref) -- skipped" >&2
     skipped+=("$ver")
     continue
   fi
   if ! zig build --prefix "$out_prefix" -Dmss-version="$ver" -Dtarget=x86-windows; then
-    echo "v$ver: BUILD FAILED"
+    echo "v$ver: BUILD FAILED" >&2
     fail=1
     continue
   fi
   # check_exports.py exits 0 or 1 for a verdict and 2 for a bad invocation, so
-  # a nonzero rc is a parity failure, not a crash. Its stderr is dropped to
-  # keep the table readable, so a missing line is reported as an empty count
-  # rather than aborting the sweep.
+  # a nonzero rc is a parity failure, not a crash. Its stderr is kept in a
+  # file rather than folded into the table: it is written only when the checker
+  # could not run at all (an unreadable DLL, one that is not a PE image), and
+  # dropping it left a crashed checker printing the same "?" row as a genuine
+  # parity failure, with nothing to tell the two apart.
   rc=0
-  out=$("$PYTHON" scripts/check_exports.py "$dll" "$ref" --names-only $STRICT 2>/dev/null) || rc=$?
+  : >"$errfile"
+  out=$("$PYTHON" scripts/check_exports.py "$dll" "$ref" --names-only ${STRICT:+"$STRICT"} 2>"$errfile") || rc=$?
   m=$(printf '%s\n' "$out" | grep '^MISSING'    | grep -oE '[0-9]+$' || true)
   d=$(printf '%s\n' "$out" | grep '^DECORATION' | grep -oE '[0-9]+$' || true)
   e=$(printf '%s\n' "$out" | grep '^EXTRA'      | grep -oE '[0-9]+$' || true)
@@ -126,6 +140,9 @@ for ver in "${VERSIONS[@]}"; do
   if [ "$rc" -ne 0 ] || [ -z "$m" ] || [ -z "$d" ] || [ -z "$e" ]; then
     status="FAIL"
     fail=1
+  fi
+  if [ -s "$errfile" ]; then
+    sed 's/^/    /' "$errfile" >&2
   fi
   printf "v%-4s MISSING=%-3s DECORATION=%-3s EXTRA=%-3s  %s\n" "$ver" "${m:-?}" "${d:-?}" "${e:-?}" "$status"
 done

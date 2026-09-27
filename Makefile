@@ -84,7 +84,7 @@ check-vendored: check-interpreter
 # build.zig.zon. It is checked, not written, here: a header swap or a pip bump
 # that does not regenerate it fails the gate rather than publishing a stale
 # inventory. See scripts/gen_sbom.py.
-check-sbom:
+check-sbom: check-interpreter
 	$(PYTHON) scripts/gen_sbom.py --check
 
 # The gate scripts are the linter, so ruff checks them too: ruff.toml pins the

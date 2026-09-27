@@ -17,8 +17,6 @@ So this reads the pins back out of each file and compares them, reporting:
 
   DRIFT     a file that must derive its pin, or names a different version
   UNPINNED  a file that must name a version does not
-
-Exit code 0 when every pin agrees.
 """
 
 import argparse
@@ -167,6 +165,9 @@ def c_flag_problems():
 def main():
     argparse.ArgumentParser(
         prog="check_toolchain_pins.py",
+        # The docstring is laid out as prose and a finding list; the default
+        # formatter reflows both into one paragraph.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
         epilog="Exit status: 0 every pin agrees, 1 they disagree, 2 bad invocation.",
     ).parse_args()

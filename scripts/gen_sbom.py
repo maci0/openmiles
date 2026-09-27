@@ -22,8 +22,6 @@ fail for no reason.
 --check compares the committed SBOM.cdx.json against what this run would write
 and exits 1 when they differ, so a header swap or a pip bump that forgets the
 inventory fails `make lint` instead of publishing a stale one.
-
-Exit code 0 written or current, 1 out of date, 2 bad invocation.
 """
 
 import argparse
@@ -225,6 +223,10 @@ def render():
 def main():
     parser = argparse.ArgumentParser(
         prog="gen_sbom.py",
+        # The docstring is laid out as prose and a list of the records the
+        # inventory is derived from; the default formatter reflows both into
+        # one paragraph.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
         epilog="Exit status: 0 SBOM written or current, 1 out of date, 2 bad invocation.",
     )

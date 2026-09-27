@@ -15,8 +15,6 @@ whose entry names no commit.
 --update rewrites deps/SHA256SUMS from the files on disk, for a deliberate
 header swap. Review the diff before committing it: the point of the check is
 that changing a digest is a conscious act.
-
-Exit code 0 when deps/ and SHA256SUMS agree.
 """
 
 import argparse
@@ -143,6 +141,10 @@ def read_sums():
 def main():
     parser = argparse.ArgumentParser(
         prog="check_vendored.py",
+        # The docstring is laid out as prose and a column-aligned finding list;
+        # the default formatter reflows both into one paragraph, which is what
+        # turned the finding names into run-on text.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
         epilog="Exit status: 0 deps/ matches SHA256SUMS, 1 they disagree, 2 bad invocation.",
     )
