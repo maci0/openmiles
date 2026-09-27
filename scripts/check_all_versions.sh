@@ -29,6 +29,13 @@ cd "$(dirname "$0")/.." || exit 1
 
 command -v zig >/dev/null || { echo "error: zig not found on PATH" >&2; exit 1; }
 
+# The parity gate's interpreter is resolved, not assumed, for the reason the
+# Makefile gives for PYTHON: `python3` is the name on Linux and macOS,
+# `python` the one a Windows install puts on PATH, and this script is a gate
+# CI may run from a Git Bash checkout.
+PYTHON=$(command -v python3 2>/dev/null || command -v python 2>/dev/null)
+[ -n "$PYTHON" ] || { echo "error: neither python3 nor python found on PATH" >&2; exit 1; }
+
 # Every build below is compared against a reference DLL, so a stray zig on PATH
 # would produce a verdict nobody audited. Makefile's check-toolchain refuses
 # exactly that; the sweep calls zig directly, so it repeats the check.
@@ -105,12 +112,12 @@ for ver in "${VERSIONS[@]}"; do
     fail=1
     continue
   fi
-  # check_exports.py exits with the discrepancy count, so a nonzero rc is a
-  # parity failure, not a crash. Its stderr is dropped to keep the table
-  # readable, so a missing line is reported as an empty count rather than
-  # aborting the sweep.
+  # check_exports.py exits 0 or 1 for a verdict and 2 for a bad invocation, so
+  # a nonzero rc is a parity failure, not a crash. Its stderr is dropped to
+  # keep the table readable, so a missing line is reported as an empty count
+  # rather than aborting the sweep.
   rc=0
-  out=$(python3 scripts/check_exports.py "$dll" "$ref" --names-only $STRICT 2>/dev/null) || rc=$?
+  out=$("$PYTHON" scripts/check_exports.py "$dll" "$ref" --names-only $STRICT 2>/dev/null) || rc=$?
   m=$(printf '%s\n' "$out" | grep '^MISSING'    | grep -oE '[0-9]+$' || true)
   d=$(printf '%s\n' "$out" | grep '^DECORATION' | grep -oE '[0-9]+$' || true)
   e=$(printf '%s\n' "$out" | grep '^EXTRA'      | grep -oE '[0-9]+$' || true)

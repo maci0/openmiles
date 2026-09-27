@@ -125,6 +125,29 @@ everything below is unreleased.
   their definitions had moved off, so the threat model read as claiming a
   mitigation at a place a reader would not find it. The references point at the
   line each anchor is on again.
+- A malformed line in `deps/SHA256SUMS` was printed and then ignored, so
+  `make check-vendored` reported the finding and still exited 0 while claiming
+  every vendored file matched. The line is a finding now, and the gate fails on
+  it.
+- `check_header.py` and `check_threat_model_refs.py` exited 2 when zig or
+  `docs/THREAT_MODEL.md` was missing. 2 is the bad-invocation code; a check
+  that could not run exits 1, as every other gate does.
+- `check_threat_model_refs.py` sent its findings to stderr while the other
+  gates report findings on stdout, so a script reading the report of a failing
+  gate saw nothing.
+- `scripts/check_all_versions.sh` called `python3` directly, where the
+  Makefile and CONTRIBUTING both resolve `python3` or `python`; a host that
+  names it `python` failed the parity sweep with no message.
+- `make help` told the reader that every individual check target takes
+  `--help`. `make check-header --help` is make's own help, prints it, and runs
+  no check, so the help named a way to get usage that does not exist; it now
+  names the script to run.
+- `make lint` was red on a clean tree: every `docs/THREAT_MODEL.md`
+  `file:line` reference into `src/root.zig`, `src/api/v8.zig` and
+  `src/engine/event.zig` that had moved since it was written failed the anchor
+  check. The anchors are the callback VFS, the whole-file read cap, the plugin
+  scan, the two soundbank entry points and the event step decode, at the lines
+  they are defined on.
 - `make lint` failed on a clean tree: `ruff check` reported the fixed-argv
   `zig cc` call in `check_header.py` under the bandit rules, and every
   `docs/THREAT_MODEL.md` `file:line` reference whose line had moved since it

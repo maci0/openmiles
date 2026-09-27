@@ -56,8 +56,10 @@ def main() -> int:
     args = parser.parse_args()
 
     if not DOC.exists():
+        # 1, not 2: nothing about the invocation is wrong, the check could not
+        # run. Every gate reserves 2 for a bad argument.
         print(f"error: {DOC} not found", file=sys.stderr)
-        return 2
+        return 1
 
     text = DOC.read_text(encoding="utf-8")
     problems: list[str] = []
@@ -92,10 +94,13 @@ def main() -> int:
         elif args.verbose:
             print(f"ok {path}:{line_no} {anchor}")
 
+    # Findings are the result of the check, so they go to stdout alongside the
+    # passing summary, the way the sibling gates report. stderr carries the
+    # hard errors above, the ones that mean the check never ran.
     if problems:
-        print(f"{len(problems)} threat model reference problem(s):", file=sys.stderr)
+        print(f"{len(problems)} threat model reference problem(s):")
         for problem in problems:
-            print(f"  {problem}", file=sys.stderr)
+            print(f"  {problem}")
         return 1
 
     print(f"threat model: {checked} file:line reference(s) resolve")

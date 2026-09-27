@@ -484,7 +484,9 @@ def compile_problems():
             "error: zig not found on PATH; `make check-toolchain` names the version",
             file=sys.stderr,
         )
-        sys.exit(2)
+        # 1, not 2: the invocation was fine, the check could not run. Every
+        # gate reserves 2 for a bad argument.
+        sys.exit(1)
     for version in SUPPORTED_VERSIONS:
         with tempfile.TemporaryDirectory() as tmp:
             tu = Path(tmp) / "header_check.c"

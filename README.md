@@ -80,9 +80,10 @@ does not declare are reported as a coverage count, not a failure; the per-symbol
 status for the rest is in [docs/API_STATUS.md](docs/API_STATUS.md).
 
 Every gate under `scripts/` follows one contract: `-h`/`--help` prints its own
-usage, findings go to stdout when they are the result and to stderr when they
-are the failure, and it exits 0 for a pass, 1 for a check failure, 2 for a bad
-invocation. `make help` lists each one and what it asserts.
+usage, the findings and the summary go to stdout as the result of the check, a
+missing tool or an unreadable file goes to stderr as the error that stopped it,
+and it exits 0 for a pass, 1 for a check failure, 2 for a bad invocation.
+`make help` lists each one and what it asserts.
 
 ### Running a subset of the tests
 

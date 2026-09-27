@@ -88,17 +88,25 @@ def vendored_files():
 
 
 def read_sums():
+    """Recorded digests by name, plus the SHA256SUMS lines that parse as none.
+
+    A malformed line is returned rather than printed here: it is a check
+    failure like any other, so it has to reach the problems list the exit
+    status is computed from. Printed from inside the parse, it left the gate
+    green over a line that records no digest at all.
+    """
     recorded = {}
+    malformed = []
     for lineno, raw in enumerate(SUMS.read_text().splitlines(), 1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         parts = line.split(maxsplit=1)
         if len(parts) != SUMS_FIELDS or len(parts[0]) != DIGEST_HEX_CHARS:
-            print(f"SHA256SUMS:{lineno} MALFORMED  {raw!r}")
+            malformed.append(f"SHA256SUMS:{lineno} MALFORMED  {raw!r}")
             continue
         recorded[parts[1].strip().lstrip("*")] = parts[0]
-    return recorded
+    return recorded, malformed
 
 
 def main():
@@ -122,8 +130,8 @@ def main():
         print(f"updated {SUMS.relative_to(ROOT)} with {len(on_disk)} entries")
         return 0
 
-    recorded = read_sums()
-    problems = []
+    recorded, malformed = read_sums()
+    problems = list(malformed)
 
     for name in sorted(on_disk):
         if name not in recorded:
@@ -151,7 +159,7 @@ def main():
         print(p)
 
     if problems:
-        print(f"{len(problems)} vendored file(s) disagree with {SUMS.relative_to(ROOT)}")
+        print(f"{len(problems)} finding(s) disagree with {SUMS.relative_to(ROOT)}")
         return 1
 
     print(f"{len(on_disk)} vendored file(s) match {SUMS.relative_to(ROOT)}")
