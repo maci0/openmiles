@@ -58,7 +58,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-zig-${{ steps.zig.outputs.version }}-
 
-      - name: Lint (zig fmt + shellcheck + C header parity, same rules as `make lint`)
+      - name: Install ruff
+        if: matrix.os == 'ubuntu-latest'
+        # Pinned to the RUFF_VERSION in the Makefile so the local gate and CI
+        # run the same analyzer; `make lint` refuses any other version.
+        run: |
+          uv tool install ruff==0.16.4
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Lint (zig fmt + ruff + shellcheck + C header parity, same rules as `make lint`)
         if: matrix.os == 'ubuntu-latest'
         run: make lint
 

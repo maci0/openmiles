@@ -6,6 +6,7 @@ ground truth — it is exactly what the import library games linked against
 resolves by name, including the stdcall byte-count decoration. A faithful
 reimplementation must export the same names with the same `@N`.
 """
+
 import argparse
 import re
 import sys
@@ -22,14 +23,14 @@ def exports(path):
     try:
         pe = pefile.PE(path, fast_load=True)
     except OSError as exc:
-        raise ValueError(f"cannot read {path}: {exc.strerror}")
-    except pefile.PEFormatError:
-        raise ValueError(f"{path} is not a PE image")
+        msg = f"cannot read {path}: {exc.strerror}"
+        raise ValueError(msg) from exc
+    except pefile.PEFormatError as exc:
+        msg = f"{path} is not a PE image"
+        raise ValueError(msg) from exc
     try:
         pe.parse_data_directories(
-            directories=[
-                pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"]
-            ]
+            directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"]]
         )
         out = set()
         if hasattr(pe, "DIRECTORY_ENTRY_EXPORT"):
@@ -51,10 +52,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="check_exports.py",
         description="Diff a built mss32.dll export table against a real Miles DLL.",
-        epilog=(
-            "Exit status: 0 export tables match, 1 discrepancies found, "
-            "2 bad invocation."
-        ),
+        epilog=("Exit status: 0 export tables match, 1 discrepancies found, 2 bad invocation."),
     )
     parser.add_argument("ours", metavar="OURS.dll", help="DLL we built")
     parser.add_argument("reference", metavar="REFERENCE.dll", help="real Miles DLL")

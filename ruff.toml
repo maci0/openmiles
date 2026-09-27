@@ -1,0 +1,53 @@
+# Lint and format config for the Python under scripts/. Those scripts are the
+# `make lint` gate itself: one that crashes, swallows an exception, or stops
+# reporting stops the gate silently, so they are held to the same bar as the
+# code they check.
+#
+# Enforced by `make lint` (ruff check + ruff format --check); run directly with
+#   ruff check . && ruff format --check .
+#
+# Not selected, and why: COM (COM812/COM819 fight the formatter over trailing
+# commas, and the formatter wins), S (the scripts read vendored headers and a
+# local DLL, never network input), ANN and D (annotating 60-line scripts and
+# documenting every three-line accessor is a separate pass).
+
+line-length = 100
+target-version = "py38"
+extend-exclude = ["deps", "zig-out", ".zig-cache", ".scratch"]
+
+[lint]
+select = [
+    "F",    # pyflakes
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "A",    # shadowing a builtin
+    "C4",   # comprehensions
+    "DTZ",  # naive datetime
+    "EM",   # exception message handling
+    "EXE",  # shebang/executable-bit agreement
+    "FURB", # refurb
+    "G",    # logging format
+    "ISC",  # implicit string concatenation
+    "LOG",  # logging misuse
+    "PERF", # per-file performance
+    "PIE",  # misc lints
+    "PL",   # pylint
+    "PTH",  # use pathlib
+    "PT",   # pytest style
+    "Q",    # quotes
+    "RET",  # return statements
+    "RUF",  # ruff-specific
+    "SIM",  # simplify
+    "TID",  # tidy imports
+    "TRY",  # tryceratops
+]
+# TRY003: every message here names the offending symbol and version, which is
+# the point of the tool; moving them into exception classes would hide it.
+ignore = ["TRY003"]
+
+[format]
+docstring-code-format = true

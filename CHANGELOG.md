@@ -30,8 +30,12 @@ everything below is unreleased.
 ### Added
 
 - `AIL_set_timer_divisor` for the legacy 8254 PIT timer rate.
-- CI runs the project's own `make lint` (zig fmt + shellcheck) and compiles C
-  with warnings as errors.
+- CI runs the project's own `make lint` (zig fmt + ruff + shellcheck) and
+  compiles C with warnings as errors.
+- `ruff check` and `ruff format` over `scripts/`, so the lint gate's own
+  scripts are linted; `ruff.toml` pins the rule set.
+- `make check-pins` (run by `make lint`) fails when the Zig and ruff versions
+  named in the Makefile, `ci.yml`, and `build.zig.zon` disagree.
 - Vendored dependency checksums are documented for `deps/`.
 
 ### Fixed

@@ -43,7 +43,9 @@ Requires [Zig 0.16.0](https://ziglang.org/download/). The version is declared
 once, as `.minimum_zig_version` in `build.zig.zon`; the Makefile, CI, and the
 release workflow all read it from there. `make build` and `make test` run a
 version check first and refuse to build on any other Zig; the raw `zig build`
-commands below do not.
+commands below do not. `make lint` additionally needs `shellcheck`
+and [ruff](https://docs.astral.sh/ruff/) 0.16.4 (the pinned version, checked
+before it runs), since the `scripts/` gate is linted too.
 
 ```bash
 # Native build (Linux/Windows -- for tests)

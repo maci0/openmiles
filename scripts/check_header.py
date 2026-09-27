@@ -28,6 +28,7 @@ Usage:
 
 Exit code 0 when the header and the export table agree for every version.
 """
+
 import re
 import sys
 from pathlib import Path
@@ -38,6 +39,15 @@ MSS_H = ROOT / "src" / "mss.h"
 
 # Every value -Dmss-version accepts, encoded as major*10+minor.
 SUPPORTED_VERSIONS = [30, 40, 50, 60, 61, 65, 66, 70, 80, 90]
+
+# The encoding of 8.0: the first release that drops the symbols in
+# REMOVED_AT_80 and switches MSS_RIB_CALL to __cdecl.
+V8_0 = 80
+
+# One entry per open #if in resolve_header: PENDING until a branch matches,
+# TAKEN while that branch is live, DONE once a branch has matched so the rest
+# of the chain is skipped.
+PENDING, TAKEN, DONE = 0, 1, 2
 
 TARGET_RE = re.compile(
     r'\.name = "([A-Za-z0-9_]+)"'
@@ -50,11 +60,28 @@ TARGET_RE = re.compile(
 # Symbols the export loop in main.zig never emits, and name substrings it
 # drops wholesale from 8.0 on. A declaration for either is a link error.
 REMOVED_AT_80 = [
-    "redbook", "quick", "sequence", "DLS", "midiOut", "XMIDI",
-    "midi_driver", "register_beat", "register_trigger", "register_sequence",
-    "register_timbre", "register_prefix", "register_ICA", "channel_notes",
-    "lock_channel", "release_channel", "send_channel_voice", "send_sysex",
-    "controller_value", "branch_index", "wave_synthesizer", "map_sequence",
+    "redbook",
+    "quick",
+    "sequence",
+    "DLS",
+    "midiOut",
+    "XMIDI",
+    "midi_driver",
+    "register_beat",
+    "register_trigger",
+    "register_sequence",
+    "register_timbre",
+    "register_prefix",
+    "register_ICA",
+    "channel_notes",
+    "lock_channel",
+    "release_channel",
+    "send_channel_voice",
+    "send_sysex",
+    "controller_value",
+    "branch_index",
+    "wave_synthesizer",
+    "map_sequence",
     "true_sequence",
 ]
 
@@ -115,13 +142,13 @@ def eval_guard(expr, version):
     return True
 
 
-def resolve_header(text, version):
-    """Return the declarations mss.h makes when OPENMILES_MSS_VERSION is `version`."""
+def resolve_header(text, version):  # noqa: PLR0912
+    """Return the declarations mss.h makes when OPENMILES_MSS_VERSION is `version`.
+
+    One branch per preprocessor directive, mirroring what cpp does; splitting it
+    would put the #if/#elif/#else/#endif chain apart from the parse it guards.
+    """
     decls = []
-    # One entry per open conditional: PENDING until a branch matches, TAKEN
-    # while that branch is live, DONE once a branch has matched so the rest of
-    # the chain is skipped.
-    PENDING, TAKEN, DONE = 0, 1, 2
     stack = []
     for raw in text.splitlines():
         line = raw.strip()
@@ -132,9 +159,7 @@ def resolve_header(text, version):
             continue
         if re.match(r"#elif\s+", line):
             if stack:
-                if stack[-1] == PENDING and eval_guard(
-                    re.sub(r"^#elif\s+", "", line), version
-                ):
+                if stack[-1] == PENDING and eval_guard(re.sub(r"^#elif\s+", "", line), version):
                     stack[-1] = TAKEN
                 elif stack[-1] == TAKEN:
                     stack[-1] = DONE
@@ -174,7 +199,7 @@ def arg_count(params):
 
 
 def parse_never_export(text):
-    m = re.search(r"const never_export = \[_\]\[\]const u8\{(.*?)\};", text, re.S)
+    m = re.search(r"const never_export = \[_\]\[\]const u8\{(.*?)\};", text, re.DOTALL)
     if not m:
         return set()
     return set(re.findall(r'"([A-Za-z0-9_]+)"', m.group(1)))
@@ -184,7 +209,7 @@ def emitted(exports, never_export, name, version):
     """True when main.zig's export loop emits `name` for `version`."""
     if name in never_export:
         return False
-    if version >= 80 and any(tok in name for tok in REMOVED_AT_80):
+    if version >= V8_0 and any(tok in name for tok in REMOVED_AT_80):
         return False
     return any(v[1] <= version <= v[2] for v in exports.get(name, ()))
 
@@ -235,9 +260,68 @@ def undefined_macros(text):
     got a definition. On the C side it shows up as a syntax error, or worse, as
     a calling convention silently expanding to nothing.
     """
-    defined = set(re.findall(r"^#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)", text, re.M))
+    defined = set(re.findall(r"^#\s*define\s+([A-Za-z_][A-Za-z0-9_]*)", text, re.MULTILINE))
     used = set(re.findall(r"\bMSS_[A-Z][A-Z0-9_]*\b", text))
     return sorted(used - defined)
+
+
+def decl_problems(version, decl, exports, never_export, rets):
+    """Return the problems one mss.h declaration has for `version`.
+
+    `decl` is the (return, convention, name, params) tuple resolve_header
+    produces. The checks are reported in the order the docstring lists them and
+    the first failure ends the declaration, so a name that no build provides is
+    reported once rather than five times.
+    """
+    ret, conv, name, params = decl
+    if name in never_export:
+        return [
+            (
+                f"v{version} NOTEXPORTED {name} is declared but main.zig lists it in "
+                "never_export, so no build provides it"
+            )
+        ]
+    if version >= V8_0 and any(tok in name for tok in REMOVED_AT_80):
+        return [
+            (f"v{version} NOTEXPORTED {name} is declared but main.zig drops '{name}' from 8.0 on")
+        ]
+    variants = exports.get(name)
+    if not variants:
+        return [f"v{version} UNDECLARED  {name} is not in the export table"]
+    live = [v for v in variants if v[1] <= version <= v[2]]
+    if not live:
+        return [f"v{version} RANGE       {name} is declared but no v{version} export provides it"]
+
+    problems = []
+    arities = {v[0] for v in live}
+    if arg_count(params) not in arities:
+        problems.append(
+            f"v{version} ARITY       {name} takes {arg_count(params)} args in the header, "
+            f"export expects {'/'.join(str(a) for a in sorted(arities))}"
+        )
+    impl = set()
+    for v in live:
+        impl |= rets.get(v[4], set())
+    want = c_return_class(ret)
+    if impl and want not in impl:
+        problems.append(
+            f"v{version} RETURN      {name} is declared '{ret}' but the implementation "
+            f"returns {'/'.join(sorted(impl))}"
+        )
+    want_cdecl = any(v[3] for v in live)
+    # MSS_RIB_CALL is itself version-conditional in the header, so resolve it
+    # the same way the C preprocessor would.
+    has_cdecl = version < V8_0 if conv == "MSS_RIB_CALL" else conv == "MSS_CDECL"
+    if want_cdecl and not has_cdecl:
+        problems.append(
+            f"v{version} CONVENTION  {name} is exported __cdecl but the header declares it stdcall"
+        )
+    if not want_cdecl and has_cdecl:
+        problems.append(
+            f"v{version} CONVENTION  {name} is exported __stdcall but the header "
+            "declares it __cdecl"
+        )
+    return problems
 
 
 def main():
@@ -251,74 +335,22 @@ def main():
     problems = []
     declared_by_version = {}
 
-    for macro in undefined_macros(header):
-        problems.append(f"UNDEFINED   macro {macro} is used but never #defined in mss.h")
+    problems += [
+        f"UNDEFINED   macro {macro} is used but never #defined in mss.h"
+        for macro in undefined_macros(header)
+    ]
 
     for version in SUPPORTED_VERSIONS:
         decls = resolve_header(header, version)
         declared_by_version[version] = {d[2] for d in decls}
-        for ret, conv, name, params in decls:
-            if name in never_export:
-                problems.append(
-                    f"v{version} NOTEXPORTED {name} is declared but main.zig lists it in "
-                    "never_export, so no build provides it"
-                )
-                continue
-            if version >= 80 and any(tok in name for tok in REMOVED_AT_80):
-                problems.append(
-                    f"v{version} NOTEXPORTED {name} is declared but main.zig drops "
-                    f"'{name}' from 8.0 on"
-                )
-                continue
-            variants = exports.get(name)
-            if not variants:
-                problems.append(f"v{version} UNDECLARED  {name} is not in the export table")
-                continue
-            live = [v for v in variants if v[1] <= version <= v[2]]
-            if not live:
-                problems.append(
-                    f"v{version} RANGE       {name} is declared but no v{version} export provides it"
-                )
-                continue
-            arities = {v[0] for v in live}
-            if arg_count(params) not in arities:
-                problems.append(
-                    f"v{version} ARITY       {name} takes {arg_count(params)} args in the header, "
-                    f"export expects {'/'.join(str(a) for a in sorted(arities))}"
-                )
-            impl = set()
-            for v in live:
-                impl |= rets.get(v[4], set())
-            want = c_return_class(ret)
-            if impl and want not in impl:
-                problems.append(
-                    f"v{version} RETURN      {name} is declared '{ret}' but the implementation "
-                    f"returns {'/'.join(sorted(impl))}"
-                )
-            cdecl = {v[3] for v in live}
-            want_cdecl = any(cdecl)
-            # MSS_RIB_CALL is itself version-conditional in the header, so
-            # resolve it the same way the C preprocessor would.
-            if conv == "MSS_RIB_CALL":
-                has_cdecl = version < 80
-            else:
-                has_cdecl = conv == "MSS_CDECL"
-            if want_cdecl and not has_cdecl:
-                problems.append(
-                    f"v{version} CONVENTION  {name} is exported __cdecl but the header declares it stdcall"
-                )
-            if not want_cdecl and has_cdecl:
-                problems.append(
-                    f"v{version} CONVENTION  {name} is exported __stdcall but the header declares it __cdecl"
-                )
+        for decl in decls:
+            problems += decl_problems(version, decl, exports, never_export, rets)
 
     for p in problems:
         print(p)
 
     for version in SUPPORTED_VERSIONS:
-        provided = {
-            name for name in exports if emitted(exports, never_export, name, version)
-        }
+        provided = {name for name in exports if emitted(exports, never_export, name, version)}
         covered = len(provided & declared_by_version[version])
         print(
             f"v{version}: {covered}/{len(provided)} exported symbols declared in mss.h"

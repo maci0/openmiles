@@ -13,6 +13,7 @@ zig-out/
 *.log
 
 # Debug/temp artifacts
+.scratch/
 europa_dump.txt
 exports.txt
 targets.txt

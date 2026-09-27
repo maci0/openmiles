@@ -19,6 +19,7 @@ Usage:
 
 Exit code 0 when deps/ and SHA256SUMS agree.
 """
+
 import hashlib
 import sys
 from pathlib import Path
@@ -40,6 +41,11 @@ def digest(path):
 # README.md documents the deps, it is not itself a vendored artifact.
 NOT_VENDORED = {SUMS.name, "README.md"}
 
+# A SHA256SUMS line is "<hex digest>  <path>": a two-field record whose digest
+# field is the full 64 hex characters of a SHA-256.
+SUMS_FIELDS = 2
+DIGEST_HEX_CHARS = 64
+
 
 def vendored_files():
     return sorted(p for p in DEPS.iterdir() if p.is_file() and p.name not in NOT_VENDORED)
@@ -52,7 +58,7 @@ def read_sums():
         if not line or line.startswith("#"):
             continue
         parts = line.split(maxsplit=1)
-        if len(parts) != 2 or len(parts[0]) != 64:
+        if len(parts) != SUMS_FIELDS or len(parts[0]) != DIGEST_HEX_CHARS:
             print(f"SHA256SUMS:{lineno} MALFORMED  {raw!r}")
             continue
         recorded[parts[1].strip().lstrip("*")] = parts[0]
@@ -78,9 +84,11 @@ def main():
         elif recorded[name] != on_disk[name]:
             problems.append(f"{name} MISMATCH   recorded {recorded[name]}")
 
-    for name in sorted(recorded):
-        if name not in on_disk:
-            problems.append(f"{name} MISSING    recorded in SHA256SUMS but absent from deps/")
+    problems += [
+        f"{name} MISSING    recorded in SHA256SUMS but absent from deps/"
+        for name in sorted(recorded)
+        if name not in on_disk
+    ]
 
     for p in problems:
         print(p)
