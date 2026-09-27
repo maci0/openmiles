@@ -3,6 +3,7 @@ const logger = @import("utils/logger.zig");
 
 pub const log = logger.log;
 pub const fs_compat = @import("utils/fs_compat.zig");
+pub const wide = @import("utils/wide.zig");
 
 /// Target MSS version (major*10+minor, e.g. 66 = 6.6), selected via -Dmss-version.
 pub const mss_version: u16 = @import("build_options").mss_version;

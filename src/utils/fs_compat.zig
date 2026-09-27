@@ -5,6 +5,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const logger = @import("logger.zig");
+const wide = @import("wide.zig");
 
 const log = logger.log;
 const is_windows = builtin.os.tag == .windows;
@@ -17,7 +18,7 @@ const win = if (is_windows) struct {
         dwHighDateTime: u32,
     };
 
-    pub const WIN32_FIND_DATAA = extern struct {
+    pub const WIN32_FIND_DATAW = extern struct {
         dwFileAttributes: u32,
         ftCreationTime: FILETIME,
         ftLastAccessTime: FILETIME,
@@ -26,13 +27,19 @@ const win = if (is_windows) struct {
         nFileSizeLow: u32,
         dwReserved0: u32,
         dwReserved1: u32,
-        cFileName: [260]u8,
-        cAlternateFileName: [14]u8,
+        cFileName: [260]u16,
+        cAlternateFileName: [14]u16,
     };
 
     pub const invalid_handle_value: HANDLE = @ptrFromInt(std.math.maxInt(usize));
 
-    extern "kernel32" fn FindFirstFileA(lpFileName: [*:0]const u8, lpFindFileData: *WIN32_FIND_DATAA) callconv(.winapi) HANDLE;
+    /// MAX_PATH, the bound on cFileName; a UTF-8 form of a name that long can
+    /// need up to three bytes per unit.
+    pub const MAX_PATH: usize = 260;
+
+    // The W entry point, so a component whose name carries characters outside
+    // the process ANSI code page is queried as written instead of mangled.
+    extern "kernel32" fn FindFirstFileW(lpFileName: [*:0]const u16, lpFindFileData: *WIN32_FIND_DATAW) callconv(.winapi) HANDLE;
     extern "kernel32" fn FindClose(hFindFile: HANDLE) callconv(.winapi) i32;
 } else struct {};
 
@@ -80,7 +87,7 @@ fn maybeResolveCaseInsensitiveWindowsPath(path: []const u8, out_buf: []u8) ?[]co
         const actual_component: []const u8 = if (std.mem.eql(u8, component, ".") or std.mem.eql(u8, component, ".."))
             component
         else blk: {
-            var query_buf: [std.fs.max_path_bytes:0]u8 = undefined;
+            var query_buf: [std.fs.max_path_bytes]u8 = undefined;
             var query_len: usize = 0;
 
             if (out_len > 0) {
@@ -96,14 +103,18 @@ fn maybeResolveCaseInsensitiveWindowsPath(path: []const u8, out_buf: []u8) ?[]co
             if (query_len + component.len >= query_buf.len) return null;
             @memcpy(query_buf[query_len..][0..component.len], component);
             query_len += component.len;
-            query_buf[query_len] = 0;
 
-            var find_data: win.WIN32_FIND_DATAA = undefined;
-            const handle = win.FindFirstFileA(&query_buf, &find_data);
+            var query_wbuf: [std.fs.max_path_bytes]u16 = undefined;
+            const query_w = wide.toWide(query_buf[0..query_len], &query_wbuf) catch return null;
+
+            var find_data: win.WIN32_FIND_DATAW = undefined;
+            const handle = win.FindFirstFileW(query_w.ptr, &find_data);
             if (handle == win.invalid_handle_value) return null;
             defer _ = win.FindClose(handle);
 
-            break :blk std.mem.sliceTo(find_data.cFileName[0..], 0);
+            // cFileName is UTF-16; the rest of this function works in UTF-8.
+            var name_buf: [win.MAX_PATH * 3]u8 = undefined;
+            break :blk wide.toUtf8(find_data.cFileName[0..], &name_buf) catch return null;
         };
 
         if (out_len > 0 and out_buf[out_len - 1] != '\\') {

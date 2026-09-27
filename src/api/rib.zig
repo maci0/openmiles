@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const openmiles = @import("openmiles");
 const log = openmiles.log;
 const io = openmiles.io;
+const wide = openmiles.wide;
 
 const Sample = openmiles.Sample;
 const Provider = openmiles.Provider;
@@ -113,6 +114,37 @@ pub fn RIB_find_files_provider(name: [*:0]const u8, property: [*:0]const u8, fil
     _ = RIB_enumerate_providers(name, null, &handle);
     return handle;
 }
+/// Directory for the unpacked ASI image, with a trailing separator so callers
+/// can append a file name to it. Returns null when no temp directory can be
+/// determined, leaving the caller to fall back to the current directory.
+fn tempDir(buf: []u8) ?[]const u8 {
+    if (builtin.os.tag == .windows) {
+        const GetTempPathW = struct {
+            extern "kernel32" fn GetTempPathW(nBufferLength: u32, lpBuffer: [*]u16) callconv(.winapi) u32;
+        }.GetTempPathW;
+        var wbuf: [std.fs.max_path_bytes]u16 = undefined;
+        const len = GetTempPathW(wbuf.len, &wbuf);
+        if (len == 0 or len >= wbuf.len) return null;
+        const dir = wide.toUtf8(wbuf[0..len], buf) catch return null;
+        return appendSeparator(buf, dir);
+    }
+    // TMPDIR is the POSIX convention; the game directory (the process cwd under
+    // Wine) is the fallback, and the caller covers that case too.
+    const tmp = std.c.getenv("TMPDIR") orelse return null;
+    const dir = std.mem.span(@as([*:0]const u8, tmp));
+    if (dir.len == 0 or dir.len > buf.len - 2) return null;
+    @memcpy(buf[0..dir.len], dir);
+    return appendSeparator(buf, buf[0..dir.len]);
+}
+
+fn appendSeparator(buf: []u8, dir: []const u8) ?[]const u8 {
+    if (dir.len == 0) return null;
+    const n = dir.len + @intFromBool(!std.fs.path.isSep(dir[dir.len - 1]));
+    if (n > buf.len) return null;
+    if (n != dir.len) buf[n - 1] = std.fs.path.sep;
+    return buf[0..n];
+}
+
 pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.winapi) ?*Provider {
     log("AIL_open_ASI_provider(buffer={*}, size={d})\n", .{ buffer, size });
     if (size < 2) return null;
@@ -122,14 +154,7 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     var path_buf: [512:0]u8 = undefined;
 
     var tmp_dir_buf: [260]u8 = undefined;
-    // GetTempPathA exists only on Windows (the real deploy target); elsewhere
-    // (e.g. the native test build) fall back to a cwd-relative temp file.
-    const tmp_len: u32 = if (builtin.os.tag == .windows) blk: {
-        const GetTempPathA = struct {
-            extern "kernel32" fn GetTempPathA(nBufferLength: u32, lpBuffer: [*]u8) callconv(.winapi) u32;
-        }.GetTempPathA;
-        break :blk GetTempPathA(tmp_dir_buf.len, &tmp_dir_buf);
-    } else 0;
+    const tmp_dir = tempDir(&tmp_dir_buf);
 
     // The image is written to TEMP and then LoadLibrary'd, so the file name must
     // not be predictable: a sequential counter would let a local process plant
@@ -146,8 +171,8 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     };
     var id = std.mem.readInt(u64, &id_bytes, .little);
     for (0..4) |_| {
-        path = if (tmp_len > 0)
-            std.fmt.bufPrintZ(&path_buf, "{s}om_asi_{x:016}.dll", .{ tmp_dir_buf[0..tmp_len], id }) catch |err| {
+        path = if (tmp_dir) |dir|
+            std.fmt.bufPrintZ(&path_buf, "{s}om_asi_{x:016}.dll", .{ dir, id }) catch |err| {
                 log("Error: {any}\n", .{err});
                 return null;
             }

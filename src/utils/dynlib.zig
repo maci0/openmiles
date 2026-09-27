@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const wide = @import("wide.zig");
 const native_os = builtin.os.tag;
 
 pub const Error = error{ FileNotFound, OutOfMemory, ImageFixupFailed } || std.posix.RealPathError;
@@ -131,20 +132,19 @@ fn recopyWritableSegment(fd: std.posix.fd_t, img: []u8, ph: std.elf.Phdr) !void 
 const WindowsDynLib = struct {
     const windows = std.os.windows;
 
-    extern "kernel32" fn LoadLibraryA(lpLibFileName: [*:0]const u8) callconv(.winapi) ?windows.HMODULE;
+    // LoadLibraryW, not LoadLibraryA: the game directory a plugin is loaded
+    // from routinely contains characters outside the process ANSI code page,
+    // which the A entry point turns into '?' and then fails to find.
+    extern "kernel32" fn LoadLibraryW(lpLibFileName: [*:0]const u16) callconv(.winapi) ?windows.HMODULE;
     extern "kernel32" fn FreeLibrary(hLibModule: windows.HMODULE) callconv(.winapi) windows.BOOL;
     extern "kernel32" fn GetProcAddress(hModule: windows.HMODULE, lpProcName: [*:0]const u8) callconv(.winapi) ?windows.FARPROC;
 
     module: windows.HMODULE,
 
     pub fn open(path: []const u8) !DynLib {
-        // LoadLibraryA needs a NUL-terminated path; bound by max_path_bytes.
-        var buf: [std.fs.max_path_bytes]u8 = undefined;
-        if (path.len >= buf.len) return error.FileNotFound;
-        @memcpy(buf[0..path.len], path);
-        buf[path.len] = 0;
-        const path_z: [*:0]const u8 = @ptrCast(&buf);
-        const module = LoadLibraryA(path_z) orelse return error.FileNotFound;
+        var buf: [std.fs.max_path_bytes]u16 = undefined;
+        const path_w = wide.toWide(path, &buf) catch return error.FileNotFound;
+        const module = LoadLibraryW(path_w.ptr) orelse return error.FileNotFound;
         return .{ .module = module };
     }
 

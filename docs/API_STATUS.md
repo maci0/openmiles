@@ -87,7 +87,7 @@ them; `make check-header` enforces that.
 | `RIB_enumerate_providers` | 🟢 Implemented | Iterates all registered providers matching requested interface |
 | `RIB_request_interface` | 🟢 Implemented | Copies built-in ASI interface entries |
 | `RIB_find_files_provider` | 🟢 Implemented | Delegates to RIB_enumerate_providers |
-| `AIL_open_ASI_provider` | 🟢 Implemented | Writes buffer to temp DLL file and loads via Provider.load |
+| `AIL_open_ASI_provider` | 🟢 Implemented | Writes buffer to a temp file (%TEMP% via GetTempPathW, $TMPDIR elsewhere, cwd as last resort) and loads it via Provider.load |
 | `AIL_close_ASI_provider` | 🟢 Implemented | |
 | `AIL_ASI_provider_attribute` | 🟢 Implemented | Searches registered interfaces |
 

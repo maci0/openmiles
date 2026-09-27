@@ -1,4 +1,5 @@
-//! Test root for engine-internal unit tests.
+//! Test root for engine-internal unit tests and for the standalone helpers the
+//! engine modules depend on.
 //!
 //! A file's `test` blocks are only included in a test binary when that file is
 //! pulled in with `_ = @import(...)`. The engine modules live inside the
@@ -10,4 +11,5 @@
 comptime {
     _ = @import("engine/digital.zig");
     _ = @import("engine/midi.zig");
+    _ = @import("utils/wide.zig");
 }

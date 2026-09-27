@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const wide = @import("wide.zig");
 
 const io: std.Io = std.Io.Threaded.global_single_threaded.io();
 
@@ -17,8 +18,10 @@ var initialized = false;
 var debug_enabled = false;
 var mutex: std.Io.Mutex = .init;
 
-extern "kernel32" fn GetEnvironmentVariableA(lpName: [*:0]const u8, lpBuffer: [*]u8, nSize: u32) callconv(.winapi) u32;
-extern "kernel32" fn OutputDebugStringA(lpOutputString: [*c]const u8) callconv(.winapi) void;
+// The W (UTF-16) entry points, not the A ones: the value of a UTF-8 env var
+// name and log text is not confined to the process ANSI code page.
+extern "kernel32" fn GetEnvironmentVariableW(lpName: [*:0]const u16, lpBuffer: [*]u16, nSize: u32) callconv(.winapi) u32;
+extern "kernel32" fn OutputDebugStringW(lpOutputString: [*:0]const u16) callconv(.winapi) void;
 
 fn isTruthy(val: []const u8) bool {
     return std.mem.eql(u8, val, "1") or std.mem.eql(u8, val, "true");
@@ -33,11 +36,19 @@ pub fn init() void {
     debug_enabled = builtin.mode == .Debug;
 
     if (builtin.os.tag == .windows) {
+        var name_wbuf: [64]u16 = undefined;
+        var wbuf: [256]u16 = undefined;
         var buf: [256]u8 = undefined;
-        const len = GetEnvironmentVariableA("OPENMILES_DEBUG", &buf, buf.len);
-        if (len > 0 and len < buf.len) {
-            debug_enabled = isTruthy(buf[0..len]);
-        }
+        // A conversion failure leaves debug_enabled at its build-mode default
+        // rather than aborting init, so the log file still opens.
+        if (wide.toWide("OPENMILES_DEBUG", &name_wbuf)) |name| {
+            const len = GetEnvironmentVariableW(name.ptr, &wbuf, wbuf.len);
+            if (len > 0 and len < wbuf.len) {
+                if (wide.toUtf8(wbuf[0..len], &buf)) |val| {
+                    debug_enabled = isTruthy(val);
+                } else |_| {}
+            }
+        } else |_| {}
     } else {
         if (std.c.getenv("OPENMILES_DEBUG")) |val_ptr| {
             debug_enabled = isTruthy(std.mem.span(@as([*:0]const u8, val_ptr)));
@@ -76,10 +87,10 @@ pub fn log(comptime fmt: []const u8, args: anytype) void {
     defer mutex.unlock(io);
 
     if (builtin.os.tag == .windows) {
-        var z_buf: [1025]u8 = undefined;
-        @memcpy(z_buf[0..msg.len], msg);
-        z_buf[msg.len] = 0;
-        OutputDebugStringA(@ptrCast(&z_buf));
+        var w_buf: [1025]u16 = undefined;
+        if (wide.toWide(msg, &w_buf)) |w| {
+            OutputDebugStringW(w.ptr);
+        } else |_| {}
     } else {
         std.debug.print("{s}", .{msg});
     }
