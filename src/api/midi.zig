@@ -43,6 +43,17 @@ pub fn AIL_init_sequence(seq_opt: ?*Sequence, data: *anyopaque, sequence_num: i3
     // The third parameter is the sequence/track index (0-based), NOT the data size.
     const raw: [*]const u8 = @ptrCast(@alignCast(data));
     const midi_len = openmiles.detectMidiSize(raw);
+    // The detector returns the streaming sentinel when it cannot establish a
+    // real length: an image that is neither FORM nor MThd, or an MThd whose
+    // declared track extents exceed the sentinel budget. The sentinel is a
+    // "length unknown" marker, not a length, and slicing the caller's bare
+    // pointer with it reads far past the game's allocation. Refuse instead, as
+    // MSS does for data it cannot identify as MIDI.
+    if (midi_len == 0 or midi_len == openmiles.streaming_sentinel_size) {
+        log("AIL_init_sequence: no usable MIDI length (detected {d})\n", .{midi_len});
+        openmiles.setLastError("Unrecognized MIDI data");
+        return 0;
+    }
     const midi_data = raw[0..midi_len];
     seq.loadMidi(midi_data, @intCast(@max(0, sequence_num))) catch |err| {
         log("AIL_init_sequence: loadMidi(track {d}, {d} bytes) failed ({any})\n", .{ sequence_num, midi_len, err });

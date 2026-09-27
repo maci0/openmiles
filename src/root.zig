@@ -73,6 +73,7 @@ pub const RIB_Main_ptr = rib_mod.RIB_Main_ptr;
 
 const audio_detect = @import("engine/audio_detect.zig");
 pub const streaming_sentinel_size = audio_detect.streaming_sentinel_size;
+pub const max_declared_image_size = audio_detect.max_declared_image_size;
 pub const detectAudioSize = audio_detect.detectAudioSize;
 pub const detectMidiSize = audio_detect.detectMidiSize;
 pub const detectFileType = audio_detect.detectFileType;
@@ -284,6 +285,12 @@ pub fn fileCallbackReadAll(filename: [*:0]const u8) ![]u8 {
         }
     }
     defer close_fn(handle);
+
+    // A VFS reports the length, and the reported value is what gets allocated
+    // and read. Cap it exactly as the direct path does, so a lying or huge stat
+    // result cannot turn into an allocation of arbitrary size (and, on the
+    // 32-bit target, a wrap).
+    if (@as(u64, file_size) > max_file_load_bytes) return error.BadSize;
 
     const buf = try global_allocator.alloc(u8, file_size);
     errdefer global_allocator.free(buf);

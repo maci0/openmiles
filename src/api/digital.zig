@@ -868,12 +868,17 @@ pub fn AIL_set_error(msg: ?[*:0]const u8) callconv(.winapi) void {
 // to avoid Zig stage2_llvm miscompilation of C varargs on Windows.
 
 pub fn AIL_WAV_info(data: *anyopaque, info: *anyopaque) callconv(.winapi) i32 {
-    // Size-less SDK ABI: the caller guarantees the buffer spans the declared RIFF
-    // size, so there is no length to bound against here. Internal callers that
-    // know the real buffer length must use wavInfoBounded (openmiles facade) so
-    // an attacker-supplied RIFF size field cannot drive reads past the actual
-    // allocation.
-    return openmiles.wavInfoBounded(@ptrCast(@alignCast(data)), std.math.maxInt(usize), info);
+    // Size-less SDK ABI: the caller passes a bare pointer and guarantees the
+    // buffer spans the declared RIFF size, so there is no true length to bound
+    // against. Internal callers that know the real buffer length must use
+    // wavInfoBounded (openmiles facade) with it. Here the bound is the
+    // declared-image ceiling: a hostile RIFF or chunk size field must not walk
+    // the parse past that, and a chunk larger than it is not a real image.
+    return openmiles.wavInfoBounded(
+        @ptrCast(@alignCast(data)),
+        openmiles.max_declared_image_size,
+        info,
+    );
 }
 
 pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, rate: i32, format: i32) callconv(.winapi) i32 {
