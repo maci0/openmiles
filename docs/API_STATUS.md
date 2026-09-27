@@ -449,7 +449,7 @@ them; `make check-header` enforces that.
 | `MilesSetVarI/F` / `MilesGetVarI/F` | 🟢 Implemented | Per-system variable store (default + named systems) |
 | `MilesStartupEventSystem` / `MilesAddEventSystem` / `MilesShutdownEventSystem` | 🟢 Implemented | Event-system lifecycle (linked list of systems) |
 | `MilesGetEventSystemState` | 🟢 Implemented | Reports live command-buffer size, loaded-bank / loaded-sound / playing-sound / persist counts (memory stats remain 0) |
-| `AIL_open_soundbank` / `MilesAddSoundBank` / `*ReleaseSoundBank` | 🟢 Implemented | Loads the `BANK` format; registers in the global container; enumerates event/sound/preset/env assets |
+| `AIL_open_soundbank` / `MilesAddSoundBank` / `*ReleaseSoundBank` | 🟢 Implemented | Loads the `BANK` format; registers in the global container in load order (a name defined by two banks resolves to the one loaded first); enumerates event/sound/preset/env assets |
 | `AIL_find_event` / `MilesFindEvent` / `AIL_get_event_contents` | 🟢 Implemented | Resolves a named event's step bytecode (`hlbank.cpp`) |
 | `AIL_sound_asset_filename` / `AIL_sound_asset_info` | 🟢 Implemented | Formats `*<bank><sound>` path and fills `MILESBANKSOUNDINFO` from the `Sound` struct |
 | `MilesEnqueueEvent*` / `MilesEnqueueEventByName` / `MilesStartSoundInstance` | 🟢 Implemented | Parse the event bytecode and create tracked sound instances per start_sound step (durations resolved via the bank container) |

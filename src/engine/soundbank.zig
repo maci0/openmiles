@@ -18,7 +18,10 @@ pub const BANK_VERSION: i32 = 8;
 // Global registry of currently-loaded banks (the SDK's "container"). Banks add
 // themselves in loadFromMemory and remove themselves in Bank.deinit, so the
 // container can resolve an event or sound by name across every loaded bank —
-// what MilesGetEventLength / event enqueue look it up through.
+// what MilesGetEventLength / event enqueue look it up through. The list is kept
+// in load order and the first bank holding a name answers for it, so a game that
+// overrides a bank by loading a second one after it is unaffected by the order
+// in which unrelated banks are later released.
 var g_registry: std.ArrayListUnmanaged(*Bank) = .empty;
 var g_registry_lock: std.atomic.Value(bool) = .init(false);
 // The registry backing uses a process-stable allocator, independent of any
@@ -46,7 +49,13 @@ fn registryRemove(bank: *Bank) void {
     defer regUnlock();
     for (g_registry.items, 0..) |b, i| {
         if (b == bank) {
-            _ = g_registry.swapRemove(i);
+            // orderedRemove, not swapRemove: registry order is the resolution
+            // order, so a bank that duplicates another's event/sound name wins
+            // by being loaded first. swapRemove would move the last-loaded bank
+            // into the freed slot, and unloading a bank would silently change
+            // which bank answers a name it never defined. The cost is an O(n)
+            // shift over the handful of banks a game loads.
+            _ = g_registry.orderedRemove(i);
             return;
         }
     }
@@ -455,6 +464,11 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
     // that table on the linear-scan path.
     self.event_index = self.buildNameIndex(.events) catch .{};
     self.sound_index = self.buildNameIndex(.sounds) catch .{};
+    // The indexes are owned by self from here on, so a failure of the last
+    // fallible step must release them: the errdefers above only free meta,
+    // fname and the struct itself, which would strand every index key.
+    errdefer self.event_index.deinit(self.allocator);
+    errdefer self.sound_index.deinit(self.allocator);
     // A bank that cannot be registered must fail the whole load: the registry is
     // the only lookup path (MilesFindEvent / Container_GetSound), so returning a
     // success here would hand out a handle whose assets can never be found.
@@ -483,6 +497,8 @@ test "asset lookup: index parity with scan semantics" {
     // Header: two event entries + one sound entry, tables right after it.
     const ev_off: u32 = header_size;
     const snd_off: u32 = ev_off + 3 * asset_entry_size;
+    w32(&img, off_tag, BANK_TAG);
+    w32(&img, off_version, @bitCast(BANK_VERSION));
     w32(&img, off_events, ev_off);
     w32(&img, off_sounds, snd_off);
     w32(&img, off_event_count, 3);
@@ -538,4 +554,71 @@ test "asset lookup: index parity with scan semantics" {
     try testing.expect(bank.findEventContents("nope") == null);
     // Sounds table lookups go through their own index.
     try testing.expectEqual(d0, bank.findSoundDataOffset("KICK") orelse return error.NoSound);
+}
+
+test "container: a duplicated event name resolves by load order, not unload history" {
+    const testing = std.testing;
+
+    // One event per image, the same name in all of them, distinct contents.
+    const BankImage = struct {
+        bytes: [256]u8,
+        len: usize,
+        data_off: u32,
+
+        fn build(img: *@This(), tag: u8) void {
+            @memset(&img.bytes, 0);
+            const w32 = struct {
+                fn f(buf: []u8, off: usize, v: u32) void {
+                    std.mem.writeInt(u32, buf[off..][0..4], v, .little);
+                }
+            }.f;
+            w32(&img.bytes, off_events, @intCast(header_size));
+            w32(&img.bytes, off_tag, BANK_TAG);
+            w32(&img.bytes, off_version, @bitCast(BANK_VERSION));
+            w32(&img.bytes, off_event_count, 1);
+            var pool: usize = header_size + asset_entry_size;
+            const name = "Boom";
+            w32(&img.bytes, header_size, @intCast(pool));
+            @memcpy(img.bytes[pool..][0..name.len], name[0..name.len]);
+            pool += name.len + 1;
+            img.data_off = @intCast(pool);
+            w32(&img.bytes, header_size + 4, img.data_off);
+            @memset(img.bytes[pool..][0..4], tag);
+            pool += 4;
+            w32(&img.bytes, off_meta_size, @intCast(pool));
+            img.len = pool;
+        }
+    };
+
+    var imgs: [3]BankImage = undefined;
+    for (&imgs, 0..) |*img, i| img.build(@intCast('A' + i));
+
+    const resolvesTo = struct {
+        fn f(bank: *Bank, off: u32) bool {
+            const p = containerFindEvent("boom") orelse return false;
+            return @intFromPtr(p) - @intFromPtr(bank.meta.ptr) == off;
+        }
+    }.f;
+
+    // Each bank is released mid-test, so a guard tracks what is still live and
+    // keeps an assertion failure from double-freeing one.
+    const first = try loadFromMemory(testing.allocator, "one.mbnk", imgs[0].bytes[0..imgs[0].len]);
+    var first_live = true;
+    defer if (first_live) first.deinit();
+    const second = try loadFromMemory(testing.allocator, "two.mbnk", imgs[1].bytes[0..imgs[1].len]);
+    var second_live = true;
+    defer if (second_live) second.deinit();
+    const third = try loadFromMemory(testing.allocator, "three.mbnk", imgs[2].bytes[0..imgs[2].len]);
+    const third_live = true;
+    defer if (third_live) third.deinit();
+
+    try testing.expect(resolvesTo(first, imgs[0].data_off));
+    // Releasing the winning bank must promote the next one loaded, not the
+    // one that happens to sit last in the registry.
+    first.deinit();
+    first_live = false;
+    try testing.expect(resolvesTo(second, imgs[1].data_off));
+    second.deinit();
+    second_live = false;
+    try testing.expect(resolvesTo(third, imgs[2].data_off));
 }

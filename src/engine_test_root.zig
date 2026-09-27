@@ -11,5 +11,6 @@
 comptime {
     _ = @import("engine/digital.zig");
     _ = @import("engine/midi.zig");
+    _ = @import("engine/soundbank.zig");
     _ = @import("utils/wide.zig");
 }
