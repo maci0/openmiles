@@ -51,6 +51,17 @@ everything below is unreleased.
 
 ### Fixed
 
+- The unregister callback a plugin is handed at `RIB_Main` did nothing:
+  `rib_unregister_interface` discarded its handle, and `rib_register_interface`
+  returned 0 or 1 rather than an interface handle, so a plugin that dropped an
+  interface at shutdown left every one of its entries in the provider registry.
+  `RIB_request_interface` and `AIL_ASI_provider_attribute` then resolved tokens
+  for an interface the module had already torn down. `RIB_register_interface`
+  now returns the handle of the interface it stored, and the callback removes
+  exactly that interface. Handles come from a per-provider counter that never
+  reuses a value, so a handle a plugin still holds cannot name a later
+  registration. The host-side `RIB_unregister_interface(provider, name, ...)`
+  export is unchanged.
 - `docs/THREAT_MODEL.md`: the `path:line anchor` references had drifted off the
   lines they name, so `make check-threat-model` failed and took `make lint` and
   `make check` with it. The ASI temp-file controls now point at the entropy
@@ -72,7 +83,12 @@ everything below is unreleased.
   caller passes one argument now instead of two. No `Provider` field changes,
   and the C export `RIB_alloc_provider_handle(module)` still takes the module
   pointer, so `mss32.dll`'s export table and every C consumer are unaffected.
-  This is the only public-surface break in this release, and it is Zig-only.
+  Both breaks in this release are Zig-only.
+- `Provider.registerInterface` returns `!?*Interface`: the interface it
+  stored, or null when the plugin's arguments were rejected. A Zig caller that
+  discards the result needs an explicit `_ =`. The handle that comes with it is
+  what the plugin's unregister callback takes, so this is how a caller reaches
+  that path.
 
 ### Added
 

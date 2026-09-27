@@ -1325,7 +1325,7 @@ pub fn startup() void {
     var src = get_ASI_INTERFACE();
 
     log("startup: registerInterface\n", .{});
-    p.registerInterface("ASI codec", @intCast(src.len), &src) catch {
+    _ = p.registerInterface("ASI codec", @intCast(src.len), &src) catch {
         log("startup: registerInterface FAILED\n", .{});
         p.deinit();
         return;
@@ -1335,7 +1335,7 @@ pub fn startup() void {
     // MP3/OGG streaming is available.  The built-in miniaudio decoder
     // handles MP3, OGG, WAV and FLAC natively, so no external .asi plugins
     // are required.
-    p.registerInterface("ASI stream", @intCast(src.len), &src) catch {
+    _ = p.registerInterface("ASI stream", @intCast(src.len), &src) catch {
         log("startup: registerInterface ASI stream FAILED\n", .{});
     };
     startup_provider.store(p, .release);

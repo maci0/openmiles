@@ -169,7 +169,7 @@ test "Provider registry and finding" {
         .token = 0x1234,
         .subtype = 0,
     };
-    try provider.registerInterface("TestInterface", 1, &entry);
+    _ = try provider.registerInterface("TestInterface", 1, &entry);
 
     var found = false;
     for (provider.interfaces.items) |iface| {
@@ -252,10 +252,10 @@ test "Provider registry allows duplicate interface names" {
         .token = 0x9999,
         .subtype = 0,
     };
-    try provider.registerInterface("TestIface", 1, &entry);
+    _ = try provider.registerInterface("TestIface", 1, &entry);
     const count_before = provider.interfaces.items.len;
     // Registering again should add a second entry (no dedup); verify it doesn't crash
-    try provider.registerInterface("TestIface", 1, &entry);
+    _ = try provider.registerInterface("TestIface", 1, &entry);
     try testing.expectEqual(count_before + 1, provider.interfaces.items.len);
 }
 
@@ -1422,9 +1422,9 @@ test "unregistering an interface name removes every registration of it" {
         .token = 2,
         .subtype = 0,
     }};
-    try p.registerInterface("filter", 1, &cut);
-    try p.registerInterface("other", 1, &keep);
-    try p.registerInterface("filter", 1, &cut);
+    _ = try p.registerInterface("filter", 1, &cut);
+    _ = try p.registerInterface("other", 1, &keep);
+    _ = try p.registerInterface("filter", 1, &cut);
     try testing.expectEqual(@as(usize, 3), p.interfaces.items.len);
 
     p.unregisterInterface("filter");
@@ -1435,6 +1435,49 @@ test "unregistering an interface name removes every registration of it" {
     // A second unregister of the same name is a no-op, not another change.
     p.unregisterInterface("filter");
     try testing.expectEqual(@as(usize, 1), p.interfaces.items.len);
+}
+
+test "unregistering by handle drops only the interface it names" {
+    // A plugin unregisters through the handle RIB_register_interface handed it,
+    // so a name-keyed drop is not reachable for it. The handle is specific to
+    // one registration: the interface the plugin no longer serves must stop
+    // answering entry lookups while the one it kept stays.
+    const p = try openmiles.Provider.init(testing.allocator);
+    defer p.deinit();
+
+    var cut = [_]openmiles.RIB_INTERFACE_ENTRY{.{
+        .entry_type = .RIB_ATTRIBUTE,
+        .name = "cutoff",
+        .token = 1,
+        .subtype = 0,
+    }};
+    var keep = [_]openmiles.RIB_INTERFACE_ENTRY{.{
+        .entry_type = .RIB_ATTRIBUTE,
+        .name = "master",
+        .token = 2,
+        .subtype = 0,
+    }};
+    const cut_iface = (try p.registerInterface("filter", 1, &cut)).?;
+    const keep_iface = (try p.registerInterface("other", 1, &keep)).?;
+    // Handles are not reused, so unregistering one can never name the other.
+    try testing.expect(cut_iface.handle != 0);
+    try testing.expect(cut_iface.handle != keep_iface.handle);
+    try testing.expectEqual(@as(?usize, 2), keep_iface.tokenFor("master"));
+
+    p.unregisterInterfaceHandle(cut_iface.handle);
+    try testing.expectEqual(@as(usize, 1), p.interfaces.items.len);
+    try testing.expectEqualStrings("other", p.interfaces.items[0].name);
+    try testing.expectEqual(@as(?usize, null), p.interfaces.items[0].tokenFor("cutoff"));
+    try testing.expectEqual(@as(?usize, 2), p.interfaces.items[0].tokenFor("master"));
+
+    // A handle already dropped, and one no registration ever issued, change
+    // nothing: a plugin that unregisters twice (or unregisters a handle from a
+    // provider it is not loading into) must not corrupt the list.
+    p.unregisterInterfaceHandle(cut_iface.handle);
+    p.unregisterInterfaceHandle(0);
+    try testing.expectEqual(@as(usize, 1), p.interfaces.items.len);
+    p.unregisterInterfaceHandle(keep_iface.handle);
+    try testing.expectEqual(@as(usize, 0), p.interfaces.items.len);
 }
 
 test "loading the same plugin path twice is recognised as one provider" {

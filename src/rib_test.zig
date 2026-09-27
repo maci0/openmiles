@@ -20,7 +20,7 @@ fn entry(comptime name: [:0]const u8, token: usize) Entry {
 fn providerWith(iface_name: [:0]const u8, entries: []const Entry) !*openmiles.Provider {
     const p = try openmiles.Provider.init(testing.allocator);
     errdefer p.deinit();
-    try p.registerInterface(iface_name, @intCast(entries.len), @ptrCast(@constCast(entries.ptr)));
+    _ = try p.registerInterface(iface_name, @intCast(entries.len), @ptrCast(@constCast(entries.ptr)));
     return p;
 }
 
@@ -64,7 +64,7 @@ test "RIB_enumerate_interface entry names stay readable after later registration
     defer p.deinit();
 
     const first = [_]Entry{entry("held open", 1)};
-    try p.registerInterface("ASI digital audio engine", 1, @ptrCast(@constCast(&first)));
+    _ = try p.registerInterface("ASI digital audio engine", 1, @ptrCast(@constCast(&first)));
 
     var cursor: ?*anyopaque = null;
     var out: Entry = undefined;
@@ -79,7 +79,7 @@ test "RIB_enumerate_interface entry names stay readable after later registration
         n[23] = 0;
         e.* = .{ .entry_type = .RIB_ATTRIBUTE, .name = n, .token = 0x1000 + i, .subtype = 0 };
     }
-    try p.registerInterface("ASI digital audio engine", filler_count, @ptrCast(@constCast(&extra[0])));
+    _ = try p.registerInterface("ASI digital audio engine", filler_count, @ptrCast(@constCast(&extra[0])));
 
     try testing.expectEqualStrings("held open", std.mem.span(@as([*:0]const u8, @ptrCast(held))));
     try testing.expectEqual(@as(usize, 1), out.token);
@@ -114,8 +114,8 @@ test "registering the same interface name twice keeps both registrations" {
 
     const first = [_]Entry{entry("cutoff", 1)};
     const second = [_]Entry{ entry("cutoff", 99), entry("order", 2) };
-    try p.registerInterface("filter", 1, @ptrCast(@constCast(&first[0])));
-    try p.registerInterface("filter", 2, @ptrCast(@constCast(&second[0])));
+    _ = try p.registerInterface("filter", 1, @ptrCast(@constCast(&first[0])));
+    _ = try p.registerInterface("filter", 2, @ptrCast(@constCast(&second[0])));
     try testing.expectEqual(@as(usize, 2), p.interfaces.items.len);
 
     const iface = p.interfaces.items[0];

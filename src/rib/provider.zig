@@ -53,20 +53,31 @@ fn rib_register_interface(provider_handle: HPROVIDER, name: [*c]const u8, entry_
     if (provider_handle) |ptr| {
         const p: *Provider = @ptrCast(@alignCast(ptr));
         const z_name = std.mem.span(name);
-        p.registerInterface(z_name, entry_count, entries) catch |err| {
+        const iface = p.registerInterface(z_name, entry_count, entries) catch |err| blk: {
             log("rib_register_interface: failed for '{s}': {any}\n", .{ z_name, err });
-            // Report failure to the plugin: 1 here tells it the entries are
+            // Report failure to the plugin: a handle here tells it the entries are
             // registered, so it will dispatch through tokens that were never
             // stored (an OOM inside registerInterface drops them all).
-            return 0;
+            break :blk null;
         };
-        return 1;
+        return @intCast(iface.?.handle);
     }
     return 0;
 }
 
+/// Drop the interface the plugin holds the handle for. A plugin unregisters
+/// through the callback it was handed at registration, so without this its
+/// shutdown left every entry of the interface in the registry: a later
+/// RIB_request_interface or AIL_ASI_provider_attribute still resolved a token
+/// for an interface the module had already torn down.
+///
+/// The handle is resolved against the thread's loading provider, the one the
+/// registration went into, so a handle cannot unregister another provider's
+/// interface. A handle that names nothing is a no-op: a plugin that
+/// unregisters the same interface twice changes nothing the second time.
 fn rib_unregister_interface(handle: usize) callconv(.c) void {
-    _ = handle;
+    const p = current_loading_provider orelse return;
+    p.unregisterInterfaceHandle(handle);
 }
 
 pub const Provider = struct {
@@ -87,6 +98,10 @@ pub const Provider = struct {
     source_path: ?[:0]u8 = null,
     user_data: [8]usize = [_]usize{0} ** 8,
     system_data: [8]usize = [_]usize{0} ** 8,
+    // Source of the interface handles handed to the plugin. Monotonic and
+    // never reused, so a handle a plugin still holds cannot name a different
+    // interface registered after the one it was given.
+    next_handle: u64 = 1,
 
     pub fn init(allocator: std.mem.Allocator) !*Provider {
         log("Provider.init called\n", .{});
@@ -216,7 +231,23 @@ pub const Provider = struct {
         }
     }
 
-    pub fn registerInterface(self: *Provider, name: []const u8, count: i32, entries: ?*anyopaque) !void {
+    /// Removes the one interface `handle` names, the path a plugin takes
+    /// through the unregister callback it was handed at registration. Drops
+    /// only that interface, unlike unregisterInterface by name, because a
+    /// handle is specific to one registration.
+    pub fn unregisterInterfaceHandle(self: *Provider, handle: usize) void {
+        for (self.interfaces.items, 0..) |iface, i| {
+            if (iface.handle == handle) {
+                iface.deinit();
+                _ = self.interfaces.orderedRemove(i);
+                return;
+            }
+        }
+    }
+
+    /// Register `name` and return the stored interface, whose `handle` is what
+    /// RIB_unregister_interface takes.
+    pub fn registerInterface(self: *Provider, name: []const u8, count: i32, entries: ?*anyopaque) !?*Interface {
         log("Provider.registerInterface called: {s}, count={d}\n", .{ name, count });
         // A negative entry count comes from the plugin, not from us: rejecting
         // it silently would hand back an empty interface the plugin believes
@@ -245,7 +276,10 @@ pub const Provider = struct {
                 try iface.add(std.mem.span(entry.name), entry.token);
             }
         }
+        iface.handle = self.next_handle;
+        self.next_handle += 1;
         try self.interfaces.append(self.allocator, iface);
+        return iface;
     }
 
     /// True when `path` names a module this provider was already loaded from,
@@ -280,6 +314,10 @@ pub const Interface = struct {
     /// lives only in `order`, so the two containers cannot disagree.
     index: std.StringHashMapUnmanaged(usize) = .empty,
     allocator: std.mem.Allocator,
+    /// What RIB_unregister_interface takes to drop this registration. Assigned
+    /// by Provider.registerInterface from a per-provider counter, so it is
+    /// unique among the interfaces that provider holds and is never reused.
+    handle: usize = 0,
 
     pub fn init(allocator: std.mem.Allocator, name: []const u8) !*Interface {
         const duped = try allocator.dupe(u8, name);
