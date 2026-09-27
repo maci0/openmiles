@@ -51,6 +51,82 @@ everything below is unreleased.
 
 ### Fixed
 
+- `AIL_set_sample_playback_delay` stored its value and read it back, and no
+  start ever applied it, so a game that staggered sounds by a few hundred
+  milliseconds heard them all at once. The delay is a sample attribute, so
+  every `AIL_start_sample` now schedules the voice for `now + delay` on the
+  engine's own clock (`DigitalDriver.engineTimeMs`, a mixer-millisecond reading
+  of the engine PCM counter, so a system-time step cannot move it).
+  `AIL_schedule_start_sample`, called after the start, still overrides with its
+  absolute point. Before, `AIL_set_sample_playback_delay` followed by
+  `AIL_start_sample` started the voice immediately; after, it starts once the
+  delay has elapsed, which is what the SDK documents.
+- `AIL_stream_info` reported a hardcoded `44100 * 2 * 2` datarate and a
+  `DIG_F` value of 3 for any stream with no decoder attached, whatever the
+  driver was actually opened at. A driver at 22050 described its streams as
+  carrying twice the data they did, and a caller sizing a buffer from the
+  datarate over-ran by that factor. The reported rate and `sndtype` now come
+  from the driver's own sample rate and channel count (mono reports `1`,
+  stereo and wider `3`), falling back to 44100 / 2 only when the driver reports
+  neither.
+- A NaN level or cone argument reached the spatializer. `AIL_set_3D_sample_cone`
+  and the `AIL_set_3D_sample_preference` "Cone inner/outer angle" attributes
+  stored NaN directly, `applyCone` handed it on, and the matching getter handed
+  it back to the app. A NaN angle now leaves the stored (omnidirectional) cone
+  alone, the same fail-safe the volume entry points use. `AIL_set_sample_51_volume_levels`
+  clamped NaN to its upper bound, so a garbage level pair came out at full
+  volume; it is silence now.
+- `AIL_list_DLS` scanned the whole size the DLS header declares, and the ABI
+  gives it a length-less pointer, so a header claiming more than it holds was
+  read past the caller's buffer. The `colh` chunk a listing actually needs sits
+  in the first few hundred bytes of any well-formed bank, so the scan is bounded
+  to a 64 KiB prefix. The declared size is still what the function reports to the
+  caller; only the scan window changed.
+- The EVNT-to-SMF conversion reserved its event list straight from the chunk
+  length. An EVNT chunk is file-controlled and the whole-file load cap still
+  admits a 256 MiB image, which that ratio turned into a multi-gigabyte
+  reservation that failed and aborted the load of a file that would otherwise
+  convert. The reservation is capped at 64k events and the list grows on demand
+  past that, as it already did whenever the estimate ran short.
+- The debug log dropped records two ways. A record longer than the 1 KiB
+  formatting buffer was discarded silently, and a write that failed was
+  discarded silently, leaving the file as the only record of what the process
+  did with no note that it had stopped. An oversized record now becomes a
+  marker naming the failure and the format string, and a failing write is
+  reported once on the console and leaves the handle in place. A log file whose
+  length cannot be read is no longer appended to at all: records are written
+  positionally from a known offset, so an offset of 0 overwrote the history
+  that was already there and the run looked as if it had succeeded. That case
+  now logs to the console only and says so.
+- `AIL_load_sample_buffer` reported a rejected buffer as an ordinary failure. A
+  whole-image load that failed returned -1 with `AIL_last_error` untouched, so a
+  game checking the error saw a stale message or none. Both the ping-pong feed
+  and the whole-image path now set `AIL_last_error` naming the buffer number and
+  the reason.
+- Resolving an event's step bytecode by name returned bytes owned by a soundbank
+  that a concurrent `MilesReleaseSoundBank` could free under the caller still
+  walking them, because the registry lock does not keep the bank alive past the
+  lookup. `containerFindEventOwned` takes the reference under the same lock that
+  resolves the name and hands back the bank to drop when the walk is done; the
+  borrowing `containerFindEvent` stays for callers that already hold a reference.
+- `openDigitalDriver` fell back to the shared redist path buffer when its private
+  copy could not be allocated, and scanned from it, which is the race the copy
+  existed to avoid. The snapshot is taken under the lock or not at all: a failed
+  allocation now leaves the driver open with no plugin scan, and says so in the
+  log. `openmiles.getRedistDirectoryCopy` is that snapshot for a caller that
+  needs to hold the path.
+- Both plugin scans held one path copy per plugin for the whole scan, because a
+  `defer` in the loop body is scoped to the function, not the iteration. The body
+  is scoped now, so a directory of N plugins holds one path at a time.
+- `scripts/check_all_versions.sh` let the build's own chatter land on stdout
+  between the rows of the machine-readable table it documents, and printed its
+  unswept versions in whatever order bash's associative array happened to iterate
+  them, so the report changed between runs. Build output goes to stderr and the
+  unswept list is sorted by version.
+- `scripts/check_exports.py` returned 2 for a reference DLL that could not be
+  read, which is the same code a bad command line returns, so a broken reference
+  read as a typo in the invocation. An unreadable or non-PE DLL is now 1, as the
+  sibling gates report a check that could not run, and 2 stays a bad invocation.
 - The unregister callback a plugin is handed at `RIB_Main` did nothing:
   `rib_unregister_interface` discarded its handle, and `rib_register_interface`
   returned 0 or 1 rather than an interface handle, so a plugin that dropped an
@@ -91,6 +167,16 @@ everything below is unreleased.
   that path.
 
 ### Added
+
+- `scripts/gen_sbom.py` checks each vendored header's license against the
+  project's GPL-3.0-only grant instead of only recording it. Those headers are
+  compiled into the shipped DLL, so a grant the project cannot redistribute
+  under GPL is a compliance failure, and without the check it would reach the
+  inventory looking like any other entry. `make check-sbom` fails on one.
+- Fuzz coverage for the Miles event enqueue and the state it owns, in
+  `src/fuzz_native_test.zig`: the fuzzer drives the shipped event constructor
+  and then reads back the enqueued instances, the persisted count, and the cache
+  bookkeeping, so a step that is accepted but not retained fails the run.
 
 - `zig build test -Dsanitize`, `make sanitize`: the test suite with every C
   translation unit instrumented by the undefined-behaviour sanitizer. Zig's own

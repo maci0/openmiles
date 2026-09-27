@@ -247,6 +247,29 @@ loads into any v4+ build; the loader is absent only from a v3 build.
 
 The output DLL is at `zig-out/bin/mss32.dll`.
 
+## Versioning and compatibility
+
+No release has been tagged yet and `build.zig.zon` reads `0.0.0`. While the
+version is `0.x`, SemVer promises nothing: a minor bump may carry a behavioural
+change, so pin by the `-Dmss-version` you build and check the changelog section
+for the tag you upgrade to.
+
+The export table, not the version number, is the compatibility contract. A
+release that holds the export counts its `-Dmss-version` values are swept
+against drops into the same game set as the release before it, and
+`make check-header` / `make check-versions` are what check that. A release that
+lowers a count is breaking for that MSS version and says so in a **Breaking**
+section of the changelog.
+
+The first tagged release fixes the stability promise. Reaching `1.0` means
+every `-Dmss-version` surface, and the struct layouts `mss.h` declares, are
+stable from there: any later change to one is a major bump naming the MSS
+version it affects. The Zig API under `src/` carries no promise before `1.0`;
+its breaks are listed under **Breaking** in the changelog.
+
+A published version is immutable. A fix to a release that already has a GitHub
+release ships as a new version, never as a rebuilt archive under the old tag.
+
 ## Usage
 
 1. Build the Windows DLL with `zig build -Dtarget=x86-windows -Doptimize=ReleaseFast`
