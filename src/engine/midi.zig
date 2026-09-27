@@ -430,7 +430,31 @@ pub const Sequence = struct {
             self.tempo = file_bpm;
             self.ms_per_beat = file_ms_per_beat;
             self.recalcTempoRatio(file_bpm);
+            // The new grid is anchored at time_ms, not carried over from the old
+            // one. A pending beat deadline set at the old tempo can sit many
+            // beats past time_ms under a faster one, so leaving it would skip
+            // every beat between the tempo change and it, and the reported
+            // measure would run behind the music for the rest of the sequence.
+            self.resyncBeatClock();
         }
+    }
+
+    /// Re-derive the beat and measure counters, and the next beat deadline,
+    /// from `at_ms` under the current `ms_per_beat`. Every point that moves the
+    /// beat grid mid-sequence (a TML_SET_TEMPO event, an XMIDI loop-back, a
+    /// seek) or falls out of the fire budget goes through here, so the reported
+    /// position is always the one the file's tempo implies rather than an
+    /// accumulation from whenever the grid last changed.
+    fn resyncBeatClockAt(self: *Sequence, at_ms: f64) void {
+        if (self.ms_per_beat <= 0) return;
+        const beats = satBeats(at_ms / self.ms_per_beat);
+        self.next_beat_ms = @as(f64, @floatFromInt(beats + 1)) * self.ms_per_beat;
+        self.current_beat_in_measure.store(@mod(beats, self.beats_per_measure) + 1, .release);
+        self.current_measure.store(@divTrunc(beats, self.beats_per_measure) + 1, .release);
+    }
+
+    fn resyncBeatClock(self: *Sequence) void {
+        self.resyncBeatClockAt(self.time_ms);
     }
 
     /// Clamp a raw user/file BPM ratio into the range every consumer can
@@ -623,12 +647,7 @@ pub const Sequence = struct {
                                         self.allNotesOff();
                                         self.current_msg = top.start_msg;
                                         self.time_ms = top.start_time_ms;
-                                        if (self.ms_per_beat > 0) {
-                                            const beats_elapsed: i32 = satBeats(self.time_ms / self.ms_per_beat);
-                                            self.current_beat_in_measure.store(@mod(beats_elapsed, self.beats_per_measure) + 1, .release);
-                                            self.current_measure.store(@divTrunc(beats_elapsed, self.beats_per_measure) + 1, .release);
-                                            self.next_beat_ms = @as(f64, @floatFromInt(beats_elapsed + 1)) * self.ms_per_beat;
-                                        }
+                                        self.resyncBeatClock();
                                         xmidi_jumped = true;
                                     } else {
                                         // count == 1: last pass, pop loop stack
@@ -795,10 +814,7 @@ pub const Sequence = struct {
         // later call re-fires the same capped run and the reported beat stays
         // wrong forever. Resync the clock to the derived position instead.
         if (budget == 0 and self.time_ms >= self.next_beat_ms) {
-            const beats = satBeats(self.time_ms / self.ms_per_beat);
-            self.next_beat_ms = @as(f64, @floatFromInt(beats + 1)) * self.ms_per_beat;
-            self.current_beat_in_measure.store(@mod(beats, self.beats_per_measure) + 1, .release);
-            self.current_measure.store(@divTrunc(beats, self.beats_per_measure) + 1, .release);
+            self.resyncBeatClock();
         }
     }
 
@@ -1043,10 +1059,7 @@ pub const Sequence = struct {
 
     fn recalcBeatPosition(self: *Sequence, target_ms: f64) void {
         if (self.ms_per_beat <= 0) return;
-        const beats_elapsed: i32 = satBeats(target_ms / self.ms_per_beat);
-        self.current_beat_in_measure.store(@mod(beats_elapsed, self.beats_per_measure) + 1, .release);
-        self.current_measure.store(@divTrunc(beats_elapsed, self.beats_per_measure) + 1, .release);
-        self.next_beat_ms = @as(f64, @floatFromInt(beats_elapsed + 1)) * self.ms_per_beat;
+        self.resyncBeatClockAt(target_ms);
         self.xmidi_loop_depth = 0;
     }
 
@@ -1152,4 +1165,35 @@ test "beat clock resyncs after the per-call beat budget is spent" {
     try testing.expectEqual(@as(i32, 1), seq.current_beat_in_measure.load(.acquire));
     try testing.expectEqual(@as(i32, 251), seq.current_measure.load(.acquire));
     try testing.expectEqual(@as(f64, 1001.0), seq.next_beat_ms);
+}
+
+test "a mid-sequence tempo change re-anchors the beat grid" {
+    const driver = try MidiDriver.init(testing.allocator);
+    defer driver.deinit();
+    const seq = try Sequence.init(driver);
+    defer seq.deinit();
+
+    // 60 BPM, four beats into the song, with the next beat still a full beat
+    // away on the old 1000 ms grid.
+    seq.ms_per_beat = 1000.0;
+    seq.initial_ms_per_beat = 1000.0;
+    seq.tempo = 60;
+    seq.beats_per_measure = 4;
+    seq.next_beat_ms = 5000.0;
+    seq.time_ms = 4000.0;
+    seq.resyncBeatClock();
+    try testing.expectEqual(@as(f64, 5000.0), seq.next_beat_ms);
+    try testing.expectEqual(@as(i32, 1), seq.current_beat_in_measure.load(.acquire));
+    try testing.expectEqual(@as(i32, 2), seq.current_measure.load(.acquire));
+
+    // The file doubles the tempo at this point. Beats 4.5 and 4.9 of the old
+    // grid have to fall where the new grid puts them, not where the pending
+    // old-grid deadline sat.
+    seq.time_ms = 4100.0;
+    seq.ms_per_beat = 500.0;
+    seq.resyncBeatClock();
+    // 4100 / 500 = 8.2 beats elapsed: beat 9 of measure 3, next deadline 4500.
+    try testing.expectEqual(@as(f64, 4500.0), seq.next_beat_ms);
+    try testing.expectEqual(@as(i32, 1), seq.current_beat_in_measure.load(.acquire));
+    try testing.expectEqual(@as(i32, 3), seq.current_measure.load(.acquire));
 }
