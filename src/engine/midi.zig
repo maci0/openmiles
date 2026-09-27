@@ -874,14 +874,13 @@ pub const Sequence = struct {
 
     pub fn ensureSoundInitialized(self: *Sequence) !void {
         if (self.is_initialized) return;
-        // Auto-create a digital driver if none exists (game may only have opened a MIDI driver)
-        if (root.lastDigitalDriver() == null) {
-            _ = root.DigitalDriver.init(root.global_allocator, 44100, 16, 2) catch |err| {
-                // The caller only ever sees error.NoDigitalDriver below, which
-                // says nothing about why the implicit driver could not start.
-                log("Sequence.ensureSoundInitialized: implicit digital driver init failed ({any})\n", .{err});
-            };
-        }
+        // Auto-create a digital driver if none exists (game may only have opened
+        // a MIDI driver). Go through openDigitalDriver: init() alone leaves the
+        // new driver out of the current-driver handle, so this branch would run
+        // again for every sequence and each one would build another miniaudio
+        // engine that nothing can close. A null return already logged the reason;
+        // the branch below reports it to the caller as error.NoDigitalDriver.
+        _ = root.openDigitalDriver(44100, 16, 2);
         if (root.lastDigitalDriver()) |driver| {
             const result = ma.ma_sound_init_from_data_source(&driver.engine, @ptrCast(&self.data_source), ma.MA_SOUND_FLAG_NO_SPATIALIZATION, null, &self.sound);
             if (result != ma.MA_SUCCESS) return error.SoundInitFailed;

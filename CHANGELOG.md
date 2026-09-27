@@ -40,6 +40,15 @@ everything below is unreleased.
 
 ### Fixed
 
+- Repeated opens no longer duplicate state: `AIL_open_digital_driver` records
+  the driver it opened, so a second call returns that driver instead of
+  building another miniaudio engine (and `AIL_shutdown` now reaches it), and a
+  MIDI sequence asking for its implicit digital driver reuses the open one
+  rather than leaking an engine per sequence. A plugin directory scanned twice
+  (`RIB_load_application_providers` after startup, or `AIL_set_redist_directory`
+  set to the same path twice) loads each module once, matched on its resolved
+  path, and `RIB_unregister_interface` drops every registration made under the
+  name instead of leaving a copy behind.
 - `RIB_enumerate_interface` yields a provider's entries in registration order.
   It previously walked a hash map, so the order a game saw depended on the key
   bytes and the map's rehash history rather than on what the provider

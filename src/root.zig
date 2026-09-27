@@ -478,6 +478,14 @@ pub fn loadApplicationProviders(dir: []const u8) i32 {
             continue;
         };
         defer alloc.free(full_path);
+        // A second scan of a directory that is already loaded (the game's own
+        // RIB_load_application_providers after our startup() already scanned it)
+        // must not register the same module twice: the duplicate would answer
+        // provider enumeration with the same codecs twice and keep a second
+        // copy of the module loaded for as long as the process runs.
+        var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const resolved = fs_compat.maybeResolveCaseInsensitivePath(full_path, &resolved_buf) orelse full_path;
+        if (isPluginAlreadyLoaded(global_providers.items, resolved)) continue;
         const p = Provider.load(alloc, full_path) catch |err| {
             log("loadApplicationProviders: failed to load plugin '{s}': {any}\n", .{ name, err });
             continue;
@@ -490,6 +498,17 @@ pub fn loadApplicationProviders(dir: []const u8) i32 {
         count += 1;
     }
     return count;
+}
+
+/// Whether `path` is a module one of `providers` was already loaded from, so a
+/// rescan of the directory holding it adds no second copy. `path` is the
+/// resolved form, which is what Provider.load records, so a differently cased
+/// name on Windows is recognised as the same plugin.
+pub fn isPluginAlreadyLoaded(providers: []const *Provider, path: []const u8) bool {
+    for (providers) |p| {
+        if (p.matchesSourcePath(path)) return true;
+    }
+    return false;
 }
 
 // --- Timer state ---
@@ -658,8 +677,13 @@ var redist_directory: [256:0]u8 = [_:0]u8{0} ** 256;
 pub fn setRedistDirectory(path: []const u8) void {
     log("Setting redist directory to: {s}\n", .{path});
     const len = @min(path.len, redist_directory.len - 1);
+    const unchanged = std.mem.eql(u8, getRedistDirectory(), path[0..len]);
     @memcpy(redist_directory[0..len], path[0..len]);
     redist_directory[len] = 0;
+    // The same directory set again is the same set of plugins: rescanning it
+    // would load a second copy of every .asi into a driver that already has
+    // them, so the reload only happens when the directory actually changed.
+    if (unchanged) return;
     if (lastDigitalDriver()) |driver| {
         driver.loadAllAsi(redist_directory[0..len]);
     }
@@ -953,6 +977,9 @@ pub fn shutdown() void {
     logger.deinit();
 }
 
+/// Opens the one digital driver for the process, or returns the one already
+/// open. The handle is not reference counted: closeDigitalDriver must be called
+/// once, for one open, and the handle must not be released afterwards.
 pub fn openDigitalDriver(frequency: u32, bits: i32, channels: i32) ?*DigitalDriver {
     clearLastError();
     driver_create_mutex.lockUncancelable(io);
@@ -964,6 +991,10 @@ pub fn openDigitalDriver(frequency: u32, bits: i32, channels: i32) ?*DigitalDriv
         setLastError("Failed to initialize digital driver");
         return null;
     };
+    // Recorded so the guard above engages on the second open and so shutdown
+    // reaches this device; without it every AIL_open_digital_driver built
+    // another miniaudio engine and left it running past AIL_shutdown.
+    last_digital_driver.store(driver, .release);
     const rd = getRedistDirectory();
     if (rd.len > 0) driver.loadAllAsi(rd);
     return driver;
@@ -976,6 +1007,10 @@ pub fn closeDigitalDriver(driver: *DigitalDriver) void {
 
 pub fn openMidiDriver() ?*MidiDriver {
     clearLastError();
+    // Opening twice hands back the driver already open (MidiDriver.init records
+    // it); a second driver would take a second soundfont with no handle the
+    // caller could release. Under driver_create_mutex so two threads cannot
+    // both pass the "already open" check and build two drivers.
     driver_create_mutex.lockUncancelable(io);
     defer driver_create_mutex.unlock(io);
     if (lastMidiDriver()) |existing| return existing;

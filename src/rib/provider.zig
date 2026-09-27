@@ -72,6 +72,11 @@ pub const Provider = struct {
     // the provider is released, after the module is unloaded and the OS lets
     // go of the file; null for providers loaded from real on-disk plugins.
     temp_path: ?[:0]u8 = null,
+    // The resolved path the module was loaded from, or null for a provider
+    // that was never loaded from a file. This is the identity a second load of
+    // the same plugin is matched against, so a rescan of a directory cannot
+    // register one module twice.
+    source_path: ?[:0]u8 = null,
     user_data: [8]usize = [_]usize{0} ** 8,
     system_data: [8]usize = [_]usize{0} ** 8,
 
@@ -99,20 +104,23 @@ pub const Provider = struct {
         errdefer allocator.destroy(self);
         const name = try allocator.dupeZ(u8, std.fs.path.basename(path));
         errdefer allocator.free(name);
+        var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const resolved_path = fs_compat.maybeResolveCaseInsensitivePath(path, &resolved_buf) orelse path;
+        const source = try allocator.dupeZ(u8, resolved_path);
+        errdefer allocator.free(source);
         self.* = .{
             .handle = @ptrCast(self),
             .lib = null,
             .name = name,
             .allocator = allocator,
             .interfaces = .empty,
+            .source_path = source,
         };
 
         const prev = current_loading_provider;
         current_loading_provider = self;
         defer current_loading_provider = prev;
 
-        var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const resolved_path = fs_compat.maybeResolveCaseInsensitivePath(path, &resolved_buf) orelse path;
         var lib = try root.DynLib.open(resolved_path);
         self.lib = lib;
         errdefer {
@@ -148,17 +156,26 @@ pub const Provider = struct {
             iface.deinit();
         }
         self.interfaces.deinit(self.allocator);
+        if (self.source_path) |sp| self.allocator.free(sp);
         self.allocator.free(self.name);
         self.allocator.destroy(self);
     }
 
+    /// Removes every interface registered under `name`, keeping the order of
+    /// the rest. A plugin that registered one name more than once gets all of
+    /// them dropped: stopping at the first would leave a copy that keeps
+    /// answering entry lookups after the interface was unregistered, so the
+    /// second unregister would still change state.
     pub fn unregisterInterface(self: *Provider, name: []const u8) void {
-        for (self.interfaces.items, 0..) |iface, i| {
+        var i: usize = 0;
+        while (i < self.interfaces.items.len) {
+            const iface = self.interfaces.items[i];
             if (std.mem.eql(u8, iface.name, name)) {
                 iface.deinit();
-                _ = self.interfaces.swapRemove(i);
-                break;
+                _ = self.interfaces.orderedRemove(i);
+                continue;
             }
+            i += 1;
         }
     }
 
@@ -186,6 +203,14 @@ pub const Provider = struct {
             }
         }
         try self.interfaces.append(self.allocator, iface);
+    }
+
+    /// True when `path` names a module this provider was already loaded from,
+    /// compared on the resolved path so a differently cased name on Windows is
+    /// the same plugin.
+    pub fn matchesSourcePath(self: *const Provider, path: []const u8) bool {
+        const sp = self.source_path orelse return false;
+        return std.mem.eql(u8, sp, path);
     }
 };
 

@@ -1083,6 +1083,104 @@ test "loadApplicationProviders skips corrupt plugins and missing directories" {
     try testing.expectEqual(@as(i32, 0), openmiles.loadApplicationProviders(dirname ++ "/missing"));
 }
 
+test "unregistering an interface name removes every registration of it" {
+    // A provider can hold two registrations under one name (RIB_Main may call
+    // register more than once). Unregistering must take both: dropping only
+    // the first would leave a copy still answering entry lookups, and the
+    // second unregister would then still change state.
+    const p = try openmiles.Provider.init(testing.allocator, null);
+    defer p.deinit();
+
+    var cut = [_]openmiles.RIB_INTERFACE_ENTRY{.{
+        .entry_type = .RIB_ATTRIBUTE,
+        .name = "cutoff",
+        .token = 1,
+        .subtype = 0,
+    }};
+    var keep = [_]openmiles.RIB_INTERFACE_ENTRY{.{
+        .entry_type = .RIB_ATTRIBUTE,
+        .name = "master",
+        .token = 2,
+        .subtype = 0,
+    }};
+    try p.registerInterface("filter", 1, &cut);
+    try p.registerInterface("other", 1, &keep);
+    try p.registerInterface("filter", 1, &cut);
+    try testing.expectEqual(@as(usize, 3), p.interfaces.items.len);
+
+    p.unregisterInterface("filter");
+    try testing.expectEqual(@as(usize, 1), p.interfaces.items.len);
+    try testing.expectEqualStrings("other", p.interfaces.items[0].name);
+    try testing.expectEqual(@as(?usize, null), p.interfaces.items[0].tokenFor("cutoff"));
+
+    // A second unregister of the same name is a no-op, not another change.
+    p.unregisterInterface("filter");
+    try testing.expectEqual(@as(usize, 1), p.interfaces.items.len);
+}
+
+test "loading the same plugin path twice is recognised as one provider" {
+    // A rescan of a plugin directory must not load a second copy of a module
+    // that is already up; the resolved path is the identity, so the same file
+    // reached by a second path is skipped too.
+    const img_path = "zig-out/bin/plugins/mock.asi";
+    std.Io.Dir.cwd().access(openmiles.io, img_path, .{}) catch return;
+
+    const p = try openmiles.Provider.load(testing.allocator, img_path);
+    defer p.deinit();
+
+    const loaded = [_]*openmiles.Provider{p};
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const resolved = openmiles.fs_compat.maybeResolveCaseInsensitivePath(img_path, &path_buf) orelse img_path;
+    try testing.expect(openmiles.isPluginAlreadyLoaded(&loaded, resolved));
+    try testing.expect(!openmiles.isPluginAlreadyLoaded(&loaded, "zig-out/bin/plugins/other.asi"));
+    // A provider that was never loaded from a file matches nothing.
+    const bare = try openmiles.Provider.init(testing.allocator, null);
+    defer bare.deinit();
+    try testing.expect(!openmiles.isPluginAlreadyLoaded(&.{bare}, resolved));
+}
+
+test "AIL_open_digital_driver twice returns the driver already open" {
+    // The second open must be the first driver: a second miniaudio engine would
+    // keep playing past the close the caller makes on the handle it holds.
+    defer {
+        if (openmiles.last_digital_driver) |d| openmiles.closeDigitalDriver(d);
+    }
+    openmiles.last_digital_driver = null;
+    const first = openmiles.openDigitalDriver(44100, 16, 2) orelse return error.NoDriver;
+    const second = openmiles.openDigitalDriver(22050, 8, 1) orelse return error.NoDriver;
+    try testing.expectEqual(first, second);
+    try testing.expectEqual(first, openmiles.last_digital_driver.?);
+}
+
+test "AIL_open_midi_driver twice returns the driver already open" {
+    defer {
+        if (openmiles.last_midi_driver) |m| openmiles.closeMidiDriver(m);
+    }
+    openmiles.last_midi_driver = null;
+    const first = openmiles.openMidiDriver() orelse return error.NoDriver;
+    const second = openmiles.openMidiDriver() orelse return error.NoDriver;
+    try testing.expectEqual(first, second);
+    try testing.expectEqual(first, openmiles.last_midi_driver.?);
+}
+
+test "setRedistDirectory with the same path does not rescan it" {
+    // AIL_set_redist_directory is called more than once per session by several
+    // games; an identical path must not push a second copy of every .asi into
+    // the open driver.
+    defer {
+        if (openmiles.last_digital_driver) |d| openmiles.closeDigitalDriver(d);
+        openmiles.setRedistDirectory("");
+    }
+    openmiles.last_digital_driver = null;
+    const driver = openmiles.openDigitalDriver(44100, 16, 2) orelse return error.NoDriver;
+
+    openmiles.setRedistDirectory("zig-out/bin/plugins");
+    const after_first = driver.providers.items.len;
+    openmiles.setRedistDirectory("zig-out/bin/plugins");
+    try testing.expectEqual(after_first, driver.providers.items.len);
+    try testing.expectEqualStrings("zig-out/bin/plugins", openmiles.getRedistDirectory());
+}
+
 test "RIB plugin loading registers the mock provider's interface end to end" {
     // The only automated coverage of the dynamic-plugin path (dlopen/LoadLibrary
     // + RIB_Main + interface registration). The fixture is installed by
