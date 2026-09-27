@@ -1,4 +1,4 @@
-.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-yaml check-threat-model check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity sanitize help
+.PHONY: all build test check clean lint format check-header check-examples check-versions check-pins check-python check-yaml check-threat-model check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity sanitize help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -86,6 +86,12 @@ check-interpreter:
 check-header: check-interpreter
 	$(PYTHON) scripts/check_header.py
 
+# The C snippets in the documentation are what a consumer copies first, so they
+# are compiled against src/mss.h at the version each one names.
+# See scripts/check_examples.py.
+check-examples: check-interpreter
+	$(PYTHON) scripts/check_examples.py
+
 # Every -Dmss-version value must be swept against a reference DLL or declared
 # unswept with a reason, and the three places that list the values must agree.
 # See scripts/check_versions.py.
@@ -157,6 +163,7 @@ lint: check-host-tools
 	zig fmt --check .
 	shellcheck scripts/*.sh
 	$(PYTHON) scripts/check_header.py
+	$(PYTHON) scripts/check_examples.py
 	$(PYTHON) scripts/check_versions.py
 	$(PYTHON) scripts/check_vendored.py
 	$(PYTHON) scripts/gen_sbom.py --check
@@ -195,6 +202,7 @@ help:
 	@echo "  check-toolchain     assert zig on PATH is the pinned build.zig.zon version"
 	@echo "  check-host-tools    assert shellcheck and a Python 3 interpreter are installed"
 	@echo "  check-header        assert src/mss.h matches the export table and struct layouts per -Dmss-version"
+	@echo "  check-examples      compile every C snippet in README.md and docs/ against src/mss.h"
 	@echo "  check-versions      assert every -Dmss-version is parity-swept or declared unswept"
 	@echo "  check-vendored      assert deps/ matches the digests in deps/SHA256SUMS, and that each vendored entry names its upstream commit"
 	@echo "  check-sbom          assert SBOM.cdx.json matches the vendored deps and the declared pip pins"

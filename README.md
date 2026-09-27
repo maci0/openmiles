@@ -265,45 +265,120 @@ values are 30, 40, 50, 60, 61, 65, 66, 70, 80, and 90 (`major*10+minor`); any
 other value is rejected by `#error` rather than read as "at least this
 version", which would silently select a declaration set no release has.
 
+A complete program that plays one second of a tone: it builds the sound image
+in memory, so it needs no asset on disk, and every call that can fail reports
+itself through `AIL_last_error()`. Compile it with the header on the include
+path and link against the import library `zig build` emits next to the DLL,
+`zig-out/lib/mss32.lib` (`-lm` for `sin`, or replace the sine with a table of
+your own). That library carries the MSVC stdcall decoration (`__AIL_startup@0`),
+so a `clang-cl` or MSVC caller resolves the names the DLL exports; a MinGW
+(`zig cc -target x86-windows-gnu`) caller asks for `_AIL_startup@0` and does
+not match it, and resolves each entry point at runtime with `GetProcAddress`
+instead, as the harnesses in `tests/` do (`tests/test_utils.h` loads both
+spellings).
+
 ```c
 #define OPENMILES_MSS_VERSION 90
 #include "mss.h"
+#include <stdio.h>
+#include <math.h>
+#include <string.h>
+
+/* One second of a 440 Hz sine, held as a mono 16-bit 44100 Hz WAV in memory.
+ * AIL_set_sample_file reads its header out of the image, so a real game passes
+ * the bytes it unpacked from its own archive and the call is the same. */
+static unsigned char tone[44 + 44100 * 2];
+
+static void put_u32(unsigned char *p, unsigned int v)
+{
+    p[0] = (unsigned char)(v & 0xFFu);
+    p[1] = (unsigned char)((v >> 8) & 0xFFu);
+    p[2] = (unsigned char)((v >> 16) & 0xFFu);
+    p[3] = (unsigned char)((v >> 24) & 0xFFu);
+}
+
+static void put_u16(unsigned char *p, unsigned int v)
+{
+    p[0] = (unsigned char)(v & 0xFFu);
+    p[1] = (unsigned char)((v >> 8) & 0xFFu);
+}
+
+static void build_tone(void)
+{
+    const unsigned int rate = 44100;
+    const unsigned int frames = rate;
+    unsigned int i;
+    unsigned char *pcm = tone + 44;
+
+    memcpy(tone, "RIFF", 4);
+    put_u32(tone + 4, 36 + frames * 2);
+    memcpy(tone + 8, "WAVEfmt ", 8);
+    put_u32(tone + 16, 16);            /* fmt chunk size */
+    put_u16(tone + 20, 1);             /* PCM */
+    put_u16(tone + 22, 1);             /* mono */
+    put_u32(tone + 24, rate);
+    put_u32(tone + 28, rate * 2);      /* bytes per second */
+    put_u16(tone + 32, 2);             /* block align */
+    put_u16(tone + 34, 16);            /* bits per sample */
+    memcpy(tone + 36, "data", 4);
+    put_u32(tone + 40, frames * 2);
+
+    for (i = 0; i < frames; ++i) {
+        double phase = 2.0 * 3.14159265358979 * 440.0 * (double)i / (double)rate;
+        int sample = (int)(12000.0 * sin(phase));
+        put_u16(pcm + i * 2, (unsigned int)(short)sample);
+    }
+}
 
 int main(void)
 {
-    AIL_startup();
+    HDIGDRIVER dig;
+    HSAMPLE S;
 
-    HDIGDRIVER dig = AIL_open_digital_driver(44100, 16, 2, 0);
+    build_tone();
+    if (!AIL_startup()) {
+        fprintf(stderr, "AIL_startup failed: %s\n", AIL_last_error());
+        return 1;
+    }
+
+    dig = AIL_open_digital_driver(44100, 16, 2, 0);
     if (dig == NULL) {
-        /* AIL_last_error() is a stable buffer; it is "" until something fails. */
-        const char *err = AIL_last_error();
-        (void)err;
+        fprintf(stderr, "AIL_open_digital_driver failed: %s\n", AIL_last_error());
         AIL_shutdown();
         return 1;
     }
 
-    /* A real WAV/OGG/MP3 in memory. The one-byte stub below is a placeholder:
-       AIL_set_sample_file reads a header out of it, so it always fails, and
-       that is the branch a caller has to handle anyway. */
-    static const unsigned char image[] = { 0 };
-    HSAMPLE S = AIL_allocate_sample_handle(dig);
-    if (S != NULL) {
-        if (AIL_set_sample_file(S, image, 0) == 0) {
-            AIL_start_sample(S);
-            while ((AIL_sample_status(S) & SMP_PLAYING) != 0) {
-                AIL_serve();
-            }
-        }
-        AIL_release_sample_handle(S);
+    S = AIL_allocate_sample_handle(dig);
+    if (S == NULL) {
+        fprintf(stderr, "AIL_allocate_sample_handle failed: %s\n", AIL_last_error());
+        AIL_close_digital_driver(dig);
+        AIL_shutdown();
+        return 1;
     }
 
+    /* AIL_set_sample_file returns 0 on failure, and AIL_last_error() names the
+     * reason; the handle stays allocated either way. */
+    if (AIL_set_sample_file(S, tone, 0) == 0) {
+        fprintf(stderr, "AIL_set_sample_file failed: %s\n", AIL_last_error());
+        AIL_release_sample_handle(S);
+        AIL_close_digital_driver(dig);
+        AIL_shutdown();
+        return 1;
+    }
+
+    AIL_start_sample(S);
+    while ((AIL_sample_status(S) & SMP_PLAYING) != 0) {
+        AIL_serve();
+    }
+    AIL_release_sample_handle(S);
     AIL_close_digital_driver(dig);
     AIL_shutdown();
     return 0;
 }
 ```
 
-The header covers playback, streaming, MIDI, 3D, RIB, filters, the Quick API,
+The header covers playback, streaming, 3D, RIB, filters, the timers, the
+v6.5+ unified level/pan/reverb/low-pass and v7+ 3D calls on `HSAMPLE`,
 the v6.5+ unified level/pan/reverb/low-pass and v7+ 3D calls on `HSAMPLE`,
 file I/O (`AIL_file_read`, `AIL_file_size`, `AIL_file_type`, and
 `AIL_set_file_callbacks` for routing file access through the game's own VFS),
@@ -311,11 +386,15 @@ and the `Miles*` event-system and SoundBank API a v8 or v9 build exports
 (`MilesStartupEventSystem`, `MilesAddSoundBank`, `MilesEnqueueEvent`,
 `MilesEnumerateSoundInstances`, and the rest, with the `MSS_FIRST` walk
 convention and the `MILESEVENTSOUNDSTATUS_*` and `MILESEVENT_ENQUEUE_*`
-constants). The v7 DSP-stage, the `AIL_add_*_event_step` event-text builders,
-the v9 per-bus mixer calls, and the legacy `waveOut`/`midiOut` exports are not
-declared; see [docs/API_STATUS.md](docs/API_STATUS.md) for the
-full list, and add your own declaration from the export table in
-`src/main.zig` if you need one.
+constants). Two groups are declared only for the version builds that export
+them, so a version-gated `#include` on its own is not enough to know whether
+they are there: the XMIDI/sequence pair is a 6.1-to-7.0 declaration only (from
+8.0 on, use the `Miles*` event API), and the Quick API and the redbook pair are
+declared for the builds below 7.1. The v7 DSP-stage, the
+`AIL_add_*_event_step` event-text builders, the v9 per-bus mixer calls, and the
+legacy `waveOut`/`midiOut` exports are not declared; see
+[docs/API_STATUS.md](docs/API_STATUS.md) for the full list, and add your own
+declaration from the export table in `src/main.zig` if you need one.
 
 `make check-header` re-checks every declaration in `mss.h` against that export
 table, and the `AILSOUNDINFO` layout against `src/root.zig`, for all ten distinct
@@ -323,7 +402,10 @@ version encodings, and compiles the header once per encoding with the same
 warning set `build.zig` compiles C with (`-Wall -Wextra -Werror` plus the
 pedantic, shadow, prototype, VLA, format and write-strings groups), so a
 declaration that only parses is caught here rather than in your build. It runs
-as part of `make lint`.
+as part of `make lint`, together with `make check-examples`, which compiles
+every `c` snippet in this file and in `docs/` against the header at the
+`OPENMILES_MSS_VERSION` each one names, so the example above cannot drift from
+the surface it documents.
 
 ### Configuration
 
