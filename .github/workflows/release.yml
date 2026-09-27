@@ -3,9 +3,20 @@ name: Release
 on:
   push:
     tags: [ "v*" ]
+  # Re-run a release for a tag that already exists, without deleting and
+  # re-pushing it. A failed run (runner outage, a flaky download) is otherwise
+  # only retryable by moving the tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to re-run, e.g. v0.1.0"
+        required: true
+        type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Keyed on the tag, not the ref, so a manual re-run cannot race the push
+  # trigger for the same release.
+  group: ${{ github.workflow }}-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -16,8 +27,13 @@ jobs:
     name: Build Windows DLL
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # The tag being released, on a push and on a manual re-run alike.
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.TAG }}
 
       # A release is only correct if the tag, the declared package version, and
       # the changelog agree. build.zig.zon is the single source of truth: the tag
@@ -27,21 +43,31 @@ jobs:
         run: |
           set -euo pipefail
           declared=$(sed -n 's/^[[:space:]]*\.version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' build.zig.zon)
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${TAG#v}"
           if [ -z "$declared" ]; then
             echo "no .version found in build.zig.zon"; exit 1
           fi
           if [ "$declared" != "$tag" ]; then
-            echo "tag ${GITHUB_REF_NAME} does not match build.zig.zon version ${declared}"
+            echo "tag ${TAG} does not match build.zig.zon version ${declared}"
             echo "set .version = \"${tag}\" in build.zig.zon and re-tag"
             exit 1
           fi
           echo "releasing ${declared}"
 
+      # build.zig.zon declares the toolchain once; CI and the Makefile read the
+      # same field, so a Zig bump cannot land in one place and miss the others.
+      - name: Read pinned Zig version
+        id: zig
+        run: |
+          set -euo pipefail
+          v=$(sed -n 's/^[[:space:]]*\.minimum_zig_version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' build.zig.zon)
+          [ -n "$v" ] || { echo "no .minimum_zig_version in build.zig.zon" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406 # v2.2.1
         with:
-          version: 0.16.0
+          version: ${{ steps.zig.outputs.version }}
 
       - name: Cache Zig global cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -49,11 +75,13 @@ jobs:
           path: |
             ~/.cache/zig
             ~/.local/share/zig
-          # The toolchain version is part of the key: a Zig bump invalidates
-          # the cache, a build.zig.zon edit does not (it rarely changes).
-          key: ${{ runner.os }}-zig-0.16.0-${{ hashFiles('build.zig.zon') }}
+          # The toolchain version is part of the key, and the restore prefix
+          # keeps it too: a Zig bump invalidates the cache instead of
+          # restoring another version's global cache, while a build.zig.zon
+          # edit (which rarely changes the toolchain) still hits the cache.
+          key: ${{ runner.os }}-zig-${{ steps.zig.outputs.version }}-${{ hashFiles('build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-
+            ${{ runner.os }}-zig-${{ steps.zig.outputs.version }}-
 
       - name: Run Tests
         run: zig build test
@@ -90,7 +118,7 @@ jobs:
       # a consumer who wants to trace that grant back to an upstream release
       # needs the attribution and the digests, not just this repository's URL.
       - name: Package release
-        run: ./scripts/package_release.sh "openmiles-${GITHUB_REF_NAME}-win32.zip"
+        run: ./scripts/package_release.sh "openmiles-${TAG}-win32.zip"
 
       - name: Verify the archive is reproducible
         run: |
@@ -105,13 +133,16 @@ jobs:
           (cd release && sha256sum LICENSE README.md CHANGELOG.md VENDORED.md \
             DEPS-SHA256SUMS mss32.dll > SHA256SUMS)
           ./scripts/package_release.sh repeat.zip
-          cmp "openmiles-${GITHUB_REF_NAME}-win32.zip" repeat.zip
+          cmp "openmiles-${TAG}-win32.zip" repeat.zip
           rm repeat.zip
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         with:
+          # Named explicitly: on a manual re-run github.ref is the branch the
+          # workflow was dispatched from, not the tag being released.
+          tag_name: ${{ env.TAG }}
           files: |
-            openmiles-${{ github.ref_name }}-win32.zip
+            openmiles-${{ env.TAG }}-win32.zip
             release/SHA256SUMS
           generate_release_notes: true

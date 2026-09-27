@@ -39,9 +39,11 @@ It replaces the proprietary MSS audio stack with [miniaudio](https://miniaud.io/
 
 ## Building
 
-Requires [Zig 0.16.0](https://ziglang.org/download/). `make build` and `make test`
-run a version check first and refuse to build on any other Zig; the raw
-`zig build` commands below do not.
+Requires [Zig 0.16.0](https://ziglang.org/download/). The version is declared
+once, as `.minimum_zig_version` in `build.zig.zon`; the Makefile, CI, and the
+release workflow all read it from there. `make build` and `make test` run a
+version check first and refuse to build on any other Zig; the raw `zig build`
+commands below do not.
 
 ```bash
 # Native build (Linux/Windows -- for tests)
@@ -87,6 +89,13 @@ the license and this README. The archive is reproducible: entry order is
 fixed, every entry takes one timestamp (`SOURCE_DATE_EPOCH`, defaulting to the
 HEAD commit time), and no host metadata is stored. Packaging it twice yields
 byte-identical files, which the release workflow checks with `cmp`.
+
+Publishing is a tag push: set `.version` in `build.zig.zon`, push `v<version>`,
+and the workflow builds, smoke-tests the DLL, verifies the archive is
+reproducible, and creates the GitHub release. The workflow refuses a tag whose
+version does not match `build.zig.zon`. A failed run is retried with a manual
+dispatch of the same tag from the Actions tab, which republishes over the
+existing release without moving the tag.
 
 ### Targeting an MSS version
 

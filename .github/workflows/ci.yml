@@ -25,10 +25,22 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      # build.zig.zon declares the toolchain once; the Makefile and the release
+      # workflow read the same field, so a Zig bump cannot land in one place
+      # and miss the others.
+      - name: Read pinned Zig version
+        id: zig
+        shell: bash
+        run: |
+          set -euo pipefail
+          v=$(sed -n 's/^[[:space:]]*\.minimum_zig_version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' build.zig.zon)
+          [ -n "$v" ] || { echo "no .minimum_zig_version in build.zig.zon" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406 # v2.2.1
         with:
-          version: 0.16.0
+          version: ${{ steps.zig.outputs.version }}
 
       - name: Cache Zig global cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -38,11 +50,13 @@ jobs:
             ~/.local/share/zig
             ~/AppData/Local/zig
             ~/Library/Caches/zig
-          # The toolchain version is part of the key: a Zig bump invalidates
-          # the cache, a build.zig.zon edit does not (it rarely changes).
-          key: ${{ runner.os }}-zig-0.16.0-${{ hashFiles('build.zig.zon') }}
+          # The toolchain version is part of the key, and the restore prefix
+          # keeps it too: a Zig bump invalidates the cache instead of
+          # restoring another version's global cache, while a build.zig.zon
+          # edit (which rarely changes the toolchain) still hits the cache.
+          key: ${{ runner.os }}-zig-${{ steps.zig.outputs.version }}-${{ hashFiles('build.zig.zon') }}
           restore-keys: |
-            ${{ runner.os }}-zig-
+            ${{ runner.os }}-zig-${{ steps.zig.outputs.version }}-
 
       - name: Lint (zig fmt + shellcheck + C header parity, same rules as `make lint`)
         if: matrix.os == 'ubuntu-latest'
@@ -66,4 +80,5 @@ jobs:
             zig-out/lib/
             zig-out/bin/
           retention-days: 7
-          if-no-files-found: ignore
+          # A build that produced nothing must not pass as a green upload.
+          if-no-files-found: error

@@ -2,15 +2,17 @@
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
-# verified against; a stray zig on PATH would silently build anyway. Keep the
-# two in sync: this value is what CI installs.
-ZIG_VERSION := 0.16.0
+# verified against; a stray zig on PATH would silently build anyway. Read the
+# version from build.zig.zon so it is declared once: CI and the release
+# workflow read the same field, and nothing has to be kept in sync by hand.
+ZIG_VERSION := $(shell sed -n 's/^[[:space:]]*\.minimum_zig_version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' build.zig.zon)
 
 all: build
 
 # Fail before any compile work, with a clear message, rather than letting an
 # unpinned zig produce artifacts nobody compared against the references.
 check-toolchain:
+	@[ -n "$(ZIG_VERSION)" ] || { echo "error: no .minimum_zig_version in build.zig.zon" >&2; exit 1; }
 	@command -v zig >/dev/null 2>&1 || { echo "error: zig $(ZIG_VERSION) not found on PATH" >&2; exit 1; }
 	@v=`zig version`; [ "$$v" = "$(ZIG_VERSION)" ] || { echo "error: zig $(ZIG_VERSION) required, found $$v" >&2; exit 1; }
 
