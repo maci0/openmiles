@@ -112,6 +112,16 @@ everything below is unreleased.
   was written failed the anchor check. The compiler call resolves `zig` through
   `shutil.which` and names the missing binary instead of raising, and the
   threat model references point at the line the anchor is on.
+- Eight `docs/THREAT_MODEL.md` `file:line` references in `src/engine/midi.zig`
+  and `src/engine/digital.zig` had drifted again, so `make lint` was red on a
+  clean tree and the lint job of `.github/workflows/ci.yml` failed on every
+  push. The anchors are the loop-stack fields and the three sample loaders at
+  the lines they are defined on.
+- `make cross` did not assert the pinned toolchain, so a stray `zig` on PATH
+  produced the shipped `x86-windows` DLL with nothing comparing it against the
+  references. It now runs `check-toolchain` first, like `build` and `test`.
+- A `scripts/__pycache__/*.pyc` was committed, and nothing kept the interpreter
+  from writing another next to the gates. Both are ignored now.
 - `make test FILTER=<substring>` reported success when the substring matched no
   test name, so a typo read as a green run. A filter that matches nothing is
   now refused, naming the filter.

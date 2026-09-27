@@ -46,8 +46,10 @@ test: check-toolchain
 check: lint build test cross
 
 # The shipped artifact. A build that only passes natively can still fail to
-# link as a 32-bit stdcall DLL, so check what ships.
-cross:
+# link as a 32-bit stdcall DLL, so check what ships. Gated on the toolchain for
+# the same reason `build` is: a stray zig would produce a cross-compiled DLL
+# nobody compared against the references, and this is the output that ships.
+cross: check-toolchain
 	zig build -Dtarget=x86-windows -Doptimize=ReleaseFast
 
 # src/mss.h declares the C surface; src/main.zig is the export table it must
