@@ -297,7 +297,7 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_3D_sample_status` | 🟢 Implemented | Returns SMP_DONE/SMP_STOPPED/SMP_PLAYING |
 | `AIL_3D_sample_volume` | 🟢 Implemented | |
 | `AIL_set_3D_sample_volume` | 🟢 Implemented | |
-| `AIL_3D_sample_loop_count` | 🟢 Implemented | |
+| `AIL_3D_sample_loop_count` | 🟢 Implemented | Returns the remaining loop count (SDK `S->loop_count`), like `AIL_sample_loop_count`; 0 on null |
 | `AIL_set_3D_sample_loop_count` | 🟢 Implemented | |
 | `AIL_3D_sample_playback_rate` | 🟢 Implemented | |
 | `AIL_set_3D_sample_playback_rate` | 🟢 Implemented | |

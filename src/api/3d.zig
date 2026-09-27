@@ -164,7 +164,11 @@ pub fn AIL_set_3D_sample_volume(s: ?*anyopaque, volume: i32) callconv(.winapi) v
 pub fn AIL_3D_sample_loop_count(s: ?*anyopaque) callconv(.winapi) i32 {
     const p = s orelse return 0;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
-    return sample.loop_count;
+    // The SDK field this reads is S->loop_count, the count that decrements during
+    // playback, so it reports the remaining plays -- exactly as
+    // AIL_sample_loop_count and AIL_stream_loop_count do. Reading our stored
+    // original instead froze the value at the count the app set.
+    return sample.loops_remaining.load(.acquire);
 }
 pub fn AIL_set_3D_sample_loop_count(s: ?*anyopaque, count: i32) callconv(.winapi) void {
     const p = s orelse return;

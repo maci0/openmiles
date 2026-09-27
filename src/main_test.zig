@@ -584,6 +584,21 @@ test "Sample3D init deinit and default properties" {
     try testing.expectEqual(@as(usize, 0), driver.samples_3d.items.len);
 }
 
+test "3D loop count getter reports the remaining count like the 2D one" {
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample3D.init(driver);
+    defer s.deinit();
+    const sp: ?*anyopaque = @ptrCast(s);
+    // MSS S->loop_count is the field that decrements during playback, so the
+    // getter mirrors AIL_sample_loop_count rather than reporting the app-set
+    // original.
+    try testing.expectEqual(@as(i32, 1), api_3d.AIL_3D_sample_loop_count(sp));
+    api_3d.AIL_set_3D_sample_loop_count(sp, 3);
+    try testing.expectEqual(@as(i32, 3), api_3d.AIL_3D_sample_loop_count(sp));
+    try testing.expectEqual(@as(i32, 3), s.loops_remaining.load(.acquire));
+}
+
 test "buildWavFromPcm stereo 16-bit" {
     const allocator = testing.allocator;
     // 4 bytes = 1 stereo frame at 16-bit (2 channels * 2 bytes)
