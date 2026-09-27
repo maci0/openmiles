@@ -173,15 +173,22 @@ test "fuzz: valid utf-8 survives the round trip whatever it contains" {
                 2 => rand.intRangeAtMost(u21, 0x800, 0xD7FF),
                 else => rand.intRangeAtMost(u21, 0xE000, 0x10FFFF),
             };
-            // utf8Encode always writes at the START of its output slice, so
-            // handing it bytes[0..n] overwrote the code points already written
-            // and left the string a mix of the last one and stale bytes (which
-            // is what surfaced as a surrogate-half encoding below).
-            var enc: [4]u8 = undefined;
-            const len: usize = std.unicode.utf8Encode(cp, &enc) catch continue;
+            // utf8CodepointSequenceLength, not the ByteSequenceLength variant:
+            // that one takes a lead BYTE, so feeding it a truncated codepoint
+            // reported the wrong width and utf8Encode then asserted on a
+            // destination sized from it.
+            const len: usize = std.unicode.utf8CodepointSequenceLength(cp) catch continue;
             if (k + len > n) break;
-            @memcpy(bytes[k..][0..len], enc[0..len]);
-            k += len;
+            // Encode into a scratch buffer, then copy at k: utf8Encode writes at
+            // the START of its output slice, so handing it bytes[0..n] overwrote
+            // the code points already written, and handing it bytes[k..n]
+            // returned a length that had to be added to k by hand. Either way
+            // the string ended up a mix of the last code point and stale bytes
+            // (which is what surfaced as a surrogate-half encoding below).
+            var enc: [4]u8 = undefined;
+            const written: usize = std.unicode.utf8Encode(cp, &enc) catch continue;
+            @memcpy(bytes[k..][0..written], enc[0..written]);
+            k += written;
         }
         const s = bytes[0..k];
         if (std.mem.indexOfScalar(u8, s, 0) != null) continue; // never generated

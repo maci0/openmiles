@@ -42,14 +42,6 @@ fn normalize3(v: *[3]f32) void {
     }
 }
 
-/// Saturating float -> i32 (NaN -> 0, out-of-range -> clamped).
-fn satI32(v: anytype) i32 {
-    if (std.math.isNan(v)) return 0;
-    if (v >= 2147483647.0) return std.math.maxInt(i32);
-    if (v <= -2147483648.0) return std.math.minInt(i32);
-    return @intFromFloat(v);
-}
-
 /// Apply an MSS loop count to a miniaudio sound: count 0 means infinite looping.
 fn applyLoopCount(sound: *ma.ma_sound, count: i32) void {
     ma.ma_sound_set_looping(sound, if (count == 0) ma.MA_TRUE else ma.MA_FALSE);
@@ -116,8 +108,8 @@ fn msPosition(self: anytype, rate_factor: f32) Sample.MsPosition {
         const native = @as(f32, @floatFromInt(self.decoder.?.outputSampleRate));
         const effective = (self.target_rate orelse native) * rate_factor;
         const ms_per_frame: f64 = if (effective > 0) 1000.0 / @as(f64, effective) else 0;
-        pos.current = satI32(@as(f64, @floatFromInt(cursor)) * ms_per_frame);
-        pos.total = satI32(@as(f64, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
+        pos.current = root.satI32(@as(f64, @floatFromInt(cursor)) * ms_per_frame);
+        pos.total = root.satI32(@as(f64, @floatFromInt(self.cached_length_frames)) * ms_per_frame);
     }
     return pos;
 }
@@ -968,12 +960,18 @@ pub const Sample = struct {
         result = ma.ma_sound_init_from_data_source(&self.driver.engine, @ptrCast(decoder), ma.MA_SOUND_FLAG_NO_SPATIALIZATION, null, &self.sound);
         if (result != ma.MA_SUCCESS) {
             _ = ma.ma_decoder_uninit(decoder);
-            return error.SampleLoadFailed;
+            return error.SoundInitFailed;
         }
         // Take ownership only after all fallible steps succeed, so callers' catch
         // paths can safely free the buffer on failure without causing a double-free
         // through a later Sample.deinit.
         self.owned_buffer = data;
+        // Every load path has to refresh this: AIL_set_sample_file and
+        // AIL_set_sample_address land here, so leaving the previous load's
+        // source frame size in place would make AIL_sample_granularity report
+        // the old file's bytes-per-frame (loadFromBoundedPointer clears it for
+        // the same reason).
+        self.src_bpf = wavSourceBytesPerFrame(data) orelse 0;
         self.finishDecoderLoad(decoder);
 
         log("Sample.loadFromOwnedMemory success: s={*}, vol={d}, pan={d}, pitch={d}, loop={d}\n", .{ self, self.volume, self.pan, self.pitch, self.loop_count });
@@ -1067,7 +1065,7 @@ pub const Sample = struct {
         if (result != ma.MA_SUCCESS) {
             _ = ma.ma_decoder_uninit(decoder);
             // decoder allocation and ctx are freed by their errdefers.
-            return error.SampleLoadFailed;
+            return error.SoundInitFailed;
         }
         self.bounded_mem_ctx = ctx;
         // Bounded mounts serve non-WAV streaming formats only; clear any
@@ -1102,7 +1100,7 @@ pub const Sample = struct {
         result = ma.ma_sound_init_from_data_source(&self.driver.engine, @ptrCast(decoder), ma.MA_SOUND_FLAG_NO_SPATIALIZATION, null, &self.sound);
         if (result != ma.MA_SUCCESS) {
             _ = ma.ma_decoder_uninit(decoder);
-            return error.SampleLoadFailed;
+            return error.SoundInitFailed;
         }
         self.owned_buffer = owned_copy;
         self.src_bpf = wavSourceBytesPerFrame(internal_data) orelse 0;
@@ -1192,7 +1190,7 @@ pub const Sample = struct {
                 @intCast(@min(@max(self.n_buffers, 2), StreamSource.max_slots));
 
             const res = ma.ma_sound_init_from_data_source(&self.driver.engine, @ptrCast(&self.stream_src.base), ma.MA_SOUND_FLAG_NO_SPATIALIZATION, null, &self.sound);
-            if (res != ma.MA_SUCCESS) return error.SampleLoadFailed;
+            if (res != ma.MA_SUCCESS) return error.SoundInitFailed;
             self.stream_active = true;
             self.is_initialized = true;
             self.is_done.store(false, .release);
