@@ -2263,6 +2263,54 @@ test "AIL_startup returns an incrementing use count (SDK refcount)" {
     try testing.expectEqual(c1 + 1, c2);
 }
 
+test "concurrent startups leave exactly one startup provider" {
+    // A game that brings the audio up from a worker thread while its main
+    // thread does the same runs startup() twice at once. The claim on the
+    // published provider is a load followed by a store, so the two threads
+    // could both read null and both build a provider: the one that lost the
+    // store was unreachable from then on, keeping its interfaces and name
+    // allocated for the life of the process while shutdown freed only the
+    // winner. Each thread reading the provider back after its own call is what
+    // exposes that: on the racing build the two disagree, because one of them
+    // is reading a provider the other has already replaced.
+    const api_digital = @import("api/digital.zig");
+    // The count is process-global and earlier tests left uses outstanding, so
+    // drain it to get the engine down, then put a startup back at the end: the
+    // state the suite expects to inherit.
+    while (api_digital.startupUseCount() > 0) api_digital.AIL_shutdown();
+    try testing.expectEqual(@as(?*openmiles.Provider, null), openmiles.startupProvider());
+
+    const thread_count = 8;
+    const CB = struct {
+        var gate: std.atomic.Value(u32) = .init(0);
+        var seen: [thread_count]?*openmiles.Provider = .{null} ** thread_count;
+
+        fn worker(slot: usize) void {
+            // All threads leave the gate together, so the calls overlap the
+            // window the claim is made in rather than running one after another.
+            _ = gate.fetchAdd(1, .release);
+            while (gate.load(.acquire) < thread_count) std.atomic.spinLoopHint();
+            openmiles.startup();
+            seen[slot] = openmiles.startupProvider();
+        }
+    };
+
+    var handles: [thread_count]std.Thread = undefined;
+    for (&handles, 0..) |*h, i| h.* = try std.Thread.spawn(.{}, CB.worker, .{i});
+    for (handles) |h| h.join();
+
+    const published = openmiles.startupProvider();
+    try testing.expect(published != null);
+    for (CB.seen) |p| try testing.expectEqual(published, p);
+
+    // The teardown reaches every provider a startup built, so nothing of the
+    // racing run is left holding memory.
+    api_digital.AIL_shutdown();
+    try testing.expectEqual(@as(?*openmiles.Provider, null), openmiles.startupProvider());
+    try testing.expectEqual(@as(i32, 1), api_digital.AIL_startup());
+    try testing.expect(openmiles.startupProvider() != null);
+}
+
 test "AIL_shutdown holds the engine up until the last use count is released" {
     const api_digital = @import("api/digital.zig");
     // Two startups and two shutdowns, in the order a game that nests the Quick

@@ -500,6 +500,24 @@ pub fn ailFileSize(filename: [*:0]const u8) u32 {
 // payload. Callers go through startupProvider().
 var startup_provider: std.atomic.Value(?*Provider) = .init(null);
 
+// Serializes startup(), which a game drives from whichever thread it happens to
+// be on: AIL_startup and AIL_quick_startup both reach it, and a worker thread
+// bringing the audio up while the main thread does the same is ordinary. The
+// startup is check-then-act on the published provider, and an atomic load/store
+// does not make that pair one step: two threads that both read null before
+// either stored built two startup providers, and the one that lost the store
+// was unreachable from then on, so its interfaces and name stayed allocated for
+// the life of the process and shutdown freed only the winner.
+//
+// The lock is taken *after* the published-provider check, so the re-entrant
+// AIL_startup a plugin's RIB_Main may make (the provider is published before
+// the scan runs) still returns on the guard rather than deadlocking on a lock
+// the same thread already holds. Nothing reached from startup()'s body takes
+// this lock, so the nesting order against provider_mutex and the driver locks
+// is fixed by that. shutdown() does not take it: see the note on its own
+// teardown, where holding it across the timer-thread joins would deadlock.
+var startup_mutex: std.Io.Mutex = .init;
+
 pub fn startupProvider() ?*Provider {
     return startup_provider.load(.acquire);
 }
@@ -1333,6 +1351,13 @@ pub fn getUsCount64() u64 {
 
 pub fn startup() void {
     if (startup_provider.load(.acquire) != null) return;
+    // Second execution of the same startup, whether it is a retry on the same
+    // thread or a second thread racing the first: the check above runs again
+    // under the lock, so the loser finds the published provider and returns
+    // without building a second one.
+    startup_mutex.lockUncancelable(io);
+    defer startup_mutex.unlock(io);
+    if (startup_provider.load(.acquire) != null) return;
     log("startup: ensureStartupTime\n", .{});
     ensureStartupTime();
     log("startup: Provider.init\n", .{});
@@ -1367,6 +1392,18 @@ pub fn startup() void {
 }
 
 pub fn shutdown() void {
+    // Deliberately not under startup_mutex, unlike startup(): the first thing
+    // this does is releaseAllTimers, which joins the timer threads, and a timer
+    // callback is free to call AIL_startup. Holding the lock across that join
+    // puts the two threads on opposite sides of it (the callback waits for the
+    // lock the teardown holds, the teardown waits for the callback to return)
+    // and a game that starts up from a timer callback would hang its shutdown
+    // forever. A shutdown racing a startup on another thread is the narrower
+    // window this leaves, and it costs no memory: the startup's provider is
+    // either already published (and so freed here) or the teardown wins and the
+    // startup is a fresh bring-up, which is what a caller that raced them asked
+    // for.
+    //
     // MSS's AIL_shutdown releases everything startup acquired. Timer threads
     // stop first (their callbacks may touch the drivers), then MIDI sequences
     // (their voices are attached to the digital engine and must be stopped

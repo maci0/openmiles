@@ -146,6 +146,17 @@ everything below is unreleased.
   read, which is the same code a bad command line returns, so a broken reference
   read as a typo in the invocation. An unreadable or non-PE DLL is now 1, as the
   sibling gates report a check that could not run, and 2 stays a bad invocation.
+- `openmiles.startup()` claimed the startup provider with an atomic load
+  followed by a store, which is not one step. A game that called `AIL_startup`
+  (or `AIL_quick_startup`) from a worker thread while its main thread did the
+  same could have both calls read "no provider", build one each, and have the
+  second store overwrite the first: the losing provider was unreachable from
+  then on, so its interfaces and name stayed allocated for the life of the
+  process while `AIL_shutdown` freed only the winner. The claim is made under a
+  lock now, so the second call finds the published provider and returns.
+  `openmiles.shutdown()` deliberately stays outside that lock: it joins the
+  timer threads, and a timer callback is free to call `AIL_startup`, so holding
+  the lock across the joins would deadlock that game.
 - The unregister callback a plugin is handed at `RIB_Main` did nothing:
   `rib_unregister_interface` discarded its handle, and `rib_register_interface`
   returned 0 or 1 rather than an interface handle, so a plugin that dropped an
