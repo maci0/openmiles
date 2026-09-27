@@ -246,6 +246,14 @@ everything below is unreleased.
 
 ### Changed
 
+- `OPENMILES_DEBUG` accepts `yes`/`no` and `on`/`off` beside `1`/`0` and
+  `true`/`false`, in any case, and a value outside that set is reported on
+  stderr instead of silently meaning off. `OPENMILES_DEBUG=yes` previously
+  disabled the very log it asked for, with no message. A `TMPDIR` that is
+  empty, too long, or relative is reported the same way rather than quietly
+  relocating the ASI image to the game directory. The README now has a
+  *Configuration* section listing both variables, their values, and their
+  defaults.
 - Unknown-size sample loads go through bounded callbacks.
 - MIDI sequence beat and millisecond conversions saturate instead of
   overflowing `i32`.

@@ -136,12 +136,35 @@ fn tempDir(buf: []u8) ?[]const u8 {
         return appendSeparator(buf, dir);
     }
     // TMPDIR is the POSIX convention; the game directory (the process cwd under
-    // Wine) is the fallback, and the caller covers that case too.
+    // Wine) is the fallback, and the caller covers that case too. A TMPDIR that
+    // is set but unusable is reported rather than dropped: the silent part of
+    // the fallback is that the unpacked image lands in the game directory, so an
+    // operator whose TMPDIR is wrong would otherwise never learn why.
     const tmp = std.c.getenv("TMPDIR") orelse return null;
     const dir = std.mem.span(@as([*:0]const u8, tmp));
-    if (dir.len == 0 or dir.len > buf.len - 2) return null;
+    if (dir.len == 0) {
+        reportTempDir("is empty");
+        return null;
+    }
+    if (dir.len > buf.len - 2) {
+        reportTempDir("is too long to use");
+        return null;
+    }
+    // POSIX requires TMPDIR to be absolute. A relative one resolves against the
+    // process cwd, which under Wine is the game directory, so honouring it puts
+    // the image exactly where the fallback would.
+    if (!std.fs.path.isAbsolute(dir)) {
+        reportTempDir("is not an absolute path");
+        return null;
+    }
     @memcpy(buf[0..dir.len], dir);
     return appendSeparator(buf, buf[0..dir.len]);
+}
+
+/// stderr rather than log(): the log is off unless the operator turned it on,
+/// and a misconfigured TMPDIR is exactly what they are trying to find out about.
+fn reportTempDir(reason: []const u8) void {
+    std.debug.print("openmiles: ignoring TMPDIR ({s}); the ASI image is written to the current directory instead\n", .{reason});
 }
 
 fn appendSeparator(buf: []u8, dir: []const u8) ?[]const u8 {

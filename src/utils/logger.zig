@@ -16,6 +16,7 @@ const max_log_bytes: u64 = 64 * 1024 * 1024; // 64 MiB
 var log_file: ?std.Io.File = null;
 var log_offset: u64 = 0;
 var initialized = false;
+var config_logged = false;
 var debug_enabled = false;
 var mutex: std.Io.Mutex = .init;
 
@@ -24,8 +25,34 @@ var mutex: std.Io.Mutex = .init;
 extern "kernel32" fn GetEnvironmentVariableW(lpName: [*:0]const u16, lpBuffer: [*]u16, nSize: u32) callconv(.winapi) u32;
 extern "kernel32" fn OutputDebugStringW(lpOutputString: [*:0]const u16) callconv(.winapi) void;
 
-fn isTruthy(val: []const u8) bool {
-    return std.mem.eql(u8, val, "1") or std.mem.eql(u8, val, "true");
+// OPENMILES_DEBUG accepts these, case-insensitively. Anything else is a
+// misconfiguration, not a request to disable the log, and is reported on
+// stderr rather than left to disable logging silently.
+const debug_on_values = [_][]const u8{ "1", "true", "yes", "on" };
+const debug_off_values = [_][]const u8{ "0", "false", "no", "off" };
+
+fn parseDebugFlag(value: []const u8) ?bool {
+    // An empty value is "set to empty", not "off": an exported
+    // OPENMILES_DEBUG= with nothing after the '=' is a broken launcher
+    // environment, and reading it as off hides the fact.
+    if (value.len == 0) return null;
+    for (debug_on_values) |v| if (std.ascii.eqlIgnoreCase(value, v)) return true;
+    for (debug_off_values) |v| if (std.ascii.eqlIgnoreCase(value, v)) return false;
+    return null;
+}
+
+fn applyDebugEnvValue(value: []const u8) void {
+    if (parseDebugFlag(value)) |enabled| {
+        debug_enabled = enabled;
+        return;
+    }
+    // stderr, not log(): the log is what the operator was trying to turn on,
+    // so a message in it would never be seen. This is the one message init
+    // always emits.
+    std.debug.print(
+        "openmiles: ignoring OPENMILES_DEBUG='{s}': expected 1/0, true/false, yes/no, or on/off\n",
+        .{value},
+    );
 }
 
 pub fn init() void {
@@ -55,13 +82,13 @@ pub fn init() void {
             const len = GetEnvironmentVariableW(name.ptr, &wbuf, wbuf.len);
             if (len > 0 and len < wbuf.len) {
                 if (wide.toUtf8(wbuf[0..len], &buf)) |val| {
-                    debug_enabled = isTruthy(val);
+                    applyDebugEnvValue(val);
                 } else |_| {}
             }
         } else |_| {}
     } else {
         if (std.c.getenv("OPENMILES_DEBUG")) |val_ptr| {
-            debug_enabled = isTruthy(std.mem.span(@as([*:0]const u8, val_ptr)));
+            applyDebugEnvValue(std.mem.span(@as([*:0]const u8, val_ptr)));
         }
     }
 
@@ -90,12 +117,27 @@ pub fn deinit() void {
         log_file = null;
     }
     @atomicStore(bool, &initialized, false, .release);
+    @atomicStore(bool, &config_logged, false, .release);
+}
+
+/// Record the effective configuration once per init, so a log that opens can be
+/// read back as "logging is on, from the build mode, into this file" without
+/// the reader having to know the variable that asked for it.
+fn logConfigOnce() void {
+    if (@atomicLoad(bool, &config_logged, .acquire)) return;
+    @atomicStore(bool, &config_logged, true, .release);
+    log("openmiles: debug log on ({s} build, default {s}), appending to openmiles.log in the current directory, cap {d} bytes\n", .{
+        @tagName(builtin.mode),
+        if (build_options.log_by_default) "on" else "off",
+        max_log_bytes,
+    });
 }
 
 pub fn log(comptime fmt: []const u8, args: anytype) void {
     if (!debug_enabled and @atomicLoad(bool, &initialized, .acquire)) return;
     init();
     if (!debug_enabled) return;
+    logConfigOnce();
     var buf: [1024]u8 = undefined;
     const msg = std.fmt.bufPrint(&buf, fmt, args) catch return;
 
@@ -116,5 +158,32 @@ pub fn log(comptime fmt: []const u8, args: anytype) void {
             f.writePositionalAll(io, msg, log_offset) catch return;
             log_offset += msg.len;
         }
+    }
+}
+
+const testing = std.testing;
+
+test "OPENMILES_DEBUG accepts the documented values in any case" {
+    for (debug_on_values) |v| {
+        try testing.expectEqual(true, parseDebugFlag(v).?);
+    }
+    // Case is not a configuration difference: an operator on a case-insensitive
+    // expectation writes "True" and "OFF" as readily as "true" and "0".
+    for ([_][]const u8{ "TRUE", "True", "YES", "On" }) |v| {
+        try testing.expectEqual(true, parseDebugFlag(v).?);
+    }
+    for ([_][]const u8{ "FALSE", "False", "NO", "Off" }) |v| {
+        try testing.expectEqual(false, parseDebugFlag(v).?);
+    }
+    for (debug_off_values) |v| {
+        try testing.expectEqual(false, parseDebugFlag(v).?);
+    }
+}
+
+test "an unrecognized OPENMILES_DEBUG is rejected, not read as off" {
+    // A typo silently disabling the log is the failure this guards: the
+    // operator asks for a trace and gets none with no message.
+    for ([_][]const u8{ "", " ", "2", "enabled", "TRUE-ish", "t", "no!", "-1" }) |v| {
+        try testing.expectEqual(@as(?bool, null), parseDebugFlag(v));
     }
 }

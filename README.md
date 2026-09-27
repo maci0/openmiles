@@ -292,7 +292,27 @@ version encodings, and compiles the header once per encoding as C99 with
 `-Wall -Wextra -Werror` so a declaration that only parses is caught here rather
 than in your build. It runs as part of `make lint`.
 
-### Debug logging
+### Configuration
+
+The library reads its runtime configuration from the process environment. It
+reads two variables and has no config file, so the table below is the whole
+surface: nothing else in the environment changes its behaviour.
+
+| Variable | Values | Default | Effect |
+|----------|--------|---------|--------|
+| `OPENMILES_DEBUG` | `1`/`0`, `true`/`false`, `yes`/`no`, `on`/`off`, any case | logging on in a Debug build, off otherwise | Verbose trace to `openmiles.log` in the game directory and to the debugger, capped at 64 MiB |
+| `TMPDIR` | an absolute directory path | `%TEMP%` on Windows, the game directory on other systems | Where the in-memory ASI plugin image is unpacked before it is loaded |
+
+An `OPENMILES_DEBUG` value outside that set (including an empty one) is
+reported on stderr and leaves the default in place, rather than silently
+meaning off. A `TMPDIR` that is empty, too long, or not absolute is reported the
+same way and the image is written to the game directory instead.
+
+`-Dmss-version` and `-Doptimize` are build-time options (`zig build --help`),
+not runtime configuration: the shipped DLL is the same build everywhere, and
+selecting a version requires a rebuild.
+
+#### Debug logging
 
 Set `OPENMILES_DEBUG=1` in your environment to enable verbose logging to `openmiles.log` in the game directory.
 
@@ -300,7 +320,7 @@ Set `OPENMILES_DEBUG=1` in your environment to enable verbose logging to `openmi
 OPENMILES_DEBUG=1 wine YourGame.exe
 ```
 
-Debug builds enable logging by default; set `OPENMILES_DEBUG=0` to turn it off. Release builds log only when `OPENMILES_DEBUG` is set to `1` or `true`. The on-disk log is capped at 64 MiB per process to prevent unbounded growth.
+Debug builds enable logging by default; set `OPENMILES_DEBUG=0` to turn it off. Release builds log only when `OPENMILES_DEBUG` names a true value (`1`, `true`, `yes`, or `on`). The on-disk log is capped at 64 MiB per process to prevent unbounded growth.
 
 ## Architecture
 
