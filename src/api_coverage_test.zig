@@ -1,9 +1,10 @@
 //! API coverage smoke test.
 //!
-//! Invokes every exported C-ABI function at least once so the whole public
-//! surface is verified to link, be reachable, and survive a benign/null call
-//! without crashing. Deep behavior + adversarial input is covered by
-//! fuzz_test.zig and main_test.zig; this file guarantees breadth (every symbol).
+//! Invokes the exported C-ABI functions of the api modules imported below at
+//! least once, so they are verified to link, be reachable, and survive a
+//! benign/null call without crashing. Deep behavior + adversarial input is
+//! covered by fuzz_test.zig and main_test.zig; scripts/check_exports.py and
+//! main_test.zig carry the rest of the export table.
 //!
 //! Convention: nullable handles are passed null (exercises the guard path);
 //! non-optional pointer params get a scratch buffer or a real handle where the

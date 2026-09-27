@@ -82,9 +82,9 @@ int play_test_main(int argc, char** argv) {
     LOAD_FUNC_EX(AIL_set_digital_master_volume, 8);
     LOAD_FUNC_EX(AIL_allocate_sample_handle, 4);
     LOAD_FUNC_EX(AIL_release_sample_handle, 4);
-    /* The v8+ table renames the 2-arg entry, so plain AIL_init_sample@8 does not exist. */
-    p_AIL_init_sample = (t_AIL_init_sample)GetProcAddress(mss, MSS_DECORATE(AIL_init_sample_v8, 8));
-    if (!p_AIL_init_sample) { printf("Failed to load function: AIL_init_sample_v8\n"); return 1; }
+    /* The v8+ table keeps the export name; AIL_init_sample_v8 is the internal
+     * Zig symbol the @8 entry is emitted from, and is never a PE export. */
+    LOAD_FUNC_EX(AIL_init_sample, 8);
     LOAD_FUNC_EX(AIL_set_sample_file, 12);
     LOAD_FUNC_EX(AIL_start_sample, 4);
     LOAD_FUNC_EX(AIL_stop_sample, 4);

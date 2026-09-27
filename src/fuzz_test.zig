@@ -2,9 +2,10 @@
 //!
 //! Each test drives an API or parser with thousands of pseudo-random and
 //! adversarial inputs (truncated headers, lying length fields, huge/zero sizes)
-//! using a fixed-seed PRNG so failures reproduce. The safe-mode build turns any
-//! out-of-bounds access, integer overflow, or unreachable into a panic, so a
-//! green run means every fuzzed surface handled the garbage without UB.
+//! using a fixed-seed PRNG so failures reproduce. Run in a build with safety
+//! checks on (the default, or -Dsanitize), where an out-of-bounds access,
+//! integer overflow, or unreachable is a panic: a green run then means every
+//! fuzzed surface handled the garbage without UB.
 //!
 //! Pure parsers (slice-bounded) and the streaming source are fuzzed directly;
 //! the C-ABI sample/sequence entry points are fuzzed against a device-less

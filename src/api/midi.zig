@@ -313,9 +313,9 @@ pub fn AIL_send_channel_voice_message(mdi_opt: ?*MidiDriver, seq_opt: ?*Sequence
             _ = tsf_mod.tsf_channel_set_presetnumber(sf, channel, b1, if (channel == 9) 1 else 0);
         },
         0xE0 => {
-            // 14 bits: data byte 1 is the low 7, data byte 2 the high 7. The mask
-            // above keeps d2 to 6 bits, so the pair spans 0..8191 with 4096 as
-            // centre rather than the full 14-bit MIDI range.
+            // 14 bits: data byte 1 is the low 7, data byte 2 the high 7. The
+            // `& 0x3F` below keeps d2 to 6 bits, so the pair spans 0..8191 with
+            // 4096 as centre rather than the full 14-bit MIDI range.
             const bend = ((b2 & 0x3F) << 7) | b1;
             _ = tsf_mod.tsf_channel_set_pitchwheel(sf, channel, bend);
         },

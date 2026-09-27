@@ -44,8 +44,9 @@ pub const StreamSource = struct {
     frame_size: usize = 4,
     mutex: std.Io.Mutex = .init,
     slots: [max_slots]Slot = [_]Slot{.{}} ** max_slots,
-    // Active ring depth. Fixed at stream creation from the sample's configured
-    // buffer count (AIL_set_sample_buffer_count); indices beyond it are invalid.
+    // Active ring depth. Seeded from the sample's configured buffer count
+    // (AIL_set_sample_buffer_count) at stream creation and resized by
+    // setSlotCount whenever that count changes; indices beyond it are invalid.
     slot_count: usize = 2,
     current: usize = 0,
     cursor_frames: u64 = 0,

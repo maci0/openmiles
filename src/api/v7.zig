@@ -7,9 +7,9 @@
 //! `mss.h` shipped with the MSS 9.x SDK (the v7–v9 unified API is identical).
 //!
 //! Functions that map onto existing engine features are implemented by reusing
-//! them; genuinely-new v7 subsystems (multichannel speaker/receiver arrays,
-//! output-filter providers, MP3 frame inspection, pipeline stages) are stubbed
-//! with sane defaults so v7 titles link and run.
+//! them; the two subsystems with no engine equivalent (output-filter providers
+//! and pipeline-stage processors) are stubbed with sane defaults so v7 titles
+//! link and run.
 
 const std = @import("std");
 const openmiles = @import("openmiles");
@@ -455,9 +455,9 @@ pub fn AIL_background_CPU_percent() callconv(.winapi) i32 {
     return 0;
 }
 
-// --- Genuinely-new v7 subsystems: stubbed (no engine equivalent) -------------
-// Multichannel speaker/receiver, output-filter providers, MP3 frame inspection,
-// and pipeline-stage processors return defaults so v7 titles link and run.
+// --- v7 subsystems with no engine equivalent -------------------------------
+// Output-filter providers and pipeline-stage processors return defaults so v7
+// titles link and run.
 
 pub fn AIL_sample_processor(s_opt: ?*Sample, pipeline_stage: i32) callconv(.winapi) ?*anyopaque {
     _ = s_opt;

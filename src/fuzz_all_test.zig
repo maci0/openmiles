@@ -7,9 +7,7 @@
 //! Out of scope here (covered by the ordered unit tests in main_test.zig and
 //! the C integration harnesses instead): AIL_startup and AIL_shutdown, which
 //! the handle pool below is built on and which run once per process rather than
-//! per input. The other lifecycle calls are fuzzed like any other export: each
-//! opens its own driver or filter and tears that down again, so none of them
-//! disturbs the pool.
+//! per input.
 const std = @import("std");
 const testing = std.testing;
 const openmiles = @import("openmiles");

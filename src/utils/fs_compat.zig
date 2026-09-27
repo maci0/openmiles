@@ -1,7 +1,8 @@
 //! Filesystem compatibility shim. Wraps file/directory operations over std.Io
-//! with a native Windows fallback so the rest of the codebase has one portable
-//! surface (open, create, whole-file read, whole-file write) regardless of
-//! target OS.
+//! with native Windows calls for the path handling std.Io does not cover, so
+//! the rest of the codebase has one portable surface (open a file, open a
+//! directory, create a file, and the read and write length a whole-file
+//! transfer asks for) regardless of target OS.
 
 const std = @import("std");
 const builtin = @import("builtin");

@@ -124,7 +124,8 @@ typedef void* HREDBOOK;
  * did not test. These are the two tables, selected by the same
  * OPENMILES_MSS_VERSION as the declarations, and they are the slots the engine
  * gives a default to; a number with no default here is one this build does not
- * name, and both calls treat it as 0 and store nothing.
+ * name, and the getter reads 0 for it. A number past the table itself (512
+ * slots) is dropped by the setter and logged.
  *
  * The numbers are the table this build reads, seeded in `preferences` in
  * src/root.zig; scripts/check_header.py holds the two in step, so a slot that
@@ -332,7 +333,7 @@ char*      MSS_CALLBACK AIL_set_redist_directory(char const* dir);
 #endif
 /* `number` is one of the MSS_* preference names above, which the build's
  * version selects between two numberings. Both return the previous value of
- * the slot, 0 for one this build does not name. */
+ * the slot, 0 for a slot this build does not name and a number past the table. */
 S32        MSS_CALLBACK AIL_get_preference(U32 number);
 S32        MSS_CALLBACK AIL_set_preference(U32 number, S32 value);
 
@@ -518,17 +519,18 @@ void        MSS_CALLBACK AIL_set_listener_3D_orientation(HDIGDRIVER dig, F32 fro
 #if MSS_AT_LEAST(65)
 /* v6.5 introduced the level/pan getters and the master level and reverb
  * calls on the ordinary HSAMPLE/HDIGDRIVER handles; v7 moved 3D onto the
- * same HSAMPLE and dropped the H3DSAMPLE family. A NULL handle is what the
- * first parameter checks, so a NULL HSAMPLE is the documented way to say
- * "the current sample". The low-pass cutoff widened at 8.0 to take a channel,
+ * same HSAMPLE and dropped the H3DSAMPLE family. A NULL handle is a no-op:
+ * every call below returns without touching state. The low-pass cutoff widened
+ * at 8.0 to take a channel,
  * and the master reverb and room-type calls widened at 9.0 to take a bus
  * index, so each arity needs its own declaration: the count is part of the
  * stdcall decoration. */
 void        MSS_CALLBACK AIL_set_sample_volume_levels(HSAMPLE S, F32 left_level, F32 right_level);
 void        MSS_CALLBACK AIL_sample_volume_levels(HSAMPLE S, F32* left_level, F32* right_level);
 /* The unified getter, not the pre-8 AIL_set_sample_volume_pan(HSAMPLE, S32,
- * S32): this one reports volume and pan in the 0-127 MSS scale through the
- * pointers, and a null pointer leaves that half untouched. */
+ * S32): this one reports the normalized 0.0-1.0 volume and pan the application
+ * set (0.5 is a centred pan) through the pointers, and a null pointer leaves
+ * that half untouched. */
 void        MSS_CALLBACK AIL_sample_volume_pan(HSAMPLE S, F32* volume, F32* pan);
 void        MSS_CALLBACK AIL_set_sample_reverb_levels(HSAMPLE S, F32 dry_level, F32 wet_level);
 void        MSS_CALLBACK AIL_sample_reverb_levels(HSAMPLE S, F32* dry_level, F32* wet_level);
@@ -580,17 +582,17 @@ void        MSS_CALLBACK AIL_set_sample_3D_velocity_vector(HSAMPLE S, F32 dx, F3
 void        MSS_CALLBACK AIL_sample_3D_velocity(HSAMPLE S, F32* dx, F32* dy, F32* dz);
 void        MSS_CALLBACK AIL_set_sample_3D_orientation(HSAMPLE S, F32 front_x, F32 front_y, F32 front_z, F32 up_x, F32 up_y, F32 up_z);
 void        MSS_CALLBACK AIL_sample_3D_orientation(HSAMPLE S, F32* front_x, F32* front_y, F32* front_z, F32* up_x, F32* up_y, F32* up_z);
-/* Angles are in degrees, and the outer level is the 0-127 volume played
- * outside the cone. */
+/* Angles are in degrees, and outer_volume_level is a 0.0-1.0 gain played
+ * outside the cone; the getter reports back what was set. */
 void        MSS_CALLBACK AIL_set_sample_3D_cone(HSAMPLE S, F32 inner_angle, F32 outer_angle, F32 outer_volume_level);
 void        MSS_CALLBACK AIL_sample_3D_cone(HSAMPLE S, F32* inner_angle, F32* outer_angle, F32* outer_volume_level);
-/* Distances are in world units, and auto_3D_wet_atten is non-zero to route
- * the 3D wet signal through the same attenuation curve. */
+/* Distances are in world units, and auto_3D_wet_atten is stored and reported
+ * back verbatim; it selects no routing in this build. */
 void        MSS_CALLBACK AIL_set_sample_3D_distances(HSAMPLE S, F32 max_dist, F32 min_dist, S32 auto_3D_wet_atten);
 void        MSS_CALLBACK AIL_sample_3D_distances(HSAMPLE S, F32* max_dist, F32* min_dist, S32* auto_3D_wet_atten);
-/* Advance a moving source and a moving listener by one frame. The engine
- * also advances them from its own mix callback; call these only for sources
- * the application moves by hand. */
+/* Advance a source this build moves by hand: the position is advanced by the
+ * velocity AIL_set_sample_3D_velocity stored, and nothing advances it
+ * per frame, so a moving source needs this call. */
 void        MSS_CALLBACK AIL_update_sample_3D_position(HSAMPLE S, F32 dt_ms);
 void        MSS_CALLBACK AIL_set_sample_obstruction(HSAMPLE S, F32 obstruction);
 F32         MSS_CALLBACK AIL_sample_obstruction(HSAMPLE S);
@@ -654,8 +656,8 @@ void        MSS_CALLBACK MilesGetEventSystemState(MILESEVENTSTATE* state);
 #endif
 
 #if MSS_AT_LEAST(90)
-/* Variables: the name is resolved against the bank's and the application's
- * variable blocks, and an unknown name is a no-op rather than an error. The
+/* Variables: the name is resolved against the system's own variable table, and
+ * an unknown name is a no-op rather than an error. The
  * Get forms report whether the name resolved and write through `value` when it
  * did. `system` is a handle, not a pointer into the heap. A v8 build has one
  * global system and does not export these four at all. */
@@ -683,8 +685,9 @@ U64         MSS_CALLBACK MilesEnqueueEventByName(char const* event_name);
 #endif
 
 /* Begin/Complete bracket the frames a game enqueues, so a batch of events all
- * resolve their variables against one consistent view. Both report whether the
- * queue was in the matching state. */
+ * resolve their variables against one consistent view. Both start their half
+ * of that work (Begin moves pending instances to playing, Complete reaps the
+ * finished ones) and return 0. */
 S32         MSS_CALLBACK MilesBeginEventQueueProcessing(void);
 S32         MSS_CALLBACK MilesCompleteEventQueueProcessing(void);
 void        MSS_CALLBACK MilesClearEventQueue(void);
@@ -708,7 +711,7 @@ U64         MSS_CALLBACK MilesResumeSoundInstances(char const* labels, U64 filte
 /* Enumerate live instances. Seed `*io_next` with MSS_FIRST for the first call
  * and pass back what the previous call wrote; 0 ends the walk. `status` is a
  * mask of MILESEVENTSOUNDSTATUS_* and 0 means every status. `labels` filters,
- * `search_for_id` restricts to one instance, and `out_info` receives the
+ * `search_for_id` is accepted and ignored, and `out_info` receives the
  * MILESEVENTSOUNDINFO for the instance that was found (NULL to skip it). The
  * v8 build narrows the instance filter to 32 bits, which is its only search
  * granularity. */
@@ -884,8 +887,10 @@ void*      MSS_CALLBACK AIL_file_read(char const* filename, void* dest);
 U32        MSS_CALLBACK AIL_file_size(char const* filename);
 S32        MSS_CALLBACK AIL_file_write(char const* filename, void const* data, U32 len);
 #if MSS_AT_LEAST(50)
-/* Returns an AILFILETYPE_* code, or AILFILETYPE_UNKNOWN for a buffer shorter
- * than 8 bytes and for an unrecognised one. */
+/* Returns a file-type code (0 for a buffer shorter than 8 bytes and for an
+ * unrecognised one, 1 for PCM WAV, 2 for ADPCM WAV, 5 for MIDI, 11-13 for the
+ * MPEG layers), the same numbering MSS 3.x-9.x uses for its AILFILETYPE_*
+ * constants, which this header does not declare. */
 S32        MSS_CALLBACK AIL_file_type(void const* data, U32 size);
 #endif
 #if MSS_AT_LEAST(70)
@@ -896,8 +901,10 @@ S32        MSS_CALLBACK AIL_file_type_named(void const* data, char const* filena
 
 #if MSS_AT_LEAST(61)
 /* Routes every later file access through the game's own VFS. The four
- * arguments are the AIL_FILE_* callbacks above, or 0 to go back to reading
- * from disk; 0 for one of them leaves that one call served from disk. The
+ * arguments are the AIL_FILE_* callbacks above, or 0 for all four to go back
+ * to reading from disk; an open with a missing close or read is a partial set,
+ * and every read then fails with the file error "Read failed" rather than
+ * falling back per call. The
  * order is (open, close, seek, read), which is the SDK's, not the order the
  * typedefs above are declared in. The parameters carry the callback types so
  * a caller passes a function where a function is expected: ISO C forbids

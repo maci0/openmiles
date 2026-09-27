@@ -31,6 +31,10 @@ comptime {
     if (is_x86_windows) {
         const Target = struct {
             name: []const u8,
+            // stdcall argument bytes, which is what the decorated `_NAME@N` ends
+            // in. Zig derives the suffix from each function's own arity, so the
+            // two must agree: a mismatch is what `make check-header` catches
+            // against the declarations in src/mss.h.
             stack_size: u8,
             ver: u16 = 30, // MSS version (major*10+minor) the export first appeared in
             ver_max: u16 = 999, // last version that still exports it (for renamed/dropped APIs)
@@ -38,9 +42,11 @@ comptime {
             // renamed export sharing another function's implementation).
             symbol: ?[]const u8 = null,
             // The real DLL exports the public RIB-interface and DLS APIs under
-            // __cdecl (undecorated: no leading `_`, no `@N`), while the AIL_*
-            // surface and the RIB provider-management calls stay __stdcall. When
-            // set, emit the bare name and the backing fn must be callconv(.c).
+            // __cdecl (undecorated: no leading `_`, no `@N`). The AIL_* surface
+            // is __stdcall apart from the v8 AIL_debug/indent/printf/sys_debug
+            // helpers, and every RIB call below 8.0 is __cdecl (the `_std`
+            // entries are the 8.0 changeover). When set, emit the bare name and
+            // the backing fn must be callconv(.c).
             cdecl: bool = false,
         };
         const targets = [_]Target{
@@ -108,9 +114,8 @@ comptime {
             .{ .name = "AIL_sample_loop_count", .stack_size = 4 },
             .{ .name = "AIL_register_EOS_callback", .stack_size = 8 },
             .{ .name = "AIL_open_stream", .stack_size = 12 },
-            // Undocumented internal that leaked into the 6.1a export table. In
-            // never_export below: no reference DLL carries it, so the entry
-            // never becomes a PE export.
+            // Undocumented internal. In never_export below: no reference DLL
+            // carries it, so the entry never becomes a PE export.
             .{ .name = "AIL_open_stream_by_sample", .stack_size = 16, .ver = 61, .ver_max = 61 },
             .{ .name = "AIL_close_stream", .stack_size = 4 },
             .{ .name = "AIL_start_stream", .stack_size = 4 },
@@ -396,11 +401,12 @@ comptime {
             .{ .name = "RIB_enumerate_interface", .stack_size = 20, .ver = 80, .symbol = "RIB_enumerate_interface_std" },
             .{ .name = "RIB_type_string", .stack_size = 8, .ver = 40, .cdecl = true, .ver_max = 79 },
             .{ .name = "RIB_type_string", .stack_size = 8, .ver = 80, .symbol = "RIB_type_string_std" },
-            // v9-only: v7/v8 export MIX_RIB_MAIN@8 (a different ASI entry arity);
-            // v4-v6 and v7/v8 do not export MSS_alloc_info/MSS_free_info at all.
+            // v9-only: 6.5 through v8 export MIX_RIB_MAIN@8 (a different ASI
+            // entry arity), and no build before v9 exports
+            // MSS_alloc_info/MSS_free_info at all.
             .{ .name = "MIX_RIB_MAIN", .stack_size = 20, .ver = 90 },
             .{ .name = "MIX_RIB_MAIN", .stack_size = 8, .ver = 65, .ver_max = 80, .symbol = "MIX_RIB_MAIN_v7" },
-            // Intermittent export: present in 6.x and v8 (8.0j), absent from v5,
+            // Intermittent export: present in v8 (8.0j), absent from v5, v6,
             // v7, and v9.
             .{ .name = "MSSDisableThreadLibraryCalls", .stack_size = 4, .ver = 80, .ver_max = 89 },
             .{ .name = "MSS_alloc_info", .stack_size = 16, .ver = 90 },

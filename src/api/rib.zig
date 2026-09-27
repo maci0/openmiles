@@ -98,7 +98,8 @@ pub fn RIB_request_interface(provider_opt: ?*Provider, name: [*:0]const u8, coun
         }
     }
 
-    // Fall back: if requesting ASI codec from the startup provider, return our built-in
+    // Fall back: an "ASI codec" request for any provider handle returns our
+    // built-in table, whatever the provider itself holds.
     if (std.mem.eql(u8, iface_name, "ASI codec")) {
         const src = openmiles.get_ASI_INTERFACE();
         const limit = @min(n, src.len);
@@ -612,8 +613,8 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
 // --- v8.0j+ / v9 stdcall RIB exports ------------------------------------------
 // The RIB interface API switched from __cdecl (undecorated, v6-v8.0b) to
 // __stdcall (decorated `_RIB_*@N`, v8.0j onward). These thin wrappers carry the
-// stdcall convention for the v8+ export targets; the bodies above stay cdecl for
-// the v6/v7 undecorated exports.
+// stdcall convention for the v8+ export targets; the `.c` bodies above are the
+// ones a build before 8.0 exports under the bare name.
 pub fn RIB_alloc_provider_handle_std(module: *anyopaque) callconv(.winapi) ?*Provider {
     return RIB_alloc_provider_handle(module);
 }

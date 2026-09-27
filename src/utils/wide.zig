@@ -24,7 +24,8 @@ pub fn utf8LenBound(wide: []const u16) usize {
     return wide.len * 3;
 }
 
-/// Convert a UTF-8 string for a *W call: NUL-terminated, no embedded NUL.
+/// Convert a UTF-8 string for a *W call: NUL-terminated. The input must be
+/// NUL-free; an interior NUL is copied and truncates the path at the *W call.
 pub fn toWide(utf8: []const u8, buf: []u16) Error![:0]const u16 {
     if (utf8.len >= buf.len) return error.NoSpaceLeft;
     const n = try std.unicode.utf8ToUtf16Le(buf[0..utf8.len], utf8);

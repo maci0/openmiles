@@ -893,6 +893,7 @@ pub const Sequence = struct {
         self.is_playing.store(false, .release);
         self.is_paused = false;
         self.is_done.store(false, .release);
+        self.was_stopped.store(false, .release);
     }
 
     /// Reset playback state to the beginning of the sequence (shared by start/stop).

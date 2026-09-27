@@ -50,7 +50,9 @@ fn normalize3(v: *[3]f32) void {
     }
 }
 
-/// Apply an MSS loop count to a miniaudio sound: count 0 means infinite looping.
+/// Translate an MSS loop count into miniaudio's looping flag: only 0 (infinite)
+/// turns it on. Finite repeats are counted by the EOS bridge, which seeks and
+/// restarts.
 fn applyLoopCount(sound: *ma.ma_sound, count: i32) void {
     ma.ma_sound_set_looping(sound, if (count == 0) ma.MA_TRUE else ma.MA_FALSE);
 }
@@ -786,7 +788,8 @@ pub const Sample = struct {
     n_buffers: i32 = 2,
     // Ring head: the slot AIL_load_sample_buffer(MSS_BUFFER_HEAD) resolves to.
     stream_head: i32 = 0,
-    // Which buffer ID was last loaded via AIL_load_sample_buffer (for EOB callback parameter)
+    // Slot most recently resolved by AIL_load_sample_buffer, or the slot that
+    // last drained a stream buffer.
     last_loaded_buffer: i32 = 0,
     user_data: [8]u32 = [_]u32{0} ** 8,
     // Bounded memory context for streaming formats loaded from raw pointers (freed on deinit)
@@ -1789,9 +1792,8 @@ pub const Sample = struct {
         }
     }
 
-    /// Frames the sample plays at once, i.e. one sample per channel. Derived
-    /// from the same source bytesPerFrame reads, so a sample count converts to
-    /// a frame index and back without a factor of the channel count.
+    /// Channels the decoder outputs, or the format the app declared, defaulting
+    /// to 2. Read by the v9 per-channel level getters.
     pub fn channelCount(self: *const Sample) u32 {
         if (self.decoder) |d| return @max(1, @as(u32, @intCast(d.outputChannels)));
         if (self.pcm_format) |fmt| return @max(1, fmt.channels);

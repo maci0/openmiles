@@ -63,8 +63,6 @@ pub fn detectMidiSize(raw: [*]const u8) usize {
     return streaming_sentinel_size;
 }
 
-// Returns an AILFILETYPE_* code: UNKNOWN=0, PCM_WAV=1, ADPCM_WAV=2, MIDI=5,
-// XMIDI=6 (consistent across MSS 3.x-9.x). These are NOT sequential 1/2/3.
 // Exact / case-insensitive 4..N-byte magic compares with bounds checking.
 fn eq(buf: []const u8, off: usize, lit: []const u8) bool {
     return off + lit.len <= buf.len and std.mem.eql(u8, buf[off .. off + lit.len], lit);
@@ -104,7 +102,9 @@ fn detectMpeg(in: []const u8) ?i32 {
 }
 
 /// Classify a media buffer into an AILFILETYPE_* code (AIL_file_type core,
-/// miscutil.cpp). Pure byte inspection; the api/file.zig export is a thin ABI
+/// miscutil.cpp). The codes are the MSS 3.x-9.x numbering and are NOT
+/// sequential: UNKNOWN=0, PCM_WAV=1, ADPCM_WAV=2, MIDI=5, XMIDI=6, the MPEG
+/// layers 11-13. Pure byte inspection; the api/file.zig export is a thin ABI
 /// wrapper over this.
 pub fn detectFileType(data: *anyopaque, len: u32) i32 {
     if (len < 8) return 0; // AILFILETYPE_UNKNOWN (SDK: data==0 || size<8)

@@ -40,7 +40,7 @@ char* AIL_sprintf(char* buf, const char* fmt, ...) {
 }
 
 // Backing symbol for the undocumented `stream_background` export that leaked
-// into the MSS 6.1-6.6 export tables (see the drectve block in digital.zig). It
+// into the MSS 6.1-6.6 export tables (see the drectve block in main.zig). It
 // is exported under a version-specific name to byte-match the reference export
 // table; no game references it, so a no-op is faithful.
 void mss_stream_background_stub(void) {}

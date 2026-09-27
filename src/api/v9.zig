@@ -232,10 +232,10 @@ pub fn AIL_us_count64() callconv(.winapi) u64 {
 }
 
 // =============================================================================
-// v9 advanced subsystems. OpenMiles has no engine equivalent for the bus mixer,
-// event command queue, sample groups, or system-state stack yet, so these link
-// with the SDK-correct signatures (exact stdcall stack sizes) and return safe
-// defaults. The few with a direct mapping onto our Sample do real work.
+// v9 advanced subsystems. The bus mixer, sample groups and the system-state
+// stack run on the driver below. The event command queue has no engine
+// equivalent yet, so its calls link with the SDK-correct signatures (exact
+// stdcall stack sizes) and return safe defaults.
 // =============================================================================
 const DigitalDriver = openmiles.DigitalDriver;
 
@@ -403,7 +403,8 @@ fn falloffPtr(graph: ?*anyopaque) ?[*]const MSSGraphPoint {
 }
 pub fn AIL_set_sample_3D_volume_falloff(s_opt: ?*Sample, graph: ?*anyopaque, pointcount: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    // SDK rejects pointcount > MILES_MAX_FALLOFF_GRAPH_POINTS (5); store verbatim.
+    // SDK rejects pointcount outside 0..MILES_MAX_FALLOFF_GRAPH_POINTS (5), and
+    // so does setFalloff: an out-of-range count leaves the previous graph.
     s.setFalloff(.volume, falloffPtr(graph), pointcount);
     // Adaptation: map the graph's first/last distance onto ma's min/max distance.
     const n = s.falloff_count[@intFromEnum(openmiles.FalloffKind.volume)];

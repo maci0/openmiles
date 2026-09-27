@@ -1536,8 +1536,8 @@ test "unregistering by handle drops only the interface it names" {
         .token = 2,
         .subtype = 0,
     }};
-    const cut_iface = (try p.registerInterface("filter", 1, &cut)).?;
-    const keep_iface = (try p.registerInterface("other", 1, &keep)).?;
+    const cut_iface = try p.registerInterface("filter", 1, &cut);
+    const keep_iface = try p.registerInterface("other", 1, &keep);
     // Handles are not reused, so unregistering one can never name the other.
     try testing.expect(cut_iface.handle != 0);
     try testing.expect(cut_iface.handle != keep_iface.handle);

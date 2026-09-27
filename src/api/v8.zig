@@ -908,6 +908,8 @@ pub fn AIL_unapply_sound_preset(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaqu
 // event-step builders, the soundbank "name" argument, the per-marker list arg,
 // and the ftoa output buffer. These variants match the exact v8 decorations and
 // forward to the v9 implementations, defaulting the parameters v9 later added.
+// AIL_sound_asset_filename is the exception: its v9-shaped body below is the
+// stub, so the real implementation lives in the v8-named function.
 // v8 form is @32 (8 args); v9 adds two trailing args (@40).
 pub fn AIL_add_control_sounds_event_step_v8(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque, a6: i32, a7: f32) callconv(.winapi) i32 {
     return AIL_add_control_sounds_event_step(a0, a1, a2, a3, a4, a5, a6, a7, 0, 0);

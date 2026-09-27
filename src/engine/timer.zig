@@ -2,7 +2,9 @@ const std = @import("std");
 const root = @import("../root.zig");
 const io = root.io;
 
-/// Provides high-resolution periodic timer callbacks for applications, executing on a dedicated background thread.
+/// Provides high-resolution periodic timer callbacks for applications, executing
+/// on a dedicated background thread. Under a virtual clock no thread is spawned
+/// and tick() fires the callback from the caller's thread instead.
 pub const Timer = struct {
     callback: *const fn (u32) callconv(.winapi) void,
     user_data: u32 = 0,

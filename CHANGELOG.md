@@ -179,6 +179,14 @@ everything below is unreleased.
   `usize` handle, which the x86 target cannot hold. The counter is pointer-sized
   now, and a counter that has run out of handles fails the registration instead
   of wrapping into a handle an earlier interface already had.
+- `rib_register_interface` unwrapped a null interface on the error path, so a
+  plugin that failed to register (a negative entry count, a null entry array, an
+  OOM) crashed the host instead of being told 0. It returns 0, and
+  `Provider.registerInterface` returns the interface it stored rather than an
+  optional that is never null.
+- Loading a sequence over a stopped one left it reporting `SEQ_STOPPED`; the
+  load path cleared the playing, paused and done flags but not the stopped one.
+  A reload now reports `SEQ_DONE`, as a fresh `init_sequence` does.
 - The unregister callback a plugin is handed at `RIB_Main` did nothing:
   `rib_unregister_interface` discarded its handle, and `rib_register_interface`
   returned 0 or 1 rather than an interface handle, so a plugin that dropped an

@@ -53,14 +53,14 @@ fn rib_register_interface(provider_handle: HPROVIDER, name: [*c]const u8, entry_
     if (provider_handle) |ptr| {
         const p: *Provider = @ptrCast(@alignCast(ptr));
         const z_name = std.mem.span(name);
-        const iface = p.registerInterface(z_name, entry_count, entries) catch |err| blk: {
+        const iface = p.registerInterface(z_name, entry_count, entries) catch |err| {
             log("rib_register_interface: failed for '{s}': {any}\n", .{ z_name, err });
             // Report failure to the plugin: a handle here tells it the entries are
             // registered, so it will dispatch through tokens that were never
             // stored (an OOM inside registerInterface drops them all).
-            break :blk null;
+            return 0;
         };
-        return @intCast(iface.?.handle);
+        return @intCast(iface.handle);
     }
     return 0;
 }
@@ -249,7 +249,7 @@ pub const Provider = struct {
 
     /// Register `name` and return the stored interface, whose `handle` is what
     /// RIB_unregister_interface takes.
-    pub fn registerInterface(self: *Provider, name: []const u8, count: i32, entries: ?*anyopaque) !?*Interface {
+    pub fn registerInterface(self: *Provider, name: []const u8, count: i32, entries: ?*anyopaque) !*Interface {
         log("Provider.registerInterface called: {s}, count={d}\n", .{ name, count });
         // A negative entry count comes from the plugin, not from us: rejecting
         // it silently would hand back an empty interface the plugin believes
@@ -287,9 +287,10 @@ pub const Provider = struct {
         return iface;
     }
 
-    /// True when `path` names a module this provider was already loaded from,
-    /// compared on the resolved path so a differently cased name on Windows is
-    /// the same plugin.
+    /// True when `path` names a module this provider was already loaded from.
+    /// The comparison is exact, so callers pass the resolved form (see
+    /// fs_compat.maybeResolveCaseInsensitivePath) and a differently cased name
+    /// on Windows is the same plugin.
     pub fn matchesSourcePath(self: *const Provider, path: []const u8) bool {
         const sp = self.source_path orelse return false;
         return std.mem.eql(u8, sp, path);

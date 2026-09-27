@@ -444,7 +444,9 @@ pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
 }
 
 /// AIL_file_size core: size in bytes via the app's callbacks when set, otherwise
-/// from the filesystem. Returns 0 and sets the file error on failure, except when the /// app set an open callback without a close one.
+/// from the filesystem. Returns 0 and sets the file error on failure, except when
+/// the app set an open callback without a close one, where it returns 0 with no
+/// error set.
 pub fn ailFileSize(filename: [*:0]const u8) u32 {
     clearFileError();
     if (cb_file_open != null) {

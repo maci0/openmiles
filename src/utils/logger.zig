@@ -182,6 +182,9 @@ fn sanitizeText(text: []u8) void {
     }
 }
 
+/// Write one record when logging is enabled. Self-initializes: a call before
+/// init() opens the log even when debug logging is off, and a call after
+/// deinit() reopens it, so a first call never has to know the lifecycle.
 pub fn log(comptime fmt: []const u8, args: anytype) void {
     if (!debug_enabled and @atomicLoad(bool, &initialized, .acquire)) return;
     init();

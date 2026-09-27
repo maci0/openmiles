@@ -468,10 +468,6 @@ pub const Bank = struct {
         }
     }
 
-    /// AIL_sound_asset_info: optionally copy the sound's MILESBANKSOUNDINFO into
-    /// `out_info`, optionally format its path into `out_filename`, and return the
-    /// filename-buffer requirement (`2 + bankNameLen + soundNameLen`), or 0 if not
-    /// found. Mirrors hlbank.cpp.
     /// Write `*<bank file name><sound file name>` (MSS's DOS-style relative
     /// asset path) into `out`, NUL-terminated. Returns the bytes the caller must
     /// provide: 1 for the `*`, both names, and 1 for the terminator.
@@ -494,6 +490,10 @@ pub const Bank = struct {
         return root.satI32(@floatFromInt(1 + self.filename.len + sfn.len + 1));
     }
 
+    /// AIL_sound_asset_info: optionally copy the sound's MILESBANKSOUNDINFO into
+    /// `out_info`, optionally format its path into `out_filename`, and return the
+    /// filename-buffer requirement (`2 + bankNameLen + soundNameLen`), or 0 if not
+    /// found. Mirrors hlbank.cpp.
     pub fn soundAssetInfo(self: *const Bank, sound_name: []const u8, out_filename: ?[*]u8, out_info: ?[*]u8) i32 {
         const data_off = self.findSoundDataOffset(sound_name) orelse 0;
         if (data_off == 0 or !self.inBounds(data_off, 8)) {

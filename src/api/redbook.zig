@@ -82,8 +82,8 @@ pub fn AIL_redbook_track_info(hb: ?*openmiles.Redbook, track: u32, start_ms: ?*u
     if (end_ms) |p| p.* = 0;
 }
 // SDK (mss.h 3.x/6.1): S32 return -- the old redbook volume call hands back a
-// status (1 on success, 0 for a null handle), unlike the void redbook_set_volume_
-// level introduced in 6.5.
+// status (1 on success, 0 for a null handle), unlike AIL_redbook_set_volume_level
+// (v6.5+), which returns the previous F32 level.
 pub fn AIL_redbook_set_volume(hb: ?*openmiles.Redbook, volume: i32) callconv(.winapi) i32 {
     const rb = hb orelse return 0;
     rb.volume = @intCast(@min(@max(volume, 0), 127));

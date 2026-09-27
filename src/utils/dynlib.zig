@@ -52,9 +52,9 @@ const StdDynLib = struct {
 /// Whether the program header table named by `eh` lies inside the image.
 ///
 /// The three fields are file-controlled, so the sum is computed in u64 and
-/// compared there: a crafted e_phoff plus e_phentsize * e_phnum overflows u64,
-/// and narrowing the wrapped result to usize (an unchecked @intCast in
-/// ReleaseFast) would pass a table that starts far outside the map.
+/// compared there: a crafted e_phoff plus e_phentsize * e_phnum lands far past
+/// the end of any image, and a comparison made in u32 would truncate it back to
+/// a small value that passes.
 fn programHeaderTableFits(eh: *const std.elf.Ehdr, img_len: usize) bool {
     if (eh.e_phoff == 0) return false;
     // The walk below indexes a [*]Phdr, so it strides by @sizeOf(Phdr), not by
@@ -208,9 +208,9 @@ test "a program header table past the end of the image is rejected" {
 
 test "a program header table whose end overflows u64 is rejected" {
     var eh: std.elf.Ehdr = std.mem.zeroes(std.elf.Ehdr);
-    // e_phoff + e_phentsize * e_phnum wraps to 0x2001, which fits in a 16 KiB
-    // image, so a bound computed after the wrap would accept a table that in
-    // fact starts 2^64 bytes before it.
+    // e_phoff + e_phentsize * e_phnum stays inside u64 but lands at
+    // 2^64 - 122879, which a u32 bound would truncate to 0x2001 and accept as a
+    // table inside a 16 KiB image.
     eh.e_phoff = 0xffffffff00002000;
     eh.e_phentsize = 0xffff;
     eh.e_phnum = 0xffff;

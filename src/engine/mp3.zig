@@ -135,7 +135,8 @@ fn fetchU32(p: []const u8) u32 {
     return std.mem.readInt(u32, p[0..4], .big);
 }
 
-/// ID3v2 tag header: "ID3", non-0xff size-of-tag bytes, syncsafe size bytes.
+/// ID3v2 tag header check: "ID3", a version below 0xff, and four syncsafe size
+/// bytes with the top bit clear.
 pub fn isId3v2(p: [*]const u8) bool {
     return p[0] == 0x49 and p[1] == 0x44 and p[2] == 0x33 and
         p[3] < 0xff and p[4] < 0xff and p[6] < 0x80 and p[7] < 0x80 and p[8] < 0x80 and p[9] < 0x80;
