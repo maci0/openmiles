@@ -4311,6 +4311,67 @@ test "injected short writes store only the named prefix" {
     try testing.expectEqualStrings(body, round_trip);
 }
 
+test "injected delete failures and the absolute temp-image create reach the seam" {
+    // The ASI image is created by absolute route and removed from either
+    // provider teardown or the failed-open path. Both went straight to std.Io,
+    // so a schedule could not fail a create that lands under the temp
+    // directory, and could not replay an image that stays on disk because it
+    // was still mapped.
+    const io = openmiles.io;
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const body = "MZ\x90\x00image";
+
+    var path_buf: [256]u8 = undefined;
+    const rel = try std.fmt.bufPrint(&path_buf, ".zig-cache/tmp/{s}/om_asi_image.dll", .{&tmp.sub_path});
+
+    const Faults = struct {
+        var fail: bool = false;
+        fn open(p: []const u8) ?anyerror {
+            if (!fail) return null;
+            return if (std.mem.endsWith(u8, p, "om_asi_image.dll")) error.AccessDenied else null;
+        }
+        fn remove(p: []const u8) ?anyerror {
+            if (!fail) return null;
+            return if (std.mem.endsWith(u8, p, "om_asi_image.dll")) error.PermissionDenied else null;
+        }
+    };
+    const fault: openmiles.fs_compat.Fault = .{ .open = Faults.open, .remove = Faults.remove };
+    defer openmiles.fs_compat.fault = null;
+
+    // Unfaulted: the absolute create, the write, and the delete all pass.
+    // The absolute form is what AIL_open_ASI_provider builds from the temp
+    // directory, so the path has to be one for the call to mean anything.
+    const cwd_z = try std.process.currentPathAlloc(io, openmiles.global_allocator);
+    defer openmiles.global_allocator.free(cwd_z);
+    var abs_buf: [512]u8 = undefined;
+    const abs = try std.fmt.bufPrint(&abs_buf, "{s}/{s}", .{ cwd_z, rel });
+    const f = try openmiles.fs_compat.createFileAbsolute(io, abs, .{ .exclusive = true });
+    openmiles.fs_compat.fault = &fault;
+    try testing.expectEqual(body.len, try openmiles.fs_compat.writeAll(io, f, abs, body));
+    f.close(io);
+
+    // The same three calls, with the schedule failing this path. The create is
+    // the one that used to slip past the seam.
+    Faults.fail = true;
+    try testing.expectError(error.AccessDenied, openmiles.fs_compat.createFileAbsolute(io, abs, .{ .exclusive = true }));
+    // The relative form is the same call, so the schedule names it too.
+    try testing.expectError(error.AccessDenied, openmiles.fs_compat.createFile(io, rel, .{ .exclusive = true }));
+    // A removal the schedule fails leaves the file in place, and reports why.
+    try testing.expectError(error.PermissionDenied, openmiles.fs_compat.deleteFile(io, abs));
+    // Another path is untouched by a schedule that names this one.
+    try testing.expectError(error.FileNotFound, openmiles.fs_compat.deleteFile(io, ".zig-cache/tmp/absent-image.dll"));
+
+    openmiles.fs_compat.fault = null;
+    Faults.fail = false;
+    // With the schedule gone the file is still there, which is what the
+    // injection models: a locked image is not removed by asking again.
+    const still_there = try openmiles.fs_compat.openFile(io, abs, .{});
+    still_there.close(io);
+    try openmiles.fs_compat.deleteFile(io, abs);
+    try testing.expectError(error.FileNotFound, openmiles.fs_compat.openFile(io, abs, .{}));
+}
+
 test "Sequence setChannelMap out-of-range physical clamps" {
     const allocator = testing.allocator;
     const driver = try openmiles.MidiDriver.init(allocator);

@@ -172,7 +172,7 @@ Gaps:
   plugin extension in the game directory, or in a directory the game points the
   redist search at, executes with game privileges.
 - `Provider.load` resolves the path case-insensitively before loading
-  (`src/rib/provider.zig:132 maybeResolveCaseInsensitivePath`), so a symlink or
+  (`src/rib/provider.zig:133 maybeResolveCaseInsensitivePath`), so a symlink or
   alternate-case name reaches whatever the resolver finds.
 - Windows DLL search order applies to a relative path, so a plugin name that
   also exists in the system directory can resolve elsewhere than the scanned
@@ -197,7 +197,11 @@ Controls present:
   `src/api/rib.zig:264 randomNameBytes`).
 - The file is created with `.exclusive = true` (`src/api/rib.zig:282 exclusive`),
   so a planted name cannot be opened for overwrite and a race replacement loses.
-- The file is deleted after the module is unloaded (`src/rib/provider.zig:173 deinit`).
+- The file is deleted after the module is unloaded (`src/rib/provider.zig:174 deinit`).
+  The removal goes through the same fault seam as the rest of the file I/O
+  (`src/utils/fs_compat.zig:288 deleteFile`), so the locked-image case, where
+  the file stays on disk for the life of the process, is a step a replay can
+  reproduce rather than one that needs a real load to provoke.
 
 Gaps:
 
@@ -267,7 +271,7 @@ Single points of failure:
   deliberate but is the thing to re-verify: a cap added to `readWholeFile`
   alone would leave the VFS boundary open, and a new whole-file read path that
   skips this function inherits no cap.
-- `Provider.load` (`src/rib/provider.zig:124 load`) is the single choke point for
+- `Provider.load` (`src/rib/provider.zig:125 load`) is the single choke point for
   every code-execution path, whether the module came from disk or from the temp
   file.
 - The C ABI shape itself: several exports take `(pointer, length)` with no way to

@@ -219,15 +219,14 @@ fn appendSeparator(buf: []u8, dir: []const u8) ?[]const u8 {
     return buf[0..n];
 }
 
-/// Drop a temp image written for a provider that is being abandoned. Tries the
-/// absolute form first, then the cwd-relative one. A file that survives both
-/// attempts is never retried, because the caller's only record of the path is
-/// about to go away, so the leak is reported.
+/// Drop a temp image written for a provider that is being abandoned. The path
+/// is absolute when a temp directory was found and process-relative when it was
+/// not, and fs_compat routes each form. A file that survives the removal is
+/// never retried, because the caller's only record of the path is about to go
+/// away, so the leak is reported.
 fn deleteTempImage(path: []const u8) void {
-    std.Io.Dir.deleteFileAbsolute(io, path) catch {
-        std.Io.Dir.cwd().deleteFile(io, path) catch |err| {
-            log("AIL_open_ASI_provider: cannot delete temp image '{s}' ({any}); it stays on disk\n", .{ path, err });
-        };
+    openmiles.fs_compat.deleteFile(io, path) catch |err| {
+        log("AIL_open_ASI_provider: cannot delete temp image '{s}' ({any}); it stays on disk\n", .{ path, err });
     };
 }
 

@@ -131,27 +131,32 @@ same run, which is what makes a failing sequence reproducible.
 
 ### Injecting disk faults
 
-Every file the library opens or writes goes through
+Every file the library opens, writes, or removes goes through
 `openmiles.fs_compat`, which carries an optional fault schedule. A schedule
-names the paths it applies to and the fault to produce, so the two faults a
-real disk will not produce on demand can be replayed:
+names the paths it applies to and the fault to produce, so the faults a real
+disk will not produce on demand can be replayed:
 
 ```zig
 const schedule: openmiles.fs_compat.Fault = .{
-    .open = failOpen,          // an open that returns an error
+    .open = failOpen,          // an open or create that returns an error
     .truncate_read = shortRead, // a whole-file read that stops short
     .truncate_write = shortWrite, // a whole-file write that stores a prefix
+    .remove = failRemove,      // a delete that returns an error
 };
 openmiles.fs_compat.fault = &schedule; // null in production
 ```
 
 `open` covers `AIL_file_read`, `Sample.loadFromFile`, soundfont and soundbank
-loads, and the plugin directory scans. `truncate_read` covers every whole-file
-read: `readWholeFile` refuses the short read, and `AIL_file_read` zero-fills
-the tail the read did not reach. `truncate_write` covers the ASI temp image,
-which is the only file the library writes; a short write there is discarded
-rather than loaded as a module the caller never handed over. Without a
-schedule installed, every one of these is a plain whole-file read or write.
+loads, the plugin directory scans, and both routes the ASI temp image is
+created by. `truncate_read` covers every whole-file read: `readWholeFile`
+refuses the short read, and `AIL_file_read` zero-fills the tail the read did
+not reach. `truncate_write` covers the ASI temp image, which is the only file
+the library writes; a short write there is discarded rather than loaded as a
+module the caller never handed over. `remove` covers the removal of that
+image, so the locked-image case, where the file stays on disk for the life of
+the process, is a scheduled step rather than something a run can only hit by
+luck. Without a schedule installed, every one of these is a plain whole-file
+read, write, or delete.
 
 ### Replaying plugin discovery
 

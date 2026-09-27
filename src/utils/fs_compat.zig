@@ -165,6 +165,11 @@ pub const Fault = struct {
     /// a file whose tail was never written, so a later read of it is short too.
     /// Null writes the whole buffer.
     truncate_write: ?*const fn (path: []const u8) ?usize = null,
+    /// Fails the removal of `path` with the error returned. Models the delete
+    /// that fails because the image is still mapped or the directory is not
+    /// writable, which otherwise only happens under a load the simulation
+    /// cannot reproduce. Null lets the removal pass.
+    remove: ?*const fn (path: []const u8) ?anyerror = null,
 };
 
 pub var fault: ?*const Fault = null;
@@ -173,6 +178,13 @@ pub var fault: ?*const Fault = null;
 fn checkOpenFault(path: []const u8) ?anyerror {
     const f = fault orelse return null;
     const hook = f.open orelse return null;
+    return hook(path);
+}
+
+/// Fail the removal of `path` if the installed schedule says so.
+fn checkRemoveFault(path: []const u8) ?anyerror {
+    const f = fault orelse return null;
+    const hook = f.remove orelse return null;
     return hook(path);
 }
 
@@ -257,6 +269,29 @@ pub fn createFile(io: std.Io, path: []const u8, flags: std.Io.Dir.CreateFileOpti
         return std.Io.Dir.createFileAbsolute(io, path, flags);
     }
     return std.Io.Dir.cwd().createFile(io, path, flags);
+}
+
+/// Create `path` by absolute route only. AIL_open_ASI_provider tries the temp
+/// directory first and the process directory second, so it needs the absolute
+/// create on its own rather than through `createFile`, which dispatches on
+/// `isAbsolute` and would silently turn the first attempt into the second.
+/// It carries the same `open` fault, so a schedule that fails this path fails
+/// the attempt that would have created the file.
+pub fn createFileAbsolute(io: std.Io, path: []const u8, flags: std.Io.Dir.CreateFileOptions) !std.Io.File {
+    if (checkOpenFault(path)) |err| return err;
+    return std.Io.Dir.createFileAbsolute(io, path, flags);
+}
+
+/// Delete `path`, by absolute route when it is absolute and process-directory
+/// route when it is not, so a temp image written under either root is found. A
+/// schedule that fails the removal fails both forms, which is what a real
+/// locked image does: the file stays on disk and the caller reports it.
+pub fn deleteFile(io: std.Io, path: []const u8) !void {
+    if (checkRemoveFault(path)) |err| return err;
+    if (std.fs.path.isAbsolute(path)) {
+        return std.Io.Dir.deleteFileAbsolute(io, path);
+    }
+    return std.Io.Dir.cwd().deleteFile(io, path);
 }
 
 pub fn dupeResolvedPathZ(allocator: std.mem.Allocator, path: []const u8) ![:0]u8 {

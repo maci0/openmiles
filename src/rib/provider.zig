@@ -100,9 +100,10 @@ pub const Provider = struct {
     system_data: [8]usize = [_]usize{0} ** 8,
     // Source of the interface handles handed to the plugin. Monotonic and
     // never reused, so a handle a plugin still holds cannot name a different
-    // interface registered after the one it was given. usize, not u64: the
-    // handle travels to a plugin as a pointer-sized integer, and the 32-bit
-    // build that ships is where the counter has to fit.
+    // interface registered after the one it was given. Same width as the
+    // `Interface.handle` it is stored in and the `usize` a plugin hands back to
+    // unregister, which is a token compared against pointers and so is
+    // pointer-width; a u64 counter does not fit that on a 32-bit target.
     next_handle: usize = 1,
 
     pub fn init(allocator: std.mem.Allocator) !*Provider {
@@ -195,13 +196,11 @@ pub const Provider = struct {
         // (Deleting before FreeLibrary would fail on Windows, which locks loaded
         // DLLs — the leak that accumulated one temp file per AIL_open_ASI_provider.)
         if (self.temp_path) |tmp| {
-            // Both deletes failing leaves the extracted image on disk for the
+            // A delete that fails leaves the extracted image on disk for the
             // life of the host process, and the path is freed below, so nothing
             // can ever retry it. Say so instead of dropping the file silently.
-            std.Io.Dir.deleteFileAbsolute(root.io, tmp) catch {
-                std.Io.Dir.cwd().deleteFile(root.io, tmp) catch |err| {
-                    root.log("Provider.deinit: cannot delete temp image '{s}' ({any}); the file stays on disk\n", .{ tmp, err });
-                };
+            fs_compat.deleteFile(root.io, tmp) catch |err| {
+                root.log("Provider.deinit: cannot delete temp image '{s}' ({any}); the file stays on disk\n", .{ tmp, err });
             };
             self.allocator.free(tmp);
             self.temp_path = null;
