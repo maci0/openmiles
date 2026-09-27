@@ -49,7 +49,48 @@ pub fn toUtf8(wide: []const u16, buf: []u8) Error![]const u8 {
     return buf[0..n];
 }
 
+/// Longest prefix of `s` that is at most `max` bytes and ends where a
+/// character ends, so a caller that has to cut a string to fit a fixed buffer
+/// stores text rather than a lead byte with its continuation bytes left
+/// behind. Used for the fixed error and path buffers the C surface hands out.
+pub fn utf8Prefix(s: []const u8, max: usize) []const u8 {
+    if (s.len <= max) return s;
+    var n = max;
+    // The last byte kept is s[n - 1]; walk back over the continuation bytes to
+    // the byte its character starts with. A string that is not valid UTF-8 can
+    // hold a run of continuation bytes with no lead byte at all, and those are
+    // kept as they came in: the input was already broken and the caller's
+    // buffer is the wrong place to repair it.
+    var start = n;
+    while (start > 0 and s[start - 1] & 0xC0 == 0x80) start -= 1;
+    if (start > 0) {
+        const width = std.unicode.utf8ByteSequenceLength(s[start - 1]) catch 1;
+        if (start - 1 + width > n) n = start - 1;
+    }
+    return s[0..n];
+}
+
 const testing = std.testing;
+
+test "utf8Prefix never cuts a character in half" {
+    // Two-byte 'é' repeated: an odd cut lands mid-character, and a cut at the
+    // boundary of a four-byte one is a third of the way into it.
+    const s = "\u{00e9}\u{00e9}\u{1F600}\u{00e9}";
+    try testing.expectEqualStrings("\u{00e9}", utf8Prefix(s, 3));
+    try testing.expectEqualStrings("\u{00e9}\u{00e9}", utf8Prefix(s, 4));
+    try testing.expectEqualStrings(s, utf8Prefix(s, s.len));
+    try testing.expectEqualStrings(s, utf8Prefix(s, s.len + 10));
+    for (0..s.len + 1) |max| {
+        const cut = utf8Prefix(s, max);
+        try testing.expect(cut.len <= max);
+        try testing.expect(std.unicode.utf8ValidateSlice(cut));
+    }
+}
+
+test "utf8Prefix keeps ascii whole" {
+    try testing.expectEqualStrings("abc", utf8Prefix("abcdef", 3));
+    try testing.expectEqualStrings("", utf8Prefix("abcdef", 0));
+}
 
 test "ascii round trip" {
     var wbuf: [32]u16 = undefined;

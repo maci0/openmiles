@@ -216,7 +216,11 @@ pub var global_allocator: std.mem.Allocator = default_allocator;
 pub var last_error_buf: [256:0]u8 = [_:0]u8{0} ** 256;
 pub var last_file_error_buf: [256:0]u8 = [_:0]u8{0} ** 256;
 pub fn setLastError(msg: []const u8) void {
-    const len = @min(msg.len, last_error_buf.len - 1);
+    // Cut on a character boundary, not a byte one: a message naming a file
+    // outside ASCII otherwise ends in half a character, and the caller reading
+    // it as UTF-8 sees a broken sequence where the tail of the name should be.
+    const cut = wide.utf8Prefix(msg, last_error_buf.len - 1);
+    const len = cut.len;
     @memcpy(last_error_buf[0..len], msg[0..len]);
     last_error_buf[len] = 0;
 }
@@ -233,7 +237,8 @@ pub fn clearLastError() void {
 }
 
 pub fn setFileError(msg: []const u8) void {
-    const len = @min(msg.len, last_file_error_buf.len - 1);
+    const cut = wide.utf8Prefix(msg, last_file_error_buf.len - 1);
+    const len = cut.len;
     @memcpy(last_file_error_buf[0..len], msg[0..len]);
     last_file_error_buf[len] = 0;
 }
@@ -771,10 +776,14 @@ var redist_mutex: std.Io.Mutex = .init;
 
 pub fn setRedistDirectory(path: []const u8) void {
     log("Setting redist directory to: {s}\n", .{path});
-    const len = @min(path.len, redist_directory.len - 1);
+    // A path cut mid-character is not the directory that was set: the scan
+    // below would walk a path that names nothing. Drop the character the cut
+    // landed in rather than storing half of it.
+    const cut = wide.utf8Prefix(path, redist_directory.len - 1);
+    const len = cut.len;
     redist_mutex.lockUncancelable(io);
-    const unchanged = std.mem.eql(u8, getRedistDirectoryLocked(), path[0..len]);
-    @memcpy(redist_directory[0..len], path[0..len]);
+    const unchanged = std.mem.eql(u8, getRedistDirectoryLocked(), cut);
+    @memcpy(redist_directory[0..len], cut);
     redist_directory[len] = 0;
     redist_mutex.unlock(io);
     // The same directory set again is the same set of plugins: rescanning it
@@ -782,8 +791,8 @@ pub fn setRedistDirectory(path: []const u8) void {
     // them, so the reload only happens when the directory actually changed.
     if (unchanged) return;
     const driver = lastDigitalDriver() orelse return;
-    const scan_path = global_allocator.dupe(u8, path[0..len]) catch {
-        log("setRedistDirectory: cannot copy the path; '{s}' was not rescanned\n", .{path[0..len]});
+    const scan_path = global_allocator.dupe(u8, cut) catch {
+        log("setRedistDirectory: cannot copy the path; '{s}' was not rescanned\n", .{cut});
         return;
     };
     defer global_allocator.free(scan_path);

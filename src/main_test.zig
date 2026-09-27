@@ -874,6 +874,27 @@ test "setFileError truncates long messages" {
     try testing.expectEqual(@as(usize, 255), stored.len);
 }
 
+test "error and path buffers cut on a character boundary" {
+    // Every message in these buffers names a file the library did not author,
+    // and a game directory outside ASCII is ordinary. The 255-byte cut lands
+    // inside a character of a long one, so what is stored has to drop that
+    // character whole: a lead byte left in the buffer is a broken sequence for
+    // the caller reading it as UTF-8.
+    openmiles.setLastError("cannot open \u{1F600}" ++ "x" ** 300);
+    defer openmiles.clearLastError();
+    try testing.expect(std.unicode.utf8ValidateSlice(std.mem.sliceTo(&openmiles.last_error_buf, 0)));
+
+    openmiles.setFileError("cannot read \u{00e9}" ++ "y" ** 300);
+    defer openmiles.clearFileError();
+    try testing.expect(std.unicode.utf8ValidateSlice(std.mem.sliceTo(&openmiles.last_file_error_buf, 0)));
+
+    openmiles.setRedistDirectory("/games/" ++ "\u{1F600}" ** 64);
+    defer openmiles.setRedistDirectory("");
+    const stored = openmiles.getRedistDirectory();
+    try testing.expect(stored.len <= 255);
+    try testing.expect(std.unicode.utf8ValidateSlice(stored));
+}
+
 test "xmidiToSmf returns error on invalid data" {
     const allocator = testing.allocator;
     const too_short = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
