@@ -113,6 +113,10 @@ pub fn RIB_find_files_provider(name: [*:0]const u8, property: [*:0]const u8, fil
     _ = RIB_enumerate_providers(name, null, &handle);
     return handle;
 }
+/// GetTempPathW writes at most MAX_PATH UTF-16 units, terminating NUL included;
+/// the UTF-8 form of a path that long needs up to three bytes per unit.
+const max_temp_path_units: usize = 260;
+
 /// Directory for the unpacked ASI image, with a trailing separator so callers
 /// can append a file name to it. Returns null when no temp directory can be
 /// determined, leaving the caller to fall back to the current directory.
@@ -121,9 +125,10 @@ fn tempDir(buf: []u8) ?[]const u8 {
         const GetTempPathW = struct {
             extern "kernel32" fn GetTempPathW(nBufferLength: u32, lpBuffer: [*]u16) callconv(.winapi) u32;
         }.GetTempPathW;
-        var wbuf: [std.fs.max_path_bytes]u16 = undefined;
+        var wbuf: [max_temp_path_units]u16 = undefined;
         const len = GetTempPathW(wbuf.len, &wbuf);
         if (len == 0 or len >= wbuf.len) return null;
+        if (wide.utf8LenBound(wbuf[0..len]) > buf.len) return null;
         const dir = wide.toUtf8(wbuf[0..len], buf) catch return null;
         return appendSeparator(buf, dir);
     }
@@ -158,9 +163,11 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
         return null;
     }
 
-    var path_buf: [512:0]u8 = undefined;
+    // Long enough for a maximally wide temp directory plus the fixed name tail,
+    // so a non-ASCII %TEMP% cannot turn the format into a failure.
+    var path_buf: [max_temp_path_units * 3 + 32:0]u8 = undefined;
 
-    var tmp_dir_buf: [260]u8 = undefined;
+    var tmp_dir_buf: [max_temp_path_units * 3]u8 = undefined;
     const tmp_dir = tempDir(&tmp_dir_buf);
 
     // The image is written to TEMP and then LoadLibrary'd, so the file name must

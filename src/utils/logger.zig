@@ -36,9 +36,13 @@ pub fn init() void {
     debug_enabled = builtin.mode == .Debug;
 
     if (builtin.os.tag == .windows) {
+        // The UTF-8 destination is sized in bytes from the unit count: a value
+        // holding a character outside ASCII needs up to three bytes per unit, so
+        // a 1:1 buffer would fail the conversion and leave the build-mode default.
+        const value_units = 256;
         var name_wbuf: [64]u16 = undefined;
-        var wbuf: [256]u16 = undefined;
-        var buf: [256]u8 = undefined;
+        var wbuf: [value_units]u16 = undefined;
+        var buf: [value_units * 3]u8 = undefined;
         // A conversion failure leaves debug_enabled at its build-mode default
         // rather than aborting init, so the log file still opens.
         if (wide.toWide("OPENMILES_DEBUG", &name_wbuf)) |name| {

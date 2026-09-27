@@ -83,7 +83,7 @@ const SoundInstance = struct {
     user_buffer_len: i32,
 };
 
-// Case-insensitive glob with '*' (any run) and '?' (one char).
+// Case-insensitive glob with '*' (any run) and '?' (one character).
 fn globMatch(pat: []const u8, text: []const u8) bool {
     var pi: usize = 0;
     var ti: usize = 0;
@@ -97,6 +97,12 @@ fn globMatch(pat: []const u8, text: []const u8) bool {
         } else if (pi < pat.len and (pat[pi] == '?' or std.ascii.toLower(pat[pi]) == std.ascii.toLower(text[ti]))) {
             pi += 1;
             ti += 1;
+            // '?' is one character, not one byte: the continuation bytes of a
+            // multi-byte character go with their lead byte, or the wildcard would
+            // match half a code point and then fail on the other half.
+            if (pat[pi - 1] == '?') {
+                while (ti < text.len and text[ti] & 0xC0 == 0x80) : (ti += 1) {}
+            }
         } else if (star) |s| {
             pi = s + 1;
             star_ti += 1;

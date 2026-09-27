@@ -5902,6 +5902,20 @@ test "MilesSetSoundLabelLimits caps concurrent sounds per label (evicts oldest)"
     try testing.expectEqual(@as(i32, 1), sfx);
 }
 
+test "label wildcard '?' spans a whole multi-byte character" {
+    api_miles_t.MilesShutdownEventSystem();
+    defer api_miles_t.MilesShutdownEventSystem();
+
+    // "caf\u{00E9}" is five bytes and four characters. A '?' is one character, so
+    // "caf?" must match it and "caf" alone must not.
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("m1"), 0, 0, cstr2("caf\u{00E9}"), null, 0, 0);
+    var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("caf?"), 0, @ptrCast(&info)));
+    nx = @ptrFromInt(std.math.maxInt(usize));
+    try testing.expectEqual(@as(i32, 0), api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("caf"), 0, @ptrCast(&info)));
+}
+
 test "zero-duration instances complete on processing instead of accumulating" {
     api_miles_t.MilesShutdownEventSystem();
     defer api_miles_t.MilesShutdownEventSystem();

@@ -15,6 +15,15 @@ const std = @import("std");
 
 pub const Error = error{ NoSpaceLeft, InvalidUtf8 } || std.unicode.Utf16LeToUtf8Error;
 
+/// Upper bound on the UTF-8 length of `wide`, terminator excluded: one unit is
+/// at most three bytes, and a surrogate pair is four bytes for two of them. A
+/// caller that sizes its UTF-8 destination from the *unit* count instead (a
+/// MAX_PATH-unit path into a MAX_PATH-byte buffer) loses every path carrying a
+/// character outside ASCII, so size it from this.
+pub fn utf8LenBound(wide: []const u16) usize {
+    return wide.len * 3;
+}
+
 /// Convert a UTF-8 string for a *W call: NUL-terminated, no embedded NUL.
 pub fn toWide(utf8: []const u8, buf: []u16) Error![:0]const u16 {
     if (utf8.len >= buf.len) return error.NoSpaceLeft;
@@ -34,7 +43,7 @@ pub fn toUtf8(wide: []const u16, buf: []u8) Error![]const u8 {
         }
         break :blk true;
     };
-    const max_bytes = if (ascii) n_units else n_units * 3;
+    const max_bytes = if (ascii) n_units else utf8LenBound(wide[0..n_units]);
     if (max_bytes > buf.len) return error.NoSpaceLeft;
     const n = try std.unicode.utf16LeToUtf8(buf[0..max_bytes], wide[0..n_units]);
     return buf[0..n];
@@ -82,4 +91,15 @@ test "short destination fails instead of overrunning" {
     try testing.expectError(error.NoSpaceLeft, toWide("abcdef", &wbuf));
     try testing.expectError(error.NoSpaceLeft, toUtf8(&.{ 'a', 'b', 'c', 'd', 'e' }, &buf));
     try testing.expectError(error.InvalidUtf8, toWide("\xFF", &wbuf));
+}
+
+test "a buffer sized in UTF-16 units is not sized in UTF-8 bytes" {
+    // 100 units of two-byte characters need 300 bytes, not 100: a caller that
+    // sized the destination by unit count would see NoSpaceLeft here and drop
+    // the whole path rather than degrade it.
+    const units: [100]u16 = @splat(0x00E9); // 'é'
+    var buf: [utf8LenBound(&units)]u8 = undefined;
+    const utf8 = try toUtf8(&units, &buf);
+    try testing.expectEqual(@as(usize, 200), utf8.len);
+    try testing.expectEqualSlices(u8, &.{ 0xC3, 0xA9, 0xC3, 0xA9 }, utf8[0..4]);
 }
