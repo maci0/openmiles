@@ -705,6 +705,14 @@ pub const Sequence = struct {
                     self.current_msg = self.midi;
                     self.time_ms = 0;
                     self.ms_per_beat = self.initial_ms_per_beat;
+                    // The next pass starts at the file's own tempo: a tempo
+                    // change applied during the pass finished must not leak
+                    // into it, or ms_per_beat and tempo disagree and the
+                    // loop plays at the wrong speed.
+                    self.tempo = self.initial_tempo;
+                    self.tempo_fade_active = false;
+                    self.recalcTempoRatio(self.initial_tempo);
+                    self.xmidi_loop_depth = 0;
                     self.next_beat_ms = self.ms_per_beat;
                     self.current_beat_in_measure.store(1, .release);
                     self.current_measure.store(1, .release);

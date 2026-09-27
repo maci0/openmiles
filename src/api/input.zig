@@ -42,7 +42,9 @@ pub fn AIL_set_input_state(input_ptr: ?*openmiles.Input, state: i32) callconv(.w
     const cur = @atomicLoad(i32, &input.state, .acquire);
     if (cur == want) return cur;
     if (want != 0) input.start() else input.stop();
-    return 1;
+    // A device that fails to start leaves state 0; report the state reached,
+    // not the intent, so the caller does not read "enabled" from a dead capture.
+    return @atomicLoad(i32, &input.state, .acquire);
 }
 pub fn AIL_input_info(input_ptr: ?*openmiles.Input) callconv(.winapi) u32 {
     const input = input_ptr orelse return 0;

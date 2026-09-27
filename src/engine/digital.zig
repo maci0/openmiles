@@ -1014,7 +1014,12 @@ pub const Sample = struct {
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
-            if (native_rate > 0) self.pitch = tr / native_rate;
+            // Same composition applyEffectivePitch applies: a reload must not
+            // drop the v7 rate factor the app set on the previous source.
+            if (native_rate > 0) self.pitch = (tr / native_rate) * self.v7_rate_factor;
+        } else if (self.v7_rate_factor != 1.0) {
+            const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
+            if (native_rate > 0) self.pitch = self.v7_rate_factor;
         }
 
         ma.ma_sound_set_volume(&self.sound, self.volume);
@@ -1352,6 +1357,10 @@ pub const Sample = struct {
         self.v7_obstruction = 0.0;
         self.v7_occlusion = 0.0;
         self.v7_exclusion = 0.0;
+        // target_rate is cleared above, so the rate factor has to go with it:
+        // leaving it set would make a later setPlaybackRate compose against a
+        // factor the reused handle no longer reports.
+        self.v7_rate_factor = 1.0;
         // NB: src_bpf is a property of the loaded source data, not a parameter --
         // AIL_init_sample does not reload, so it is left intact (recomputed only
         // on the next load).

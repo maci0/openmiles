@@ -156,6 +156,20 @@ pub const StreamSource = struct {
         len1.* = @intCast(self.slots[1].len);
     }
 
+    /// Play position and length held in one ring slot. Slots past the ring
+    /// depth never held data and report zeros.
+    pub fn slotInfo(self: *StreamSource, index: usize, pos: *u32, len: *u32) void {
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        if (index >= self.slot_count) {
+            pos.* = 0;
+            len.* = 0;
+            return;
+        }
+        pos.* = @intCast(self.slots[index].pos);
+        len.* = @intCast(self.slots[index].len);
+    }
+
     // --- ma_data_source vtable ---------------------------------------------
 
     fn onRead(pds: ?*anyopaque, frames_out: ?*anyopaque, frame_count: u64, frames_read: ?*u64) callconv(.c) ma.ma_result {

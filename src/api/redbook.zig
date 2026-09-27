@@ -29,13 +29,15 @@ pub fn AIL_redbook_pause(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
     const rb = hb orelse return 0;
     log("AIL_redbook_pause(hb={*})\n", .{rb});
     rb.pause();
-    return 1;
+    // Report the transition that happened: a pause on a stopped or already
+    // paused drive changes nothing, and a caller branching on this must see that.
+    return if (rb.status == .paused) 1 else 0;
 }
 pub fn AIL_redbook_resume(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
     const rb = hb orelse return 0;
     log("AIL_redbook_resume(hb={*})\n", .{rb});
     rb.resumePlayback();
-    return 1;
+    return if (rb.status == .playing) 1 else 0;
 }
 pub fn AIL_redbook_status(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
     const rb = hb orelse return openmiles.redbook_status_error;

@@ -176,6 +176,14 @@ pub const Timer = struct {
     pub fn tick(self: *Timer) void {
         if (!root.clock.isVirtual()) return;
         if (!@atomicLoad(bool, &self.is_running, .acquire)) return;
+        // Identify this call as the run loop's own thread so a callback that
+        // releases the handle takes deinit's self-deinit branch (unlink, no
+        // destroy) instead of freeing the struct the loop reads on the way out.
+        self.thread_id.store(std.Thread.getCurrentId(), .release);
+        defer {
+            self.thread_id.store(0, .release);
+            if (self.retiring.load(.acquire)) self.allocator.destroy(self);
+        }
         self.callback(self.getUserData());
         root.clock.advance(@as(i64, self.getPeriodUs()) * std.time.ns_per_us);
     }

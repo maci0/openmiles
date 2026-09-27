@@ -513,12 +513,9 @@ pub fn AIL_sample_buffer_info(s_opt: ?*Sample, buff_num: i32, pos: ?*u32, len: ?
     if (s.stream_active) {
         var p0: u32 = 0;
         var l0: u32 = 0;
-        var p1: u32 = 0;
-        var l1: u32 = 0;
-        s.stream_src.bufferInfo(&p0, &l0, &p1, &l1);
-        const even = @mod(buff_num, 2) == 0;
-        if (pos) |p| p.* = if (even) p0 else p1;
-        if (len) |p| p.* = if (even) l0 else l1;
+        s.stream_src.slotInfo(@intCast(@max(buff_num, 0)), &p0, &l0);
+        if (pos) |p| p.* = p0;
+        if (len) |l| l.* = l0;
         return if (s.stream_src.isStarved()) 1 else 0; // return S->starved
     }
     if (pos) |p| p.* = 0;

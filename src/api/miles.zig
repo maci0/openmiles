@@ -753,7 +753,6 @@ pub fn MilesSetSoundLabelLimits(system: ?*anyopaque, sound_limits: ?[*:0]const u
 // --- sound banks / events ----------------------------------------------------
 
 pub fn MilesAddSoundBank(filename: ?[*:0]const u8, name: ?[*:0]const u8) callconv(.winapi) ?*anyopaque {
-    _ = name;
     const fname = std.mem.span(filename orelse return null);
     const image = openmiles.readWholeFile(fname) catch |err| {
         // Same signal as AIL_open_soundbank: a silent null here would leave the
@@ -770,6 +769,15 @@ pub fn MilesAddSoundBank(filename: ?[*:0]const u8, name: ?[*:0]const u8) callcon
         openmiles.setLastError("Failed to add sound bank");
         return null;
     };
+    // Same 4-char bank-name check AIL_open_soundbank applies: a game that names
+    // the bank it expects must not be handed a different one.
+    if (name) |np| {
+        if (!std.ascii.eqlIgnoreCase(std.mem.span(np), std.mem.span(bank.name()))) {
+            bank.deinit();
+            openmiles.setLastError("Bank name mismatch");
+            return null;
+        }
+    }
     return @ptrCast(bank);
 }
 pub fn MilesReleaseSoundBank(bank: ?*anyopaque) callconv(.winapi) i32 {

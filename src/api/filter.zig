@@ -66,7 +66,13 @@ pub fn AIL_enumerate_filters(next: *?*anyopaque, dest: *?*Provider, name: *[*:0]
 pub fn AIL_enumerate_filter_attributes(filter: *anyopaque, next: *?*anyopaque, name: *[*:0]const u8) callconv(.winapi) i32 {
     _ = filter;
     const idx: usize = if (next.* == null) 0 else @intFromPtr(next.*);
-    if (idx >= filter_attr_names.len) return 0;
+    if (idx >= filter_attr_names.len) {
+        // MSSENUM contract: the terminal call clears the cursor and the
+        // destination, so a loop that follows `next` terminates.
+        next.* = null;
+        name.* = filter_attr_names[0];
+        return 0;
+    }
     name.* = filter_attr_names[idx];
     next.* = @ptrFromInt(idx + 1);
     return 1;

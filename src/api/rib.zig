@@ -420,14 +420,14 @@ pub fn MIX_RIB_MAIN(provider: ?*Provider, up_down: u32, rib_alloc: ?*anyopaque, 
     _ = rib_alloc;
     _ = rib_reg;
     _ = rib_unreg;
-    return 0;
+    return 1;
 }
 // v7/v8 ASI mixer entry: MIX_RIB_MAIN(HPROVIDER, U32 up_down)@8. v9 widened it to
 // @20 with explicit RIB alloc/register/unregister callbacks.
 pub fn MIX_RIB_MAIN_v7(provider: ?*Provider, up_down: u32) callconv(.winapi) i32 {
     _ = provider;
     _ = up_down;
-    return 0;
+    return 1;
 }
 // v7 ASI EOB reset: @8 (HSAMPLE, buff_num); v8+ added the new_stream_position arg.
 pub fn AIL_request_EOB_ASI_reset_v7(s_opt: ?*Sample, buff_num: u32) callconv(.winapi) void {

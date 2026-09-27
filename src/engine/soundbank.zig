@@ -503,6 +503,11 @@ pub const Bank = struct {
         if (out_info) |oi| {
             if (self.inBounds(data_off, 12 + sound_info_size)) {
                 @memcpy(oi[0..sound_info_size], self.meta[data_off + 12 ..][0..sound_info_size]);
+            } else {
+                // Truncated record: zero the struct rather than leaving the
+                // caller's buffer unwritten, since the fill is documented to
+                // happen whenever the sound resolves.
+                @memset(oi[0..sound_info_size], 0);
             }
         }
         const fn_abs = @as(usize, data_off) +| self.rdU32(data_off + 4);

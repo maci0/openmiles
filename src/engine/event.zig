@@ -368,12 +368,15 @@ pub const EventConstruct = struct {
         return true;
     }
     pub fn addMoveVar(self: *EventConstruct, name: ?*const anyopaque, times: ?[*]const f32, interp_types: ?[*]const i32, values: ?[*]const f32) bool {
-        self.printType(.move_var);
-        self.raw(";");
-        self.fieldCStr(name);
+        // Validate before emitting: a rejected step must leave the stream
+        // unchanged, or the half-written head decodes as a truncated step and
+        // every step before it is lost.
         const t = times orelse return false;
         const it = interp_types orelse return false;
         const v = values orelse return false;
+        self.printType(.move_var);
+        self.raw(";");
+        self.fieldCStr(name);
         self.fieldFloat(t[0]);
         self.fieldFloat(t[1]);
         self.print("{d};", .{it[0]});
