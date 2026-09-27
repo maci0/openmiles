@@ -91,7 +91,9 @@ test "coverage: digital.zig exports" {
     defer alloc.free(wav);
     const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    s.loadFromMemory(wav, false) catch {};
+    // A swallowed load failure would leave the sample-block below running
+    // against an empty handle and still report green.
+    try s.loadFromMemory(wav, false);
     const myprov = try openmiles.Provider.init(alloc);
     defer myprov.deinit();
     // Filter.init appends to the driver and builds a miniaudio node, so a null
@@ -153,8 +155,10 @@ test "coverage: digital.zig exports" {
     dg.AIL_stop_sample(s);
     dg.AIL_end_sample(s);
     dg.AIL_set_sample_address(s, sc(), 0);
-    _ = dg.AIL_set_sample_file(s, @ptrCast(wav.ptr), -1);
-    _ = dg.AIL_set_named_sample_file(s, "wav", @ptrCast(wav.ptr), @intCast(wav.len), 0);
+    // Both take the complete WAV image built above, so a 0 here means the load
+    // failed and the calls that follow would run against an empty sample.
+    try testing.expectEqual(@as(i32, 1), dg.AIL_set_sample_file(s, @ptrCast(wav.ptr), -1));
+    try testing.expectEqual(@as(i32, 1), dg.AIL_set_named_sample_file(s, "wav", @ptrCast(wav.ptr), @intCast(wav.len), 0));
     _ = dg.AIL_load_sample_buffer(s, 0, sc(), 0);
     flt.AIL_filter_sample_attribute(s, "Cutoff", sc());
     flt.AIL_set_filter_sample_preference(s, "Cutoff", sc());
@@ -185,7 +189,14 @@ test "coverage: digital.zig exports" {
 
     // WAV info / encoders.
     var info: openmiles.AILSOUNDINFO = undefined;
-    _ = dg.AIL_WAV_info(@ptrCast(wav.ptr), &info);
+    // The image above was written by buildWavFromPcm, so every field the
+    // header carries is known: an unparsed header reads as zeroes and would
+    // pass a bare "did not crash" check.
+    try testing.expectEqual(@as(i32, 1), dg.AIL_WAV_info(@ptrCast(wav.ptr), &info));
+    try testing.expectEqual(@as(u32, 8000), info.rate);
+    try testing.expectEqual(@as(i32, 16), info.bits);
+    try testing.expectEqual(@as(i32, 1), info.channels);
+    try testing.expectEqual(@as(u32, pcm.len), info.data_len);
     info = .{ .format = 0, .data_ptr = @ptrCast(&pcm), .data_len = pcm.len, .rate = 8000, .bits = 16, .channels = 1, .samples = 0, .block_size = 0, .initial_ptr = null };
     var outp: *anyopaque = undefined;
     if (dg.AIL_compress_ADPCM(&info, &outp, &u32o) != 0) mem.AIL_mem_free_lock(outp);
@@ -221,16 +232,21 @@ test "coverage: 3d.zig exports" {
     td.AIL_set_listener_3D_position(drv, 0, 0, 0);
     td.AIL_set_listener_3D_velocity(drv, 0, 0, 0, 1);
     td.AIL_set_listener_3D_orientation(drv, 0, 0, 1, 0, 1, 0);
-    td.AIL_set_3D_distance_factor(drv, 1);
-    _ = td.AIL_3D_distance_factor(drv);
-    td.AIL_set_3D_doppler_factor(drv, 1);
-    _ = td.AIL_3D_doppler_factor(drv);
-    td.AIL_set_3D_rolloff_factor(drv, 1);
-    _ = td.AIL_3D_rolloff_factor(drv);
-    td.AIL_set_3D_room_type(drv, 0);
-    _ = td.AIL_3D_room_type(drv);
-    td.AIL_set_3D_speaker_type(drv, 0);
-    _ = td.AIL_3D_speaker_type(drv);
+    td.AIL_set_3D_distance_factor(drv, 0.5);
+    try testing.expectEqual(@as(f32, 0.5), td.AIL_3D_distance_factor(drv));
+    td.AIL_set_3D_doppler_factor(drv, 0.25);
+    try testing.expectEqual(@as(f32, 0.25), td.AIL_3D_doppler_factor(drv));
+    td.AIL_set_3D_rolloff_factor(drv, 2.0);
+    try testing.expectEqual(@as(f32, 2.0), td.AIL_3D_rolloff_factor(drv));
+    td.AIL_set_3D_room_type(drv, 3);
+    try testing.expectEqual(@as(i32, 3), td.AIL_3D_room_type(drv));
+    td.AIL_set_3D_speaker_type(drv, 2);
+    try testing.expectEqual(@as(i32, 2), td.AIL_3D_speaker_type(drv));
+    // A null driver reports 0.0 for the float factors (SDK mssds3d.cpp), not
+    // the 1.0 default, so the value must be read back as 0.0.
+    try testing.expectEqual(@as(f32, 0.0), td.AIL_3D_distance_factor(null));
+    try testing.expectEqual(@as(f32, 0.0), td.AIL_3D_doppler_factor(null));
+    try testing.expectEqual(@as(f32, 0.0), td.AIL_3D_rolloff_factor(null));
     _ = td.AIL_active_3D_sample_count(drv);
     td.AIL_3D_provider_attribute(dp, "x", sc());
     _ = td.AIL_set_3D_provider_preference(dp, "x", sc());
@@ -269,11 +285,11 @@ test "coverage: 3d.zig exports" {
     td.AIL_set_3D_sample_cone(s3, 0, 360, 64);
     td.AIL_3D_sample_cone(s3, &f32o, &f32o, &i32o);
     td.AIL_set_3D_sample_effects_level(s3, 0.5);
-    _ = td.AIL_3D_sample_effects_level(s3);
-    td.AIL_set_3D_sample_obstruction(s3, 0.5);
-    _ = td.AIL_3D_sample_obstruction(s3);
-    td.AIL_set_3D_sample_occlusion(s3, 0.5);
-    _ = td.AIL_3D_sample_occlusion(s3);
+    try testing.expectEqual(@as(f32, 0.5), td.AIL_3D_sample_effects_level(s3));
+    td.AIL_set_3D_sample_obstruction(s3, 0.25);
+    try testing.expectEqual(@as(f32, 0.25), td.AIL_3D_sample_obstruction(s3));
+    td.AIL_set_3D_sample_occlusion(s3, 0.75);
+    try testing.expectEqual(@as(f32, 0.75), td.AIL_3D_sample_occlusion(s3));
     td.AIL_set_3D_sample_preference(s3, "x", sc());
     td.AIL_3D_sample_attribute(s3, "x", sc());
     td.AIL_auto_update_3D_position(s3, 1);
@@ -432,12 +448,25 @@ test "coverage: midi.zig exports" {
     const seq = md.AIL_allocate_sequence_handle(mdi) orelse return error.NoSequence;
     defer md.AIL_release_sequence_handle(seq);
 
-    // Minimal valid SMF so the size-less init_sequence detects a real length.
+    // A loadable SMF: format 0, one track, 96 ticks per quarter, holding a
+    // tempo, a note-on/note-off pair and the end-of-track marker. An
+    // end-of-track-only track parses to zero messages, and tml_load reports
+    // that as a load failure, so the track has to carry real events for
+    // init_sequence to succeed. The size-less ABI also needs a real declared
+    // length here: 14 + 8 + 16 bytes.
     const smf = [_]u8{
-        'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0,    0,    1, 0, 0x60,
-        'M', 'T', 'r', 'k', 0, 0, 0, 4, 0, 0xFF, 0x2F, 0,
+        'M', 'T', 'h', 'd', 0, 0, 0, 6, // MThd, 6-byte header
+        0, 0, 0, 1, 0, 0x60, // format 0, 1 track, division 96
+        'M', 'T', 'r', 'k', 0, 0, 0, 16, // MTrk, 16 bytes of events
+        0, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20, // tempo 500000 us/quarter
+        0, 0x90, 0x3C, 0x64, // note on, channel 0, C4
+        0x60, 0x80, 0x3C, 0x40, // +96 ticks, note off C4
+        0, 0xFF, 0x2F, 0, // end of track
     };
-    _ = md.AIL_init_sequence(seq, @ptrCast(@constCast(&smf)), 0);
+    // The SMF above is loadable, so init must report success: a bare 0
+    // (unrecognized image, or a load failure) would leave every sequence call
+    // below running against an empty sequence and still pass.
+    try testing.expectEqual(@as(i32, 1), md.AIL_init_sequence(seq, @ptrCast(@constCast(&smf)), 0));
 
     md.AIL_start_sequence(seq);
     md.AIL_pause_sequence(seq);
@@ -484,11 +513,25 @@ test "coverage: midi.zig exports" {
     md.AIL_midiOutClose(mp);
     var out_len: u32 = scratch.len;
     var xmi_out: ?*anyopaque = null;
-    _ = md.AIL_MIDI_to_XMI(@ptrCast(@constCast(&smf)), smf.len, &xmi_out, &out_len, 0);
+    try testing.expectEqual(@as(i32, 1), md.AIL_MIDI_to_XMI(@ptrCast(@constCast(&smf)), smf.len, &xmi_out, &out_len, 0));
+    // The conversion is a verbatim copy, so the reported size and the bytes
+    // themselves are both known: a truncation or a null output would otherwise
+    // go unnoticed.
+    try testing.expectEqual(@as(u32, smf.len), out_len);
+    try testing.expect(xmi_out != null);
+    try testing.expectEqualSlices(u8, &smf, @as([*]const u8, @ptrCast(xmi_out.?))[0..smf.len]);
     freeLock(xmi_out);
     var lst: ?*anyopaque = null;
     var lsz: u32 = 0;
-    if (md.AIL_list_MIDI(@ptrCast(&smf), smf.len, &lst, &lsz, 0) != 0) freeLock(lst);
+    // The listing is built from the header: format 0, one track, 96 ticks per
+    // quarter note, all three of which are spelled out in the SMF above.
+    try testing.expectEqual(@as(i32, 1), md.AIL_list_MIDI(@ptrCast(&smf), smf.len, &lst, &lsz, 0));
+    try testing.expect(lst != null and lsz > 0);
+    const listing = @as([*:0]const u8, @ptrCast(lst.?))[0..lsz];
+    defer freeLock(lst);
+    try testing.expect(std.mem.indexOf(u8, listing, "Format: 0") != null);
+    try testing.expect(std.mem.indexOf(u8, listing, "Tracks: 1") != null);
+    try testing.expect(std.mem.indexOf(u8, listing, "Division: 96") != null);
 }
 
 test "coverage: dls.zig exports" {
@@ -644,7 +687,7 @@ test "coverage: v7.zig unified exports" {
     defer alloc.free(wav7);
     const s = try openmiles.Sample.init(drv);
     defer s.deinit();
-    s.loadFromMemory(wav7, false) catch {};
+    try s.loadFromMemory(wav7, false);
 
     // Unified 3D on the sample.
     v7.AIL_set_sample_3D_position(s, 1, 2, 3);
