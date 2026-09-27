@@ -20,6 +20,7 @@ each resulting declaration, reports:
   NOTEXPORTED the symbol is never emitted, or is dropped from 8.0 on
   UNDEFINED   a macro is used in the header but never defined
   LAYOUT      a shared struct's field order disagrees with the implementation
+  COMPILE     the header, with that version's guards resolved, is not valid C99
 
 Symbols the header does not declare are listed at the end as a coverage count.
 The header is a documented core subset, so that part is informational.
@@ -31,7 +32,9 @@ Exit code 0 when the header and the export table agree for every version.
 """
 
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -237,6 +240,12 @@ def zig_returns():
                 cls = "signed"
             elif ret == "u32":
                 cls = "unsigned"
+            elif ret == "f32":
+                # A float return is its own class: the level, cutoff and
+                # distance getters hand back an F32, and without this every one
+                # of them fell into "pointer" and made a correct F32
+                # declaration look like a mismatch.
+                cls = "float"
             else:
                 cls = "pointer"
             rets.setdefault(m.group(1), set()).add(cls)
@@ -425,6 +434,51 @@ def layout_problems(header):
     return problems
 
 
+def compile_problems():
+    """Compile mss.h once per version, the way a consumer's compiler does.
+
+    Everything else in this script reads the header as text, so a declaration
+    that parses but does not compile -- a macro that expands to nothing, a
+    typedef used before it is declared, a stray comma -- passes every check
+    above and fails only in the build of the game that includes the header.
+    The version guards are ten different preprocessed headers, so all ten are
+    compiled: `zig cc` is already the toolchain this project requires, and
+    compiling to an object file needs no DLL to link against.
+    """
+    problems = []
+    for version in SUPPORTED_VERSIONS:
+        with tempfile.TemporaryDirectory() as tmp:
+            tu = Path(tmp) / "header_check.c"
+            tu.write_text(
+                f"#define OPENMILES_MSS_VERSION {version}\n"
+                f'#include "{MSS_H}"\n'
+                "int main(void) { return 0; }\n"
+            )
+            proc = subprocess.run(
+                [
+                    "zig",
+                    "cc",
+                    "-c",
+                    "-std=c99",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    str(tu),
+                    "-o",
+                    str(Path(tmp) / "header_check.o"),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        if proc.returncode != 0:
+            problems.append(
+                f"v{version} COMPILE    mss.h does not compile as C99: "
+                + " ".join(proc.stderr.split())[:400]
+            )
+    return problems
+
+
 def main():
     verbose = "--verbose" in sys.argv[1:]
     main_zig = MAIN_ZIG.read_text()
@@ -448,6 +502,8 @@ def main():
         declared_by_version[version] = {d[2] for d in decls}
         for decl in decls:
             problems += decl_problems(version, decl, exports, never_export, rets)
+
+    problems += compile_problems()
 
     for p in problems:
         print(p)

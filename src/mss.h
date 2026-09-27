@@ -367,6 +367,113 @@ void        MSS_CALLBACK AIL_set_listener_3D_velocity(HDIGDRIVER dig, F32 x, F32
 void        MSS_CALLBACK AIL_set_listener_3D_orientation(HDIGDRIVER dig, F32 front_x, F32 front_y, F32 front_z, F32 up_x, F32 up_y, F32 up_z);
 #endif
 
+// Unified audio API (v7 and later)
+#if MSS_AT_LEAST(65)
+/* v6.5 introduced the level/pan getters and the master level and reverb
+ * calls on the ordinary HSAMPLE/HDIGDRIVER handles; v7 moved 3D onto the
+ * same HSAMPLE and dropped the H3DSAMPLE family. A NULL handle is what the
+ * first parameter checks, so a NULL HSAMPLE is the documented way to say
+ * "the current sample". The low-pass cutoff widened at 8.0 to take a channel,
+ * and the master reverb and room-type calls widened at 9.0 to take a bus
+ * index, so each arity needs its own declaration: the count is part of the
+ * stdcall decoration. */
+void        MSS_CALLBACK AIL_set_sample_volume_levels(HSAMPLE S, F32 left_level, F32 right_level);
+void        MSS_CALLBACK AIL_sample_volume_levels(HSAMPLE S, F32* left_level, F32* right_level);
+/* The unified getter, not the pre-8 AIL_set_sample_volume_pan(HSAMPLE, S32,
+ * S32): this one reports volume and pan in the 0-127 MSS scale through the
+ * pointers, and a null pointer leaves that half untouched. */
+void        MSS_CALLBACK AIL_sample_volume_pan(HSAMPLE S, F32* volume, F32* pan);
+void        MSS_CALLBACK AIL_set_sample_reverb_levels(HSAMPLE S, F32 dry_level, F32 wet_level);
+void        MSS_CALLBACK AIL_sample_reverb_levels(HSAMPLE S, F32* dry_level, F32* wet_level);
+#if MSS_AT_LEAST(80)
+void        MSS_CALLBACK AIL_set_sample_low_pass_cut_off(HSAMPLE S, S32 channel, F32 cut_off);
+F32         MSS_CALLBACK AIL_sample_low_pass_cut_off(HSAMPLE S, S32 channel);
+#else
+void        MSS_CALLBACK AIL_set_sample_low_pass_cut_off(HSAMPLE S, F32 cut_off);
+F32         MSS_CALLBACK AIL_sample_low_pass_cut_off(HSAMPLE S);
+#endif
+F32         MSS_CALLBACK AIL_digital_master_volume_level(HDIGDRIVER dig);
+void        MSS_CALLBACK AIL_set_digital_master_volume_level(HDIGDRIVER dig, F32 master_volume);
+#endif
+
+#if MSS_AT_LEAST(65) && MSS_BEFORE(90)
+void        MSS_CALLBACK AIL_set_digital_master_reverb(HDIGDRIVER dig, F32 reverb_decay_time, F32 reverb_predelay, F32 reverb_damping);
+void        MSS_CALLBACK AIL_digital_master_reverb(HDIGDRIVER dig, F32* reverb_time, F32* reverb_predelay, F32* reverb_damping);
+void        MSS_CALLBACK AIL_set_digital_master_reverb_levels(HDIGDRIVER dig, F32 dry_level, F32 wet_level);
+void        MSS_CALLBACK AIL_digital_master_reverb_levels(HDIGDRIVER dig, F32* dry_level, F32* wet_level);
+#elif MSS_AT_LEAST(90)
+/* v9.0 put every master effect on a named bus, so each of these grew a bus
+ * index as its first argument after the driver. */
+void        MSS_CALLBACK AIL_set_digital_master_reverb(HDIGDRIVER dig, S32 bus_index, F32 reverb_decay_time, F32 reverb_predelay, F32 reverb_damping);
+void        MSS_CALLBACK AIL_digital_master_reverb(HDIGDRIVER dig, S32 bus_index, F32* reverb_time, F32* reverb_predelay, F32* reverb_damping);
+void        MSS_CALLBACK AIL_set_digital_master_reverb_levels(HDIGDRIVER dig, S32 bus_index, F32 dry_level, F32 wet_level);
+void        MSS_CALLBACK AIL_digital_master_reverb_levels(HDIGDRIVER dig, S32 bus_index, F32* dry_level, F32* wet_level);
+#endif
+
+#if MSS_AT_LEAST(70) && MSS_BEFORE(90)
+/* AIL_set_room_type returns void here, matching what the DLL actually
+ * implements; the S32 the original SDK header spells is a return value it
+ * never filled in. AIL_room_type is the one that reports the current setting. */
+void        MSS_CALLBACK AIL_set_room_type(HDIGDRIVER dig, S32 room_type);
+S32         MSS_CALLBACK AIL_room_type(HDIGDRIVER dig);
+#elif MSS_AT_LEAST(90)
+void        MSS_CALLBACK AIL_set_room_type(HDIGDRIVER dig, S32 bus_index, S32 room_type);
+S32         MSS_CALLBACK AIL_room_type(HDIGDRIVER dig, S32 bus_index);
+#endif
+
+#if MSS_AT_LEAST(70)
+/* 3D on the ordinary HSAMPLE: the H3DSAMPLE spellings above stop at 6.6, and
+ * these are what a v7 or later build exports. The AIL_set_* forms take the
+ * values, the AIL_sample_* forms read them back, and a null pointer on a
+ * getter leaves that component unchanged. */
+void        MSS_CALLBACK AIL_set_sample_3D_position(HSAMPLE S, F32 x, F32 y, F32 z);
+S32         MSS_CALLBACK AIL_sample_3D_position(HSAMPLE S, F32* x, F32* y, F32* z);
+void        MSS_CALLBACK AIL_set_sample_3D_velocity(HSAMPLE S, F32 dx, F32 dy, F32 dz, F32 magnitude);
+void        MSS_CALLBACK AIL_set_sample_3D_velocity_vector(HSAMPLE S, F32 dx, F32 dy, F32 dz);
+void        MSS_CALLBACK AIL_sample_3D_velocity(HSAMPLE S, F32* dx, F32* dy, F32* dz);
+void        MSS_CALLBACK AIL_set_sample_3D_orientation(HSAMPLE S, F32 front_x, F32 front_y, F32 front_z, F32 up_x, F32 up_y, F32 up_z);
+void        MSS_CALLBACK AIL_sample_3D_orientation(HSAMPLE S, F32* front_x, F32* front_y, F32* front_z, F32* up_x, F32* up_y, F32* up_z);
+/* Angles are in degrees, and the outer level is the 0-127 volume played
+ * outside the cone. */
+void        MSS_CALLBACK AIL_set_sample_3D_cone(HSAMPLE S, F32 inner_angle, F32 outer_angle, F32 outer_volume_level);
+void        MSS_CALLBACK AIL_sample_3D_cone(HSAMPLE S, F32* inner_angle, F32* outer_angle, F32* outer_volume_level);
+/* Distances are in world units, and auto_3D_wet_atten is non-zero to route
+ * the 3D wet signal through the same attenuation curve. */
+void        MSS_CALLBACK AIL_set_sample_3D_distances(HSAMPLE S, F32 max_dist, F32 min_dist, S32 auto_3D_wet_atten);
+void        MSS_CALLBACK AIL_sample_3D_distances(HSAMPLE S, F32* max_dist, F32* min_dist, S32* auto_3D_wet_atten);
+/* Advance a moving source and a moving listener by one frame. The engine
+ * also advances them from its own mix callback; call these only for sources
+ * the application moves by hand. */
+void        MSS_CALLBACK AIL_update_sample_3D_position(HSAMPLE S, F32 dt_ms);
+void        MSS_CALLBACK AIL_set_sample_obstruction(HSAMPLE S, F32 obstruction);
+F32         MSS_CALLBACK AIL_sample_obstruction(HSAMPLE S);
+void        MSS_CALLBACK AIL_set_sample_occlusion(HSAMPLE S, F32 occlusion);
+F32         MSS_CALLBACK AIL_sample_occlusion(HSAMPLE S);
+void        MSS_CALLBACK AIL_set_sample_exclusion(HSAMPLE S, F32 exclusion);
+F32         MSS_CALLBACK AIL_sample_exclusion(HSAMPLE S);
+S32         MSS_CALLBACK AIL_set_sample_info(HSAMPLE S, AILSOUNDINFO const* info);
+#endif
+
+#if MSS_AT_LEAST(70)
+void        MSS_CALLBACK AIL_listener_3D_position(HDIGDRIVER dig, F32* x, F32* y, F32* z);
+void        MSS_CALLBACK AIL_listener_3D_velocity(HDIGDRIVER dig, F32* dx, F32* dy, F32* dz);
+void        MSS_CALLBACK AIL_set_listener_3D_velocity_vector(HDIGDRIVER dig, F32 dx, F32 dy, F32 dz);
+void        MSS_CALLBACK AIL_listener_3D_orientation(HDIGDRIVER dig, F32* front_x, F32* front_y, F32* front_z, F32* up_x, F32* up_y, F32* up_z);
+void        MSS_CALLBACK AIL_update_listener_3D_position(HDIGDRIVER dig, F32 dt_ms);
+#endif
+
+#if MSS_AT_LEAST(65) && MSS_BEFORE(67)
+/* 6.5-6.6 only: the per-stream half of the level/pan/reverb/low-pass family,
+ * dropped again in 7.x when the stream handle lost its own controls. */
+void        MSS_CALLBACK AIL_set_stream_volume_levels(HSTREAM stream, F32 left_level, F32 right_level);
+void        MSS_CALLBACK AIL_stream_volume_levels(HSTREAM stream, F32* left_level, F32* right_level);
+void        MSS_CALLBACK AIL_stream_volume_pan(HSTREAM stream, F32* volume, F32* pan);
+void        MSS_CALLBACK AIL_set_stream_reverb_levels(HSTREAM stream, F32 dry_level, F32 wet_level);
+void        MSS_CALLBACK AIL_stream_reverb_levels(HSTREAM stream, F32* dry_level, F32* wet_level);
+void        MSS_CALLBACK AIL_set_stream_low_pass_cut_off(HSTREAM stream, F32 cut_off);
+F32         MSS_CALLBACK AIL_stream_low_pass_cut_off(HSTREAM stream);
+#endif
+
 // Timer API
 HTIMER      MSS_CALLBACK AIL_register_timer(AILTIMERCB callback);
 void        MSS_CALLBACK AIL_set_timer_frequency(HTIMER timer, U32 hertz);

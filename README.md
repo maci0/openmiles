@@ -241,7 +241,8 @@ int main(void)
 ```
 
 The header covers playback, streaming, MIDI, 3D, RIB, filters, the Quick API,
-and file I/O (`AIL_file_read`, `AIL_file_size`, `AIL_file_type`, and
+the v6.5+ unified level/pan/reverb/low-pass and v7+ 3D calls on `HSAMPLE`, and
+file I/O (`AIL_file_read`, `AIL_file_size`, `AIL_file_type`, and
 `AIL_set_file_callbacks` for routing file access through the game's own VFS).
 The v7 DSP-stage, v8/v9 event and SoundBank, and legacy `waveOut`/`midiOut`
 exports are not declared; see [docs/API_STATUS.md](docs/API_STATUS.md) for the
@@ -250,7 +251,9 @@ full list, and add your own declaration from the export table in
 
 `make check-header` re-checks every declaration in `mss.h` against that export
 table, and the `AILSOUNDINFO` layout against `src/root.zig`, for all ten distinct
-version encodings; it runs as part of `make lint`.
+version encodings, and compiles the header once per encoding as C99 with
+`-Wall -Wextra -Werror` so a declaration that only parses is caught here rather
+than in your build. It runs as part of `make lint`.
 
 ### Debug logging
 
