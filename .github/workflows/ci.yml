@@ -66,6 +66,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-zig-${{ steps.zig.outputs.version }}-
 
+      # uv installs the two pinned linters below; it is not itself a tool the
+      # tree pins (the Makefile holds the ruff and yamllint versions), so it is
+      # named here at a fixed version rather than read out of build.zig.zon.
+      # Nothing installed it before: the runner image ships pipx, not uv, so
+      # the first `uv tool install` failed the whole ubuntu leg with exit 127
+      # before any gate ran. The binary lands in ~/.local/bin, the same
+      # directory the two install steps below put their tools in.
+      - name: Install uv
+        if: matrix.os == 'ubuntu-latest'
+        run: pipx install uv==0.12.19
+
       - name: Install ruff
         if: matrix.os == 'ubuntu-latest'
         # Pinned to the RUFF_VERSION in the Makefile so the local gate and CI
