@@ -178,14 +178,7 @@ pub fn AIL_set_3D_sample_loop_count(s: ?*anyopaque, count: i32) callconv(.winapi
 pub fn AIL_3D_sample_playback_rate(s: ?*anyopaque) callconv(.winapi) i32 {
     const p = s orelse return 0;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
-    // Mirror AIL_API_sample_playback_rate (a 3D sample is HSAMPLE-backed and is
-    // init'd through the same AIL_API_init_sample): explicit app-set rate first,
-    // then the loaded decoder's native rate (original_playback_rate is set to the
-    // file rate at load), then the 11025 init default for a fresh sample.
-    if (sample.target_rate) |tr| return openmiles.satI32(tr);
-    // Saturate: outputSampleRate is a u32 file-header value that can exceed i32.
-    if (sample.decoder) |d| return std.math.cast(i32, d.outputSampleRate) orelse std.math.maxInt(i32);
-    return 11025;
+    return sample.playbackRate();
 }
 pub fn AIL_set_3D_sample_playback_rate(s: ?*anyopaque, rate: i32) callconv(.winapi) void {
     const p = s orelse return;
@@ -440,15 +433,7 @@ pub fn AIL_3D_sample_attribute(s: ?*anyopaque, name: [*:0]const u8, val: *anyopa
         v.* = sample.cone_outer_volume;
     } else if (std.mem.eql(u8, n, "Frequency") or std.mem.eql(u8, n, "Playback rate")) {
         const v: *i32 = @ptrCast(@alignCast(val));
-        // Same resolution order as AIL_3D_sample_playback_rate: the app-set rate,
-        // then the loaded decoder's native rate, then the 11025 AIL_init_sample
-        // default. A hardcoded 44100 made a 22050 Hz sample report double its
-        // real rate, disagreeing with AIL_3D_sample_ms_position.
-        if (sample.target_rate) |tr| {
-            v.* = openmiles.satI32(tr);
-        } else if (sample.decoder) |d| {
-            v.* = std.math.cast(i32, d.outputSampleRate) orelse std.math.maxInt(i32);
-        } else v.* = 11025;
+        v.* = sample.playbackRate();
     } else if (std.mem.eql(u8, n, "Volume")) {
         const v: *i32 = @ptrCast(@alignCast(val));
         v.* = sample.original_volume;

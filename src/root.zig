@@ -226,13 +226,7 @@ pub var last_file_error_buf: [256:0]u8 = [_:0]u8{0} ** 256;
 pub fn setLastError(msg: []const u8) void {
     error_buf_mutex.lockUncancelable(io);
     defer error_buf_mutex.unlock(io);
-    // Cut on a character boundary, not a byte one: a message naming a file
-    // outside ASCII otherwise ends in half a character, and the caller reading
-    // it as UTF-8 sees a broken sequence where the tail of the name should be.
-    const cut = wide.utf8Prefix(msg, last_error_buf.len - 1);
-    const len = cut.len;
-    @memcpy(last_error_buf[0..len], msg[0..len]);
-    last_error_buf[len] = 0;
+    writeErrorLocked(&last_error_buf, msg);
 }
 
 /// Same as `setLastError`, for a message that names the offending value (a
@@ -241,7 +235,7 @@ pub fn setLastError(msg: []const u8) void {
 pub fn setLastErrorFmt(comptime fmt: []const u8, args: anytype) void {
     error_buf_mutex.lockUncancelable(io);
     defer error_buf_mutex.unlock(io);
-    if (std.fmt.bufPrintZ(&last_error_buf, fmt, args)) |_| {} else |_| writeLastErrorLocked("Error message too long");
+    if (std.fmt.bufPrintZ(&last_error_buf, fmt, args)) |_| {} else |_| writeErrorLocked(&last_error_buf, "Error message too long");
 }
 
 pub fn clearLastError() void {
@@ -253,29 +247,25 @@ pub fn clearLastError() void {
 pub fn setFileError(msg: []const u8) void {
     error_buf_mutex.lockUncancelable(io);
     defer error_buf_mutex.unlock(io);
-    const cut = wide.utf8Prefix(msg, last_file_error_buf.len - 1);
-    const len = cut.len;
-    @memcpy(last_file_error_buf[0..len], msg[0..len]);
-    last_file_error_buf[len] = 0;
+    writeErrorLocked(&last_file_error_buf, msg);
 }
 
 /// Same as `setFileError`, for a message that names the file it applies to.
 pub fn setFileErrorFmt(comptime fmt: []const u8, args: anytype) void {
     error_buf_mutex.lockUncancelable(io);
     defer error_buf_mutex.unlock(io);
-    if (std.fmt.bufPrintZ(&last_file_error_buf, fmt, args)) |_| {} else |_| writeFileErrorLocked("Error message too long");
+    if (std.fmt.bufPrintZ(&last_file_error_buf, fmt, args)) |_| {} else |_| writeErrorLocked(&last_file_error_buf, "Error message too long");
 }
 
-fn writeLastErrorLocked(msg: []const u8) void {
-    const len = @min(msg.len, last_error_buf.len - 1);
-    @memcpy(last_error_buf[0..len], msg[0..len]);
-    last_error_buf[len] = 0;
-}
-
-fn writeFileErrorLocked(msg: []const u8) void {
-    const len = @min(msg.len, last_file_error_buf.len - 1);
-    @memcpy(last_file_error_buf[0..len], msg[0..len]);
-    last_file_error_buf[len] = 0;
+/// Copy into one of the two error buffers. Callers hold error_buf_mutex.
+fn writeErrorLocked(buf: *[256:0]u8, msg: []const u8) void {
+    // Cut on a character boundary, not a byte one: a message naming a file
+    // outside ASCII otherwise ends in half a character, and the caller reading
+    // it as UTF-8 sees a broken sequence where the tail of the name should be.
+    const cut = wide.utf8Prefix(msg, buf.len - 1);
+    const len = cut.len;
+    @memcpy(buf[0..len], msg[0..len]);
+    buf[len] = 0;
 }
 
 pub fn clearFileError() void {
@@ -847,6 +837,18 @@ var driver_create_mutex: std.Io.Mutex = .init;
 var known_drivers: std.ArrayList(*DigitalDriver) = .empty;
 var driver_table_mutex: std.Io.Mutex = .init;
 
+/// Drop the first entry equal to `item`, if the list holds one. The registries
+/// that unlink through it hold distinct handles, so the first match is the only
+/// one, and a miss is the normal outcome of a double unregister.
+pub fn removeFirst(list: anytype, item: anytype) void {
+    for (list.items, 0..) |entry, i| {
+        if (entry == item) {
+            _ = list.swapRemove(i);
+            return;
+        }
+    }
+}
+
 /// Returns false when the handle could not be tracked. The caller must then
 /// tear the driver down instead of publishing it: an untracked handle is
 /// misclassified as a Sample3D by the 3D dispatch entry points.
@@ -863,12 +865,7 @@ pub fn registerDriver(driver: *DigitalDriver) bool {
 pub fn unregisterDriver(driver: *DigitalDriver) void {
     driver_table_mutex.lockUncancelable(io);
     defer driver_table_mutex.unlock(io);
-    for (known_drivers.items, 0..) |d, i| {
-        if (d == driver) {
-            _ = known_drivers.swapRemove(i);
-            return;
-        }
-    }
+    removeFirst(&known_drivers, driver);
 }
 
 pub fn isKnownDriver(ptr: *anyopaque) bool {
@@ -903,12 +900,7 @@ pub fn registerSequence(seq: *Sequence) void {
 pub fn unregisterSequence(seq: *Sequence) void {
     global_sequences_mutex.lockUncancelable(io);
     defer global_sequences_mutex.unlock(io);
-    for (global_sequences.items, 0..) |s, i| {
-        if (s == seq) {
-            _ = global_sequences.swapRemove(i);
-            break;
-        }
-    }
+    removeFirst(&global_sequences, seq);
 }
 
 pub fn getActiveSequenceCount() u32 {

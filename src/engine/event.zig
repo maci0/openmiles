@@ -214,11 +214,7 @@ pub const EventConstruct = struct {
         };
     }
     pub fn addComment(self: *EventConstruct, text: []const u8) bool {
-        self.printType(.comment);
-        self.raw(";");
-        self.raw(text);
-        self.raw(";");
-        return true;
+        return self.addOneString(.comment, text);
     }
     pub fn addClearState(self: *EventConstruct) bool {
         self.printType(.clear_state);
@@ -494,6 +490,14 @@ const Decoder = struct {
         x.len = len;
         if (self.p[0] == ';') self.p += 1;
     }
+    /// Read one `;`-delimited string field and copy it into the working
+    /// buffer. The two halves always run together: setupString records where
+    /// the source text sits and copyString emits it, so a step never keeps one
+    /// without the other.
+    fn copyField(self: *Decoder, x: *MSSStringC) void {
+        self.setupString(x);
+        self.copyString(x);
+    }
     fn copyString(self: *Decoder, x: *MSSStringC) void {
         const n: usize = @intCast(@max(0, x.len));
         // Compared as a subtraction, not `wp + n + 1 >= wlimit`: that sum wraps
@@ -673,76 +677,58 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
         },
         .comment => {
             if (!d.stepTypeSep()) return null;
-            d.setupString(&step.u.comment.comment);
-            d.copyString(&step.u.comment.comment);
+            d.copyField(&step.u.comment.comment);
         },
         .clear_state => {
             if (!d.stepTypeSep()) return null;
         },
         .exec_event => {
             if (!d.stepTypeSep()) return null;
-            d.setupString(&step.u.exec.eventname);
-            d.copyString(&step.u.exec.eventname);
+            d.copyField(&step.u.exec.eventname);
         },
         .apply_env => {
             if (!d.stepTypeSep()) return null;
-            d.setupString(&step.u.env.envname);
-            d.copyString(&step.u.env.envname);
+            d.copyField(&step.u.env.envname);
             d.copyDigit(&step.u.env.isdynamic);
         },
         .enable_limit => {
             if (!d.stepTypeSep()) return null;
-            d.setupString(&step.u.enablelimit.limitname);
-            d.copyString(&step.u.enablelimit.limitname);
+            d.copyField(&step.u.enablelimit.limitname);
         },
         .cache_sounds, .purge_sounds => {
             if (!d.stepTypeSep()) return null;
-            d.setupString(&step.u.load.lib);
-            d.copyString(&step.u.load.lib);
+            d.copyField(&step.u.load.lib);
             d.parseNameList(&step.u.load);
         },
         .set_limits => {
             if (!d.stepTypeSep()) return null;
-            d.setupString(&step.u.limits.name);
-            d.copyString(&step.u.limits.name);
-            d.setupString(&step.u.limits.limits);
-            d.copyString(&step.u.limits.limits);
+            d.copyField(&step.u.limits.name);
+            d.copyField(&step.u.limits.limits);
         },
         .persist => {
             if (!d.stepTypeSep()) return null;
-            d.setupString(&step.u.persist.presetname);
-            d.copyString(&step.u.persist.presetname);
-            d.setupString(&step.u.persist.name);
-            d.copyString(&step.u.persist.name);
-            d.setupString(&step.u.persist.labels);
-            d.copyString(&step.u.persist.labels);
+            d.copyField(&step.u.persist.presetname);
+            d.copyField(&step.u.persist.name);
+            d.copyField(&step.u.persist.labels);
             d.copyDigit(&step.u.persist.isdynamic);
         },
         .ramp => {
             if (!d.stepTypeSep()) return null;
-            d.setupString(&step.u.ramp.name);
-            d.copyString(&step.u.ramp.name);
-            d.setupString(&step.u.ramp.labels);
-            d.copyString(&step.u.ramp.labels);
+            d.copyField(&step.u.ramp.name);
+            d.copyField(&step.u.ramp.labels);
             d.copyFloat(&step.u.ramp.time);
-            d.setupString(&step.u.ramp.target);
-            d.copyString(&step.u.ramp.target);
+            d.copyField(&step.u.ramp.target);
             d.copyDigit(&step.u.ramp.type);
             d.copyDigit(&step.u.ramp.apply_to_new);
             d.copyDigit(&step.u.ramp.interpolate_type);
         },
         .control_sounds => {
             if (!d.stepTypeSep()) return null;
-            d.setupString(&step.u.control.labels);
-            d.copyString(&step.u.control.labels);
-            d.setupString(&step.u.control.markerstart);
-            d.copyString(&step.u.control.markerstart);
-            d.setupString(&step.u.control.markerend);
-            d.copyString(&step.u.control.markerend);
-            d.setupString(&step.u.control.position);
-            d.copyString(&step.u.control.position);
-            d.setupString(&step.u.control.presetname);
-            d.copyString(&step.u.control.presetname);
+            d.copyField(&step.u.control.labels);
+            d.copyField(&step.u.control.markerstart);
+            d.copyField(&step.u.control.markerend);
+            d.copyField(&step.u.control.position);
+            d.copyField(&step.u.control.presetname);
             d.copyUChar(&step.u.control.loopcount);
             d.copyDigit(&step.u.control.type);
             d.copyFloat(&step.u.control.fadeouttime);
@@ -750,14 +736,10 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
         },
         .set_lfo => {
             if (!d.stepTypeSep()) return null;
-            d.setupString(&step.u.setlfo.name);
-            d.copyString(&step.u.setlfo.name);
-            d.setupString(&step.u.setlfo.base);
-            d.copyString(&step.u.setlfo.base);
-            d.setupString(&step.u.setlfo.amplitude);
-            d.copyString(&step.u.setlfo.amplitude);
-            d.setupString(&step.u.setlfo.freq);
-            d.copyString(&step.u.setlfo.freq);
+            d.copyField(&step.u.setlfo.name);
+            d.copyField(&step.u.setlfo.base);
+            d.copyField(&step.u.setlfo.amplitude);
+            d.copyField(&step.u.setlfo.freq);
             d.copyDigit(&step.u.setlfo.invert);
             d.copyDigit(&step.u.setlfo.polarity);
             d.copyDigit(&step.u.setlfo.waveform);
@@ -766,8 +748,7 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
         },
         .set_blend => {
             if (!d.stepTypeSep()) return null;
-            d.setupString(&step.u.blend.name);
-            d.copyString(&step.u.blend.name);
+            d.copyField(&step.u.blend.name);
             var count: i32 = 0;
             d.copyDecimal(&count);
             const n: usize = @intCast(@min(@max(count, 0), 10));
@@ -783,8 +764,7 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
         },
         .move_var => {
             if (!d.stepTypeSep()) return null;
-            d.setupString(&step.u.movevar.name);
-            d.copyString(&step.u.movevar.name);
+            d.copyField(&step.u.movevar.name);
             d.copyFloat(&step.u.movevar.times[0]);
             d.copyFloat(&step.u.movevar.times[1]);
             d.copyDecimal(&step.u.movevar.interp_types[0]);
@@ -796,22 +776,14 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
         .start_sound => {
             if (!d.stepTypeSep()) return null;
             const s = &step.u.start;
-            d.setupString(&s.soundname);
-            d.copyString(&s.soundname);
-            d.setupString(&s.presetname);
-            d.copyString(&s.presetname);
-            d.setupString(&s.eventname);
-            d.copyString(&s.eventname);
-            d.setupString(&s.markerstart);
-            d.copyString(&s.markerstart);
-            d.setupString(&s.markerend);
-            d.copyString(&s.markerend);
-            d.setupString(&s.labels);
-            d.copyString(&s.labels);
-            d.setupString(&s.statevar);
-            d.copyString(&s.statevar);
-            d.setupString(&s.varinit);
-            d.copyString(&s.varinit);
+            d.copyField(&s.soundname);
+            d.copyField(&s.presetname);
+            d.copyField(&s.eventname);
+            d.copyField(&s.markerstart);
+            d.copyField(&s.markerend);
+            d.copyField(&s.labels);
+            d.copyField(&s.statevar);
+            d.copyField(&s.varinit);
             d.copyDigit(&s.stream);
             d.copyDigit(&s.canload);
             d.copyDigit(&s.presetisdynamic);
@@ -819,8 +791,7 @@ fn nextStepDepth(event_string: [*:0]const u8, step: *EVENT_STEP_INFO, scratch: [
             d.copyUShort(&s.delaymax);
             d.copyUChar(&s.priority);
             d.copyUChar(&s.loopcount);
-            d.setupString(&s.startoffset);
-            d.copyString(&s.startoffset);
+            d.copyField(&s.startoffset);
             d.copyFloat(&s.volmin);
             d.copyFloat(&s.volmax);
             d.copyFloat(&s.pitchmin);

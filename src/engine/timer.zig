@@ -98,12 +98,7 @@ pub const Timer = struct {
     fn unlinkFromGlobalList(self: *Timer, free_self: bool) void {
         root.global_timers_mutex.lockUncancelable(io);
         defer root.global_timers_mutex.unlock(io);
-        for (root.global_timers.items, 0..) |t, i| {
-            if (t == self) {
-                _ = root.global_timers.swapRemove(i);
-                break;
-            }
-        }
+        root.removeFirst(&root.global_timers, self);
         if (free_self) self.allocator.destroy(self);
     }
 

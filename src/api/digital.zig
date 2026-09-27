@@ -136,17 +136,7 @@ pub fn AIL_sample_pan(s_opt: ?*Sample) callconv(.winapi) i32 {
 }
 pub fn AIL_sample_playback_rate(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    // SDK (wavefile.cpp AIL_API_sample_playback_rate) returns S->original_playback_
-    // rate verbatim. AIL_API_init_sample seeds it to 11025; loading a file
-    // overwrites it with the file's native rate, and AIL_set_sample_playback_rate
-    // overwrites it with the app value. So: explicit override first, then the
-    // loaded decoder's native rate, then the 11025 init default for a fresh,
-    // unloaded sample (NOT 44100).
-    if (s.target_rate) |tr| return openmiles.satI32(tr);
-    // File-header rate is u32 from untrusted input; a value above i32 max
-    // must saturate rather than panic the @intCast.
-    if (s.decoder) |d| return std.math.cast(i32, d.outputSampleRate) orelse std.math.maxInt(i32);
-    return 11025;
+    return s.playbackRate();
 }
 // SDK: AIL_set_sample_volume_pan(HSAMPLE, F32 volume, F32 pan) — floats in 0.0..1.0,
 // not the S32 0..127 of the separate set_sample_volume/set_sample_pan.
@@ -568,8 +558,7 @@ pub fn AIL_digital_latency(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
             // SDK (genericdig.cpp) reports TOTAL output buffering, not one period:
             // (hw_buffer_ms) * DIG_DS_MIX_FRAGMENT_CNT. Our equivalent is the full
             // device buffer = all internalPeriods of internalPeriodSizeInFrames, so
-            // multiply by the period count (was reporting a single period, ~N times
-            // too low).
+            // multiply by the period count.
             // 64-bit intermediate: period*periods*1000 overflows u32 for
             // large-device configs (e.g. 384000-frame periods x 32).
             const total_frames = @as(u64, period) * periods;

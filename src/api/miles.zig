@@ -150,11 +150,8 @@ var g_next_id: u64 = 1;
 // Sounds cached into memory by cache_sounds event steps (deduped); reported as
 // MILESEVENTSTATE.LoadedSoundCount and removed by purge_sounds steps.
 // Names are keyed case-insensitively, the way the bank container resolves them
-// (soundbank's name index is lowercased). A case-sensitive key let
-// cache_sounds("kick") and cache_sounds("KICK") both be stored, and left
-// purge_sounds("KICK") unable to remove a cached "kick": the entry survived its
-// own invalidation, so LoadedSoundCount never fell and the name was never
-// freed.
+// (soundbank's name index is lowercased), so cache_sounds("KICK") and
+// purge_sounds("KICK") address the same entry.
 
 // Every name-keyed registry in this file keys a hash map on the lowercased
 // name and owns the key, so a name match is a hash lookup rather than a scan
@@ -284,9 +281,7 @@ fn instanceHasLabel(inst: *const SoundInstance, label: []const u8) bool {
 // Evict the oldest instances carrying `label` until a slot is free under `lim`
 // (a cap of 0 evicts every one of them). The matches are gathered and ordered
 // by instance_id once, rather than rescanning the whole list to recount and
-// re-find the minimum after each eviction: the old loop was O(instances) per
-// evicted instance, so a cap of 0 over N instances cost O(N^2) label
-// tokenizations on a single start-sound step.
+// re-find the minimum after each eviction.
 fn evictOldestWithLabel(label: []const u8, lim: u32) void {
     var matches: std.ArrayListUnmanaged(*SoundInstance) = .empty;
     defer matches.deinit(openmiles.global_allocator);
@@ -456,8 +451,7 @@ fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: 
 
 // One event variable. The name is the map key, lowercased and owned by the
 // table, so a get or set is a hash lookup however many variables a game's
-// event script declares; the previous linked list scanned the whole table,
-// with a case-insensitive compare per node, on every read and write.
+// event script declares.
 const Var = struct {
     is_float: bool,
     i: i32 = 0,

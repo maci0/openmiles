@@ -665,28 +665,26 @@ pub const DigitalDriver = struct {
         ma.ma_engine_listener_set_world_up(&self.engine, 0, v[0], v[1], -v[2]);
     }
 
+    // miniaudio is left-handed on Z, the MSS surface is right-handed, so every
+    // listener getter undoes the negation the matching setter applied.
+    fn fromMSS(v: ma.ma_vec3f) ma.ma_vec3f {
+        return .{ .x = v.x, .y = v.y, .z = -v.z };
+    }
+
     pub fn getListenerPosition(self: *DigitalDriver) ma.ma_vec3f {
-        var v = ma.ma_engine_listener_get_position(&self.engine, 0);
-        v.z = -v.z;
-        return v;
+        return fromMSS(ma.ma_engine_listener_get_position(&self.engine, 0));
     }
 
     pub fn getListenerVelocity(self: *DigitalDriver) ma.ma_vec3f {
-        var v = ma.ma_engine_listener_get_velocity(&self.engine, 0);
-        v.z = -v.z;
-        return v;
+        return fromMSS(ma.ma_engine_listener_get_velocity(&self.engine, 0));
     }
 
     pub fn getListenerDirection(self: *DigitalDriver) ma.ma_vec3f {
-        var v = ma.ma_engine_listener_get_direction(&self.engine, 0);
-        v.z = -v.z;
-        return v;
+        return fromMSS(ma.ma_engine_listener_get_direction(&self.engine, 0));
     }
 
     pub fn getListenerWorldUp(self: *DigitalDriver) ma.ma_vec3f {
-        var v = ma.ma_engine_listener_get_world_up(&self.engine, 0);
-        v.z = -v.z;
-        return v;
+        return fromMSS(ma.ma_engine_listener_get_world_up(&self.engine, 0));
     }
 
     pub fn getDevice(self: *DigitalDriver) ?*ma.ma_device {
@@ -730,6 +728,22 @@ fn wavSourceBytesPerFrame(data: []const u8) ?u32 {
         off = next;
     }
     return null;
+}
+
+/// The rate AIL_init_sample seeds a fresh sample with, before any file is
+/// loaded. Not 44100: an unloaded sample has no file rate to report, and the
+/// SDK reports the seed.
+pub const init_sample_default_rate: i32 = 11025;
+
+/// The rate a getter reports for a sample: the app-set rate, then the loaded
+/// decoder's native rate, then the AIL_init_sample seed. A Sample and a
+/// Sample3D differ only in their fields, so the rule is stated once here and
+/// each type forwards to it.
+fn resolvePlaybackRate(target_rate: ?f32, decoder: ?*ma.ma_decoder) i32 {
+    if (target_rate) |tr| return root.satI32(tr);
+    // outputSampleRate is a u32 file-header value that can exceed i32.
+    if (decoder) |d| return std.math.cast(i32, d.outputSampleRate) orelse std.math.maxInt(i32);
+    return init_sample_default_rate;
 }
 
 pub const Sample = struct {
@@ -942,14 +956,7 @@ pub const Sample = struct {
 
     pub fn deinit(self: *Sample) void {
         log("Sample.deinit: s={*}\n", .{self});
-        if (!self.driver_is_dead) {
-            for (self.driver.samples.items, 0..) |s, i| {
-                if (s == self) {
-                    _ = self.driver.samples.swapRemove(i);
-                    break;
-                }
-            }
-        }
+        if (!self.driver_is_dead) root.removeFirst(&self.driver.samples, self);
         // Detach from any attached Filter first — Filter's attached_samples
         // list would otherwise hold a dangling pointer after we're freed.
         if (self.attached_filter) |f| {
@@ -1755,6 +1762,11 @@ pub const Sample = struct {
         ma.ma_sound_set_pitch(&self.sound, self.pitch);
     }
 
+    /// See resolvePlaybackRate.
+    pub fn playbackRate(self: *Sample) i32 {
+        return resolvePlaybackRate(self.target_rate, self.decoder);
+    }
+
     pub fn setPlaybackRate(self: *Sample, rate: i32) void {
         // SDK (AIL_API_set_sample_playback_rate): a rate <= 0 is ignored, the
         // current rate is left unchanged.
@@ -1924,14 +1936,7 @@ pub const Sample3D = struct {
     }
 
     pub fn deinit(self: *Sample3D) void {
-        if (!self.driver_is_dead) {
-            for (self.driver.samples_3d.items, 0..) |s, i| {
-                if (s == self) {
-                    _ = self.driver.samples_3d.swapRemove(i);
-                    break;
-                }
-            }
-        }
+        if (!self.driver_is_dead) root.removeFirst(&self.driver.samples_3d, self);
         self.cleanupPlaybackState();
         self.driver.allocator.destroy(self);
     }
@@ -2200,6 +2205,11 @@ pub const Sample3D = struct {
         if (self.is_initialized) {
             applyLoopCount(&self.sound, count);
         }
+    }
+
+    /// See resolvePlaybackRate.
+    pub fn playbackRate(self: *Sample3D) i32 {
+        return resolvePlaybackRate(self.target_rate, self.decoder);
     }
 
     pub fn setPlaybackRate(self: *Sample3D, rate: i32) void {

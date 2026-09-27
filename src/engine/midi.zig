@@ -498,7 +498,8 @@ pub const Sequence = struct {
         }
         self.user_bpm = target_bpm;
         self.tempo_fade_start_ratio = self.tempo_ratio;
-        if (target_bpm > 0 and self.tempo > 0) {
+        // Past the early return above, self.tempo is already known positive.
+        if (target_bpm > 0) {
             const raw = @as(f64, @floatFromInt(target_bpm)) / @as(f64, @floatFromInt(self.tempo));
             self.tempo_fade_target_ratio = clampedTempoRatio(raw);
         } else {
@@ -720,21 +721,7 @@ pub const Sequence = struct {
                 if (self.loops_remaining <= 0 or self.loops_remaining > 1) {
                     // Loop restart (infinite when <=0, decrement when >1)
                     if (self.loops_remaining > 1) self.loops_remaining -= 1;
-                    self.allNotesOff();
-                    self.current_msg = self.midi;
-                    self.time_ms = 0;
-                    self.ms_per_beat = self.initial_ms_per_beat;
-                    // The next pass starts at the file's own tempo: a tempo
-                    // change applied during the pass finished must not leak
-                    // into it, or ms_per_beat and tempo disagree and the
-                    // loop plays at the wrong speed.
-                    self.tempo = self.initial_tempo;
-                    self.tempo_fade_active = false;
-                    self.recalcTempoRatio(self.initial_tempo);
-                    self.xmidi_loop_depth = 0;
-                    self.next_beat_ms = self.ms_per_beat;
-                    self.current_beat_in_measure.store(1, .release);
-                    self.current_measure.store(1, .release);
+                    self.rewindToStart();
                 } else {
                     self.is_playing.store(false, .release);
                     self.is_done.store(true, .release);
@@ -896,20 +883,30 @@ pub const Sequence = struct {
         self.was_stopped.store(false, .release);
     }
 
-    /// Reset playback state to the beginning of the sequence (shared by start/stop).
-    fn resetToBeginning(self: *Sequence) void {
+    /// Everything a pass back to the start of the sequence has to restore,
+    /// shared by the first start and a loop restart. `loops_remaining` is left
+    /// alone: the first pass seeds it from `loop_count`, a restart spends one.
+    fn rewindToStart(self: *Sequence) void {
         self.allNotesOff();
         self.current_msg = self.midi;
         self.time_ms = 0;
-        self.loops_remaining = self.loop_count;
         self.ms_per_beat = self.initial_ms_per_beat;
+        // The next pass starts at the file's own tempo: a tempo change applied
+        // during the pass finished must not leak into it, or ms_per_beat and
+        // tempo disagree and the loop plays at the wrong speed.
         self.tempo = self.initial_tempo;
         self.tempo_fade_active = false;
         self.recalcTempoRatio(self.initial_tempo);
+        self.xmidi_loop_depth = 0;
         self.next_beat_ms = self.ms_per_beat;
         self.current_beat_in_measure.store(1, .release);
         self.current_measure.store(1, .release);
-        self.xmidi_loop_depth = 0;
+    }
+
+    /// Reset playback state to the beginning of the sequence (shared by start/stop).
+    fn resetToBeginning(self: *Sequence) void {
+        self.loops_remaining = self.loop_count;
+        self.rewindToStart();
     }
 
     pub fn start(self: *Sequence) void {

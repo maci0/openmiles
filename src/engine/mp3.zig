@@ -357,8 +357,10 @@ pub fn enumerateFrames(es: *MP3_INFO) i32 {
             if (info_base.len >= off + 3) {
                 es.enc_delay = (@as(i32, info_base[off]) << 4) + (@as(i32, info_base[off + 1]) >> 4);
                 es.enc_padding = (@as(i32, info_base[off + 1] & 0x0f) << 8) + @as(i32, info_base[off + 2]);
-                if (es.enc_delay < 0 or es.enc_delay > 4096) es.enc_delay = -1;
-                if (es.enc_padding < 0 or es.enc_padding > 4096) es.enc_padding = -1;
+                // Both are packed out of u8 bytes, so neither can come out
+                // negative; only the upper bound can reject.
+                if (es.enc_delay > 4096) es.enc_delay = -1;
+                if (es.enc_padding > 4096) es.enc_padding = -1;
             }
         }
 

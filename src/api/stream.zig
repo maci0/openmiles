@@ -163,16 +163,9 @@ pub fn AIL_stream_status(s_opt: ?*Sample) callconv(.winapi) i32 {
 }
 pub fn AIL_stream_playback_rate(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
-    // A stream handle is a Sample (see the 6.5/6.6 note below), so this mirrors
-    // AIL_sample_playback_rate exactly: the app-set rate first, then the loaded
-    // decoder's native rate, then the 11025 AIL_init_sample default for a fresh,
-    // unloaded stream. Reporting a hardcoded 44100 made a 22050 Hz stream claim
-    // double its real rate, so AIL_set_stream_ms_position and the rate getter
-    // disagreed.
-    if (s.target_rate) |tr| return openmiles.satI32(tr);
-    // outputSampleRate is a u32 header value that can exceed i32.
-    if (s.decoder) |d| return std.math.cast(i32, d.outputSampleRate) orelse std.math.maxInt(i32);
-    return 11025;
+    // A stream handle is a Sample (see the 6.5/6.6 note below), so this is
+    // AIL_sample_playback_rate.
+    return s.playbackRate();
 }
 pub fn AIL_stream_volume(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;

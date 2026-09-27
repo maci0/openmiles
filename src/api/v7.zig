@@ -761,21 +761,25 @@ pub fn AIL_calculate_3D_channel_levels_v7(
     listen_face: ?*anyopaque,
     rolloff_factor: f32,
 ) callconv(.winapi) i32 {
-    _ = dig;
-    _ = channel_levels;
-    _ = speaker_array;
-    _ = src_pos;
-    _ = src_face;
-    _ = src_up;
-    _ = src_inner_angle;
-    _ = src_outer_angle;
-    _ = src_outer_volume;
-    _ = src_max_dist;
-    _ = src_min_dist;
-    _ = listen_pos;
-    _ = listen_face;
-    _ = rolloff_factor;
-    return 0;
+    return AIL_calculate_3D_channel_levels(
+        dig,
+        channel_levels,
+        speaker_array,
+        src_pos,
+        src_face,
+        src_up,
+        src_inner_angle,
+        src_outer_angle,
+        src_outer_volume,
+        src_max_dist,
+        src_min_dist,
+        listen_pos,
+        listen_face,
+        null, // listener up-vector, added after v7
+        rolloff_factor,
+        null, // doppler velocity, added after v7
+        null, // doppler shift, added after v7
+    );
 }
 pub fn AIL_digital_output_filter(dig_opt: ?*DigitalDriver) callconv(.winapi) ?*anyopaque {
     _ = dig_opt;

@@ -80,14 +80,7 @@ pub const Filter = struct {
         // Unregister from driver's filter list so DigitalDriver.deinit doesn't
         // try to free us again. Skip if driver_is_dead (driver is already
         // iterating its filters list and will free us directly).
-        if (!self.driver_is_dead) {
-            for (self.driver.filters.items, 0..) |f, i| {
-                if (f == self) {
-                    _ = self.driver.filters.swapRemove(i);
-                    break;
-                }
-            }
-        }
+        if (!self.driver_is_dead) root.removeFirst(&self.driver.filters, self);
         // Clear each attached sample's back-reference so they don't dangle.
         // Only re-route through the engine endpoint if the driver is still alive.
         for (self.attached_samples.items) |sample| {
@@ -157,12 +150,7 @@ pub const Filter = struct {
                 0,
             );
         }
-        for (self.attached_samples.items, 0..) |s, i| {
-            if (s == sample) {
-                _ = self.attached_samples.swapRemove(i);
-                break;
-            }
-        }
+        root.removeFirst(&self.attached_samples, sample);
     }
 
     /// Set the low-pass cutoff frequency in Hz and reinitialize the filter.

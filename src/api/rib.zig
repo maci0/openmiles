@@ -111,11 +111,20 @@ pub fn RIB_request_interface(provider_opt: ?*Provider, name: [*:0]const u8, coun
 
     return 0;
 }
-pub fn RIB_find_files_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8, search_dir: [*:0]const u8, file_ext: [*:0]const u8) callconv(.winapi) ?*Provider {
-    log("RIB_find_files_provider(name='{s}', property='{s}', filename='{s}', search_dir='{s}', file_ext='{s}')\n", .{ std.mem.span(name), std.mem.span(property), std.mem.span(filename), std.mem.span(search_dir), std.mem.span(file_ext) });
+
+/// The first provider registered under `name`, or null. The MSS find_* entry
+/// points take property/filename/search_dir/file_ext arguments, and the
+/// enumeration here matches on the name alone, so every one of them resolves
+/// to the same lookup and the extra arguments are logged, not applied.
+fn findFirstProvider(name: [*:0]const u8) ?*Provider {
     var handle: ?*Provider = null;
     _ = RIB_enumerate_providers(name, null, &handle);
     return handle;
+}
+
+pub fn RIB_find_files_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8, search_dir: [*:0]const u8, file_ext: [*:0]const u8) callconv(.winapi) ?*Provider {
+    log("RIB_find_files_provider(name='{s}', property='{s}', filename='{s}', search_dir='{s}', file_ext='{s}')\n", .{ std.mem.span(name), std.mem.span(property), std.mem.span(filename), std.mem.span(search_dir), std.mem.span(file_ext) });
+    return findFirstProvider(name);
 }
 /// GetTempPathW writes at most MAX_PATH UTF-16 units, terminating NUL included;
 /// the UTF-8 form of a path that long needs up to three bytes per unit.
@@ -372,9 +381,7 @@ pub fn RIB_error() callconv(.c) [*:0]const u8 {
 }
 pub fn RIB_find_file_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8) callconv(.c) ?*Provider {
     log("RIB_find_file_provider(name='{s}', property='{s}', filename='{s}')\n", .{ std.mem.span(name), std.mem.span(property), std.mem.span(filename) });
-    var handle: ?*Provider = null;
-    _ = RIB_enumerate_providers(name, null, &handle);
-    return handle;
+    return findFirstProvider(name);
 }
 pub fn RIB_load_provider_library(path: [*:0]const u8) callconv(.c) ?*Provider {
     const p = openmiles.Provider.load(openmiles.global_allocator, std.mem.span(path)) catch |err| {
@@ -488,15 +495,11 @@ pub fn RIB_set_provider_user_data(provider_opt: ?*Provider, index: u32, value: u
 }
 pub fn RIB_find_file_dec_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8, search_dir: [*:0]const u8, file_ext: [*:0]const u8) callconv(.winapi) ?*Provider {
     log("RIB_find_file_dec_provider(name='{s}', property='{s}', filename='{s}', search_dir='{s}', file_ext='{s}')\n", .{ std.mem.span(name), std.mem.span(property), std.mem.span(filename), std.mem.span(search_dir), std.mem.span(file_ext) });
-    var handle: ?*Provider = null;
-    _ = RIB_enumerate_providers(name, null, &handle);
-    return handle;
+    return findFirstProvider(name);
 }
 pub fn RIB_find_provider(name: [*:0]const u8, property: [*:0]const u8, value: [*:0]const u8) callconv(.winapi) ?*Provider {
     log("RIB_find_provider(name='{s}', property='{s}', value='{s}')\n", .{ std.mem.span(name), std.mem.span(property), std.mem.span(value) });
-    var handle: ?*Provider = null;
-    _ = RIB_enumerate_providers(name, null, &handle);
-    return handle;
+    return findFirstProvider(name);
 }
 // Real MSS: AIL_request_EOB_ASI_reset(HSAMPLE S, U32 buff_num, S32 new_stream_position) @12.
 pub fn AIL_request_EOB_ASI_reset(s_opt: ?*Sample, buff_num: u32, new_stream_position: i32) callconv(.winapi) void {
