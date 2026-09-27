@@ -11,6 +11,7 @@
 //! or truncated bank is rejected rather than over-reading.
 
 const std = @import("std");
+const fs_compat = @import("../utils/fs_compat.zig");
 
 pub const BANK_TAG: u32 = (@as(u32, 'B') << 24) | (@as(u32, 'A') << 16) | (@as(u32, 'N') << 8) | @as(u32, 'K');
 pub const BANK_VERSION: i32 = 8;
@@ -35,15 +36,57 @@ fn regUnlock() void {
     g_registry_lock.store(false, .release);
 }
 
-/// Track a loaded bank in the global registry. Fails only on OOM; the caller
-/// must treat that as a failed load, since an untracked bank would be invisible
-/// to every containerFindEvent/containerSoundDurationMs lookup while still
-/// holding its memory.
-fn registryAdd(bank: *Bank) !void {
+/// Reserve room for one more registry entry, before a load owns any memory, so
+/// publishing the bank it builds cannot fail. A bank that could not be
+/// registered would be invisible to every containerFindEvent /
+/// containerSoundDurationMs lookup while still holding its memory, so the load
+/// fails on the reservation instead of on the append.
+fn registryReserve() !void {
     regLock();
     defer regUnlock();
-    try g_registry.append(registry_alloc, bank);
+    try g_registry.ensureUnusedCapacity(registry_alloc, 1);
 }
+
+/// Track a loaded bank in the global registry, or hand back the bank already
+/// loaded from the same file (see `registryAcquireBySource`), with a reference
+/// taken for this open. Only call after registryReserve succeeded.
+fn registryAdd(bank: *Bank) *Bank {
+    regLock();
+    defer regUnlock();
+    if (registryFindLocked(bank.source_path)) |existing| {
+        existing.refs += 1;
+        return existing;
+    }
+    g_registry.appendAssumeCapacity(bank);
+    return bank;
+}
+/// The live bank whose resolved source path is `source_path`, or null. The
+/// caller holds the registry lock.
+fn registryFindLocked(source_path: []const u8) ?*Bank {
+    for (g_registry.items) |b| {
+        if (std.mem.eql(u8, b.source_path, source_path)) return b;
+    }
+    return null;
+}
+
+/// One bank per file: the live bank loaded from the same file `source_path`
+/// names, with a reference taken for this open, or null when the file is not
+/// loaded yet. A game that opens the same .mbnk twice (a retry, a scene
+/// reloaded, a "did it register?" check) must not get two registry entries and
+/// two copies of the metadata, or the second copy answers a name lookup the
+/// first one already answers and LoadedBankCount overstates what is loaded.
+///
+/// The lookup and the reference are taken under one lock: a load that only
+/// looked the bank up and released the lock would race another load's
+/// registration and hand out a bank that is about to be freed.
+fn registryAcquireBySource(source_path: []const u8) ?*Bank {
+    regLock();
+    defer regUnlock();
+    const existing = registryFindLocked(source_path) orelse return null;
+    existing.refs += 1;
+    return existing;
+}
+
 fn registryRemove(bank: *Bank) void {
     regLock();
     defer regUnlock();
@@ -137,6 +180,15 @@ pub const Bank = struct {
     // ReleaseFast). Immutable after load, so sharing it is race-free.
     name_buf: [5]u8 = [_]u8{0} ** 5,
     filename: [:0]u8,
+    /// Resolved form of `filename`, and the key the global registry dedups on.
+    /// Owned like `filename` — sentinel-typed, which is the slice type its
+    /// allocator frees it as — and freed with the bank.
+    source_path: [:0]u8,
+    /// Number of successful opens still holding this bank. Each open that finds
+    /// the bank already loaded adds one; the last release unregisters and frees
+    /// it. The open and the release are per open, so a second open of the same
+    /// file is answered by a second release rather than by a second copy.
+    refs: u32 = 1,
     allocator: std.mem.Allocator,
     // Name indexes for the two queried tables (events, sounds). Built once at
     // load, before the bank joins the global registry, so concurrent lookups
@@ -426,11 +478,25 @@ pub const Bank = struct {
         return self.rdU32(data_off + 36);
     }
 
+    /// Drop this open's reference. The bank is unregistered and freed by the
+    /// release that drops the last one, so an open of an already-loaded bank and
+    /// its matching close leave the state the first open alone would.
     pub fn deinit(self: *Bank) void {
+        std.debug.assert(self.refs > 0);
+        self.refs -= 1;
+        if (self.refs > 0) return;
         registryRemove(self);
+        self.teardown();
+    }
+
+    /// Free a bank that was never published to the registry: the load path's
+    /// own failure and duplicate cases. `deinit` is the only path that reaches
+    /// a published bank's frees.
+    fn teardown(self: *Bank) void {
         self.event_index.deinit(self.allocator);
         self.sound_index.deinit(self.allocator);
         self.allocator.free(self.meta);
+        self.allocator.free(self.source_path);
         self.allocator.free(self.filename);
         self.allocator.destroy(self);
     }
@@ -444,9 +510,44 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
     if (image.len < header_size) return error.TooShort;
     if (std.mem.readInt(u32, image[off_tag..][0..4], .little) != BANK_TAG) return error.NotABank;
     if (std.mem.readInt(i32, image[off_version..][0..4], .little) != BANK_VERSION) return error.BadVersion;
+
+    // A file already in the container answers this open with a reference to the
+    // copy it holds, before the metadata is copied and the indexes built. The
+    // header checks above still run, so a caller that hands over bytes which are
+    // not a bank keeps getting that error rather than silently getting the bank
+    // of a file it named.
+    const source = try fs_compat.dupeResolvedPathZ(allocator, filename);
+    if (registryAcquireBySource(source)) |existing| {
+        allocator.free(source);
+        return existing;
+    }
+    errdefer allocator.free(source);
+    try registryReserve();
+
     const meta_size = std.mem.readInt(i32, image[off_meta_size..][0..4], .little);
     if (meta_size < header_size or @as(usize, @intCast(meta_size)) > image.len) return error.BadMetaSize;
     const msz: usize = @intCast(meta_size);
+
+    // Validate each asset table fits inside the metadata, reading the caller's
+    // image through a view of the metadata the bank will hold. Checked before
+    // anything is copied, so a rejected bank owns nothing, and the ownership
+    // below then moves exactly once with no errdefer left to unwind against it.
+    const probe: Bank = .{
+        // The table checks below only read, and the bank holds a mutable copy of
+        // these same bytes, so the const image needs only a type cast here.
+        .meta = @constCast(image[0..msz]),
+        .filename = source,
+        .source_path = source,
+        .allocator = undefined,
+    };
+    inline for (.{ AssetKind.events, .environments, .presets, .sounds }) |k| {
+        const cnt = probe.countFor(k);
+        const base = probe.tableOff(k);
+        if (cnt != 0) {
+            const end = @as(u64, base) + @as(u64, cnt) * asset_entry_size;
+            if (base == 0 or end > msz) return error.BadAssetTable;
+        }
+    }
 
     // Copy the metadata with one trailing NUL sentinel: fixed-width on-disk
     // string fields (SoundBankName[4]) and event-step text are consumed as C
@@ -461,40 +562,29 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
     errdefer allocator.free(fname);
 
     const self = try allocator.create(Bank);
-    errdefer allocator.destroy(self);
-    self.* = .{ .meta = meta, .filename = fname, .allocator = allocator };
+    // The struct owns meta, fname and source from here on: the errdefers above
+    // are spent and the only step left cannot fail.
+    self.* = .{ .meta = meta, .filename = fname, .source_path = source, .allocator = allocator };
 
     // Copy SoundBankName[4] out terminated (meta_size >= header_size > off_name,
     // enforced above, so the read is in bounds).
     const nlen = @min(msz - off_name, 4);
     @memcpy(self.name_buf[0..nlen], image[off_name..][0..nlen]);
 
-    // Validate each asset table fits inside the metadata (errdefers above free
-    // meta/fname/self on failure — do not deinit here or they double-free).
-    inline for (.{ AssetKind.events, .environments, .presets, .sounds }) |k| {
-        const cnt = self.countFor(k);
-        const base = self.tableOff(k);
-        if (cnt != 0) {
-            const end = @as(u64, base) + @as(u64, cnt) * asset_entry_size;
-            if (base == 0 or end > msz) return error.BadAssetTable;
-        }
-    }
     // Build the events/sounds name indexes before the bank joins the registry:
     // until registryAdd publishes it, no other thread can reach the Bank, so
     // the build needs no lock and lookups never race it. A failed build leaves
     // that table on the linear-scan path.
     self.event_index = self.buildNameIndex(.events) catch .{};
     self.sound_index = self.buildNameIndex(.sounds) catch .{};
-    // The indexes are owned by self from here on, so a failure of the last
-    // fallible step must release them: the errdefers above only free meta,
-    // fname and the struct itself, which would strand every index key.
-    errdefer self.event_index.deinit(self.allocator);
-    errdefer self.sound_index.deinit(self.allocator);
-    // A bank that cannot be registered must fail the whole load: the registry is
-    // the only lookup path (MilesFindEvent / Container_GetSound), so returning a
-    // success here would hand out a handle whose assets can never be found.
-    try registryAdd(self);
-    return self;
+    const registered = registryAdd(self);
+    if (registered != self) {
+        // Another load of the same file reached the registry between the lookup
+        // above and this one, and already holds the bank. The copy just built is
+        // redundant, so it goes and the caller gets the live bank's reference.
+        self.teardown();
+    }
+    return registered;
 }
 
 test "asset lookup: index parity with scan semantics" {

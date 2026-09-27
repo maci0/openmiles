@@ -199,6 +199,11 @@ everything below is unreleased.
 - Repeated `AIL_stream_*Buffer` submits and a soundfont load that failed part
   way through left the stream in a state where a retry could not complete, so
   both are re-run safe now.
+- Opening the same soundbank file twice registered two banks: a second copy of
+  the metadata in the container, `LoadedBankCount` counting one file twice, and
+  the second copy answering a name lookup the first already owned. One bank per
+  file now: an open of a file already in the container returns the bank it holds
+  and takes a reference, and each open needs its own close.
 - Soundbank name resolution picked a hash-map winner rather than load order, and
   a bank that failed to load left its index entries allocated. Names resolve in
   load order and the indexes are freed on the failure path.

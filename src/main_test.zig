@@ -6148,6 +6148,44 @@ test "MilesGetEventSystemState reports the live loaded-bank count" {
     try testing.expectEqual(base, state.LoadedBankCount);
 }
 
+test "opening the same soundbank file twice loads one bank" {
+    // A game that opens a bank, does not see what it expected, and opens it
+    // again must end up where one open leaves it: one bank in the container, one
+    // copy of the metadata, and a close that matches each open.
+    var img: [128]u8 = undefined;
+    const n = buildEventBank(&img);
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = openmiles.io;
+    {
+        const file = try tmp.dir.createFile(io, "once.mbnk", .{});
+        try file.writeStreamingAll(io, img[0..n]);
+        file.close(io);
+    }
+    var path_buf: [256]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buf, ".zig-cache/tmp/{s}/once.mbnk", .{&tmp.sub_path});
+    const path_z: [:0]u8 = try openmiles.global_allocator.dupeZ(u8, path);
+    defer openmiles.global_allocator.free(path_z);
+
+    const before = openmiles.soundbank.loadedCount();
+    const first = api_v8b.AIL_open_soundbank(@ptrCast(path_z.ptr), null) orelse return error.OpenFailed;
+    const second = api_v8b.AIL_open_soundbank(@ptrCast(path_z.ptr), null) orelse return error.OpenFailed;
+    try testing.expectEqual(@intFromPtr(first), @intFromPtr(second));
+    try testing.expectEqual(before + 1, openmiles.soundbank.loadedCount());
+
+    // The event is resolvable through either handle, and the first close leaves
+    // it resolvable: the second open is still open.
+    const ev = api_miles_t.MilesFindEvent(first, "boom") orelse return error.NoEvent;
+    try testing.expectEqualStrings("9;4;<;", std.mem.span(@as([*:0]const u8, @ptrCast(ev))));
+    api_v8b.AIL_close_soundbank(first);
+    try testing.expectEqual(before + 1, openmiles.soundbank.loadedCount());
+    try testing.expect(api_miles_t.MilesFindEvent(second, "boom") != null);
+
+    api_v8b.AIL_close_soundbank(second);
+    try testing.expectEqual(before, openmiles.soundbank.loadedCount());
+}
+
 test "AIL_get_event_contents returns the event bytecode pointer" {
     var img: [128]u8 = undefined;
     const n = buildEventBank(&img);
