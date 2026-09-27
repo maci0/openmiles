@@ -9,8 +9,8 @@ const deg2rad = openmiles.deg2rad;
 pub fn AIL_enumerate_3D_providers(next: *?*anyopaque, handle: *?*Provider, name: *[*:0]const u8) callconv(.winapi) i32 {
     log("AIL_enumerate_3D_providers(next={*}, handle={*}, name={*})\n", .{ next, handle, name });
     const idx: usize = if (next.*) |v| @intFromPtr(v) else 0;
-    if (idx == 0 and openmiles.startup_provider != null) {
-        handle.* = openmiles.startup_provider;
+    if (idx == 0 and openmiles.startupProvider() != null) {
+        handle.* = openmiles.startupProvider();
         name.* = "OpenMiles Software 3D";
         next.* = @ptrFromInt(1);
         return 1;

@@ -446,8 +446,8 @@ pub fn AIL_DLS_sample_handle(dls: ?*MidiDriver) callconv(.winapi) ?*anyopaque {
 
 pub fn AIL_find_filter(name: [*:0]const u8, ret: ?*?*openmiles.Provider) callconv(.winapi) i32 {
     _ = name;
-    if (ret) |p| p.* = openmiles.startup_provider;
-    return if (openmiles.startup_provider != null) 1 else 0;
+    if (ret) |p| p.* = openmiles.startupProvider();
+    return if (openmiles.startupProvider() != null) 1 else 0;
 }
 
 // SDK returns S32 (integer percent in EAX), not F32.

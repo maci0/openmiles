@@ -790,7 +790,7 @@ test "fuzz: invoke every export with adversarial inputs" {
             if (api_quick.AIL_quick_load_and_play(rstr, ri, ri)) |qs| api_quick.AIL_quick_unload(qs);
             api_quick.AIL_quick_unload(null);
             // filter subsystem (open -> attribute -> attach -> enumerate -> close)
-            if (api_filter.AIL_open_filter(openmiles.startup_provider, hd)) |filt| {
+            if (api_filter.AIL_open_filter(openmiles.startupProvider(), hd)) |filt| {
                 var fval: f32 = rf;
                 api_filter.AIL_filter_attribute(filt, rstr, &fval);
                 api_filter.AIL_set_filter_attribute(filt, rstr, &fval);

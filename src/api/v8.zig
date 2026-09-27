@@ -795,8 +795,9 @@ pub fn AIL_set_sample_buffer_count(s_opt: ?*Sample, n_buffers: i32) callconv(.wi
     if (n_buffers < 2 or n_buffers > 8) return 0;
     s.n_buffers = n_buffers;
     // Keep an already-streaming transport in sync so its slots and the
-    // configured ring can never disagree.
-    if (s.stream_active) s.stream_src.slot_count = @intCast(n_buffers);
+    // configured ring can never disagree. Through the setter: the audio thread
+    // is walking the ring by this same count.
+    if (s.stream_active) s.stream_src.setSlotCount(@intCast(n_buffers));
     return 1;
 }
 pub fn AIL_set_sample_is_3D(s_opt: ?*Sample, is_3D: i32) callconv(.winapi) i32 {

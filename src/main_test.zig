@@ -1164,9 +1164,9 @@ test "loadApplicationProviders skips corrupt plugins and missing directories" {
     try cwd.writeFile(io, .{ .sub_path = dirname ++ "/readme.txt", .data = "not a plugin" });
     try cwd.writeFile(io, .{ .sub_path = dirname ++ "/broken.asi", .data = "\xDE\xAD\xBE\xEF" ** 4 });
 
-    const before = openmiles.getAllProviders().len;
+    const before = openmiles.getProviderCount();
     try testing.expectEqual(@as(i32, 0), openmiles.loadApplicationProviders(dirname));
-    try testing.expectEqual(before, openmiles.getAllProviders().len);
+    try testing.expectEqual(before, openmiles.getProviderCount());
 
     // A nonexistent directory is reported and returns 0 rather than crashing.
     try testing.expectEqual(@as(i32, 0), openmiles.loadApplicationProviders(dirname ++ "/missing"));

@@ -159,7 +159,7 @@ pub fn AIL_sample_loop_count(s_opt: ?*Sample) callconv(.winapi) i32 {
     // SDK returns S->loop_count, which decrements during playback (remaining
     // loops), while orig_loop_count (AIL_sample_loop_block) holds the original.
     // Our loops_remaining tracks the same value (reset to loop_count on start).
-    return s.loops_remaining;
+    return s.loops_remaining.load(.acquire);
 }
 pub fn AIL_register_EOS_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const s = s_opt orelse return null;
@@ -438,7 +438,7 @@ pub fn AIL_sample_buffer_ready(s_opt: ?*Sample) callconv(.winapi) i32 {
     // Streaming: index of a free buffer slot, or -1 when the ring is full.
     if (s.stream_active) return s.streamBufferReady();
     // Non-streaming whole-buffer samples: "ready" once finished or not yet started.
-    if (s.is_done or !s.is_initialized) return 0;
+    if (s.is_done.load(.acquire) or !s.is_initialized) return 0;
     if (openmiles.ma.ma_sound_at_end(&s.sound) != 0) return 0;
     return -1;
 }

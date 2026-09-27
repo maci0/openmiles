@@ -152,7 +152,7 @@ pub fn AIL_stream_status(s_opt: ?*Sample) callconv(.winapi) i32 {
     const ma = openmiles.ma;
     const done: i32 = @intFromEnum(openmiles.SampleStatus.done);
     const stopped: i32 = @intFromEnum(openmiles.SampleStatus.stopped);
-    if (s.is_done) return done;
+    if (s.is_done.load(.acquire)) return done;
     if (s.is_paused) return stopped;
     if (s.is_initialized) {
         if (ma.ma_sound_is_playing(&s.sound) != 0) return @intFromEnum(openmiles.SampleStatus.playing);
@@ -189,7 +189,7 @@ pub fn AIL_stream_loop_count(s_opt: ?*Sample) callconv(.winapi) i32 {
     // the REMAINING loop count (S->loop_count), not the original. Our streams are
     // preloaded, so mirror AIL_sample_loop_count exactly (loops_remaining).
     const s = s_opt orelse return -1;
-    return s.loops_remaining;
+    return s.loops_remaining.load(.acquire);
 }
 pub fn AIL_stream_ms_position(s_opt: ?*Sample, total_ms: ?*i32, current_ms: ?*i32) callconv(.winapi) void {
     const s = s_opt orelse return;
@@ -276,7 +276,7 @@ pub fn AIL_service_stream(s_opt: ?*Sample, onoff: i32) callconv(.winapi) i32 {
     // serviced (start_IOs_if_we_can). Our streams are fully preloaded, so there
     // is never any IO to service -> 0 bytes on a live stream, -1 once finished.
     const s = s_opt orelse return -1;
-    if (s.is_done) return -1;
+    if (s.is_done.load(.acquire)) return -1;
     return 0;
 }
 pub fn AIL_register_EOF_callback(s_opt: ?*Sample, callback: ?*anyopaque) callconv(.winapi) ?*anyopaque {

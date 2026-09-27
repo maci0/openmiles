@@ -34,6 +34,8 @@ const Slot = struct {
 pub const StreamSource = struct {
     /// Maximum ring depth (MILES sample buffer count limit, mss.h: 2..8).
     pub const max_slots: usize = 8;
+    /// Minimum ring depth, the low end of the same mss.h range.
+    pub const min_slots: usize = 2;
 
     base: ma.ma_data_source_base = undefined,
     format: ma.ma_format = ma.ma_format_s16,
@@ -98,9 +100,9 @@ pub const StreamSource = struct {
     /// drained slot (`data == null`, `eof == false`) is free and takes the new
     /// buffer as normal.
     pub fn loadBuffer(self: *StreamSource, index: usize, data: ?*const anyopaque, len: usize) void {
-        if (index >= self.slot_count) return;
         self.mutex.lockUncancelable(io);
         defer self.mutex.unlock(io);
+        if (index >= self.slot_count) return;
         const held = self.slots[index];
         if (held.data != null or held.eof) {
             root.log("StreamSource.loadBuffer: slot {d} still holds an unsubmitted buffer; the repeat is ignored\n", .{index});
@@ -113,6 +115,19 @@ pub const StreamSource = struct {
         }
         self.starved = false;
         self.ended = false;
+    }
+
+    /// Resize the active ring. Under the lock because `onRead` (audio thread)
+    /// walks the ring by `slot_count` while the game thread calls
+    /// AIL_set_sample_buffer_count; changing it unlocked lets the mixer index
+    /// a slot outside the new depth and leave the app refilling a slot the
+    /// mixer never reads.
+    pub fn setSlotCount(self: *StreamSource, count: usize) void {
+        const clamped = @min(@max(count, min_slots), max_slots);
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
+        self.slot_count = clamped;
+        if (self.current >= clamped) self.current = 0;
     }
 
     /// Index of a slot free to be filled, or -1 if the ring is full.
@@ -256,6 +271,11 @@ pub const StreamSource = struct {
 
     fn onGetCursor(pds: ?*anyopaque, cursor: ?*u64) callconv(.c) ma.ma_result {
         const self: *StreamSource = @ptrCast(@alignCast(pds.?));
+        // Under the lock like every other accessor: miniaudio calls this on the
+        // caller's thread (so a game-thread position query races `onRead`), and
+        // onRead advances cursor_frames with a read-modify-write.
+        self.mutex.lockUncancelable(io);
+        defer self.mutex.unlock(io);
         if (cursor) |p| p.* = self.cursor_frames;
         return ma.MA_SUCCESS;
     }

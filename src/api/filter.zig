@@ -54,7 +54,7 @@ pub fn AIL_set_filter_attribute(filter_ptr: *anyopaque, name: [*:0]const u8, val
 pub fn AIL_enumerate_filters(next: *?*anyopaque, dest: *?*Provider, name: *[*:0]const u8) callconv(.winapi) i32 {
     const idx: usize = if (next.*) |v| @intFromPtr(v) else 0;
     if (idx == 0) {
-        dest.* = openmiles.startup_provider;
+        dest.* = openmiles.startupProvider();
         name.* = builtin_filter_name;
         next.* = @ptrFromInt(@as(usize, 1));
         return 1;

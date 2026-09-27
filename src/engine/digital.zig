@@ -692,7 +692,7 @@ pub const Sample = struct {
     sound: ma.ma_sound,
     decoder: ?*ma.ma_decoder = null,
     is_initialized: bool = false,
-    is_done: bool = false, // true when all loops exhausted (avoids false .done from ma_sound_at_end)
+    is_done: std.atomic.Value(bool) = .init(false), // true when all loops exhausted (avoids false .done from ma_sound_at_end)
     is_paused: bool = false, // MSS: paused samples still report SMP_PLAYING (4)
     // The SDK inits a sample to SMP_DONE and only reports SMP_STOPPED after an
     // explicit AIL_stop_sample. This flag distinguishes "never played / done"
@@ -724,7 +724,7 @@ pub const Sample = struct {
     pitch: f32 = 1.0,
     target_rate: ?f32 = null,
     loop_count: i32 = 1,
-    loops_remaining: i32 = 1,
+    loops_remaining: std.atomic.Value(i32) = .init(1),
     loop_start_frame: u64 = 0,
     loop_end_frame: u64 = 0, // 0 = play to end of file
     owned_buffer: ?[]u8 = null,
@@ -850,20 +850,24 @@ pub const Sample = struct {
         _ = pSound;
         const self: *Sample = @ptrCast(@alignCast(pUserData.?));
         // All looping is handled manually here (miniaudio looping is disabled).
+        // Atomic: the audio thread runs this bridge while a game thread may
+        // restart the sample, and a plain read-modify-write would drop one of
+        // the two updates.
         // loops_remaining <= 0: infinite (0 = documented infinite, negative = treated same).
-        if (self.loops_remaining <= 0) {
+        const remaining = self.loops_remaining.load(.acquire);
+        if (remaining <= 0) {
             // Infinite loop - restart from loop start
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
             _ = ma.ma_sound_start(&self.sound);
             return;
-        } else if (self.loops_remaining > 1) {
-            self.loops_remaining -= 1;
+        } else if (remaining > 1) {
+            _ = self.loops_remaining.fetchSub(1, .acq_rel);
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
             _ = ma.ma_sound_start(&self.sound);
             return;
         }
         // loops_remaining == 1: last iteration done
-        self.is_done = true;
+        self.is_done.store(true, .release);
         self.fireEobThenEosCallbacks();
     }
 
@@ -932,7 +936,7 @@ pub const Sample = struct {
     fn finishDecoderLoad(self: *Sample, decoder: *ma.ma_decoder) void {
         self.decoder = decoder;
         self.is_initialized = true;
-        self.is_done = false;
+        self.is_done.store(false, .release);
         self.is_paused = false;
         _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
 
@@ -1189,7 +1193,7 @@ pub const Sample = struct {
             if (res != ma.MA_SUCCESS) return error.SampleLoadFailed;
             self.stream_active = true;
             self.is_initialized = true;
-            self.is_done = false;
+            self.is_done.store(false, .release);
             ma.ma_sound_set_volume(&self.sound, self.volume);
             ma.ma_sound_set_pan(&self.sound, self.pan);
             ma.ma_sound_set_pitch(&self.sound, self.pitch);
@@ -1219,10 +1223,10 @@ pub const Sample = struct {
         self.pitch = 1.0;
         self.target_rate = null;
         self.loop_count = 1;
-        self.loops_remaining = 1;
+        self.loops_remaining.store(1, .release);
         self.loop_start_frame = 0;
         self.loop_end_frame = 0;
-        self.is_done = false;
+        self.is_done.store(false, .release);
         self.is_paused = false;
         // Re-init returns the sample to the fresh SMP_DONE / never-played state.
         self.was_stopped = false;
@@ -1311,8 +1315,8 @@ pub const Sample = struct {
 
     pub fn start(self: *Sample) void {
         log("Sample.start: s={*}\n", .{self});
-        self.loops_remaining = self.loop_count;
-        self.is_done = false;
+        self.loops_remaining.store(self.loop_count, .release);
+        self.is_done.store(false, .release);
         self.is_paused = false;
         self.was_stopped = false;
         self.has_played = true;
@@ -1345,7 +1349,7 @@ pub const Sample = struct {
             // AIL_start_sample is what rewinds to the beginning.)
             _ = ma.ma_sound_stop(&self.sound);
         }
-        self.is_done = false;
+        self.is_done.store(false, .release);
         self.is_paused = false;
         self.was_stopped = true;
     }
@@ -1359,7 +1363,7 @@ pub const Sample = struct {
         if (self.is_initialized) {
             _ = ma.ma_sound_stop(&self.sound);
         }
-        self.is_done = true;
+        self.is_done.store(true, .release);
         if (already_done) return;
         self.fireEobThenEosCallbacks();
     }
@@ -1383,7 +1387,7 @@ pub const Sample = struct {
     }
 
     pub fn status(self: *Sample) SampleStatus {
-        if (self.is_done) return .done;
+        if (self.is_done.load(.acquire)) return .done;
         if (self.is_paused) return .playing; // MSS: paused samples report SMP_PLAYING
         if (self.is_initialized) {
             if (ma.ma_sound_is_playing(&self.sound) != 0) return .playing;
@@ -1644,7 +1648,7 @@ pub const Sample = struct {
 
     pub fn setLoopCount(self: *Sample, count: i32) void {
         self.loop_count = count;
-        self.loops_remaining = count;
+        self.loops_remaining.store(count, .release);
         log("Sample.setLoopCount: s={*}, count={d}\n", .{ self, count });
         // MSS uses 0 for infinite looping.
         if (self.is_initialized) {
@@ -1693,7 +1697,7 @@ pub const Sample3D = struct {
     decoder: ?*ma.ma_decoder = null,
     owned_buffer: ?[]u8 = null,
     is_initialized: bool = false,
-    is_done: bool = false,
+    is_done: std.atomic.Value(bool) = .init(false),
     is_paused: bool = false,
     was_stopped: bool = false, // SMP_STOPPED only after explicit stop (else SMP_DONE)
     driver_is_dead: bool = false,
@@ -1702,7 +1706,7 @@ pub const Sample3D = struct {
     pitch: f32 = 1.0,
     target_rate: ?f32 = null,
     loop_count: i32 = 1,
-    loops_remaining: i32 = 1,
+    loops_remaining: std.atomic.Value(i32) = .init(1),
     loop_start_frame: u64 = 0,
     loop_end_frame: u64 = 0,
     eos_callback: usize = 0,
@@ -1737,17 +1741,18 @@ pub const Sample3D = struct {
         _ = pSound;
         const self: *Sample3D = @ptrCast(@alignCast(pUserData.?));
         // loops_remaining <= 0: infinite (0 = documented, negative = treated same).
-        if (self.loops_remaining <= 0) {
+        const remaining = self.loops_remaining.load(.acquire);
+        if (remaining <= 0) {
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
             _ = ma.ma_sound_start(&self.sound);
             return;
-        } else if (self.loops_remaining > 1) {
-            self.loops_remaining -= 1;
+        } else if (remaining > 1) {
+            _ = self.loops_remaining.fetchSub(1, .acq_rel);
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
             _ = ma.ma_sound_start(&self.sound);
             return;
         }
-        self.is_done = true;
+        self.is_done.store(true, .release);
         if (self.eos_callback != 0) {
             const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eos_callback);
             cb(@ptrCast(self));
@@ -1815,7 +1820,7 @@ pub const Sample3D = struct {
     fn finishDecoderLoad(self: *Sample3D, decoder: *ma.ma_decoder) void {
         self.decoder = decoder;
         self.is_initialized = true;
-        self.is_done = false;
+        self.is_done.store(false, .release);
         self.is_paused = false;
         _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
 
@@ -1934,8 +1939,8 @@ pub const Sample3D = struct {
     }
 
     pub fn start(self: *Sample3D) void {
-        self.loops_remaining = self.loop_count;
-        self.is_done = false;
+        self.loops_remaining.store(self.loop_count, .release);
+        self.is_done.store(false, .release);
         self.is_paused = false;
         self.was_stopped = false;
         if (self.is_initialized) {
@@ -1956,7 +1961,7 @@ pub const Sample3D = struct {
         if (self.is_initialized) {
             _ = ma.ma_sound_stop(&self.sound);
         }
-        self.is_done = false;
+        self.is_done.store(false, .release);
         self.is_paused = false;
         self.was_stopped = true;
     }
@@ -1969,7 +1974,7 @@ pub const Sample3D = struct {
         if (self.is_initialized) {
             _ = ma.ma_sound_stop(&self.sound);
         }
-        self.is_done = true;
+        self.is_done.store(true, .release);
         if (already_done) return;
         if (self.eos_callback != 0) {
             const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.eos_callback);
@@ -1992,7 +1997,7 @@ pub const Sample3D = struct {
     }
 
     pub fn status(self: *Sample3D) SampleStatus {
-        if (self.is_done) return .done;
+        if (self.is_done.load(.acquire)) return .done;
         // Paused 3D samples report SMP_STOPPED (8), unlike 2D where paused reports SMP_PLAYING (4).
         if (self.is_paused) return .stopped;
         if (self.is_initialized) {
@@ -2045,7 +2050,7 @@ pub const Sample3D = struct {
 
     pub fn setLoopCount(self: *Sample3D, count: i32) void {
         self.loop_count = count;
-        self.loops_remaining = count;
+        self.loops_remaining.store(count, .release);
         if (self.is_initialized) {
             applyLoopCount(&self.sound, count);
         }
@@ -2216,15 +2221,15 @@ test "EOB/EOS callbacks fire with single HSAMPLE arg" {
     const s = try std.testing.allocator.create(Sample);
     defer std.testing.allocator.destroy(s);
     s.* = undefined;
-    s.loops_remaining = 1;
-    s.is_done = false;
+    s.loops_remaining.store(1, .release);
+    s.is_done.store(false, .release);
     s.eob_callback = @intFromPtr(&CbProbe.onEob);
     s.eos_callback = @intFromPtr(&CbProbe.onEos);
     s.sob_callback = 0;
     CbProbe.reset();
     // Final-loop completion path: must fire EOB then EOS, each with HSAMPLE only.
     Sample.eosCallbackBridge(s, null);
-    try std.testing.expect(s.is_done);
+    try std.testing.expect(s.is_done.load(.acquire));
     try std.testing.expectEqual(@as(u32, 1), CbProbe.eob_calls);
     try std.testing.expectEqual(@as(u32, 1), CbProbe.eos_calls);
     try std.testing.expectEqual(@as(?*anyopaque, @ptrCast(s)), CbProbe.eob_hs);

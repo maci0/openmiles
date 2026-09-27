@@ -36,7 +36,7 @@ pub fn RIB_unregister_interface(provider_opt: ?*Provider, name: [*:0]const u8, c
 pub fn RIB_provider_library_handle() callconv(.winapi) ?*anyopaque {
     log("RIB_provider_library_handle()\n", .{});
     if (openmiles.getCurrentLoadingProvider()) |p| return @ptrCast(p);
-    return @ptrCast(openmiles.startup_provider);
+    return @ptrCast(openmiles.startupProvider());
 }
 pub fn RIB_load_application_providers(dir: [*:0]const u8) callconv(.winapi) i32 {
     const dir_str = std.mem.span(dir);
@@ -51,16 +51,18 @@ pub fn RIB_enumerate_providers(name: [*:0]const u8, next: ?*?*anyopaque, handle:
     // next.* encodes cursor position: null means start, otherwise (last_returned_index + 1).
     var cursor: usize = if (next) |n| if (n.*) |v| @intFromPtr(v) else 0 else 0;
 
-    const global_providers = openmiles.getAllProviders();
-    const total = (if (openmiles.startup_provider != null) @as(usize, 1) else 0) + global_providers.len;
+    // Indexed one at a time through the provider lock: handing the caller the
+    // backing slice would let a concurrent scan's append realloc free the
+    // buffer this loop is walking.
+    const startup = openmiles.startupProvider();
+    const global_base: usize = if (startup != null) 1 else 0;
+    const total = global_base + openmiles.getProviderCount();
 
     while (cursor < total) : (cursor += 1) {
-        const p: *Provider = if (cursor == 0 and openmiles.startup_provider != null)
-            openmiles.startup_provider.?
-        else blk: {
-            const gi = if (openmiles.startup_provider != null) cursor - 1 else cursor;
-            break :blk global_providers[gi];
-        };
+        const p: *Provider = if (cursor == 0 and startup != null)
+            startup.?
+        else
+            openmiles.getProviderAt(cursor - global_base) orelse break;
 
         const has_iface = for (p.interfaces.items) |iface| {
             if (std.mem.eql(u8, iface.name, iface_name)) break true;
@@ -427,7 +429,7 @@ pub fn AIL_request_EOB_ASI_reset(s_opt: ?*Sample, buff_num: u32, new_stream_posi
     _ = new_stream_position;
     if (s.is_initialized) {
         _ = openmiles.ma.ma_sound_seek_to_pcm_frame(&s.sound, s.loop_start_frame);
-        s.is_done = false;
+        s.is_done.store(false, .release);
     }
 }
 /// AIL_compress_ASI(info, ext, outdata, outsize, callback)

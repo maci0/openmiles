@@ -444,12 +444,34 @@ pub fn ailFileSize(filename: [*:0]const u8) u32 {
 
 // --- Provider state ---
 
-pub var startup_provider: ?*Provider = null;
+// Atomic for the same reason as last_digital_driver below: AIL_startup and
+// AIL_shutdown run on whichever thread calls them, while provider enumeration
+// on another thread resolves and dereferences this pointer. A plain optional
+// pointer is two words, so a reader could see a non-null tag with a null
+// payload. Callers go through startupProvider().
+var startup_provider: std.atomic.Value(?*Provider) = .init(null);
 
+pub fn startupProvider() ?*Provider {
+    return startup_provider.load(.acquire);
+}
+
+// Guarded by provider_mutex. Grown by the plugin scan, read by provider
+// enumeration, emptied by shutdown; an append that reallocs frees the buffer a
+// concurrent reader is walking, so the slice is never handed out raw.
 var global_providers: std.ArrayList(*Provider) = .empty;
+var provider_mutex: std.Io.Mutex = .init;
 
-pub fn getAllProviders() []*Provider {
-    return global_providers.items;
+pub fn getProviderCount() usize {
+    provider_mutex.lockUncancelable(io);
+    defer provider_mutex.unlock(io);
+    return global_providers.items.len;
+}
+
+pub fn getProviderAt(index: usize) ?*Provider {
+    provider_mutex.lockUncancelable(io);
+    defer provider_mutex.unlock(io);
+    if (index >= global_providers.items.len) return null;
+    return global_providers.items[index];
 }
 
 pub fn isPluginExtension(name: []const u8) bool {
@@ -502,19 +524,36 @@ pub fn loadApplicationProviders(dir: []const u8) i32 {
         // copy of the module loaded for as long as the process runs.
         var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
         const resolved = fs_compat.maybeResolveCaseInsensitivePath(full_path, &resolved_buf) orelse full_path;
-        if (isPluginAlreadyLoaded(global_providers.items, resolved)) continue;
+        if (isProviderPathLoaded(resolved)) continue;
         const p = Provider.load(alloc, full_path) catch |err| {
             log("loadApplicationProviders: failed to load plugin '{s}': {any}\n", .{ name, err });
             continue;
         };
-        global_providers.append(alloc, p) catch |err| {
-            log("loadApplicationProviders: cannot track loaded plugin '{s}' ({any}); it is unloaded\n", .{ name, err });
-            p.deinit();
-            continue;
-        };
+        if (addProvider(p)) continue;
         count += 1;
     }
     return count;
+}
+
+/// Track a freshly loaded module, or report failure after unloading it. The
+/// list is under provider_mutex because a concurrent RIB_enumerate_providers is
+/// indexing it while this scan appends.
+fn addProvider(p: *Provider) bool {
+    provider_mutex.lockUncancelable(io);
+    defer provider_mutex.unlock(io);
+    global_providers.append(global_allocator, p) catch |err| {
+        log("loadApplicationProviders: cannot track loaded plugin '{s}' ({any}); it is unloaded\n", .{ p.source_path orelse "?", err });
+        p.deinit();
+        return true;
+    };
+    return false;
+}
+
+/// Whether `path` names a module already held in the application list.
+fn isProviderPathLoaded(path: []const u8) bool {
+    provider_mutex.lockUncancelable(io);
+    defer provider_mutex.unlock(io);
+    return isPluginAlreadyLoaded(global_providers.items, path);
 }
 
 /// Whether `path` is a module one of `providers` was already loaded from, so a
@@ -536,7 +575,7 @@ pub fn isPluginAlreadyLoaded(providers: []const *Provider, path: []const u8) boo
 /// with its own codec state.
 pub fn isPluginLoadedAnywhere(owned: []const *Provider, path: []const u8) bool {
     if (isPluginAlreadyLoaded(owned, path)) return true;
-    return isPluginAlreadyLoaded(global_providers.items, path);
+    return isProviderPathLoaded(path);
 }
 
 // --- Timer state ---
@@ -702,24 +741,44 @@ pub fn getActiveSequenceCount() u32 {
 
 // --- Redist directory ---
 
+// AIL_set_redist_directory is documented as callable more than once per
+// session, and a game may drive it from a worker thread while its main thread
+// opens a driver and reads the same path. The compare-then-copy below is one
+// read-modify-write of a 256-byte buffer, so it is serialized; the scan itself
+// runs outside the lock on a private copy, since loadAllAsi does directory I/O
+// and the caller holds the path for the whole scan.
 var redist_directory: [256:0]u8 = [_:0]u8{0} ** 256;
+var redist_mutex: std.Io.Mutex = .init;
 
 pub fn setRedistDirectory(path: []const u8) void {
     log("Setting redist directory to: {s}\n", .{path});
     const len = @min(path.len, redist_directory.len - 1);
-    const unchanged = std.mem.eql(u8, getRedistDirectory(), path[0..len]);
+    redist_mutex.lockUncancelable(io);
+    const unchanged = std.mem.eql(u8, getRedistDirectoryLocked(), path[0..len]);
     @memcpy(redist_directory[0..len], path[0..len]);
     redist_directory[len] = 0;
+    redist_mutex.unlock(io);
     // The same directory set again is the same set of plugins: rescanning it
     // would load a second copy of every .asi into a driver that already has
     // them, so the reload only happens when the directory actually changed.
     if (unchanged) return;
-    if (lastDigitalDriver()) |driver| {
-        driver.loadAllAsi(redist_directory[0..len]);
-    }
+    const driver = lastDigitalDriver() orelse return;
+    const scan_path = global_allocator.dupe(u8, path[0..len]) catch {
+        log("setRedistDirectory: cannot copy the path; '{s}' was not rescanned\n", .{path[0..len]});
+        return;
+    };
+    defer global_allocator.free(scan_path);
+    driver.loadAllAsi(scan_path);
 }
 
 pub fn getRedistDirectory() []const u8 {
+    redist_mutex.lockUncancelable(io);
+    defer redist_mutex.unlock(io);
+    return getRedistDirectoryLocked();
+}
+
+/// getRedistDirectory with redist_mutex already held.
+fn getRedistDirectoryLocked() []const u8 {
     return std.mem.sliceTo(&redist_directory, 0);
 }
 
@@ -1040,7 +1099,7 @@ pub fn getUsCount64() u64 {
 // lateral dependencies between api/ modules.
 
 pub fn startup() void {
-    if (startup_provider != null) return;
+    if (startup_provider.load(.acquire) != null) return;
     log("startup: ensureStartupTime\n", .{});
     ensureStartupTime();
     log("startup: Provider.init\n", .{});
@@ -1065,7 +1124,7 @@ pub fn startup() void {
     p.registerInterface("ASI stream", @intCast(src.len), &src) catch {
         log("startup: registerInterface ASI stream FAILED\n", .{});
     };
-    startup_provider = p;
+    startup_provider.store(p, .release);
     // Scan for external plugins (.asi, .m3d, .flt) — games may ship
     // proprietary codecs that we don't replace yet. These supplement (not
     // replace) the built-in provider.
@@ -1082,13 +1141,16 @@ pub fn shutdown() void {
     releaseAllTimers();
     if (lastMidiDriver()) |m| closeMidiDriver(m);
     if (lastDigitalDriver()) |d| closeDigitalDriver(d);
+    // The startup provider is unpublished before it is freed, and the
+    // application list is emptied under the lock, so a thread enumerating
+    // providers on another sees a null pointer instead of one into freed
+    // memory.
+    if (startup_provider.swap(null, .acq_rel)) |p| p.deinit();
+    provider_mutex.lockUncancelable(io);
+    defer provider_mutex.unlock(io);
     for (global_providers.items) |p| p.deinit();
     global_providers.deinit(global_allocator);
     global_providers = .empty;
-    if (startup_provider) |p| {
-        p.deinit();
-        startup_provider = null;
-    }
     logger.deinit();
 }
 
@@ -1111,7 +1173,14 @@ pub fn openDigitalDriver(frequency: u32, bits: i32, channels: i32) ?*DigitalDriv
     // another miniaudio engine and left it running past AIL_shutdown.
     last_digital_driver.store(driver, .release);
     const rd = getRedistDirectory();
-    if (rd.len > 0) driver.loadAllAsi(rd);
+    if (rd.len > 0) {
+        // Scanned from a private copy: the scan holds the path for its whole
+        // duration, and a concurrent AIL_set_redist_directory would otherwise
+        // rewrite the bytes under it.
+        const scan_path = global_allocator.dupe(u8, rd) catch rd;
+        defer if (scan_path.ptr != rd.ptr) global_allocator.free(scan_path);
+        driver.loadAllAsi(scan_path);
+    }
     return driver;
 }
 
