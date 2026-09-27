@@ -52,6 +52,20 @@ test "fuzz: invoke every export with adversarial inputs" {
     // Sweep several PRNG seeds so the adversarial input space is explored more
     // broadly than a single fixed sequence would. Driver/timer handles above
     // are set up once and reused across all rounds.
+    //
+    // The loop runs on a virtual clock. The one export pair here that reaches
+    // the operating system is AIL_start_all_timers/AIL_start_timer: on the real
+    // clock each call spawns a thread, so 16 seeds x 200 rounds ask for 3200 of
+    // them. A thread's stack is committed from the process's commit charge, and
+    // Windows stops handing them out long before the loop ends: the spawn
+    // returns STATUS_COMMITMENT_LIMIT, the driver then cannot allocate either,
+    // and the test binary dies with no failing assertion to point at. Under a
+    // virtual clock no thread is spawned, and the whole start/stop state
+    // machine still runs on every iteration (see start()/stop() in
+    // engine/timer.zig). main_test keeps the real-thread timer tests, including
+    // the concurrent start/stop race, so the spawn path stays covered.
+    openmiles.useVirtualClock(0);
+    defer openmiles.useRealClock();
     const seeds = [_]u64{ 0xF0F0F0F0, 0x12345678, 0xDEADBEEF, 0xCAFEBABE, 0x00000000, 0xFFFFFFFFFFFFFFFF, 0x9E3779B9, 0x1, 0x5555AAAA, 0xC0FFEE, 0x0123456789ABCDEF, 0xA5A5A5A5A5A5A5A5, 0x7FFFFFFFFFFFFFFF, 0x8000000000000000, 0xB16B00B5, 0xD1CE5EED };
     for (seeds) |sd| {
         prng = std.Random.DefaultPrng.init(sd);
