@@ -61,7 +61,6 @@ pub fn RIB_enumerate_providers(name: [*:0]const u8, next: ?*?*anyopaque, handle:
             break :blk global_providers[gi];
         };
 
-        // Check whether this provider has the requested interface.
         const has_iface = for (p.interfaces.items) |iface| {
             if (std.mem.eql(u8, iface.name, iface_name)) break true;
         } else false;

@@ -80,9 +80,6 @@ pub fn AIL_set_named_sample_file(s_opt: ?*Sample, file_type: [*:0]const u8, file
         std.ascii.eqlIgnoreCase(ft, ".raw") or
         std.ascii.eqlIgnoreCase(ft, "pcm") or
         std.ascii.eqlIgnoreCase(ft, ".pcm");
-    if (std.ascii.eqlIgnoreCase(ft, "mp3") or std.ascii.eqlIgnoreCase(ft, ".mp3")) {
-        log("AIL_set_named_sample_file is routing MP3 directly to decoder\n", .{});
-    }
     if (is_raw and size > 0) {
         s.setAddress(@constCast(file_image), @intCast(size)) catch |err| {
             log("AIL_set_named_sample_file: raw PCM setAddress failed ({any})\n", .{err});
@@ -91,12 +88,9 @@ pub fn AIL_set_named_sample_file(s_opt: ?*Sample, file_type: [*:0]const u8, file
         };
         return 1;
     }
-    // Dump header bytes when size is known to be large enough
-    const ptr: [*]const u8 = @ptrCast(file_image);
     if (size >= 16) {
-        log("AIL_set_named_sample_file: Header bytes: {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2}\n", .{ ptr[0], ptr[1], ptr[2], ptr[3], ptr[4], ptr[5], ptr[6], ptr[7], ptr[8], ptr[9], ptr[10], ptr[11], ptr[12], ptr[13], ptr[14], ptr[15] });
-    } else if (size > 0) {
-        log("AIL_set_named_sample_file: Buffer too small for header dump (size={d})\n", .{size});
+        const ptr: [*]const u8 = @ptrCast(file_image);
+        log("AIL_set_named_sample_file: Header bytes: {X}\n", .{ptr[0..16]});
     }
     s.load(@constCast(file_image), size) catch |err| {
         log("AIL_set_named_sample_file: Failed to load sample file ({any})\n", .{err});

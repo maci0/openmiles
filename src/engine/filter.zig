@@ -159,7 +159,6 @@ pub const Filter = struct {
                 0,
             );
         }
-        // Remove from tracking list
         for (self.attached_samples.items, 0..) |s, i| {
             if (s == sample) {
                 _ = self.attached_samples.swapRemove(i);

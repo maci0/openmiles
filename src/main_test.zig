@@ -19,6 +19,12 @@ fn loadedSample(allocator: std.mem.Allocator, pcm_len: usize, channels: u16, rat
     return s;
 }
 
+// 100 ms of silence as a mono 8-bit 44100 Hz WAV; the caller owns the buffer.
+fn zeroWav(allocator: std.mem.Allocator) ![]u8 {
+    const pcm = [_]u8{0} ** 4410;
+    return openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+}
+
 test "DigitalDriver init and deinit" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
@@ -1298,8 +1304,7 @@ test "Sample loadFromMemory initializes sample" {
 
     try testing.expect(!sample.is_initialized);
 
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(allocator);
     defer allocator.free(wav);
 
     try sample.loadFromMemory(wav, true);
@@ -1315,8 +1320,7 @@ test "Sample loadFromBoundedPointer mounts via bounded callbacks" {
     const sample = try openmiles.Sample.init(driver);
     defer sample.deinit();
 
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(allocator);
     defer allocator.free(wav);
 
     // The size-less pointer path mounts through bounded read/seek callbacks
@@ -1363,8 +1367,7 @@ test "AIL_stream_loop_count: -1 on null, remaining count otherwise (SDK preload 
     defer driver.deinit();
     const s = try openmiles.Sample.init(driver);
     defer s.deinit();
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(testing.allocator);
     defer testing.allocator.free(wav);
     try s.loadFromMemory(wav, false);
 
@@ -1413,8 +1416,7 @@ test "AIL_end_3D_sample fires the 3D EOS callback once (live->DONE only)" {
     defer driver.deinit();
     const s = try openmiles.Sample3D.init(driver);
     defer s.deinit();
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(testing.allocator);
     defer testing.allocator.free(wav);
     try s.loadFromMemory(wav, true);
     const sp: *anyopaque = @ptrCast(s);
@@ -1442,8 +1444,7 @@ test "AIL_end_sample fires the EOS callback once (only on the live->DONE transit
     defer driver.deinit();
     const s = try openmiles.Sample.init(driver);
     defer s.deinit();
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(testing.allocator);
     defer testing.allocator.free(wav);
     try s.loadFromMemory(wav, true);
 
@@ -1474,8 +1475,7 @@ test "AIL_register_SOB_callback: the callback actually fires on AIL_start_sample
     defer driver.deinit();
     const s = try openmiles.Sample.init(driver);
     defer s.deinit();
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(allocator);
     defer allocator.free(wav);
     try s.loadFromMemory(wav, true);
 
@@ -1494,8 +1494,7 @@ test "Sample loadFromMemory then start and stop lifecycle" {
     const sample = try openmiles.Sample.init(driver);
     defer sample.deinit();
 
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(allocator);
     defer allocator.free(wav);
 
     try sample.loadFromMemory(wav, true);
@@ -1518,8 +1517,7 @@ test "paused 2D sample reports SMP_PLAYING, paused 3D reports SMP_STOPPED" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
     defer driver.deinit();
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(allocator);
     defer allocator.free(wav);
 
     const s2 = try openmiles.Sample.init(driver);
@@ -1549,8 +1547,7 @@ test "AIL_quick_status returns QSTAT_* values, not the SMP_* bitmask" {
     defer driver.deinit();
     const sample = try openmiles.Sample.init(driver);
     defer sample.deinit();
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(allocator);
     defer allocator.free(wav);
     try sample.loadFromMemory(wav, true);
 
@@ -3195,8 +3192,7 @@ test "Sample pause and resume lifecycle" {
     const sample = try openmiles.Sample.init(driver);
     defer sample.deinit();
 
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(allocator);
     defer allocator.free(wav);
 
     try sample.loadFromMemory(wav, true);
@@ -3586,8 +3582,7 @@ test "Sample3D loadFromMemory and start stop lifecycle" {
     const s = try openmiles.Sample3D.init(driver);
     defer s.deinit();
 
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(allocator);
     defer allocator.free(wav);
 
     try s.loadFromMemory(wav, true);
@@ -3613,8 +3608,7 @@ test "Sample3D pause and resume lifecycle" {
     const s = try openmiles.Sample3D.init(driver);
     defer s.deinit();
 
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(allocator);
     defer allocator.free(wav);
 
     try s.loadFromMemory(wav, true);
@@ -3649,8 +3643,7 @@ test "Sample setLoopBlock stores frame boundaries" {
     const sample = try openmiles.Sample.init(driver);
     defer sample.deinit();
 
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(allocator);
     defer allocator.free(wav);
 
     try sample.loadFromMemory(wav, true);
@@ -3673,8 +3666,7 @@ test "Sample setPosition on initialized sample" {
     const sample = try openmiles.Sample.init(driver);
     defer sample.deinit();
 
-    const pcm = [_]u8{0} ** 4410;
-    const wav = try openmiles.buildWavFromPcm(allocator, &pcm, 1, 44100, 8);
+    const wav = try zeroWav(allocator);
     defer allocator.free(wav);
 
     try sample.loadFromMemory(wav, true);

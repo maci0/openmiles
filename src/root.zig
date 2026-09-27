@@ -873,28 +873,25 @@ pub fn ensureStartupTime() void {
     }
 }
 
-pub fn getMsCount() u32 {
+fn elapsedNs() u64 {
     ensureStartupTime();
-    const elapsed_ns: u64 = @intCast(@max(0, nowNs() - startup_ns));
-    return @truncate(elapsed_ns / std.time.ns_per_ms);
+    return @intCast(@max(0, nowNs() - startup_ns));
+}
+
+pub fn getMsCount() u32 {
+    return @truncate(elapsedNs() / std.time.ns_per_ms);
 }
 
 pub fn getUsCount() u32 {
-    ensureStartupTime();
-    const elapsed_ns: u64 = @intCast(@max(0, nowNs() - startup_ns));
-    return @truncate(elapsed_ns / std.time.ns_per_us);
+    return @truncate(elapsedNs() / std.time.ns_per_us);
 }
 
 /// 64-bit millisecond/microsecond counters since startup (MSS v9 AIL_*_count64).
 pub fn getMsCount64() u64 {
-    ensureStartupTime();
-    const elapsed_ns: u64 = @intCast(@max(0, nowNs() - startup_ns));
-    return elapsed_ns / std.time.ns_per_ms;
+    return elapsedNs() / std.time.ns_per_ms;
 }
 pub fn getUsCount64() u64 {
-    ensureStartupTime();
-    const elapsed_ns: u64 = @intCast(@max(0, nowNs() - startup_ns));
-    return elapsed_ns / std.time.ns_per_us;
+    return elapsedNs() / std.time.ns_per_us;
 }
 
 // --- Lifecycle functions ---
