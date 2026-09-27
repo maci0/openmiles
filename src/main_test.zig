@@ -3301,6 +3301,99 @@ test "Timer concurrent start/stop never runs overlapping loops" {
     try testing.expect(!timer.is_running);
 }
 
+test "Timer restart while a self-stopped callback is still running keeps one loop" {
+    // A self-stop from inside the callback cannot join its own thread, so the
+    // run loop is still alive (and its handle still owned by the Timer) when the
+    // callback returns. Starting again at that moment used to spawn a second
+    // loop over the old handle: both fired the callback concurrently, the old
+    // handle was never joined, and deinit() freed the struct under the old loop.
+    const CB = struct {
+        var timer: *openmiles.Timer = undefined;
+        var active: std.atomic.Value(u32) = .init(0);
+        var overlapped: std.atomic.Value(bool) = .init(false);
+        var restart_issued: std.atomic.Value(bool) = .init(false);
+        var once: std.atomic.Value(bool) = .init(false);
+        var fired: std.atomic.Value(u32) = .init(0);
+
+        fn cb(_: u32) callconv(.winapi) void {
+            if (active.fetchAdd(1, .acq_rel) != 0) overlapped.store(true, .release);
+            _ = fired.fetchAdd(1, .monotonic);
+            // First fire: stop from inside the callback, then block until the
+            // other thread has asked for a restart. The restart is issued
+            // before it calls start(), so the callback is still running when
+            // start() runs: exactly the window the fix covers.
+            if (!once.swap(true, .acq_rel)) {
+                timer.stop();
+                while (!restart_issued.load(.acquire)) std.atomic.spinLoopHint();
+            }
+            _ = active.fetchSub(1, .acq_rel);
+        }
+
+        fn restarter() void {
+            // Give the timer thread time to reach the self-stop.
+            while (fired.load(.monotonic) == 0) std.atomic.spinLoopHint();
+            restart_issued.store(true, .release);
+            timer.start();
+        }
+    };
+    const timer = try openmiles.Timer.init(openmiles.global_allocator, CB.cb);
+    defer timer.deinit();
+    CB.timer = timer;
+    timer.setPeriodUs(200);
+
+    const helper = try std.Thread.spawn(.{}, CB.restarter, .{});
+    timer.start();
+    helper.join();
+
+    try testing.expect(!CB.overlapped.load(.acquire));
+    try testing.expect(timer.is_running);
+    // The single surviving loop still ticks after the handover.
+    const before = CB.fired.load(.monotonic);
+    var waited: u32 = 0;
+    while (CB.fired.load(.monotonic) == before and waited < 5000) : (waited += 10) {
+        openmiles.io.sleep(std.Io.Duration.fromNanoseconds(10 * std.time.ns_per_ms), .awake) catch {};
+    }
+    try testing.expect(CB.fired.load(.monotonic) > before);
+}
+
+test "Timer restart from inside its own callback resumes the same loop" {
+    // start() from the callback cannot join the thread it is running on, so it
+    // must resume the existing loop instead of spawning a second one. Before
+    // the retire branch existed this either spawned a second loop or blocked on
+    // state_mutex forever; either way the single surviving loop is the one the
+    // callback returns into.
+    const CB = struct {
+        var timer: *openmiles.Timer = undefined;
+        var fires: std.atomic.Value(u32) = .init(0);
+        var active: std.atomic.Value(u32) = .init(0);
+        var overlapped: std.atomic.Value(bool) = .init(false);
+
+        fn cb(_: u32) callconv(.winapi) void {
+            if (active.fetchAdd(1, .acq_rel) != 0) overlapped.store(true, .release);
+            const n = fires.fetchAdd(1, .monotonic);
+            // First fire: stop and start again from the callback itself.
+            if (n == 0) {
+                timer.stop();
+                timer.start();
+            }
+            _ = active.fetchSub(1, .acq_rel);
+        }
+    };
+    const timer = try openmiles.Timer.init(openmiles.global_allocator, CB.cb);
+    defer timer.deinit();
+    CB.timer = timer;
+    timer.setPeriodUs(200);
+    timer.start();
+
+    const before = CB.fires.load(.monotonic);
+    var waited: u32 = 0;
+    while (CB.fires.load(.monotonic) < before + 3 and waited < 5000) : (waited += 10) {
+        openmiles.io.sleep(std.Io.Duration.fromNanoseconds(10 * std.time.ns_per_ms), .awake) catch {};
+    }
+    try testing.expect(CB.fires.load(.monotonic) >= before + 3);
+    try testing.expect(!CB.overlapped.load(.acquire));
+}
+
 test "virtual clock replays a timer run from its step sequence" {
     // The point of the virtual clock: the callback sequence and the timestamps
     // it sees come from the steps taken, not from how fast the host is. The

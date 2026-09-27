@@ -76,9 +76,32 @@ pub const Timer = struct {
     }
 
     pub fn start(self: *Timer) void {
-        self.state_mutex.lockUncancelable(io);
+        // tryLock, not lock: the retire branch below joins a run loop that is
+        // still unwinding inside the callback, and that callback is free to
+        // call back into the API, including start on this same timer. Blocking
+        // here would put that callback on the other side of the join it is
+        // waiting for. A concurrent start is dropped instead: whichever caller
+        // holds the lock leaves the timer running, and start is idempotent.
+        if (!self.state_mutex.tryLock()) return;
         defer self.state_mutex.unlock(io);
         if (@atomicLoad(bool, &self.is_running, .acquire)) return;
+        if (self.thread) |stale| {
+            // A self-stop leaves its run loop alive until the callback returns,
+            // with is_running cleared and the handle still owned here. Spawning
+            // over that handle would give two loops firing the callback
+            // concurrently and drop the old handle unjoined, so the old loop is
+            // retired first. Starting from inside that loop's own callback is a
+            // plain resume: the same loop keeps running once the callback
+            // returns, and joining it here would join the current thread.
+            if (self.thread_id.load(.acquire) == std.Thread.getCurrentId()) {
+                @atomicStore(bool, &self.is_running, true, .release);
+                return;
+            }
+            @atomicStore(bool, &self.is_running, false, .release);
+            stale.join();
+            self.thread = null;
+            self.thread_id.store(0, .release);
+        }
         @atomicStore(bool, &self.is_running, true, .release);
         self.thread_id.store(0, .release);
         // No thread under a virtual clock: nothing advances time on its own, so
