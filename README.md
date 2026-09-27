@@ -393,7 +393,17 @@ declared for the builds below 7.1. The v7 DSP-stage, the
 `AIL_add_*_event_step` event-text builders, the v9 per-bus mixer calls, and the
 legacy `waveOut`/`midiOut` exports are not declared; see
 [docs/API_STATUS.md](docs/API_STATUS.md) for the full list, and add your own
-declaration from the export table in `src/main.zig` if you need one.
+declaration from the export table in `src/main.zig` if you need one. That
+includes `AIL_create_event` and the step builders `MilesEnqueueEvent` takes its
+event text from, which the event section of `docs/API_STATUS.md` lists beside
+the `Miles*` calls they feed.
+
+`AIL_get_preference` and `AIL_set_preference` take a slot number, and the header
+names the slots as `DIG_*`, `MDI_*` and `AIL_*` constants. The names are
+version-specific: MSS 9.0 renumbered the table, so the header defines one number
+per name for the `OPENMILES_MSS_VERSION` in the build, and
+`scripts/check_header.py` holds that against the engine's table. A slot this
+build does not name reads as 0 and is not stored.
 
 `make check-header` re-checks every declaration in `mss.h` against that export
 table, and the `AILSOUNDINFO` layout against `src/root.zig`, for all ten distinct

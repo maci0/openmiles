@@ -53,6 +53,10 @@ UNSUPPORTED_VERSIONS = [0, 45, 62, 91, 100]
 # REMOVED_AT_80 and switches MSS_RIB_CALL to __cdecl.
 V8_0 = 80
 
+# The encoding of 9.0: the release that renumbered the preference table, so the
+# two layouts mss.h spells are the ones either side of it.
+V9_CUTOFF = 90
+
 # One entry per open #if in resolve_header: PENDING until a branch matches,
 # TAKEN while that branch is live, DONE once a branch has matched so the rest
 # of the chain is skipped.
@@ -455,6 +459,85 @@ def layout_problems(header):
     return problems
 
 
+def zig_preference_slots(text):
+    """The preference slot numbers root.zig names, {name: number}.
+
+    Two eras, two spellings: the 3.x..8.x table is the `Pref` enum, and the 9.x
+    one is seeded inline (`p[3] = 64; // DIG_MIXER_CHANNELS`), because 9.0
+    renumbered the table and the seeds are what the disassembly pinned. A name
+    the table does not carry has no number, which is the same state the header
+    is checked against.
+    """
+    enum = re.search(r"pub const Pref = enum\(u32\) \{(.*?)\};", text, re.DOTALL)
+    if enum is None:
+        return None
+    slots = {
+        name: int(num)
+        for name, num in re.findall(r"^\s*(\w+) = (\d+),", enum.group(1), re.MULTILINE)
+    }
+    seeded = re.findall(r"^\s*p\[(\d+)\] = -?\d+;\s*//\s*(\w+)", text, re.MULTILINE)
+    if not slots or not seeded:
+        return None
+    return slots, V9_CUTOFF, {name: int(num) for num, name in seeded}
+
+
+def c_preference_slots(lines):
+    """The preference names a preprocessed header defines, {name: number}.
+
+    Read from between the header's preference-slot markers rather than from the
+    whole header: every other #define in it (SMP_*, SEEK_*, DIG_F_*) is a
+    different constant space and would read as a slot this build does not name.
+    """
+    block = "\n".join(lines)
+    m = re.search(
+        r"/\* BEGIN preference slots.*?\*/(.*?)/\* END preference slots",
+        block,
+        re.DOTALL,
+    )
+    if not m:
+        return {}
+    defines = re.findall(r"^#define\s+([A-Z][A-Z0-9_]+)\s+(\d+)\s*$", m.group(1), re.MULTILINE)
+    return {name: int(value) for name, value in defines}
+
+
+def preference_problems(header, root_zig_text):
+    """Agreement between mss.h's preference numbers and the table root.zig reads.
+
+    AIL_get_preference / AIL_set_preference take a bare number, so the names the
+    header spells are the only way a caller reaches a slot, and MSS 9.0 gave
+    every name a different number than 8.0 did. A name whose number drifts from
+    the engine's is a setting applied to a neighbour of the one asked for, and
+    the call still returns a plausible value.
+    """
+    parsed = zig_preference_slots(root_zig_text)
+    if parsed is None:
+        return ["PREF       the preference table in src/root.zig was not found"]
+    legacy, v9_cutoff, modern = parsed
+
+    problems = []
+    for version in SUPPORTED_VERSIONS:
+        want = modern if version >= v9_cutoff else legacy
+        declared = c_preference_slots(live_header_lines(header, version))
+        if not declared:
+            problems.append(f"v{version} PREF       no preference names are declared in mss.h")
+            continue
+        for name, number in sorted(declared.items()):
+            if name not in want:
+                problems.append(
+                    f"v{version} PREF       {name} is not a preference slot in src/root.zig"
+                )
+            elif want[name] != number:
+                problems.append(
+                    f"v{version} PREF       {name} is {number} in mss.h "
+                    f"and {want[name]} in src/root.zig"
+                )
+        problems.extend(
+            f"v{version} PREF       {name} is a slot in src/root.zig and unnamed in mss.h"
+            for name in sorted(set(want) - set(declared))
+        )
+    return problems
+
+
 def compile_problems():
     """Compile mss.h once per version, the way a consumer's compiler does.
 
@@ -583,6 +666,8 @@ def main():
     declared_by_version = {}
 
     problems += layout_problems(header)
+
+    problems += preference_problems(header, ROOT_ZIG.read_text())
 
     problems += [
         f"UNDEFINED   macro {macro} is used but never #defined in mss.h"

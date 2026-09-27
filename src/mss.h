@@ -117,6 +117,69 @@ typedef void* HREDBOOK;
 #define DIG_F_STEREO_8           2
 #define DIG_F_STEREO_16          3
 
+/* AIL_get_preference / AIL_set_preference take a slot number, and the number is
+ * ABI: MSS 9.0 renumbered the whole table, so one name is a different slot
+ * before and after 9.0. A caller that hard-codes an index instead of naming it
+ * therefore reads a neighbour of the setting it asked for, on the version it
+ * did not test. These are the two tables, selected by the same
+ * OPENMILES_MSS_VERSION as the declarations, and they are the slots the engine
+ * gives a default to; a number with no default here is one this build does not
+ * name, and both calls treat it as 0 and store nothing.
+ *
+ * The numbers are the table this build reads, seeded in `preferences` in
+ * src/root.zig; scripts/check_header.py holds the two in step, so a slot that
+ * moves fails the gate rather than the caller. */
+/* BEGIN preference slots: everything between the two markers below is the
+ * preference numbering, and scripts/check_header.py reads it from here to hold
+ * it against the engine's table. */
+#if MSS_AT_LEAST(90)
+#define AIL_MM_PERIOD                    0
+#define AIL_TIMERS                       1
+#define AIL_ENABLE_MMX_SUPPORT           2
+#define DIG_MIXER_CHANNELS               3
+#define DIG_ENABLE_RESAMPLE_FILTER       4
+#define DIG_RESAMPLING_TOLERANCE         5
+#define DIG_DS_FRAGMENT_SIZE             6
+#define DIG_DS_FRAGMENT_CNT              7
+#define DIG_DS_MIX_FRAGMENT_CNT          8
+#define DIG_LEVEL_RAMP_SAMPLES           9
+#define DIG_MAX_PREDELAY_MS             10
+#define DIG_3D_MUTE_AT_MAX              11
+#define DIG_MAX_CHAIN_ELEMENT_SIZE      15
+#define DIG_MIN_CHAIN_ELEMENT_TIME      16
+#define DIG_OUTPUT_BUFFER_SIZE          18
+#define DIG_PREFERRED_WO_DEVICE         19
+#define MDI_SEQUENCES                   21
+#define MDI_SERVICE_RATE                22
+#define MDI_DEFAULT_VOLUME              23
+#define MDI_QUANT_ADVANCE               24
+#define MDI_DEFAULT_BEND_RANGE          26
+#define MDI_SYSEX_BUFFER_SIZE           28
+#define DLS_VOICE_LIMIT                 29
+#define DLS_TIMEBASE                    30
+#define DLS_STREAM_BOOTSTRAP            32
+#define DLS_ENABLE_FILTERING            34
+#define DLS_GM_PASSTHROUGH              35
+#define DLS_ADPCM_TO_ASI_THRESHOLD      36
+#else
+#define DIG_RESAMPLING_TOLERANCE         0
+#define DIG_MIXER_CHANNELS               1
+#define DIG_DEFAULT_VOLUME               2
+#define MDI_SERVICE_RATE                 3
+#define MDI_SEQUENCES                    4
+#define MDI_DEFAULT_VOLUME               5
+#define MDI_QUANT_ADVANCE                6
+#define MDI_ALLOW_LOOP_BRANCHING         7
+#define MDI_DEFAULT_BEND_RANGE           8
+#define MDI_DOUBLE_NOTE_OFF              9
+#define MDI_SYSEX_BUFFER_SIZE           10
+#define DIG_OUTPUT_BUFFER_SIZE          11
+#define AIL_MM_PERIOD                   12
+#define DIG_ENABLE_RESAMPLE_FILTER      31
+#define DIG_DECODE_BUFFER_SIZE          32
+#endif
+/* END preference slots */
+
 #define REDBOOK_STOPPED          0
 #define REDBOOK_PLAYING          1
 #define REDBOOK_PAUSED           2
@@ -248,6 +311,9 @@ typedef U32  (MSS_CALLBACK *AIL_FILE_OPEN)(char const* filename, U32* file_handl
 typedef void (MSS_CALLBACK *AIL_FILE_CLOSE)(U32 file_handle);
 typedef S32  (MSS_CALLBACK *AIL_FILE_SEEK)(U32 file_handle, S32 offset, U32 type);
 typedef U32  (MSS_CALLBACK *AIL_FILE_READ)(U32 file_handle, void* buffer, U32 bytes_to_read);
+/* The async completion callback, with the shape the original SDK declares it.
+ * This build serves every async read synchronously, so it never calls one. */
+typedef void (MSS_CALLBACK *AIL_FILE_ASYNC_CB)(void const* buffer, U32 bytes, U32 pos);
 
 typedef void* HSEQUENCE;
 typedef void* HDLSDRIVER;
@@ -264,6 +330,9 @@ char*      MSS_CALLBACK AIL_last_error(void);
 #if MSS_AT_LEAST(60)
 char*      MSS_CALLBACK AIL_set_redist_directory(char const* dir);
 #endif
+/* `number` is one of the MSS_* preference names above, which the build's
+ * version selects between two numberings. Both return the previous value of
+ * the slot, 0 for one this build does not name. */
 S32        MSS_CALLBACK AIL_get_preference(U32 number);
 S32        MSS_CALLBACK AIL_set_preference(U32 number, S32 value);
 
@@ -596,11 +665,14 @@ S32         MSS_CALLBACK MilesGetVarI(U32 system, char const* name, S32* value);
 S32         MSS_CALLBACK MilesGetVarF(U32 system, char const* name, F32* value);
 #endif
 
-/* Queue a compiled event for playback. `event` points at event text as
- * AIL_create_event or AIL_get_event_contents produced it; `user_buffer` and
- * `user_buffer_len` attach caller data to the resulting instance, which the
- * instance reports back through MilesEnumerateSoundInstances. `flags` takes
- * the MILESEVENT_ENQUEUE_* values. The return is the queue ID that
+/* Queue a compiled event for playback. `event` points at event text, either
+ * MilesFindEvent's result or one the DLL's AIL_create_event plus the
+ * AIL_add_*_event_step builders produced; those constructors are exported but
+ * not declared here, so their signatures are in docs/API_STATUS.md and the
+ * export table in src/main.zig. `user_buffer` and `user_buffer_len` attach
+ * caller data to the resulting instance, which the instance reports back
+ * through MilesEnumerateSoundInstances. `flags` takes the
+ * MILESEVENT_ENQUEUE_* values. The return is the queue ID that
  * MilesEnumerateSoundInstances matches on, or 0 if the event was rejected. */
 U64         MSS_CALLBACK MilesEnqueueEvent(void const* event, void* user_buffer, S32 user_buffer_len, S32 flags, U64 event_filter);
 #if MSS_AT_LEAST(90)
@@ -617,9 +689,14 @@ S32         MSS_CALLBACK MilesBeginEventQueueProcessing(void);
 S32         MSS_CALLBACK MilesCompleteEventQueueProcessing(void);
 void        MSS_CALLBACK MilesClearEventQueue(void);
 
-/* Start one sound out of a bank. `sound_name` and `labels` are bank-relative
- * names; a NULL `sound_name` starts nothing and returns 0, and NULL labels
- * start every instance carrying the sound. Returns the instance ID. */
+/* Start one sound. `sound_name` is a bank-relative name and `labels` the
+ * label list attached to the instance; a NULL `sound_name` starts nothing and
+ * returns 0, and NULL labels start every instance carrying the sound. Returns
+ * the instance ID. `bank` is accepted and the name is resolved against every
+ * loaded bank, so two banks carrying one sound name are not told apart here;
+ * `loop_count`, `stream` and `user_buffer_flags` are accepted and stored as
+ * the event VM leaves them, and the instance this build tracks plays no audio
+ * (see docs/API_STATUS.md). */
 U64         MSS_CALLBACK MilesStartSoundInstance(void* bank, char const* sound_name, U32 loop_count, S32 stream, char const* labels, void* user_buffer, S32 user_buffer_len, S32 user_buffer_flags);
 /* Stop, pause, or resume every live instance carrying `labels`, or every
  * instance when `labels` is NULL. `filter` is a mask of MILESEVENTSOUNDSTATUS_*
@@ -667,10 +744,10 @@ S32         MSS_CALLBACK MilesSetSoundLabelLimits(void* system, char const* soun
 S32         MSS_CALLBACK MilesSetSoundLabelLimits(char const* sound_limits);
 #endif
 
-/* Load a bank. `name` is the name the bank's assets resolve under, or NULL for
- * the name the file carries; a `name` that does not match the bank's own is
- * rejected with a NULL return. Returns the bank handle. A v8 build loads the
- * bank under its own name and takes only the filename. */
+/* Load a bank from `filename` and return its handle, or NULL with the reason in
+ * AIL_last_error(). The bank's assets resolve under the name the file carries;
+ * `name` is accepted and dropped, so passing a different one neither renames
+ * the bank nor rejects the load. A v8 build takes the filename alone. */
 #if MSS_AT_LEAST(90)
 void*       MSS_CALLBACK MilesAddSoundBank(char const* filename, char const* name);
 #else
@@ -689,11 +766,16 @@ S32         MSS_CALLBACK MilesGetEventLength(char const* event_name);
  * caller frees with free() (or AIL_mem_free_lock). */
 char const* MSS_CALLBACK MilesTextDumpEventSystem(void);
 
-/* Install a 32-bit xorshift routine the event VM draws random choices from, and
- * the callback that receives an event the VM could not execute. A NULL resets
- * either to the built-in. */
+/* A 32-bit xorshift routine the event VM would draw random choices from, and
+ * the callback that would receive an event the VM could not execute. This
+ * build's VM does neither, so both are accepted and the pointer dropped: a
+ * caller that installs one and expects to be called back will not be. Read
+ * the outcome out of the instance state MilesEnumerateSoundInstances reports
+ * instead. */
 void        MSS_CALLBACK MilesRegisterRand(void* rand);
 void        MSS_CALLBACK MilesSetEventErrorCallback(void* callback);
+/* The bank loader's function table, accepted and dropped: this build has no
+ * loader callbacks to bind it to. */
 void        MSS_CALLBACK MilesSetBankFunctions(void const* functions);
 #if MSS_AT_LEAST(90)
 /* Function table the SDK's audition loader would install; it takes an opaque
@@ -707,10 +789,15 @@ void const* MSS_CALLBACK MilesGetBankFunctions(void);
 void        MSS_CALLBACK MilesUseTelemetry(void* context);
 void        MSS_CALLBACK MilesUseTmLite(void* context);
 
-/* Background file reads. Start one with MilesAsyncFileRead, poll it with
- * MilesAsyncFileStatus until it reports a completion code, and drop it with
- * MilesAsyncFileCancel; MilesAsyncStartup and MilesAsyncShutdown bracket the
- * whole set. MilesAsyncSetPaused stops delivery without cancelling. */
+/* Background file reads, bracketed by MilesAsyncStartup and
+ * MilesAsyncShutdown, which both report success so a game's own bracket is
+ * satisfied. The service itself is not in this build: MilesAsyncFileRead and
+ * MilesAsyncFileCancel return 0 (failed) for every request and
+ * MilesAsyncFileStatus reports 0, so no read is ever served in the background
+ * and a poll loop on it never completes. Load assets through
+ * MilesAddSoundBank, or through AIL_file_read for a VFS, which is served
+ * synchronously. MilesAsyncSetPaused and MilesRequeueAsyncs accept the call
+ * and do nothing. */
 S32         MSS_CALLBACK MilesAsyncStartup(void);
 S32         MSS_CALLBACK MilesAsyncShutdown(void);
 S32         MSS_CALLBACK MilesAsyncFileRead(void* request);
@@ -809,14 +896,19 @@ S32        MSS_CALLBACK AIL_file_type_named(void const* data, char const* filena
 
 #if MSS_AT_LEAST(61)
 /* Routes every later file access through the game's own VFS. The four
- * arguments are the AIL_FILE_* callback pointers below, or 0 to go back to
- * reading from disk. The order is (open, close, seek, read).
+ * arguments are the AIL_FILE_* callbacks above, or 0 to go back to reading
+ * from disk; 0 for one of them leaves that one call served from disk. The
+ * order is (open, close, seek, read), which is the SDK's, not the order the
+ * typedefs above are declared in. The parameters carry the callback types so
+ * a caller passes a function where a function is expected: ISO C forbids
+ * converting a function pointer to `void *`, so the `void *` spelling this
+ * replaces did not compile under -Wpedantic.
  * AIL_set_file_async_callbacks takes the same four plus a completion callback
  * the DLL ignores: the async path is served synchronously, so a callback
  * posted from a worker thread would never be the caller's own. */
-void       MSS_CALLBACK AIL_set_file_callbacks(void* open_fn, void* close_fn, void* seek_fn, void* read_fn);
+void       MSS_CALLBACK AIL_set_file_callbacks(AIL_FILE_OPEN open_fn, AIL_FILE_CLOSE close_fn, AIL_FILE_SEEK seek_fn, AIL_FILE_READ read_fn);
 #if MSS_BEFORE(81)
-void       MSS_CALLBACK AIL_set_file_async_callbacks(void* open_fn, void* close_fn, void* seek_fn, void* read_fn, void* callback_fn);
+void       MSS_CALLBACK AIL_set_file_async_callbacks(AIL_FILE_OPEN open_fn, AIL_FILE_CLOSE close_fn, AIL_FILE_SEEK seek_fn, AIL_FILE_READ read_fn, AIL_FILE_ASYNC_CB callback_fn);
 #endif
 #endif
 
