@@ -319,13 +319,17 @@ pub fn AIL_push_system_state(dig: ?*DigitalDriver, flags: u32, crossfade_ms: i32
     const d = dig orelse return;
     _ = flags;
     _ = crossfade_ms;
-    // Save the current driver state so it can be restored by pop. (We snapshot
-    // the master volume; the level counter mirrors the real push/pop depth.)
-    // A failed save must be visible: a later pop would otherwise restore the
-    // wrong level's volume with nothing in the log to explain it.
-    d.system_state_stack.append(d.allocator, d.getMasterVolume()) catch {
-        openmiles.log("AIL_push_system_state: allocation failed; this state level will not be restored\n", .{});
-    };
+    // Save the current driver state so a pop restores it. The level count is
+    // this stack's depth, so a push that records nothing must not raise the
+    // level either: a pop would then reach a volume an earlier level saved.
+    // Capacity is reserved at init, so the only way to hit the cap is the level
+    // count itself running past what AIL_system_state_level can report; the
+    // matching pop is refused for the same reason, which keeps the two paired.
+    if (d.system_state_stack.items.len >= openmiles.max_system_state_level) {
+        openmiles.log("AIL_push_system_state: level cap ({d}) reached; this level will not be pushed\n", .{openmiles.max_system_state_level});
+        return;
+    }
+    d.system_state_stack.appendAssumeCapacity(d.getMasterVolume());
 }
 pub fn AIL_pop_system_state(dig: ?*DigitalDriver, crossfade_ms: i32) callconv(.winapi) void {
     const d = dig orelse return;
@@ -334,7 +338,9 @@ pub fn AIL_pop_system_state(dig: ?*DigitalDriver, crossfade_ms: i32) callconv(.w
 }
 pub fn AIL_system_state_level(dig: ?*DigitalDriver) callconv(.winapi) u8 {
     const d = dig orelse return 0;
-    return @intCast(@min(d.system_state_stack.items.len, 255));
+    // The stack is capped at max_system_state_level, so the depth always fits
+    // the u8 this reports and never has to be clamped down.
+    return @intCast(d.system_state_stack.items.len);
 }
 pub fn AIL_set_async_callbacks(read: ?*anyopaque, cancel: ?*anyopaque, status: ?*anyopaque, a3: ?*anyopaque, a4: ?*anyopaque, a5: ?*anyopaque, a6: ?*anyopaque) callconv(.winapi) void {
     _ = read;

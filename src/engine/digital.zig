@@ -348,13 +348,23 @@ pub const SampleStatus = enum(u32) {
     playing_but_released = 16, // SMP_PLAYINGBUTRELEASED
 };
 
+/// Deepest system-state stack AIL_system_state_level can report: the depth
+/// crosses into the API's u8 at the 256th level. The stack is capped here and
+/// its capacity reserved at init so a push inside the cap cannot fail to grow.
+pub const max_system_state_level: usize = 255;
+
 pub const DigitalDriver = struct {
     engine: ma.ma_engine,
     allocator: std.mem.Allocator,
     providers: std.ArrayListUnmanaged(*root.Provider),
     timers: std.ArrayListUnmanaged(*root.Timer),
     samples: std.ArrayListUnmanaged(*Sample),
-    // v9 system-state stack: saved master-volume per push level.
+    // v9 system-state stack: saved master-volume per push level. The depth is
+    // the level count, and pop restores the volume its own push saved, so the
+    // two have to stay in step. Growth is reserved up front (see init) and the
+    // depth capped at max_system_state_level, which leaves no way for a push to
+    // be recorded without a saved value or for a pop to reach a value no push
+    // put there.
     system_state_stack: std.ArrayListUnmanaged(f32) = .empty,
     // v9 bus mixer: submix groups samples can be routed to.
     buses: std.ArrayListUnmanaged(*MixBus) = .empty,
@@ -394,6 +404,17 @@ pub const DigitalDriver = struct {
             .timers = .empty,
             .samples = .empty,
             .samples_3d = .empty,
+        };
+        // Reserve the whole system-state stack here rather than growing it on
+        // the first push. A push that cannot grow the stack raises the level
+        // count by one less than the push itself, and the next pop then restores
+        // the volume an earlier level saved. Reserving up front makes every push
+        // inside the cap infallible, so the count and the saved values cannot
+        // come apart.
+        self.system_state_stack.ensureTotalCapacity(allocator, max_system_state_level) catch {
+            log("DigitalDriver.init: system-state stack reservation failed\n", .{});
+            allocator.destroy(self);
+            return error.OutOfMemory;
         };
         var config = ma.ma_engine_config_init();
         if (@import("builtin").is_test) {

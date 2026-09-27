@@ -33,6 +33,7 @@ pub const SamplePcmFormat = digital_mod.SamplePcmFormat;
 pub const FalloffGraphPoint = digital_mod.FalloffGraphPoint;
 pub const FalloffKind = digital_mod.FalloffKind;
 pub const max_falloff_points = digital_mod.max_falloff_points;
+pub const max_system_state_level = digital_mod.max_system_state_level;
 const audio_encoding = @import("engine/audio_encoding.zig");
 pub const buildWavFromPcm = audio_encoding.buildWavFromPcm;
 pub const buildAdpcmWav = audio_encoding.buildAdpcmWav;

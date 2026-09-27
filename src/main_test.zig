@@ -5279,6 +5279,46 @@ test "v9 system-state push/pop tracks depth and restores volume" {
     try testing.expect(@abs(drv.getMasterVolume() - 1.0) < 0.001);
 }
 
+test "v9 system-state push/pop pairs every level with its own volume" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    // Each push records a distinct volume, then every level is changed after
+    // the push. A pop that reached the wrong level's entry would restore one of
+    // the other volumes here. The value is read back through the engine rather
+    // than assumed, so the test holds whatever the engine stores.
+    var pushed: [4]f32 = undefined;
+    for (0..4) |i| {
+        drv.setMasterVolume(0.1 * @as(f32, @floatFromInt(i + 1)));
+        pushed[i] = drv.getMasterVolume();
+        api_v9.AIL_push_system_state(drv, 0, 0);
+        try testing.expectEqual(@as(u8, @intCast(i + 1)), api_v9.AIL_system_state_level(drv));
+    }
+    for (0..4) |i| {
+        try testing.expect(pushed[i] != pushed[3 - i]);
+        drv.setMasterVolume(0.9);
+        api_v9.AIL_pop_system_state(drv, 0);
+        try testing.expectEqual(@as(u8, @intCast(3 - i)), api_v9.AIL_system_state_level(drv));
+        try testing.expectEqual(pushed[3 - i], drv.getMasterVolume());
+    }
+}
+
+test "v9 system-state level cap keeps pushes and pops paired" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    drv.setMasterVolume(0.5);
+    const pushed_volume = drv.getMasterVolume();
+    for (0..openmiles.max_system_state_level) |_| api_v9.AIL_push_system_state(drv, 0, 0);
+    try testing.expectEqual(@as(u8, @intCast(openmiles.max_system_state_level)), api_v9.AIL_system_state_level(drv));
+    // A push past the cap must not raise the level, and the pop that pairs with
+    // it must not reach a volume an inner level saved.
+    drv.setMasterVolume(0.75);
+    api_v9.AIL_push_system_state(drv, 0, 0);
+    try testing.expectEqual(@as(u8, @intCast(openmiles.max_system_state_level)), api_v9.AIL_system_state_level(drv));
+    api_v9.AIL_pop_system_state(drv, 0);
+    try testing.expectEqual(@as(u8, @intCast(openmiles.max_system_state_level - 1)), api_v9.AIL_system_state_level(drv));
+    try testing.expectEqual(pushed_volume, drv.getMasterVolume());
+}
+
 test "distance_factor folds into the per-sample Doppler factor (matches MSS)" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
