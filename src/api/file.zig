@@ -19,14 +19,23 @@ pub fn AIL_file_type(data: *anyopaque, len: u32) callconv(.winapi) i32 {
 }
 pub fn AIL_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32) callconv(.winapi) i32 {
     const path = std.mem.span(filename);
+    openmiles.clearFileError();
     const file = fs_compat.createFile(io, path, .{}) catch |err| {
-        log("Error: {any}\n", .{err});
+        // AIL_file_error() is the only channel this call has: a bare 0 with
+        // "No error" behind it leaves the application with no way to tell a
+        // missing directory from a full disk. Name the file and the reason.
+        log("AIL_file_write: cannot create '{s}' ({any})\n", .{ path, err });
+        openmiles.setFileErrorFmt("Cannot create '{s}'", .{path});
         return 0;
     };
+    // A write that fails partway leaves a truncated file on disk; the failure
+    // is reported, but the partial contents stay, so say which file is short.
+    errdefer openmiles.setFileErrorFmt("Write to '{s}' failed", .{path});
     defer file.close(io);
     const buf: [*]const u8 = @ptrCast(@alignCast(data));
     file.writeStreamingAll(io, buf[0..len]) catch |err| {
-        log("Error: {any}\n", .{err});
+        log("AIL_file_write: writing {d} bytes to '{s}' failed ({any})\n", .{ len, path, err });
+        openmiles.setFileErrorFmt("Write of {d} bytes to '{s}' failed", .{ len, path });
         return 0;
     };
     return 1;

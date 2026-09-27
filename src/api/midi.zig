@@ -222,16 +222,25 @@ pub fn AIL_list_MIDI(midi: ?*const anyopaque, midi_size: u32, lst: ?*?*anyopaque
         const format = std.mem.readInt(u16, data[8..10], .big);
         const tracks = std.mem.readInt(u16, data[10..12], .big);
         const division = std.mem.readInt(u16, data[12..14], .big);
-        text = std.fmt.allocPrintSentinel(openmiles.global_allocator, "Standard MIDI File\nFormat: {d}\nTracks: {d}\nDivision: {d} ticks/quarter\n", .{ format, tracks, division }, 0) catch return 0;
+        text = std.fmt.allocPrintSentinel(openmiles.global_allocator, "Standard MIDI File\nFormat: {d}\nTracks: {d}\nDivision: {d} ticks/quarter\n", .{ format, tracks, division }, 0) catch {
+            openmiles.setLastError("AIL_list_MIDI: cannot format the listing");
+            return 0;
+        };
     } else if (std.mem.eql(u8, data[0..4], "FORM")) {
-        text = std.fmt.allocPrintSentinel(openmiles.global_allocator, "XMIDI sequence\nSize: {d} bytes\n", .{midi_size}, 0) catch return 0;
+        text = std.fmt.allocPrintSentinel(openmiles.global_allocator, "XMIDI sequence\nSize: {d} bytes\n", .{midi_size}, 0) catch {
+            openmiles.setLastError("AIL_list_MIDI: cannot format the listing");
+            return 0;
+        };
     } else {
         openmiles.setLastError("AIL_list_MIDI: unrecognized MIDI image");
         return 0;
     }
     defer openmiles.global_allocator.free(text);
 
-    const p = std.c.malloc(text.len + 1) orelse return 0;
+    const p = std.c.malloc(text.len + 1) orelse {
+        openmiles.setLastError("AIL_list_MIDI: cannot allocate the listing");
+        return 0;
+    };
     const dst: [*]u8 = @ptrCast(p);
     @memcpy(dst[0 .. text.len + 1], text[0 .. text.len + 1]); // include NUL
     if (lst) |pp| pp.* = p;

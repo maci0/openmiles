@@ -24,6 +24,7 @@ pub fn AIL_allocate_3D_sample_handle(driver_opt: ?*DigitalDriver) callconv(.wina
     log("AIL_allocate_3D_sample_handle(driver={*})\n", .{driver});
     const s = openmiles.Sample3D.init(driver) catch |err| {
         log("Error: {any}\n", .{err});
+        openmiles.setLastError("Failed to allocate 3D sample handle");
         return null;
     };
     return @ptrCast(s);
@@ -42,6 +43,7 @@ pub fn AIL_set_3D_sample_file(s: ?*anyopaque, data: ?*anyopaque) callconv(.winap
     const raw: [*]const u8 = @ptrCast(@alignCast(d));
     sample.loadFromUnownedPointer(raw) catch |err| {
         log("Error: {any}\n", .{err});
+        openmiles.setLastError("AIL_set_3D_sample_file: cannot decode the image");
         return 0;
     };
     return 1;
@@ -249,6 +251,7 @@ pub fn AIL_set_3D_sample_info(s: ?*anyopaque, info: ?*anyopaque) callconv(.winap
     const bits: u16 = if (si.bits == 8) 8 else 16;
     sample.loadFromPcm(data[0..si.data_len], channels, si.rate, bits) catch |err| {
         log("Error: {any}\n", .{err});
+        openmiles.setLastErrorFmt("AIL_set_3D_sample_info: cannot load {d} PCM bytes", .{si.data_len});
         return 0;
     };
     return 1;
@@ -541,6 +544,7 @@ pub fn AIL_open_3D_object(provider: *anyopaque) callconv(.winapi) ?*anyopaque {
     const dig: *DigitalDriver = openmiles.lastDigitalDriver() orelse @ptrCast(@alignCast(provider));
     const s = openmiles.Sample3D.init(dig) catch |err| {
         log("Error: {any}\n", .{err});
+        openmiles.setLastError("Failed to allocate 3D object");
         return null;
     };
     return @ptrCast(s);

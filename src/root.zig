@@ -220,6 +220,13 @@ pub fn setLastError(msg: []const u8) void {
     last_error_buf[len] = 0;
 }
 
+/// Same as `setLastError`, for a message that names the offending value (a
+/// file, a sample, a byte count). A message that does not survive the buffer
+/// says so rather than leaving a truncated string that reads as the whole error.
+pub fn setLastErrorFmt(comptime fmt: []const u8, args: anytype) void {
+    if (std.fmt.bufPrintZ(&last_error_buf, fmt, args)) |_| {} else |_| setLastError("Error message too long");
+}
+
 pub fn clearLastError() void {
     last_error_buf[0] = 0;
 }
@@ -228,6 +235,11 @@ pub fn setFileError(msg: []const u8) void {
     const len = @min(msg.len, last_file_error_buf.len - 1);
     @memcpy(last_file_error_buf[0..len], msg[0..len]);
     last_file_error_buf[len] = 0;
+}
+
+/// Same as `setFileError`, for a message that names the file it applies to.
+pub fn setFileErrorFmt(comptime fmt: []const u8, args: anytype) void {
+    if (std.fmt.bufPrintZ(&last_file_error_buf, fmt, args)) |_| {} else |_| setFileError("Error message too long");
 }
 
 pub fn clearFileError() void {

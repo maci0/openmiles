@@ -129,7 +129,18 @@ pub const Provider = struct {
         }
 
         if (lib.lookup(RIB_Main_ptr, "RIB_Main")) |rib_main| {
-            _ = rib_main(self.handle, 1, rib_alloc_provider_handle, rib_register_interface, rib_unregister_interface);
+            // The plugin's own status for the load. It is not a load failure by
+            // itself (a plugin may return its own convention), but a provider
+            // whose RIB_Main reported failure and registered nothing would
+            // otherwise sit in the registry looking loaded, and every later
+            // lookup would report the interface as simply absent.
+            const status = rib_main(self.handle, 1, rib_alloc_provider_handle, rib_register_interface, rib_unregister_interface);
+            if (status == 0) {
+                log("Provider.load: RIB_Main in '{s}' reported failure (returned 0)\n", .{name});
+            }
+            if (self.interfaces.items.len == 0) {
+                log("Provider.load: '{s}' registered no interfaces\n", .{name});
+            }
         }
 
         return self;
@@ -138,7 +149,13 @@ pub const Provider = struct {
     pub fn deinit(self: *Provider) void {
         if (self.lib) |*lib| {
             if (lib.lookup(RIB_Main_ptr, "RIB_Main")) |rib_main| {
-                _ = rib_main(self.handle, 0, rib_alloc_provider_handle, rib_register_interface, rib_unregister_interface);
+                // Shutdown is a notification: nothing is loaded afterwards that
+                // a status could change, but a plugin that could not shut down
+                // cleanly may still be running teardown state, so a reported
+                // failure is worth saying out loud.
+                if (rib_main(self.handle, 0, rib_alloc_provider_handle, rib_register_interface, rib_unregister_interface) == 0) {
+                    log("Provider.deinit: RIB_Main in '{s}' reported failure while unloading\n", .{self.name});
+                }
             }
             lib.close();
         }

@@ -34,7 +34,10 @@ const MemStream = struct {
     err: bool = false,
 
     fn create(self_buf: []u8, length: usize, owns: bool, writable: bool) ?*MemStream {
-        const m = openmiles.global_allocator.create(MemStream) catch return null;
+        const m = openmiles.global_allocator.create(MemStream) catch {
+            openmiles.setLastError("Cannot allocate the memory stream");
+            return null;
+        };
         m.* = .{ .buf = self_buf, .len = length, .owns = owns, .writable = writable };
         return m;
     }
@@ -401,7 +404,10 @@ pub fn AIL_mem_close(mem: ?*anyopaque, data_out: ?*?*anyopaque, size_out: ?*u32)
 // Real MSS: AIL_mem_create() @0 — create an empty, growable in-memory write
 // stream (writes append and grow the backing buffer; see AIL_mem_close).
 pub fn AIL_mem_create() callconv(.winapi) ?*anyopaque {
-    const buf = openmiles.global_allocator.alloc(u8, 0) catch return null;
+    const buf = openmiles.global_allocator.alloc(u8, 0) catch {
+        openmiles.setLastError("AIL_mem_create: cannot allocate the stream");
+        return null;
+    };
     const m = MemStream.create(buf, 0, true, true) orelse {
         openmiles.global_allocator.free(buf);
         return null;

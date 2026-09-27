@@ -12,6 +12,7 @@ pub fn RIB_alloc_provider_handle(module: *anyopaque) callconv(.c) ?*Provider {
     log("RIB_alloc_provider_handle(module={*})\n", .{module});
     return Provider.init(openmiles.global_allocator, module) catch |err| {
         log("Error: {any}\n", .{err});
+        openmiles.setLastError("Failed to allocate provider handle");
         return null;
     };
 }
@@ -443,9 +444,23 @@ pub fn AIL_compress_ASI(info_opt: ?*const openmiles.AILSOUNDINFO, ext: ?[*:0]con
     const channels: u16 = @intCast(@max(1, @min(2, info.channels)));
     const pcm: [*]const i16 = @ptrCast(@alignCast(info.data_ptr.?));
     const total_per_ch: usize = @as(usize, info.data_len) / (@as(usize, channels) * 2);
-    const wav = openmiles.buildAdpcmWav(openmiles.global_allocator, pcm, total_per_ch, channels, info.rate) catch return 0;
+    // A source shorter than one frame per channel has no samples to encode;
+    // buildAdpcmWav would return a header-only image and this call would report
+    // success, handing the caller a compressed file that decodes to silence.
+    if (total_per_ch == 0) {
+        openmiles.setLastError("AIL_compress_ASI: source holds less than one sample frame");
+        return 0;
+    }
+    const wav = openmiles.buildAdpcmWav(openmiles.global_allocator, pcm, total_per_ch, channels, info.rate) catch |err| {
+        log("AIL_compress_ASI: encoding {d} samples failed ({any})\n", .{ total_per_ch, err });
+        openmiles.setLastError("AIL_compress_ASI: cannot encode the PCM source");
+        return 0;
+    };
     defer openmiles.global_allocator.free(wav);
-    const buf: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse return 0);
+    const buf: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse {
+        openmiles.setLastError("AIL_compress_ASI: out of memory");
+        return 0;
+    });
     @memcpy(buf[0..wav.len], wav);
     if (outdata) |o| o.* = buf;
     if (outsize) |o| o.* = @intCast(wav.len);
@@ -472,7 +487,10 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
     defer all_pcm.deinit(openmiles.global_allocator);
     // Heap scratch (16-byte aligned): a stack buffer trips a layout-dependent
     // misaligned ma_int16 write inside miniaudio's decoder under the UBSan build.
-    const chunk_buf = openmiles.global_allocator.alignedAlloc(u8, .@"16", 4096 * 4) catch return 0;
+    const chunk_buf = openmiles.global_allocator.alignedAlloc(u8, .@"16", 4096 * 4) catch {
+        openmiles.setLastError("AIL_decompress_ASI: out of memory");
+        return 0;
+    };
     defer openmiles.global_allocator.free(chunk_buf);
     while (true) {
         var fr: u64 = 0;
@@ -493,11 +511,21 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
             return 0;
         };
     }
-    if (all_pcm.items.len == 0) return 0;
+    if (all_pcm.items.len == 0) {
+        openmiles.setLastError("AIL_decompress_ASI: the input decoded to no audio");
+        return 0;
+    }
 
-    const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, all_pcm.items, 2, 44100, 16) catch return 0;
+    const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, all_pcm.items, 2, 44100, 16) catch |err| {
+        log("AIL_decompress_ASI: cannot build the output WAV ({any})\n", .{err});
+        openmiles.setLastError("AIL_decompress_ASI: cannot build the output WAV");
+        return 0;
+    };
     defer openmiles.global_allocator.free(wav);
-    const buf: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse return 0);
+    const buf: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse {
+        openmiles.setLastError("AIL_decompress_ASI: out of memory");
+        return 0;
+    });
     @memcpy(buf[0..wav.len], wav);
     if (wav_out) |o| o.* = buf;
     if (wavsize) |o| o.* = @intCast(wav.len);

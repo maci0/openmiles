@@ -18,6 +18,7 @@ pub fn AIL_open_filter(provider_opt: ?*Provider, driver_opt: ?*DigitalDriver) ca
     log("AIL_open_filter(provider={*}, driver={*})\n", .{ provider, driver });
     const filter = Filter.init(provider, driver) catch |err| {
         log("Error: {any}\n", .{err});
+        openmiles.setLastError("Failed to open filter");
         return null;
     };
     return @ptrCast(filter);

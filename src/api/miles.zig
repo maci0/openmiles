@@ -464,7 +464,10 @@ pub fn MilesStartupEventSystem(driver: ?*anyopaque, command_buf_len: i32, memory
     _ = memory_buf;
     _ = memory_len;
     if (g_root) |r| return @ptrCast(r);
-    const sys = openmiles.global_allocator.create(EventSystem) catch return null;
+    const sys = openmiles.global_allocator.create(EventSystem) catch {
+        openmiles.setLastError("MilesStartupEventSystem: cannot allocate the event system");
+        return null;
+    };
     sys.* = .{ .driver = driver, .command_buffer_size = command_buf_len };
     g_root = sys;
     log("MilesStartupEventSystem(driver={*}, cmdbuf={d})\n", .{ driver, command_buf_len });
@@ -472,7 +475,10 @@ pub fn MilesStartupEventSystem(driver: ?*anyopaque, command_buf_len: i32, memory
 }
 
 pub fn MilesAddEventSystem(driver: ?*anyopaque) callconv(.winapi) ?*anyopaque {
-    const sys = openmiles.global_allocator.create(EventSystem) catch return null;
+    const sys = openmiles.global_allocator.create(EventSystem) catch {
+        openmiles.setLastError("MilesAddEventSystem: cannot allocate the event system");
+        return null;
+    };
     sys.* = .{ .driver = driver };
     // append to the tail of the list (root must stay at index 0)
     if (g_root) |r| {
@@ -735,8 +741,14 @@ pub fn MilesTextDumpEventSystem() callconv(.winapi) ?[*:0]u8 {
         g_instances.items.len,
         g_persists.items.len,
         openmiles.soundbank.loadedCount(),
-    }) catch return null;
-    const out: [*]u8 = @ptrCast(std.c.malloc(text.len + 1) orelse return null);
+    }) catch {
+        openmiles.setLastError("Cannot format the event system status");
+        return null;
+    };
+    const out: [*]u8 = @ptrCast(std.c.malloc(text.len + 1) orelse {
+        openmiles.setLastError("Cannot allocate the event system status");
+        return null;
+    });
     @memcpy(out[0..text.len], text);
     out[text.len] = 0;
     return @ptrCast(out);

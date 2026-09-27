@@ -9,7 +9,10 @@ const dls_container = openmiles.dls_container;
 /// Copy `src` into a buffer allocated with the C allocator so the caller can
 /// release it via `AIL_mem_free_lock` (which calls `free`). Returns null on OOM.
 fn cmemdup(src: []const u8) ?*anyopaque {
-    const p = std.c.malloc(src.len) orelse return null;
+    const p = std.c.malloc(src.len) orelse {
+        openmiles.setLastErrorFmt("Cannot allocate {d} bytes for the output image", .{src.len});
+        return null;
+    };
     const dst: [*]u8 = @ptrCast(p);
     @memcpy(dst[0..src.len], src);
     return p;
@@ -362,7 +365,10 @@ pub fn AIL_list_DLS(dls: ?*const anyopaque, lst: ?*?*anyopaque, lst_size: ?*u32,
         }
     }
     const title_slice = if (title) |t| std.mem.span(t) else "DLS";
-    const text = std.fmt.allocPrintSentinel(openmiles.global_allocator, "{s}\nDLS bank: {d} bytes, {d} instrument(s)\n", .{ title_slice, sz, instruments }, 0) catch return 0;
+    const text = std.fmt.allocPrintSentinel(openmiles.global_allocator, "{s}\nDLS bank: {d} bytes, {d} instrument(s)\n", .{ title_slice, sz, instruments }, 0) catch {
+        openmiles.setLastError("AIL_list_DLS: cannot format the listing");
+        return 0;
+    };
     defer openmiles.global_allocator.free(text);
     const out = cmemdup(text[0 .. text.len + 1]) orelse return 0; // include NUL
     if (lst) |pp| pp.* = out;
@@ -397,7 +403,10 @@ pub fn AIL_merge_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyopaque, ou
         openmiles.setLastError("AIL_merge_DLS_with_XMI: image sizes overflow");
         return 0;
     };
-    const buf = std.c.malloc(total) orelse return 0;
+    const buf = std.c.malloc(total) orelse {
+        openmiles.setLastErrorFmt("AIL_merge_DLS_with_XMI: cannot allocate {d} bytes", .{total});
+        return 0;
+    };
     const dst: [*]u8 = @ptrCast(buf);
     @memcpy(dst[0..xsz], xraw[0..xsz]);
     @memcpy(dst[xsz .. xsz + dsz], draw[0..dsz]);

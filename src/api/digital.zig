@@ -52,6 +52,7 @@ pub fn AIL_waveOutOpen(drvr_ptr: ?*?*DigitalDriver, lphwo: ?*u32, device_id: i32
     if (drvr_ptr) |ptr| {
         const driver = openmiles.DigitalDriver.init(openmiles.global_allocator, 44100, 16, 2) catch |err| {
             log("Error: {any}\n", .{err});
+            openmiles.setLastError("Failed to initialize digital driver");
             return 1;
         }; // MMSYSERR_ERROR
         ptr.* = driver;
@@ -195,6 +196,7 @@ pub fn AIL_allocate_sample_handle(driver_opt: ?*DigitalDriver) callconv(.winapi)
     log("AIL_allocate_sample_handle(driver={*})\n", .{driver});
     return openmiles.Sample.init(driver) catch |err| {
         log("Error: {any}\n", .{err});
+        openmiles.setLastError("Failed to allocate sample handle");
         return null;
     };
 }
@@ -377,6 +379,7 @@ pub fn AIL_allocate_file_sample(driver_opt: ?*DigitalDriver, data: *anyopaque, f
     _ = flags;
     const s = openmiles.Sample.init(driver) catch |err| {
         log("Error: {any}\n", .{err});
+        openmiles.setLastError("Failed to allocate file sample");
         return null;
     };
     const raw: [*]const u8 = @ptrCast(@alignCast(data));
@@ -877,6 +880,11 @@ pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, r
     // The 5th arg is a DIG_F format code (mss.h), NOT a bit depth:
     //   DIG_F_16BITS_MASK (1) -> 16-bit else 8-bit; DIG_F_STEREO_MASK (2) -> stereo.
     if (rate <= 0) return 0;
+    openmiles.clearFileError();
+    const out_path = std.mem.span(filename);
+    // A write that fails partway leaves a short file behind; the caller is told
+    // which file, so a later AIL_file_size does not read it as complete.
+    errdefer openmiles.setFileErrorFmt("AIL_WAV_file_write: '{s}' is incomplete", .{out_path});
     // MSS 8.0+ (msssys.c AIL_API_WAV_file_write) honors DIG_F_MULTICHANNEL_MASK
     // (bit 16): the real channel count is packed in the high 16 bits. Pre-8.0 has
     // no multichannel path -- and there bit 16 meant DIG_F_USING_ASI, an unrelated
@@ -891,18 +899,21 @@ pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, r
     const pcm_data: []const u8 = @as([*]const u8, @ptrCast(@alignCast(data)))[0..len];
     const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, pcm_data, channels, @intCast(rate), bits) catch |err| {
         log("Error: {any}\n", .{err});
+        openmiles.setFileErrorFmt("AIL_WAV_file_write: cannot build a WAV for '{s}'", .{out_path});
         return 0;
     };
     defer openmiles.global_allocator.free(wav);
     const io = openmiles.io;
     const path = std.mem.span(filename);
     const file = openmiles.fs_compat.createFile(io, path, .{}) catch |err| {
-        log("Error: {any}\n", .{err});
+        log("AIL_WAV_file_write: cannot create '{s}' ({any})\n", .{ path, err });
+        openmiles.setFileErrorFmt("AIL_WAV_file_write: cannot create '{s}'", .{path});
         return 0;
     };
     defer file.close(io);
     file.writeStreamingAll(io, wav) catch |err| {
-        log("Error: {any}\n", .{err});
+        log("AIL_WAV_file_write: writing {d} bytes to '{s}' failed ({any})\n", .{ wav.len, path, err });
+        openmiles.setFileErrorFmt("AIL_WAV_file_write: write of {d} bytes to '{s}' failed", .{ wav.len, path });
         return 0;
     };
     return 1;
@@ -910,7 +921,10 @@ pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, r
 /// Hand a freshly built WAV to the caller as a malloc'd buffer (free with
 /// AIL_mem_free_lock). Returns 0 if the allocation fails.
 fn adoptWavOut(wav: []const u8, outdata: **anyopaque, outsize: *u32) i32 {
-    const out_ptr: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse return 0);
+    const out_ptr: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse {
+        openmiles.setLastError("Cannot allocate the output buffer");
+        return 0;
+    });
     @memcpy(out_ptr[0..wav.len], wav);
     outdata.* = out_ptr;
     outsize.* = @intCast(wav.len);
@@ -926,6 +940,12 @@ pub fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsi
     const channels: u16 = @intCast(info.channels);
     const bytes_per_sample: usize = if (info.bits == 8) 1 else 2;
     const total_per_ch: usize = @as(usize, info.data_len) / (bytes_per_sample * @as(usize, channels));
+    // Fewer bytes than one whole frame: nothing to encode, and a header-only
+    // image handed back under a success code decodes as a file of silence.
+    if (total_per_ch == 0) {
+        openmiles.setLastError("AIL_compress_ADPCM: source holds less than one sample frame");
+        return 0;
+    }
     // The encoder works on 16-bit samples; promote 8-bit unsigned PCM (128 = 0).
     var pcm16_owned: ?[]i16 = null;
     defer if (pcm16_owned) |p| openmiles.global_allocator.free(p);
@@ -933,7 +953,10 @@ pub fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsi
         if (info.bits == 8) {
             const u8data: [*]const u8 = @ptrCast(info.data_ptr.?);
             const n: usize = info.data_len;
-            const tmp = openmiles.global_allocator.alloc(i16, n) catch return 0;
+            const tmp = openmiles.global_allocator.alloc(i16, n) catch {
+                openmiles.setLastErrorFmt("AIL_compress_ADPCM: cannot allocate {d} bytes for the 16-bit source", .{n * 2});
+                return 0;
+            };
             for (0..n) |i| tmp[i] = (@as(i16, u8data[i]) - 128) << 8;
             pcm16_owned = tmp;
             break :blk tmp.ptr;
@@ -942,6 +965,7 @@ pub fn AIL_compress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, outsi
     };
     const wav = openmiles.buildAdpcmWav(openmiles.global_allocator, pcm, total_per_ch, channels, info.rate) catch |err| {
         log("Error: {any}\n", .{err});
+        openmiles.setLastError("AIL_compress_ADPCM: cannot encode the PCM source");
         return 0;
     };
     defer openmiles.global_allocator.free(wav);
@@ -1001,7 +1025,10 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
     // avoiding a stack-layout-dependent misaligned write inside miniaudio's IMA
     // decoder that a stack [u8 align(2)] / [i16] array did not reliably prevent.
     const chunk_bytes: usize = 4096 * 8; // up to 4096 frames x 8 bytes (4ch 16-bit)
-    const chunk_buf = openmiles.global_allocator.alignedAlloc(u8, .@"16", chunk_bytes) catch return 0;
+    const chunk_buf = openmiles.global_allocator.alignedAlloc(u8, .@"16", chunk_bytes) catch {
+        openmiles.setLastError("AIL_decompress_ADPCM: cannot allocate the decode buffer");
+        return 0;
+    };
     defer openmiles.global_allocator.free(chunk_buf);
     const chunk_frames: u64 = chunk_bytes / @as(usize, bpf);
     while (true) {
@@ -1017,9 +1044,15 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
         }
         if (fr == 0) break;
         const nbytes: usize = @intCast(fr * @as(u64, bpf));
-        pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..nbytes]) catch return 0;
+        pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..nbytes]) catch {
+            openmiles.setLastError("AIL_decompress_ADPCM: out of memory while decoding");
+            return 0;
+        };
     }
-    if (pcm.items.len == 0) return 0;
+    if (pcm.items.len == 0) {
+        openmiles.setLastError("AIL_decompress_ADPCM: the image decoded to no audio");
+        return 0;
+    }
 
     // SDK (miscutil.cpp): the output is sized to exactly info->samples frames
     // (size = samples*channels*16/8). IMA block padding makes the decoder emit up
@@ -1044,6 +1077,7 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
 
     const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, pcm.items, @intCast(channels), rate, 16) catch |err| {
         log("Error: {any}\n", .{err});
+        openmiles.setLastError("AIL_decompress_ADPCM: cannot build the output WAV");
         return 0;
     };
     defer openmiles.global_allocator.free(wav);
@@ -1059,6 +1093,7 @@ pub fn AIL_create_wave_synthesizer(dig_opt: ?*DigitalDriver, mdi: ?*MidiDriver, 
     _ = polyphony;
     const driver = MidiDriver.init(openmiles.global_allocator) catch |err| {
         log("Error: {any}\n", .{err});
+        openmiles.setLastError("Failed to create wave synthesizer");
         return null;
     };
     if (dls) |bank| {
