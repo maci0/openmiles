@@ -26,6 +26,7 @@ const api_timer = @import("api/timer.zig");
 const api_v8 = @import("api/v8.zig");
 const api_v7 = @import("api/v7.zig");
 const api_stream = @import("api/stream.zig");
+const api_miles = @import("api/miles.zig");
 
 fn freeLock(p: ?*anyopaque) void {
     if (p) |ptr| api_memory.AIL_mem_free_lock(ptr);
@@ -1002,5 +1003,120 @@ test "fuzz detectAudioSize/detectMidiSize with adversarial headers" {
         }
         _ = openmiles.detectAudioSize(@ptrCast(region.ptr));
         _ = openmiles.detectMidiSize(@ptrCast(region.ptr));
+    }
+}
+
+// --- Miles label grammar ------------------------------------------------------
+
+/// A NUL-terminated string drawn from the bytes the Miles label grammar
+/// actually sees: the '*' and '?' glob metacharacters, the ':' ',' and
+/// whitespace separators that split a limits entry and a label list, digits
+/// (a cap count), ASCII case pairs (matching is case-insensitive), and
+/// multi-byte UTF-8 lead/continuation bytes ('?' matches one character, which
+/// is more than one byte).
+fn randLabelStr(rand: std.Random, buf: []u8) [:0]const u8 {
+    const alphabet = "*?:, \t019aAbB\xC3\xA9\x80\xFF";
+    const n = rand.intRangeAtMost(usize, 1, buf.len - 2);
+    // A label list of nothing but separators carries no label at all, so the
+    // tail is always anchored by one: the '*' assertion below is about
+    // matching, not about a list that tokenizes to nothing.
+    buf[0] = 'x';
+    for (buf[1..n]) |*b| b.* = alphabet[rand.intRangeAtMost(usize, 0, alphabet.len - 1)];
+    buf[n] = 0;
+    return buf[0..n :0];
+}
+
+/// Every instance the enumeration reports for `labels`, counted through the
+/// public C entry point (MSS_FIRST restarts the walk).
+fn countMilesInstances(labels: ?[*:0]const u8) u64 {
+    var next: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var info: api_miles.MILESEVENTSOUNDINFO = undefined;
+    var n: u64 = 0;
+    while (api_miles.MilesEnumerateSoundInstances(null, &next, 0, labels, 0, &info) != 0) n += 1;
+    return n;
+}
+
+test "fuzz Miles label caps, glob queries, and instance eviction" {
+    var prng = std.Random.DefaultPrng.init(0xC0FFEE27);
+    const rand = prng.random();
+    var sbuf: [64]u8 = undefined;
+    var nbuf: [64]u8 = undefined;
+    var lbuf: [64]u8 = undefined;
+    var qbuf: [64]u8 = undefined;
+    defer api_miles.MilesClearEventQueue();
+    api_miles.MilesClearEventQueue();
+
+    var i: usize = 0;
+    while (i < 500) : (i += 1) {
+        // A cap table parsed from a fuzzed "label count:label count" string:
+        // missing counts, empty entries, overflow, and embedded NUL-free
+        // garbage all have to leave the table and the instances consistent.
+        _ = api_miles.MilesSetSoundLabelLimits(null, randLabelStr(rand, &sbuf).ptr);
+        // Starts and stops interleave. A stop swap-removes, so the instance
+        // array's order drifts away from the instance-id order a cap eviction
+        // sorts by, which is where a stale index would corrupt the array.
+        const n = rand.intRangeAtMost(usize, 1, 6);
+        var k: usize = 0;
+        while (k < n) : (k += 1) {
+            const labels = randLabelStr(rand, &lbuf);
+            const name = randLabelStr(rand, &nbuf);
+            _ = api_miles.MilesStartSoundInstance(null, name.ptr, 0, 0, labels.ptr, null, 0, 0);
+            if (rand.boolean()) _ = api_miles.MilesStopSoundInstances(labels.ptr, 0);
+        }
+
+        // A pause/suspend count and an enumeration walk are two public entry
+        // points onto the same predicate; they must report the same instances.
+        const query = randLabelStr(rand, &qbuf);
+        const paused = api_miles.MilesPauseSoundInstances(query.ptr, 0);
+        try testing.expectEqual(paused, countMilesInstances(query.ptr));
+        try testing.expectEqual(paused, api_miles.MilesResumeSoundInstances(query.ptr, 0));
+        // '*' is the universal query: it globs onto every non-empty label.
+        // The harness only ever starts instances with a non-empty label.
+        try testing.expectEqual(countMilesInstances(null), countMilesInstances("*"));
+    }
+
+    // A cap is an upper bound, so starting under one must never leave more
+    // instances carrying the capped label than the cap allows, however the
+    // array was shuffled by earlier stops.
+    _ = api_miles.MilesSetSoundLabelLimits(null, "music 2:sfx 1");
+    const cap: u64 = 2;
+    i = 0;
+    while (i < 200) : (i += 1) {
+        const labels = if (rand.boolean()) "music,amb" else "music";
+        _ = api_miles.MilesStartSoundInstance(null, "sfx_0", 0, 0, labels.ptr, null, 0, 0);
+        try testing.expect(countMilesInstances("music") <= cap);
+        // A stop on an unrelated query shuffles the array without changing the
+        // count, so the next eviction sees an order it did not record.
+        _ = api_miles.MilesStopSoundInstances("amb", 0);
+    }
+    try testing.expectEqual(countMilesInstances(null), api_miles.MilesStopSoundInstances(null, 0));
+    try testing.expectEqual(@as(u64, 0), countMilesInstances(null));
+}
+
+test "fuzz: a cap evicted from a shuffled list keeps the newest instances" {
+    api_miles.MilesClearEventQueue();
+    defer api_miles.MilesClearEventQueue();
+
+    // No cap while the list is built, so all four instances carry the label.
+    _ = api_miles.MilesSetSoundLabelLimits(null, "");
+    _ = api_miles.MilesStartSoundInstance(null, "s1", 0, 0, "music,one", null, 0, 0);
+    _ = api_miles.MilesStartSoundInstance(null, "s2", 0, 0, "music,two", null, 0, 0);
+    _ = api_miles.MilesStartSoundInstance(null, "s3", 0, 0, "music,three", null, 0, 0);
+    // Stopping the first entry moves the last one into its slot, so the list
+    // order (s3, s2) no longer tracks instance_id: the eviction that follows
+    // sorts the matches by id and used to then remove them by the index it
+    // recorded, which by the second removal named a slot past the end.
+    try testing.expectEqual(@as(u64, 1), api_miles.MilesStopSoundInstances("one", 0));
+    _ = api_miles.MilesSetSoundLabelLimits(null, "music 1");
+    _ = api_miles.MilesStartSoundInstance(null, "s4", 0, 0, "music,four", null, 0, 0);
+
+    try testing.expectEqual(@as(u64, 1), countMilesInstances("music"));
+    // Both capped instances go, so the sound just started is the only one left
+    // and the list holds nothing but it.
+    try testing.expectEqual(@as(u64, 1), countMilesInstances(null));
+    var next: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var info: api_miles.MILESEVENTSOUNDINFO = undefined;
+    while (api_miles.MilesEnumerateSoundInstances(null, &next, 0, "*", 0, &info) != 0) {
+        try testing.expect(std.mem.eql(u8, std.mem.span(info.UsedSound.?), "s4"));
     }
 }

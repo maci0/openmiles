@@ -219,36 +219,52 @@ fn instanceHasLabel(inst: *const SoundInstance, label: []const u8) bool {
     return false;
 }
 // Evict the oldest instances carrying `label` until a slot is free under `lim`
-// (a cap of 0 evicts every one of them). The matching indices are gathered in
-// one pass and ordered by instance_id once, rather than rescanning the whole
-// list to recount and re-find the minimum after each eviction: the old loop
-// was O(instances) per evicted instance, so a cap of 0 over N instances cost
-// O(N^2) label tokenizations on a single start-sound step.
+// (a cap of 0 evicts every one of them). The matches are gathered and ordered
+// by instance_id once, rather than rescanning the whole list to recount and
+// re-find the minimum after each eviction: the old loop was O(instances) per
+// evicted instance, so a cap of 0 over N instances cost O(N^2) label
+// tokenizations on a single start-sound step.
 fn evictOldestWithLabel(label: []const u8, lim: u32) void {
-    var matches: std.ArrayListUnmanaged(usize) = .empty;
+    var matches: std.ArrayListUnmanaged(*SoundInstance) = .empty;
     defer matches.deinit(openmiles.global_allocator);
-    for (g_instances.items, 0..) |inst, i| {
+    for (g_instances.items) |inst| {
         if (!instanceHasLabel(inst, label)) continue;
-        matches.append(openmiles.global_allocator, i) catch return;
+        matches.append(openmiles.global_allocator, inst) catch return;
     }
     // Already under the cap: nothing to evict.
     const cap: usize = lim;
     if (matches.items.len < cap) return;
-    std.sort.block(usize, matches.items, g_instances.items, struct {
-        fn lt(items: []const *SoundInstance, a: usize, b: usize) bool {
-            return items[a].instance_id < items[b].instance_id;
+    std.sort.block(*SoundInstance, matches.items, {}, struct {
+        fn lt(_: void, a: *SoundInstance, b: *SoundInstance) bool {
+            return a.instance_id < b.instance_id;
         }
     }.lt);
     // One slot short of the cap is enough room for the sound being added; a cap
     // of 0 has no slot, so it evicts all matches.
-    const victims = @min(matches.items.len, matches.items.len - cap + 1);
-    // Highest index first: swapRemove shifts the tail down, which leaves every
-    // lower (not yet removed) index valid.
-    var v: usize = victims;
-    while (v > 0) {
-        v -= 1;
-        destroyInstance(g_instances.swapRemove(matches.items[v]));
+    const victims = matches.items[0..@min(matches.items.len, matches.items.len - cap + 1)];
+    // Compact the array in one pass, matching on the instance pointer. An index
+    // recorded before the first removal is stale by the time it is used: the
+    // survivors shift down, so it names whichever instance was moved into that
+    // slot, and the walk runs off the end of a shortened array. The victims are
+    // ordered by instance_id, not by position, so membership is a scan rather
+    // than a cursor into the list. The write cursor never passes the read
+    // cursor, so the in-place compaction is safe.
+    var w: usize = 0;
+    for (g_instances.items) |inst| {
+        var is_victim = false;
+        for (victims) |victim| {
+            if (victim != inst) continue;
+            is_victim = true;
+            break;
+        }
+        if (is_victim) {
+            destroyInstance(inst);
+            continue;
+        }
+        g_instances.items[w] = inst;
+        w += 1;
     }
+    g_instances.shrinkRetainingCapacity(w);
 }
 // Make room under each limited label of a new sound before it is added.
 fn enforceLimits(labels_in: []const u8) void {

@@ -103,3 +103,83 @@ test "a buffer sized in UTF-16 units is not sized in UTF-8 bytes" {
     try testing.expectEqual(@as(usize, 200), utf8.len);
     try testing.expectEqualSlices(u8, &.{ 0xC3, 0xA9, 0xC3, 0xA9 }, utf8[0..4]);
 }
+
+test "fuzz: arbitrary bytes are refused or converted, never overrun" {
+    // The *W entry points transcode file names and plugin paths the process
+    // did not author, so the input is arbitrary bytes: malformed sequences,
+    // overlong encodings, lone continuation bytes. Anything the converters
+    // refuse is a valid answer; what must never happen is a write past the
+    // destination or a partial result reported as a whole one.
+    var prng = std.Random.DefaultPrng.init(0xA17E);
+    const rand = prng.random();
+    const canary: u16 = 0x5A5A;
+    var bytes: [96]u8 = undefined;
+    // Worst case in both directions for a 96-byte input: one UTF-16 unit per
+    // UTF-8 byte, and one to three UTF-8 bytes per unit.
+    var wbuf: [bytes.len + 2]u16 = undefined;
+    var out: [bytes.len * 3 + 2]u8 = undefined;
+    var i: usize = 0;
+    while (i < 5000) : (i += 1) {
+        const n = rand.intRangeAtMost(usize, 0, bytes.len);
+        rand.bytes(bytes[0..n]);
+        // A NUL would end the wide string early and truncate the result; the
+        // converters document the input as NUL-free, so keep the fuzz bytes
+        // NUL-free too and let everything else through unfiltered.
+        for (bytes[0..n]) |*b| {
+            if (b.* == 0) b.* = 0x01;
+        }
+
+        @memset(&wbuf, canary);
+        const w = toWide(bytes[0..n], &wbuf) catch continue;
+        try testing.expect(w.len <= bytes[0..n].len);
+        try testing.expectEqual(@as(u16, 0), wbuf[w.len]);
+        try testing.expectEqual(canary, wbuf[w.len + 1]);
+
+        // A destination too small for what the string needs is refused whole:
+        // a prefix written and returned would be a truncated path that still
+        // looked like a whole one.
+        if (n > 0) {
+            const short = out[0..rand.intRangeAtMost(usize, 0, n - 1)];
+            @memset(short, 0xCC);
+            try testing.expectError(error.NoSpaceLeft, toUtf8(w, short));
+            for (short) |b| try testing.expectEqual(@as(u8, 0xCC), b);
+        }
+        // Malformed bytes decode lossily (the replacement character), so the
+        // only property left is that the result is a prefix-bounded string of
+        // well-formed UTF-8 and nothing was written past it.
+        const back = try toUtf8(w, &out);
+        try testing.expect(std.unicode.utf8ValidateSlice(back));
+    }
+}
+
+test "fuzz: valid utf-8 survives the round trip whatever it contains" {
+    var prng = std.Random.DefaultPrng.init(0xA17F);
+    const rand = prng.random();
+    var bytes: [96]u8 = undefined;
+    // Worst case in both directions for a 96-byte input: one UTF-16 unit per
+    // UTF-8 byte, and one to three UTF-8 bytes per unit.
+    var wbuf: [bytes.len + 2]u16 = undefined;
+    var out: [bytes.len * 3 + 2]u8 = undefined;
+    var i: usize = 0;
+    while (i < 5000) : (i += 1) {
+        // Whole code points across every plane, so surrogate pairs, four-byte
+        // sequences, and the ASCII tail of a name all get built.
+        const n = rand.intRangeAtMost(usize, 0, bytes.len);
+        var k: usize = 0;
+        while (k < n) {
+            const cp: u21 = switch (rand.intRangeAtMost(u8, 0, 3)) {
+                0 => rand.intRangeAtMost(u21, 0, 0x7F),
+                1 => rand.intRangeAtMost(u21, 0x80, 0x7FF),
+                2 => rand.intRangeAtMost(u21, 0x800, 0xD7FF),
+                else => rand.intRangeAtMost(u21, 0xE000, 0x10FFFF),
+            };
+            const len: usize = std.unicode.utf8ByteSequenceLength(@truncate(cp)) catch continue;
+            if (k + len > n) break;
+            k += (std.unicode.utf8Encode(cp, bytes[0..n]) catch break);
+        }
+        const s = bytes[0..k];
+        if (std.mem.indexOfScalar(u8, s, 0) != null) continue; // never generated
+        const w = try toWide(s, &wbuf);
+        try testing.expectEqualStrings(s, try toUtf8(w, &out));
+    }
+}
