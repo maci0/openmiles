@@ -3968,8 +3968,16 @@ test "Timer restart while a self-stopped callback is still running keeps one loo
         }
 
         fn restarter() void {
-            // Give the timer thread time to reach the self-stop.
-            while (fired.load(.monotonic) == 0) std.atomic.spinLoopHint();
+            // Wait for the self-stop to have landed, not merely for the first
+            // fire: `fired` is bumped before the callback reaches stop(), so a
+            // restart issued on that alone can beat the stop. start() would then
+            // see the timer still running, return without respawning, and the
+            // callback's own stop() would clear is_running for good — the
+            // "timer is still running" assertion below reads false while the
+            // library did exactly what it was asked. is_running cleared with
+            // `fired` set is the window this test covers: the callback has
+            // self-stopped and has not returned yet.
+            while (fired.load(.monotonic) == 0 or @atomicLoad(bool, &timer.is_running, .acquire)) std.atomic.spinLoopHint();
             restart_issued.store(true, .release);
             timer.start();
         }
