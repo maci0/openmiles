@@ -58,14 +58,6 @@ V8_0 = 80
 # of the chain is skipped.
 PENDING, TAKEN, DONE = 0, 1, 2
 
-TARGET_RE = re.compile(
-    r'\.name = "([A-Za-z0-9_]+)"'
-    r"(?:.*?\.stack_size = (\d+))?"
-    r"(?:.*?\.ver = (\d+))?"
-    r"(?:.*?\.ver_max = (\d+))?"
-    r"(?:.*?\.cdecl = true)?"
-)
-
 # Symbols the export loop in main.zig never emits, and name substrings it
 # drops wholesale from 8.0 on. A declaration for either is a link error.
 REMOVED_AT_80 = [
@@ -187,13 +179,6 @@ def resolve_header(text, version):  # noqa: PLR0912
         if d:
             decls.append((d.group(1), d.group(2), d.group(3), d.group(4)))
     return decls
-
-
-def arg_count(params):
-    params = params.strip()
-    if params in ("", "void"):
-        return 0
-    return sum(1 for _ in split_args(params))
 
 
 def slot_count(params):

@@ -284,22 +284,6 @@ pub fn clearFileError() void {
     last_file_error_buf[0] = 0;
 }
 
-/// Copy the stored last-error message into `out` and return the slice actually
-/// written. The error buffers are shared across every thread that calls the
-/// API, so a caller that reads them through the raw pointers the C API returns
-/// is reading whatever another thread writes; this is the race-free way in.
-pub fn copyLastError(out: []u8) []const u8 {
-    error_buf_mutex.lockUncancelable(io);
-    defer error_buf_mutex.unlock(io);
-    return std.mem.copyForwards(u8, out, std.mem.sliceTo(&last_error_buf, 0));
-}
-
-pub fn copyFileError(out: []u8) []const u8 {
-    error_buf_mutex.lockUncancelable(io);
-    defer error_buf_mutex.unlock(io);
-    return std.mem.copyForwards(u8, out, std.mem.sliceTo(&last_file_error_buf, 0));
-}
-
 // --- Custom file I/O callbacks ---
 
 // MSS file callbacks (mss.h). FileHandle is a U32 token (4 bytes on x86, same
