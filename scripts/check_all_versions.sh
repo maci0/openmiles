@@ -24,6 +24,8 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
+command -v zig >/dev/null || { echo "error: zig not found on PATH" >&2; exit 1; }
+
 usage() {
   cat <<EOF
 Usage: scripts/check_all_versions.sh [--strict]
@@ -77,11 +79,15 @@ for ver in "${VERSIONS[@]}"; do
     fail=1
     continue
   fi
-  out=$(python3 scripts/check_exports.py zig-out/bin/mss32.dll "$ref" --names-only $STRICT)
-  rc=$?
-  m=$(printf '%s\n' "$out" | sed -n 's/^MISSING[^:]*: \([0-9]*\)$/\1/p')
-  d=$(printf '%s\n' "$out" | sed -n 's/^DECORATION[^:]*: \([0-9]*\)$/\1/p')
-  e=$(printf '%s\n' "$out" | sed -n 's/^EXTRA[^:]*: \([0-9]*\)$/\1/p')
+  # check_exports.py exits with the discrepancy count, so a nonzero rc is a
+  # parity failure, not a crash. Its stderr is dropped to keep the table
+  # readable, so a missing line is reported as an empty count rather than
+  # aborting the sweep.
+  rc=0
+  out=$(python3 scripts/check_exports.py zig-out/bin/mss32.dll "$ref" --names-only $STRICT 2>/dev/null) || rc=$?
+  m=$(printf '%s\n' "$out" | grep '^MISSING'    | grep -oE '[0-9]+$' || true)
+  d=$(printf '%s\n' "$out" | grep '^DECORATION' | grep -oE '[0-9]+$' || true)
+  e=$(printf '%s\n' "$out" | grep '^EXTRA'      | grep -oE '[0-9]+$' || true)
   status="ok"
   # An unparsable report is a broken checker run, not a pass.
   if [ "$rc" -ne 0 ] || [ -z "$m" ] || [ -z "$d" ] || [ -z "$e" ]; then

@@ -134,6 +134,12 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "build_options", .module = build_opts_mod },
             },
             .link_libc = true,
+            // The DLL is the shipped artifact, so it must not ship without a
+            // stack canary. Zig 0.16 rejects -fstack-protector outright on
+            // x86_64 Linux ("the selected target does not support stack
+            // protection"), so scope it to the Windows targets that accept it
+            // rather than breaking the native build the tests run on.
+            .stack_protector = if (target.result.os.tag == .windows) true else null,
         }),
     });
 
@@ -146,6 +152,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .link_libc = true,
+            .stack_protector = if (target.result.os.tag == .windows) true else null,
         }),
     });
     c_impl.root_module.addIncludePath(b.path("deps"));
@@ -320,12 +327,16 @@ pub fn build(b: *std.Build) void {
     // harnesses find them relative to their own directory (they look up
     // test_media/test.{wav,mid,sf2}). The directory is gitignored ("provide
     // your own"), so skip the install when it is absent instead of failing the
-    // build on machines without the fixtures (e.g. CI).
+    // build on machines without the fixtures (e.g. CI). Say which of the two
+    // happened: the install tree differs, and a silently fixture-less build
+    // reads as a passing one.
     if (std.Io.Dir.cwd().access(b.graph.io, "test_media", .{})) |_| {
         b.installDirectory(.{
             .source_dir = b.path("test_media"),
             .install_dir = .bin,
             .install_subdir = "test_media",
         });
-    } else |_| {}
+    } else |_| {
+        std.debug.print("note: test_media/ not found, test fixtures are not installed\n", .{});
+    }
 }

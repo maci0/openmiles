@@ -38,7 +38,9 @@ jobs:
             ~/.local/share/zig
             ~/AppData/Local/zig
             ~/Library/Caches/zig
-          key: ${{ runner.os }}-zig-${{ hashFiles('build.zig.zon') }}
+          # The toolchain version is part of the key: a Zig bump invalidates
+          # the cache, a build.zig.zon edit does not (it rarely changes).
+          key: ${{ runner.os }}-zig-0.16.0-${{ hashFiles('build.zig.zon') }}
           restore-keys: |
             ${{ runner.os }}-zig-
 

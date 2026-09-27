@@ -39,7 +39,9 @@ It replaces the proprietary MSS audio stack with [miniaudio](https://miniaud.io/
 
 ## Building
 
-Requires [Zig 0.16.0](https://ziglang.org/download/).
+Requires [Zig 0.16.0](https://ziglang.org/download/). `make build` and `make test`
+run a version check first and refuse to build on any other Zig; the raw
+`zig build` commands below do not.
 
 ```bash
 # Native build (Linux/Windows -- for tests)
@@ -57,6 +59,14 @@ zig build -Dtarget=x86-windows -Doptimize=ReleaseFast -Dmss-version=5
 `make lint`, and `make parity` runs the per-version export-table sweep
 (`scripts/check_all_versions.sh`, which needs the reference DLLs under
 `references/`, not checked in).
+
+### Release archive
+
+`scripts/package_release.sh <out.zip>` packages `zig-out/bin/mss32.dll` with
+the license and this README. The archive is reproducible: entry order is
+fixed, every entry takes one timestamp (`SOURCE_DATE_EPOCH`, defaulting to the
+HEAD commit time), and no host metadata is stored. Packaging it twice yields
+byte-identical files, which the release workflow checks with `cmp`.
 
 ### Targeting an MSS version
 

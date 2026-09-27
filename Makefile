@@ -1,11 +1,23 @@
-.PHONY: all build test clean lint format check-header parity help
+.PHONY: all build test clean lint format check-header check-toolchain parity help
+
+# The one toolchain this project builds with. build.zig.zon carries
+# .minimum_zig_version, but that is a floor, not the version the output was
+# verified against; a stray zig on PATH would silently build anyway. Keep the
+# two in sync: this value is what CI installs.
+ZIG_VERSION := 0.16.0
 
 all: build
 
-build:
+# Fail before any compile work, with a clear message, rather than letting an
+# unpinned zig produce artifacts nobody compared against the references.
+check-toolchain:
+	@command -v zig >/dev/null 2>&1 || { echo "error: zig $(ZIG_VERSION) not found on PATH" >&2; exit 1; }
+	@v=`zig version`; [ "$$v" = "$(ZIG_VERSION)" ] || { echo "error: zig $(ZIG_VERSION) required, found $$v" >&2; exit 1; }
+
+build: check-toolchain
 	zig build
 
-test:
+test: check-toolchain
 	zig build test
 
 # src/mss.h declares the C surface; src/main.zig is the export table it must
