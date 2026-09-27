@@ -13,12 +13,16 @@ All notable changes to OpenMiles are recorded here. The format follows
   published under a name the package does not claim.
 - The release workflow runs the test suite, cross-compiles the DLL, and smoke
   tests the produced binary (32-bit PE, core exports present) before packaging.
-- Compatibility is per `-Dmss-version`, not per OpenMiles release. Each
-  supported value (3 through 9) reproduces its reference `mss32.dll` export
-  table with zero missing exports, so an OpenMiles release that keeps those
-  counts is a drop-in replacement for the same game set as the previous one.
-  A release that changes a count below is breaking for the affected version and
-  must say so in its Breaking section.
+- Compatibility is per `-Dmss-version`, not per OpenMiles release. Each value
+  swept by `scripts/check_all_versions.sh` (`3`, `4`, `5`, `6.1`, `6.5`, `7`,
+  `8`, `9`) reproduces its reference `mss32.dll` export table with zero missing
+  exports, so an OpenMiles release that keeps those counts is a drop-in
+  replacement for the same game set as the previous one. A release that changes
+  a count below is breaking for the affected version and must say so in its
+  Breaking section. `6` / `6.6` (66) and `6.0` (60) have no committed reference
+  DLL and are not swept; `scripts/check_header.py` checks them against the
+  export table, and `scripts/check_versions.py` fails if a `-Dmss-version`
+  value is neither swept nor listed as unswept with a reason.
 - ABI parity is checked by `scripts/check_all_versions.sh` against reference
   DLLs under `references/` (not committed; supply them locally to run it).
 
@@ -68,6 +72,12 @@ everything below is unreleased.
 - `make check-pins` (run by `make lint`) fails when the Zig and ruff versions
   named in the Makefile, `ci.yml`, and `build.zig.zon` disagree, and when a
   workflow that builds the tree stops taking its Zig from `build.zig.zon`.
+- `make check-versions` (run by `make lint`) fails when a `-Dmss-version` value
+  is not parity-swept, is not declared unswept with a reason, or is missing
+  from the version set `scripts/check_header.py` resolves the header for.
+  `scripts/check_all_versions.sh` prints the values it did not build.
+- Fuzz targets for the event-step decoder and the XMIDI parser
+  (`src/fuzz_native_test.zig`).
 - Vendored dependency checksums are documented for `deps/`.
 
 ### Fixed
@@ -82,7 +92,23 @@ everything below is unreleased.
   through `lastDigitalDriver` / `setLastDigitalDriver` and their MIDI
   counterparts.
 - `zig fmt` clean again (`src/engine/midi.zig`), so `make lint` passes.
-
+- A digital driver handle that could not enter the handle table is misread as a
+  `Sample3D` by every 3D setter, which then writes a listener position through
+  the wrong layout. The table was capped at eight drivers, so the ninth open
+  produced exactly that: it now grows on demand, and an open that still cannot
+  be tracked fails the call instead of publishing an untracked handle.
+- UTF-8 destinations were sized in UTF-16 units, so a path carrying any
+  character outside ASCII was reported as too long and dropped. Buffers are
+  sized from `wide.utf8LenBound` (three bytes per unit) in the temp-path,
+  ASI-unpack, and log paths.
+- A `?` wildcard in a file glob matched one byte, so it could match half a
+  multi-byte character and then fail on the rest. It matches one character.
+- `Timer.setPeriodUs` accepted 0, which left the run loop with an empty sleep
+  and fired the callback back to back on one core. The period is clamped to
+  `Timer.min_period_us`, so a rate that truncates to 0 hz runs at the floor
+  rather than spinning.
+- The event-step decoder read past the end of the string when a version header
+  ended at its type byte (`"9"`, `"9;"`). Found by the new fuzz target.
 - Repeated opens no longer duplicate state: `AIL_open_digital_driver` records
   the driver it opened, so a second call returns that driver instead of
   building another miniaudio engine (and `AIL_shutdown` now reaches it), and a

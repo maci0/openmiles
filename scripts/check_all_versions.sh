@@ -12,9 +12,10 @@
 # the v9 functions newer than the 9.1d binary snapshot), should stay 0.
 #
 # The reference set covers one mainline binary per selectable major version
-# plus the 6.1 and 6.5 sub-lines. The 6, 6.0, and 6.6 selects share the 6.0
-# mainline surface and are not swept separately; a change to their gating needs
-# a 6.0/6.6 reference added here before the sweep can vouch for it.
+# plus the 6.1 and 6.5 sub-lines. Every accepted -Dmss-version value is either
+# in VERSIONS or in UNSWEPT with a reason, and scripts/check_versions.py fails
+# if one is neither, so a new select cannot ship without either a reference or
+# a written statement that it has none.
 #
 # Usage: scripts/check_all_versions.sh [--strict]
 #   --strict folds EXTRA into the per-version pass/fail too.
@@ -65,6 +66,16 @@ declare -A REF=(
 )
 
 VERSIONS=(3 4 5 6.1 6.5 7 8 9)
+
+# Accepted -Dmss-version values with no reference DLL in this sweep. Each
+# reason says what the shipped gate does and does not prove for that build; the
+# only gate these values have is scripts/check_header.py, which checks the
+# header against the export table but never against a real Miles DLL.
+declare -A UNSWEPT=(
+  [6]='same build as 6.6: neither is the 6.0 or 6.5 surface, so neither reference covers them'
+  [6.6]='same build as 6; the 6.5/6.6 sub-line result in docs/EXPORT_PARITY.md came from a local sweep whose references are not committed'
+  [6.0]='no 6.0 reference DLL; the 6.1d and 6.5h references bracket a different surface'
+)
 fail=0
 skipped=()
 for ver in "${VERSIONS[@]}"; do
@@ -95,6 +106,13 @@ for ver in "${VERSIONS[@]}"; do
     fail=1
   fi
   printf "v%-4s MISSING=%-3s DECORATION=%-3s EXTRA=%-3s  %s\n" "$ver" "${m:-?}" "${d:-?}" "${e:-?}" "$status"
+done
+
+# A green sweep says nothing about a value it never built, so name the ones it
+# skipped by declaration. scripts/check_versions.py keeps this list in step with
+# the values -Dmss-version accepts.
+for ver in "${!UNSWEPT[@]}"; do
+  printf 'v%-4s not swept: %s\n' "$ver" "${UNSWEPT[$ver]}"
 done
 
 if [ "${#skipped[@]}" -ne 0 ]; then

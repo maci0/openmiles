@@ -133,10 +133,16 @@ arities).
 | 3 | Core, Digital, Sample, Streaming, MIDI, Redbook, Timer | 0 |
 | 4 | RIB/ASI plugin system + ASI compression, Quick, Input, Memory | 0 |
 | 5 | 3D audio, filters | 0 |
-| 6 | Filter API maturity | 0 |
+| 6.1 | Filter API maturity | 0 |
+| 6.5 | Low-pass cutoff controls, per-stream level and exclusion calls | 0 |
 | 7 | Unified 2D/3D sample API, master/speaker reverb, DSP stages | 0 |
 | 8 | Event system, soundbanks, channel levels, in-memory I/O | 0 |
 | 9 | `Miles*` event/variable API, environment presets, 64-bit counters | 0 |
+
+`6`/`6.6` (66) and `6.0` (60) have no reference DLL in the sweep: 66 carries the
+6.5/6.6 sub-line surface, which neither the 6.1d nor the 6.5h reference covers,
+and no 6.0 or 6.6 binary is committed. `src/mss.h` is still checked against the
+export table for both, by `scripts/check_header.py`.
 
 `scripts/check_all_versions.sh` reproduces the zero-missing diff per major
 version against the reference DLLs listed in that script (3.6a, 4.0h, 5.0b,

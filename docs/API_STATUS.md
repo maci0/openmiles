@@ -510,8 +510,12 @@ reference `mss32.dll` (decorated stdcall names, via `winedump -j export`):
 | v9 | 9.1d | 0 |
 
 The reference column is the canonical per-version set
-`scripts/check_all_versions.sh` sweeps against. The `6`, `6.0` and `6.6`
-selects share the 6.0 mainline and are not swept separately.
+`scripts/check_all_versions.sh` sweeps against. `-Dmss-version=6` and
+`-Dmss-version=6.6` both encode 66, a surface of its own (the 6.5/6.6
+sub-line), and `6.0` encodes 60: none of the three is swept, because no 6.0 or
+6.6 reference DLL is committed. `scripts/check_versions.py` keeps that set and
+the one in `scripts/check_all_versions.sh` in step, and
+`scripts/check_header.py` still checks all three against the export table.
 
 Per-version arity differences are reproduced exactly (e.g. `AIL_init_sample`
 `@4→@12→@8`, the v4/v5 5-arg `AIL_3D_sample_distances@20`, `AIL_input_open@12`,

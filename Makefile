@@ -1,4 +1,4 @@
-.PHONY: all build test check clean lint format check-header check-pins check-python check-toolchain check-vendored cross parity help
+.PHONY: all build test check clean lint format check-header check-versions check-pins check-python check-toolchain check-vendored cross parity help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -39,6 +39,12 @@ cross:
 check-header:
 	./scripts/check_header.py
 
+# Every -Dmss-version value must be swept against a reference DLL or declared
+# unswept with a reason, and the three places that list the values must agree.
+# See scripts/check_versions.py.
+check-versions:
+	./scripts/check_versions.py
+
 # deps/ holds vendored upstream headers, not package-manager downloads, so
 # deps/SHA256SUMS is the only record of which bytes were reviewed.
 check-vendored:
@@ -65,6 +71,7 @@ lint:
 	zig fmt --check .
 	shellcheck scripts/*.sh
 	./scripts/check_header.py
+	./scripts/check_versions.py
 	./scripts/check_vendored.py
 	@$(MAKE) --no-print-directory check-python
 	@$(MAKE) --no-print-directory check-pins
@@ -87,6 +94,7 @@ help:
 	@echo "  check      run every CI check in order: lint, build, test, cross"
 	@echo "  lint       zig fmt, ruff, shellcheck, header/vendored parity, pin agreement"
 	@echo "  check-header  assert src/mss.h matches the export table and struct layouts per -Dmss-version"
+	@echo "  check-versions  assert every -Dmss-version is parity-swept or declared unswept"
 	@echo "  cross      cross-compile the shipped x86-windows DLL"
 	@echo "  format     apply zig fmt and ruff format"
 	@echo "  parity     diff every -Dmss-version export table against its reference DLL"

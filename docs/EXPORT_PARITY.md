@@ -99,7 +99,10 @@ those three symbols — an unavoidable trade-off, documented here.
 > `zig build -Dtarget=x86-windows`), not the 635/514 those tables carry. Treat
 > them as the record of a past run, not the current count. The live count comes
 > from the built DLL or from `scripts/check_all_versions.sh`; the load-bearing
-> claim is the MISSING/DECORATION diff, not the export total.
+> claim is the MISSING/DECORATION diff, not the export total. The v6 row's
+> reference is a 6.0 mainline binary, which is not one of the references
+> `scripts/check_all_versions.sh` names, so that row cannot be reproduced by the
+> shipped sweep.
 
 `MISSING` and `DECORATION MISMATCH` are both 0 for v5-v9, so every function a
 game *calls* resolves with the correct name and stdcall byte-count. The
@@ -202,5 +205,9 @@ gap, it is reproduced exactly: a no-op C stub (`mss_stream_background_stub`)
 backs a version-gated `/EXPORT:` drectve that emits the reference's exact export
 name (`@stream_background@0` for ver 61/65, `stream_background` for ver 66). The
 export *name* is just a string in the table, so a single cdecl stub serves both
-forms. **All of v3-v9 are now 0 MISSING / 0 DECORATION MISMATCH against their
-canonical reference DLL.**
+forms. **Every version in `scripts/check_all_versions.sh` is now 0 MISSING /
+0 DECORATION MISMATCH against its canonical reference DLL.** The 6.5/6.6 audit
+above used a 6.6 reference that is not committed, so the shipped sweep cannot
+re-verify `-Dmss-version=6` / `6.6`; `scripts/check_all_versions.sh` lists it
+under `UNSWEPT` with that reason, and `scripts/check_versions.py` fails if an
+accepted `-Dmss-version` value is neither swept nor listed there.
