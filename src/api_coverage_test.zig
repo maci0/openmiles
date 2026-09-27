@@ -92,7 +92,7 @@ test "coverage: digital.zig exports" {
     const s = try openmiles.Sample.init(drv);
     defer s.deinit();
     s.loadFromMemory(wav, false) catch {};
-    const myprov = openmiles.Provider.init(alloc, null) catch null;
+    const myprov = openmiles.Provider.init(alloc) catch null;
     defer if (myprov) |p| p.deinit();
     const filt: ?*anyopaque = flt.AIL_open_filter(myprov, drv);
 

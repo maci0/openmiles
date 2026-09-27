@@ -10,7 +10,7 @@ const Provider = openmiles.Provider;
 
 pub fn RIB_alloc_provider_handle(module: *anyopaque) callconv(.c) ?*Provider {
     log("RIB_alloc_provider_handle(module={*})\n", .{module});
-    return Provider.init(openmiles.global_allocator, module) catch |err| {
+    return Provider.init(openmiles.global_allocator) catch |err| {
         log("Error: {any}\n", .{err});
         openmiles.setLastError("Failed to allocate provider handle");
         return null;

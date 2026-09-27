@@ -100,7 +100,7 @@ test "MidiDriver ms-per-frame stays finite for any output rate" {
 
 test "Provider registry and finding" {
     const allocator = testing.allocator;
-    const provider = try openmiles.Provider.init(allocator, null);
+    const provider = try openmiles.Provider.init(allocator);
     defer provider.deinit();
 
     try testing.expectEqualStrings("unknown", provider.name);
@@ -185,7 +185,7 @@ test "Sequence setMsPosition clamps beat math for tiny ms_per_beat" {
 
 test "Provider registry allows duplicate interface names" {
     const allocator = testing.allocator;
-    const provider = try openmiles.Provider.init(allocator, null);
+    const provider = try openmiles.Provider.init(allocator);
     defer provider.deinit();
 
     var entry = openmiles.RIB_INTERFACE_ENTRY{
@@ -1231,7 +1231,7 @@ test "unregistering an interface name removes every registration of it" {
     // register more than once). Unregistering must take both: dropping only
     // the first would leave a copy still answering entry lookups, and the
     // second unregister would then still change state.
-    const p = try openmiles.Provider.init(testing.allocator, null);
+    const p = try openmiles.Provider.init(testing.allocator);
     defer p.deinit();
 
     var cut = [_]openmiles.RIB_INTERFACE_ENTRY{.{
@@ -1277,7 +1277,7 @@ test "loading the same plugin path twice is recognised as one provider" {
     try testing.expect(openmiles.isPluginAlreadyLoaded(&loaded, resolved));
     try testing.expect(!openmiles.isPluginAlreadyLoaded(&loaded, "zig-out/bin/plugins/other.asi"));
     // A provider that was never loaded from a file matches nothing.
-    const bare = try openmiles.Provider.init(testing.allocator, null);
+    const bare = try openmiles.Provider.init(testing.allocator);
     defer bare.deinit();
     try testing.expect(!openmiles.isPluginAlreadyLoaded(&.{bare}, resolved));
 }

@@ -1217,7 +1217,7 @@ pub fn startup() void {
     log("startup: ensureStartupTime\n", .{});
     ensureStartupTime();
     log("startup: Provider.init\n", .{});
-    const p = Provider.init(global_allocator, null) catch {
+    const p = Provider.init(global_allocator) catch {
         log("startup: Provider.init FAILED\n", .{});
         return;
     };

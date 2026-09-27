@@ -18,7 +18,7 @@ fn entry(comptime name: [:0]const u8, token: usize) Entry {
 
 /// Registers `entries` under `iface_name` on a fresh provider and returns it.
 fn providerWith(iface_name: [:0]const u8, entries: []const Entry) !*openmiles.Provider {
-    const p = try openmiles.Provider.init(testing.allocator, null);
+    const p = try openmiles.Provider.init(testing.allocator);
     errdefer p.deinit();
     try p.registerInterface(iface_name, @intCast(entries.len), @ptrCast(@constCast(entries.ptr)));
     return p;
@@ -60,7 +60,7 @@ test "RIB_enumerate_interface entry names stay readable after later registration
     // read it after the provider registers more entries. Storing names in a
     // hash map fails this, because growing the map frees the key storage the
     // pointer refers to.
-    const p = try openmiles.Provider.init(testing.allocator, null);
+    const p = try openmiles.Provider.init(testing.allocator);
     defer p.deinit();
 
     const first = [_]Entry{entry("held open", 1)};
@@ -109,7 +109,7 @@ test "a repeated entry name updates its token in place" {
 test "registering the same interface name twice keeps both registrations" {
     // RIB_Main calls register once per interface, so two calls with the same
     // name are two interfaces, and RIB_enumerate_interface matches the first.
-    const p = try openmiles.Provider.init(testing.allocator, null);
+    const p = try openmiles.Provider.init(testing.allocator);
     defer p.deinit();
 
     const first = [_]Entry{entry("cutoff", 1)};

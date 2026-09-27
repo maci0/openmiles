@@ -88,7 +88,7 @@ pub const Provider = struct {
     user_data: [8]usize = [_]usize{0} ** 8,
     system_data: [8]usize = [_]usize{0} ** 8,
 
-    pub fn init(allocator: std.mem.Allocator, module: ?*anyopaque) !*Provider {
+    pub fn init(allocator: std.mem.Allocator) !*Provider {
         log("Provider.init called\n", .{});
         const name = try allocator.dupeZ(u8, "unknown");
         errdefer allocator.free(name);
@@ -101,7 +101,6 @@ pub const Provider = struct {
             .allocator = allocator,
             .interfaces = .empty,
         };
-        _ = module;
         return self;
     }
 

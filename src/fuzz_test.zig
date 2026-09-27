@@ -499,7 +499,7 @@ test "fuzz Filter cutoff/order with adversarial values" {
     const rand = prng.random();
     const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer driver.deinit();
-    const provider = try openmiles.Provider.init(testing.allocator, null);
+    const provider = try openmiles.Provider.init(testing.allocator);
     defer provider.deinit();
     const filter = openmiles.Filter.init(provider, driver) catch return;
     defer filter.deinit();
