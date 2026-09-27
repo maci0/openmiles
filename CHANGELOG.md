@@ -45,6 +45,15 @@ All notable changes to OpenMiles are recorded here. The format follows
 No version has been tagged yet. `build.zig.zon` still reads `0.0.0`, so
 everything below is unreleased.
 
+### Fixed
+
+- `docs/THREAT_MODEL.md`: the `path:line anchor` references had drifted off the
+  lines they name, so `make check-threat-model` failed and took `make lint` and
+  `make check` with it. The ASI temp-file controls now point at the entropy
+  draw and the exclusive create as they are written today, and the
+  plugin-scanning references at the current `loadApplicationProviders` and
+  `loadAllAsi` call sites.
+
 ### Breaking
 
 - `Provider.init` takes only the allocator. It previously took a second
