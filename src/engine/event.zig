@@ -844,6 +844,9 @@ test "nextStep stops at a version header cut off after the type byte" {
     try testing.expectEqual(@as(?[*:0]const u8, null), nextStep("9", &step, &scratch));
     // A header with a separator but no version number stops at the same place.
     try testing.expectEqual(@as(?[*:0]const u8, null), nextStep("9;", &step, &scratch));
-    // Well-formed headers still hand back the step that follows them.
-    try testing.expectEqual(@as(?[*:0]const u8, @ptrCast(":x;y;1.000000;1;1;2;")), nextStep("9;4:x;y;1.000000;1;1;2;", &step, &scratch));
+    // A well-formed header ("9;4;") is consumed and the step behind it is what
+    // comes back: the cursor points past that step, not at its first byte.
+    const after = nextStep("9;4;<;", &step, &scratch).?;
+    try testing.expectEqual(@intFromEnum(StepType.clear_state), step.type);
+    try testing.expect(after[0] == 0);
 }

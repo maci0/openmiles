@@ -59,7 +59,11 @@ test "coverage: digital.zig exports" {
     _ = dg.AIL_startup();
     _ = dg.AIL_last_error();
     _ = dg.AIL_get_preference(0);
-    _ = dg.AIL_set_preference(0, 0);
+    // The preference table is a process global that outlives this test, and
+    // main_test asserts shipped defaults against it, so put back what was
+    // there before writing a value the exporter would not be called with.
+    const old_pref = dg.AIL_set_preference(0, 0);
+    defer _ = dg.AIL_set_preference(0, old_pref);
     _ = dg.AIL_ms_count();
     _ = dg.AIL_us_count();
     dg.AIL_delay(0);

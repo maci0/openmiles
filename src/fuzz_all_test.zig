@@ -480,7 +480,13 @@ test "fuzz: invoke every export with adversarial inputs" {
             api_v7.AIL_set_listener_relative_receiver_array(hd, scp, @min(@max(ri, 0), 32)); // memcpy path, bounded count
             api_memory.AIL_set_mem_callbacks(null, null);
             api_v7.AIL_set_output_filter_driver_preference(null, rstr, scp);
-            _ = api_digital.AIL_set_preference(ru, ri);
+            // The preference table and the redist directory are process globals
+            // that outlive this loop: restore both, or a later test in the same
+            // binary reads a random value as if it were the shipped default.
+            const old_pref = api_digital.AIL_set_preference(ru, ri);
+            defer _ = api_digital.AIL_set_preference(ru, old_pref);
+            const old_redist = openmiles.getRedistDirectory();
+            defer _ = api_digital.AIL_set_redist_directory(@ptrCast(old_redist.ptr));
             _ = api_digital.AIL_set_redist_directory(rstr);
             api_v7.AIL_set_room_type(hd, ri, ri);
             api_v7.AIL_set_sample_3D_cone(hs, rf, rf, rf);

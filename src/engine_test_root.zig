@@ -9,7 +9,9 @@
 //! `test` blocks run.
 
 comptime {
+    _ = @import("engine/asi.zig");
     _ = @import("engine/digital.zig");
+    _ = @import("engine/event.zig");
     _ = @import("engine/midi.zig");
     _ = @import("engine/soundbank.zig");
     _ = @import("utils/wide.zig");
