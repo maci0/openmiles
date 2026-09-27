@@ -105,7 +105,15 @@ fn globMatch(pat: []const u8, text: []const u8) bool {
             }
         } else if (star) |s| {
             pi = s + 1;
+            // The retry starts at a character boundary, the same rule the '?'
+            // branch follows. Advancing one byte at a time let it restart on a
+            // continuation byte, where a pattern byte could match the tail of a
+            // character the pattern never named: "*\xA9b" matched "a<e-acute>b"
+            // by lining its lone 0xA9 up with the trailing byte of the e-acute,
+            // so a label query in a legacy code page selected instances whose
+            // labels it does not equal.
             star_ti += 1;
+            while (star_ti < text.len and text[star_ti] & 0xC0 == 0x80) : (star_ti += 1) {}
             ti = star_ti;
         } else return false;
     }
@@ -846,4 +854,38 @@ pub fn MilesEnumeratePresetPersists_v8(io_next: ?*?*anyopaque, out_name: ?*?[*:0
 }
 pub fn MilesEnumerateSoundInstances_v8(system: ?*anyopaque, io_next: ?*?*anyopaque, status: i32, labels: ?[*:0]const u8, search_for_id: u32, out_info: ?*anyopaque) callconv(.winapi) i32 {
     return MilesEnumerateSoundInstances(system, io_next, status, labels, search_for_id, out_info);
+}
+
+const testing = std.testing;
+
+test "glob: a retry after '*' restarts on a character boundary" {
+    // "*" then a lone continuation byte then "b" must not match "a<e-acute>b".
+    // The 0xA9 in the pattern is not the e-acute (U+00E9 is C3 A9), so the only
+    // way this could match is by lining the pattern byte up with the trailing
+    // byte of a character the pattern never named.
+    try testing.expect(!globMatch("*\xA9b", "a\u{00e9}b"));
+    // The same pattern with the whole character does match, and so does a
+    // pattern that wildcards the character: the fix rejects only the split.
+    try testing.expect(globMatch("*\u{00e9}b", "a\u{00e9}b"));
+    try testing.expect(globMatch("*\xe2\x98\x83b", "a\u{2603}b"));
+    try testing.expect(globMatch("*?*", "a\u{00e9}b"));
+    // A continuation byte names no character, so a pattern holding one cannot
+    // match a text holding that character, whatever the wildcards do.
+    try testing.expect(!globMatch("*?\xA9*", "a\u{00e9}b"));
+}
+
+test "glob: '?' consumes one character, '*' any run" {
+    try testing.expect(globMatch("kick", "kick"));
+    try testing.expect(!globMatch("kick", "kicks"));
+    try testing.expect(globMatch("k?ck", "kick"));
+    // One '?' is one character, so a two-character name needs two.
+    try testing.expect(!globMatch("??", "\u{00e9}"));
+    try testing.expect(globMatch("??", "a\u{00e9}"));
+    try testing.expect(globMatch("*.wav", "caf\u{00e9}.wav"));
+    try testing.expect(globMatch("*", ""));
+    try testing.expect(globMatch("", ""));
+    try testing.expect(!globMatch("", "a"));
+    // ASCII behavior is unchanged: every retry position is already a boundary.
+    try testing.expect(globMatch("*bcd", "abcd"));
+    try testing.expect(!globMatch("*bce", "abcd"));
 }

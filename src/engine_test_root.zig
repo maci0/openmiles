@@ -14,6 +14,7 @@ comptime {
     _ = @import("engine/event.zig");
     _ = @import("engine/midi.zig");
     _ = @import("engine/soundbank.zig");
+    _ = @import("api/miles.zig");
     _ = @import("utils/logger.zig");
     _ = @import("utils/wide.zig");
     _ = @import("utils/dynlib.zig");
