@@ -57,10 +57,10 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_set_file_async_callbacks` | 🟢 Implemented | |
 | `AIL_startup` | 🟢 Implemented | Registers built-in ASI codec provider |
 | `AIL_shutdown` | 🟢 Implemented | Tears down digital and MIDI drivers |
-| `AIL_set_redist_directory` | 🟢 Implemented | Stores path and triggers provider scanning on existing drivers |
+| `AIL_set_redist_directory` | 🟢 Implemented | Stores path (255-byte limit, a longer one is truncated and reported on stderr) and triggers provider scanning on existing drivers |
 | `AIL_last_error` | 🟢 Implemented | Returns last error set by API calls; empty string when none |
-| `AIL_get_preference` | 🟢 Implemented | |
-| `AIL_set_preference` | 🟢 Implemented | |
+| `AIL_get_preference` | 🟢 Implemented | A number past the 512-slot table returns 0 and is logged |
+| `AIL_set_preference` | 🟢 Implemented | A number past the 512-slot table is dropped, logged, and returns 0 |
 | `AIL_serve` | ⚪ Stub | No-op; miniaudio uses its own audio thread |
 
 ## RIB / ASI Plugin System

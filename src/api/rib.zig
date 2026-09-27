@@ -141,7 +141,14 @@ fn tempDir(buf: []u8) ?[]const u8 {
     // the fallback is that the unpacked image lands in the game directory, so an
     // operator whose TMPDIR is wrong would otherwise never learn why.
     const tmp = std.c.getenv("TMPDIR") orelse return null;
-    const dir = std.mem.span(@as([*:0]const u8, tmp));
+    return configuredTempDir(std.mem.span(@as([*:0]const u8, tmp)), buf);
+}
+
+/// Validate a configured temp directory and copy it into `buf` with a trailing
+/// separator, or return null after reporting why it was rejected. Split out of
+/// tempDir so the checks on a configured value are testable without writing to
+/// the process environment, which the test runner would share.
+fn configuredTempDir(dir: []const u8, buf: []u8) ?[]const u8 {
     if (dir.len == 0) {
         reportTempDir("is empty");
         return null;
@@ -608,4 +615,27 @@ pub fn RIB_enumerate_interface_std(provider_opt: ?*Provider, name: [*:0]const u8
 }
 pub fn RIB_type_string_std(data: ?*const anyopaque, subtype: u32) callconv(.winapi) [*:0]const u8 {
     return RIB_type_string(data, subtype);
+}
+
+const testing = std.testing;
+
+test "a configured TMPDIR is copied with a trailing separator" {
+    var buf: [max_temp_path_units * 3]u8 = undefined;
+    const out = configuredTempDir("/var/tmp", &buf).?;
+    try testing.expectEqualStrings("/var/tmp/", out);
+    // An operator's trailing separator is not doubled.
+    const kept = configuredTempDir("/var/tmp/", &buf).?;
+    try testing.expectEqualStrings("/var/tmp/", kept);
+}
+
+test "a rejected TMPDIR returns null instead of a partial path" {
+    var buf: [16]u8 = undefined;
+    // Set but empty: an exported TMPDIR= is a broken launcher environment, and
+    // reading it as "use the game directory" is what the report is for.
+    try testing.expectEqual(@as(?[]const u8, null), configuredTempDir("", &buf));
+    // Relative: it resolves against the cwd, which is where the fallback goes.
+    try testing.expectEqual(@as(?[]const u8, null), configuredTempDir("tmp", &buf));
+    try testing.expectEqual(@as(?[]const u8, null), configuredTempDir(".", &buf));
+    // Longer than the buffer, with room for the separator it would need.
+    try testing.expectEqual(@as(?[]const u8, null), configuredTempDir("/" ++ "a" ** 32, &buf));
 }

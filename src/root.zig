@@ -893,6 +893,18 @@ pub fn setRedistDirectory(path: []const u8) void {
     // landed in rather than storing half of it.
     const cut = wide.utf8Prefix(path, redist_directory.len - 1);
     const len = cut.len;
+    // A path longer than the buffer is stored truncated, so the scan below walks
+    // a directory that is not the one the caller named and loads no plugins. Say
+    // so on stderr, where the OPENMILES_DEBUG and TMPDIR reports go as well: a
+    // caller with a too-long path has no reason to have a debug log turned on,
+    // and the empty plugin list is otherwise indistinguishable from a
+    // redist directory that holds none.
+    if (cut.len < path.len) {
+        std.debug.print(
+            "openmiles: AIL_set_redist_directory: path is {d} bytes, the {d}-byte limit stored the first {d}; plugins are searched in the truncated path\n",
+            .{ path.len, redist_directory.len - 1, cut.len },
+        );
+    }
     redist_mutex.lockUncancelable(io);
     const unchanged = std.mem.eql(u8, getRedistDirectoryLocked(), cut);
     @memcpy(redist_directory[0..len], cut);
@@ -1040,6 +1052,7 @@ var preferences: [512]i32 = init: {
 
 pub fn getPreference(number: u32) i32 {
     if (number < preferences.len) return preferences[number];
+    log("getPreference: {d} is past the {d}-slot table; the read returns 0\n", .{ number, preferences.len });
     return 0;
 }
 
@@ -1049,6 +1062,7 @@ pub fn setPreference(number: u32, value: i32) i32 {
         preferences[number] = value;
         return old;
     }
+    log("setPreference: {d} is past the {d}-slot table; {d} was not stored\n", .{ number, preferences.len, value });
     return 0;
 }
 
