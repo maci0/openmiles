@@ -938,7 +938,10 @@ pub fn gainToMssVolume(gain: f32) i32 {
             lo = mid + 1;
         }
     }
-    if (hi <= 0) return if (lo <= 0) 0 else lo;
+    // gain below table[1]: the only neighbors left are 0 (silence) and 1, so
+    // compare against their midpoint instead of returning 1 unconditionally
+    // (a master gain of 1e-6 is nearer to 0).
+    if (hi <= 0) return if (gain <= volume_to_gain_table[1] * 0.5) 0 else 1;
     const lo_clamped: usize = @intCast(@min(lo, 127));
     const g_lo = volume_to_gain_table[@intCast(hi)];
     const g_hi = volume_to_gain_table[lo_clamped];

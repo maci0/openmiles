@@ -173,9 +173,15 @@ test "fuzz: valid utf-8 survives the round trip whatever it contains" {
                 2 => rand.intRangeAtMost(u21, 0x800, 0xD7FF),
                 else => rand.intRangeAtMost(u21, 0xE000, 0x10FFFF),
             };
-            const len: usize = std.unicode.utf8ByteSequenceLength(@truncate(cp)) catch continue;
+            // utf8Encode always writes at the START of its output slice, so
+            // handing it bytes[0..n] overwrote the code points already written
+            // and left the string a mix of the last one and stale bytes (which
+            // is what surfaced as a surrogate-half encoding below).
+            var enc: [4]u8 = undefined;
+            const len: usize = std.unicode.utf8Encode(cp, &enc) catch continue;
             if (k + len > n) break;
-            k += (std.unicode.utf8Encode(cp, bytes[0..n]) catch break);
+            @memcpy(bytes[k..][0..len], enc[0..len]);
+            k += len;
         }
         const s = bytes[0..k];
         if (std.mem.indexOfScalar(u8, s, 0) != null) continue; // never generated

@@ -697,6 +697,9 @@ test "gainToMssVolume boundary values" {
     try testing.expectEqual(@as(i32, 0), openmiles.gainToMssVolume(-1.0));
     try testing.expectEqual(@as(i32, 127), openmiles.gainToMssVolume(1.0));
     try testing.expectEqual(@as(i32, 127), openmiles.gainToMssVolume(2.0));
+    // A gain below the table's first entry is nearer to 0 than to 1.
+    try testing.expectEqual(@as(i32, 0), openmiles.gainToMssVolume(1e-6));
+    try testing.expectEqual(@as(i32, 1), openmiles.gainToMssVolume(openmiles.mssVolumeToGain(1) * 0.9));
 }
 
 test "mssVolumeToGain and gainToMssVolume roundtrip" {
