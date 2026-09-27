@@ -164,6 +164,14 @@ pub const Timer = struct {
 
     fn run(self: *Timer) void {
         self.thread_id.store(std.Thread.getCurrentId(), .release);
+        // The id names a *live* run loop, so it is cleared on the way out. Left
+        // set after the loop exits it outlives the thread it identifies, and
+        // the OS recycles thread ids: a later unrelated thread that happened to
+        // get this one would compare equal in start() and take the self-resume
+        // branch, leaving the timer "running" with no loop to fire the callback.
+        // Clearing it also means an external stop() after the loop is gone never
+        // mistakes itself for the callback thread.
+        defer self.thread_id.store(0, .release);
         var next_ns: i128 = root.nowNs();
         while (@atomicLoad(bool, &self.is_running, .acquire)) {
             self.callback(self.getUserData());

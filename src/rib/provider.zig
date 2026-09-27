@@ -29,7 +29,15 @@ pub const RIB_unregister_interface_ptr = *const fn (usize) callconv(.c) void;
 
 pub const RIB_Main_ptr = *const fn (HPROVIDER, u32, RIB_alloc_provider_handle_ptr, RIB_register_interface_ptr, RIB_unregister_interface_ptr) callconv(.c) i32;
 
-var current_loading_provider: ?*Provider = null;
+// The provider whose RIB_Main is running right now, so the three callbacks a
+// plugin receives can answer "which provider am I registering into" without the
+// plugin having to thread that through itself. Thread-local, not a global: the
+// plugin's RIB_Main runs synchronously on the thread that called Provider.load,
+// so a process-wide slot let a second thread loading a provider concurrently
+// overwrite this one, and the first plugin's RIB_alloc_provider_handle then
+// handed back the *other* provider's handle -- its interfaces would register
+// into a provider that is about to be released.
+threadlocal var current_loading_provider: ?*Provider = null;
 
 pub fn getCurrentLoadingProvider() ?*Provider {
     return current_loading_provider;
@@ -149,6 +157,14 @@ pub const Provider = struct {
     pub fn deinit(self: *Provider) void {
         if (self.lib) |*lib| {
             if (lib.lookup(RIB_Main_ptr, "RIB_Main")) |rib_main| {
+                // The unload RIB_Main gets the same "which provider am I"
+                // context the load one does. Without it a plugin that
+                // unregisters through RIB_unregister_interface resolves the
+                // handle against whatever provider happened to be loading on
+                // this thread, or against null.
+                const prev = current_loading_provider;
+                current_loading_provider = self;
+                defer current_loading_provider = prev;
                 // Shutdown is a notification: nothing is loaded afterwards that
                 // a status could change, but a plugin that could not shut down
                 // cleanly may still be running teardown state, so a reported

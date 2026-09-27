@@ -12,6 +12,7 @@
 
 const std = @import("std");
 const fs_compat = @import("../utils/fs_compat.zig");
+const root = @import("../root.zig");
 
 pub const BANK_TAG: u32 = (@as(u32, 'B') << 24) | (@as(u32, 'A') << 16) | (@as(u32, 'N') << 8) | @as(u32, 'K');
 pub const BANK_VERSION: i32 = 8;
@@ -24,16 +25,16 @@ pub const BANK_VERSION: i32 = 8;
 // overrides a bank by loading a second one after it is unaffected by the order
 // in which unrelated banks are later released.
 var g_registry: std.ArrayListUnmanaged(*Bank) = .empty;
-var g_registry_lock: std.atomic.Value(bool) = .init(false);
+var g_registry_mutex: std.Io.Mutex = .init;
 // The registry backing uses a process-stable allocator, independent of any
 // bank's own allocator (which in tests may be the leak-checked test allocator).
 const registry_alloc = std.heap.page_allocator;
 
 fn regLock() void {
-    while (g_registry_lock.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {}
+    g_registry_mutex.lockUncancelable(root.io);
 }
 fn regUnlock() void {
-    g_registry_lock.store(false, .release);
+    g_registry_mutex.unlock(root.io);
 }
 
 /// Reserve room for one more registry entry, before a load owns any memory, so
@@ -88,8 +89,8 @@ fn registryAcquireBySource(source_path: []const u8) ?*Bank {
 }
 
 fn registryRemove(bank: *Bank) void {
-    regLock();
-    defer regUnlock();
+    g_registry_mutex.lockUncancelable(root.io);
+    defer g_registry_mutex.unlock(root.io);
     for (g_registry.items, 0..) |b, i| {
         if (b == bank) {
             // orderedRemove, not swapRemove: registry order is the resolution
@@ -105,15 +106,15 @@ fn registryRemove(bank: *Bank) void {
 }
 
 pub fn loadedCount() u32 {
-    regLock();
-    defer regUnlock();
+    g_registry_mutex.lockUncancelable(root.io);
+    defer g_registry_mutex.unlock(root.io);
     return @intCast(g_registry.items.len);
 }
 
 /// Resolve a named event's step bytecode across all loaded banks (Container_GetEvent).
 pub fn containerFindEvent(event_name: []const u8) ?[*]const u8 {
-    regLock();
-    defer regUnlock();
+    g_registry_mutex.lockUncancelable(root.io);
+    defer g_registry_mutex.unlock(root.io);
     for (g_registry.items) |b| {
         if (b.findEventContents(event_name)) |ev| return ev;
     }
@@ -131,8 +132,8 @@ fn bareSoundName(name: []const u8) []const u8 {
 /// (Container_GetSound -> MILESBANKSOUNDINFO.DurationMs).
 pub fn containerSoundDurationMs(sound_name: []const u8) ?u32 {
     const bare = bareSoundName(sound_name);
-    regLock();
-    defer regUnlock();
+    g_registry_mutex.lockUncancelable(root.io);
+    defer g_registry_mutex.unlock(root.io);
     for (g_registry.items) |b| {
         if (b.soundDurationMs(bare)) |ms| return ms;
     }
