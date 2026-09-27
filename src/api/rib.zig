@@ -669,11 +669,16 @@ const testing = std.testing;
 
 test "a configured TMPDIR is copied with a trailing separator" {
     var buf: [max_temp_path_units * 3]u8 = undefined;
+    // The separator appendSeparator adds is std.fs.path.sep, so the
+    // expectation is built from it too: on Windows the same contract reads as
+    // a trailing '\', and a literal '/' in the expectation tested the host
+    // rather than the code.
+    const with_sep = "/var/tmp" ++ [_]u8{std.fs.path.sep};
     const out = configuredTempDir("/var/tmp", &buf).?;
-    try testing.expectEqualStrings("/var/tmp/", out);
+    try testing.expectEqualStrings(with_sep, out);
     // An operator's trailing separator is not doubled.
-    const kept = configuredTempDir("/var/tmp/", &buf).?;
-    try testing.expectEqualStrings("/var/tmp/", kept);
+    const kept = configuredTempDir(with_sep, &buf).?;
+    try testing.expectEqualStrings(with_sep, kept);
 }
 
 test "a rejected TMPDIR returns null instead of a partial path" {
