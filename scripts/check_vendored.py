@@ -62,6 +62,40 @@ SECTION_RE = re.compile(r"^##\s+(.+)$", re.MULTILINE)
 NAME_RE = re.compile(r"[A-Za-z0-9_.-]+\.h")
 FIRST_PARTY_RE = re.compile(r"first-party")
 
+# The version a vendored file states in its own bytes, read two ways because
+# upstream states it two ways. miniaudio carries the triple in macros; the two
+# TinySoundFont headers carry no version macro at all, so theirs is the banner
+# on line 1, which is the only place upstream states it. Reading the bytes is
+# the point: the version in deps/README.md is what gen_sbom.py writes into
+# SBOM.cdx.json, and a scanner matches an advisory against that string. A
+# header swapped for a newer release with the README entry left behind puts
+# the superseded version in the inventory, so every advisory published for the
+# release that actually shipped is a miss.
+VERSION_MACROS = ("MA_VERSION_MAJOR", "MA_VERSION_MINOR", "MA_VERSION_REVISION")
+VERSION_MACRO_RES = tuple(
+    re.compile(rf"^#define\s+{macro}\s+(\d+)\s*$", re.MULTILINE) for macro in VERSION_MACROS
+)
+BANNER_RE = re.compile(r"^/\*\s*\S+\s+-\s+v(\d+(?:\.\d+)*)\s+-")
+
+
+def header_version(path):
+    """The version path states in its own bytes, or None if it states none."""
+    # Vendored headers are kept byte for byte and upstream ships tsf.h and
+    # tml.h with CRLF, so decode leniently and let the regexes absorb the \r:
+    # an undecodable byte in someone else's header is not this check's finding.
+    text = path.read_text(encoding="utf-8", errors="replace")
+    parts = []
+    for pattern in VERSION_MACRO_RES:
+        match = pattern.search(text)
+        if match is None:
+            parts = []
+            break
+        parts.append(match.group(1))
+    if parts:
+        return ".".join(parts)
+    match = BANNER_RE.search(text)
+    return match.group(1) if match else None
+
 
 class Entry(NamedTuple):
     """What deps/README.md claims about one file in deps/."""
@@ -110,6 +144,39 @@ def readme_entries():
         for name in NAME_RE.findall(m.group(1)):
             entries[name] = entry
     return entries
+
+
+def entry_problems(name, entry):
+    """What deps/README.md claims about one file in deps/ fails to hold.
+
+    A first-party file has no upstream and no upstream version, so the commit
+    and the version checks do not apply to it.
+    """
+    readme = README.relative_to(ROOT)
+    findings = []
+    if entry is None:
+        findings.append(f"{name} UNDOCUMENTED  no section in {readme}")
+    elif entry.first_party:
+        return findings
+    elif entry.commit is None:
+        findings.append(
+            f"{name} NOPROVENANCE  its {readme} section names no upstream commit and does not "
+            f"claim the file first-party"
+        )
+    elif entry.version is None:
+        findings.append(f"{name} NOVERSION  its {readme} section records no version")
+    else:
+        stated = header_version(DEPS / name)
+        if stated is None:
+            findings.append(
+                f"{name} UNREADABLE-VERSION  states no version in its own bytes, so the "
+                f"{entry.version!r} its {readme} section claims is unchecked"
+            )
+        elif stated != entry.version.removeprefix("v"):
+            findings.append(
+                f"{name} VERSION  {readme} claims {entry.version!r}, the file states {stated}"
+            )
+    return findings
 
 
 def vendored_files():
@@ -180,14 +247,7 @@ def main():
 
     entries = readme_entries()
     for name in sorted(on_disk):
-        entry = entries.get(name)
-        if entry is None:
-            problems.append(f"{name} UNDOCUMENTED  no section in {README.relative_to(ROOT)}")
-        elif entry.commit is None and not entry.first_party:
-            problems.append(
-                f"{name} NOPROVENANCE  its {README.relative_to(ROOT)} section names no upstream "
-                f"commit and does not claim the file first-party"
-            )
+        problems += entry_problems(name, entries.get(name))
 
     for p in problems:
         print(p)

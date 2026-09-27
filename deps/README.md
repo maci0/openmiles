@@ -58,6 +58,12 @@ header that arrived from somewhere unexpected. The same script requires every
 vendored entry above to name a 40-character upstream commit, since a digest
 alone says which bytes shipped but not which release they came from.
 
+It also reads the version out of each header's own bytes and compares it to the
+**Version** field above. That field is what `gen_sbom.py` writes into
+`SBOM.cdx.json`, and a vulnerability scanner matches advisories against it, so a
+header upgraded with the entry left behind would put the superseded version in
+the inventory and hide every advisory for the release that actually shipped.
+
 The two TinySoundFont headers carry no version macro: their `v0.9` and `v0.7`
 entries are the version banner on line 1 of each file, and the commits above are
 the last upstream commits to touch them, each verified byte-for-byte against
@@ -69,9 +75,11 @@ Update checklist:
    week, so a header fetched from `master` cannot be traced back to what was
    reviewed.
 2. Download only from the upstream URLs listed above.
-3. Confirm the version: miniaudio carries `MA_VERSION_MAJOR/MINOR/REVISION`,
-   but tsf.h and tml.h have no version macro at all, so their version entry
-   comes from the commit id recorded in step 1.
+3. Confirm the version against the header's own bytes, which
+   `scripts/check_vendored.py` then compares to the **Version** field above:
+   miniaudio carries `MA_VERSION_MAJOR/MINOR/REVISION`, but tsf.h and tml.h
+   have no version macro at all, so theirs is the banner on line 1 and the
+   commit id recorded in step 1.
 4. Diff against the current vendored copy to spot unexpected changes.
 5. Run `scripts/check_vendored.py --update` in the same commit as the header
    swap, and read the diff: a changed digest is a reviewed change, not a

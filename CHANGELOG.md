@@ -324,6 +324,16 @@ everything below is unreleased.
   `tml.h`, each verified byte-for-byte against upstream), and
   `scripts/check_vendored.py` fails a vendored file whose entry names no
   commit and does not claim the file first-party.
+- A vendored header's recorded version was never compared with the version the
+  header states in its own bytes, and that recorded version is what
+  `scripts/gen_sbom.py` writes into `SBOM.cdx.json`. A header upgraded without
+  the `deps/README.md` entry would have put the superseded version in the
+  inventory a vulnerability scanner matches against, so every advisory
+  published for the release that actually shipped would miss. `check_vendored.py`
+  reads the version out of each header now (miniaudio's
+  `MA_VERSION_MAJOR/MINOR/REVISION`, the line 1 banner of the two
+  TinySoundFont headers) and fails a mismatch, or a vendored header that states
+  no version a check could read.
 - `mss.h` declared the pre-8.0 `AILSOUNDINFO` (9 fields, 36 bytes) for every
   version, so a v8 or v9 build read `channel_mask` at +0x18 and `block_size` at
   +0x20 out of a 36-byte caller struct. `channel_mask` is now declared from
