@@ -44,7 +44,8 @@ pub fn AIL_init_sequence(seq_opt: ?*Sequence, data: *anyopaque, sequence_num: i3
     const raw: [*]const u8 = @ptrCast(@alignCast(data));
     const midi_len = openmiles.detectMidiSize(raw);
     const midi_data = raw[0..midi_len];
-    seq.loadMidi(midi_data, @intCast(@max(0, sequence_num))) catch {
+    seq.loadMidi(midi_data, @intCast(@max(0, sequence_num))) catch |err| {
+        log("AIL_init_sequence: loadMidi(track {d}, {d} bytes) failed ({any})\n", .{ sequence_num, midi_len, err });
         openmiles.setLastError("Failed to initialize MIDI sequence");
         return 0;
     };

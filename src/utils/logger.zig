@@ -61,7 +61,13 @@ pub fn init() void {
         })) |f| {
             log_offset = f.length(io) catch 0;
             log_file = f;
-        } else |_| {}
+        } else |err| {
+            // The log is the only record of what this process did. Losing it
+            // silently leaves an operator with no trace at all, and since
+            // log() returns early on any write failure, say so once here,
+            // before the sink is gone.
+            std.debug.print("openmiles: cannot open openmiles.log for appending: {t}\n", .{err});
+        }
     }
     @atomicStore(bool, &initialized, true, .release);
 }

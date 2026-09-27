@@ -224,13 +224,25 @@ pub fn AIL_DLS_open(mdi_opt: ?*MidiDriver, dig_opt: ?*DigitalDriver, libname: ?[
     _ = rate;
     _ = bits;
     _ = channels;
+    // MidiDriver.init publishes itself as last_midi_driver; keep the previous
+    // one so the failure path below can put it back instead of leaving the
+    // process with no "current" MIDI driver at all.
+    const prev_driver = openmiles.last_midi_driver;
     const driver = openmiles.MidiDriver.init(openmiles.global_allocator) catch |err| {
-        log("Error: {any}\n", .{err});
+        log("AIL_DLS_open: driver init failed ({any})\n", .{err});
+        openmiles.setLastError("Failed to initialize DLS device");
         return null;
     };
     if (libname) |name| {
-        _ = driver.loadDLS(std.mem.span(name)) catch {
-            log("AIL_DLS_open: failed to load DLS library '{s}'\n", .{name});
+        // A handle returned with no bank loaded reports success and then
+        // renders silence for every note. Fail the open instead: the caller
+        // asked for a specific library and did not get it.
+        _ = driver.loadDLS(std.mem.span(name)) catch |err| {
+            log("AIL_DLS_open: failed to load DLS library '{s}' ({any})\n", .{ name, err });
+            driver.deinit();
+            openmiles.last_midi_driver = prev_driver;
+            openmiles.setLastError("Failed to load DLS/SoundFont file");
+            return null;
         };
     }
     return driver;

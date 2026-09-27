@@ -47,6 +47,10 @@ fn rib_register_interface(provider_handle: HPROVIDER, name: [*c]const u8, entry_
         const z_name = std.mem.span(name);
         p.registerInterface(z_name, entry_count, entries) catch |err| {
             log("rib_register_interface: failed for '{s}': {any}\n", .{ z_name, err });
+            // Report failure to the plugin: 1 here tells it the entries are
+            // registered, so it will dispatch through tokens that were never
+            // stored (an OOM inside registerInterface drops them all).
+            return 0;
         };
         return 1;
     }
@@ -158,7 +162,13 @@ pub const Provider = struct {
 
     pub fn registerInterface(self: *Provider, name: []const u8, count: i32, entries: *anyopaque) !void {
         log("Provider.registerInterface called: {s}, count={d}\n", .{ name, count });
-        if (count < 0) return;
+        // A negative entry count comes from the plugin, not from us: rejecting
+        // it silently would hand back an empty interface the plugin believes
+        // it filled.
+        if (count < 0) {
+            log("Provider.registerInterface: '{s}' declared {d} entries\n", .{ name, count });
+            return error.NegativeEntryCount;
+        }
         const entry_count: usize = @intCast(count);
         const iface = try Interface.init(self.allocator, name);
         // Own the interface until it is safely appended to the provider list:
@@ -188,6 +198,9 @@ pub const Interface = struct {
 
     pub fn init(allocator: std.mem.Allocator, name: []const u8) !*Interface {
         const self = try allocator.create(Interface);
+        // The name dupe below can fail while self is allocated but
+        // uninitialized, so the destroy guard must precede it.
+        errdefer allocator.destroy(self);
         self.* = .{
             .name = try allocator.dupe(u8, name),
             .entries = .{},

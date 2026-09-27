@@ -844,7 +844,11 @@ pub const Sequence = struct {
         if (self.is_initialized) return;
         // Auto-create a digital driver if none exists (game may only have opened a MIDI driver)
         if (root.last_digital_driver == null) {
-            _ = root.DigitalDriver.init(root.global_allocator, 44100, 16, 2) catch {};
+            _ = root.DigitalDriver.init(root.global_allocator, 44100, 16, 2) catch |err| {
+                // The caller only ever sees error.NoDigitalDriver below, which
+                // says nothing about why the implicit driver could not start.
+                log("Sequence.ensureSoundInitialized: implicit digital driver init failed ({any})\n", .{err});
+            };
         }
         if (root.last_digital_driver) |driver| {
             const result = ma.ma_sound_init_from_data_source(&driver.engine, @ptrCast(&self.data_source), ma.MA_SOUND_FLAG_NO_SPATIALIZATION, null, &self.sound);

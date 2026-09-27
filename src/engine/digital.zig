@@ -428,18 +428,22 @@ pub const DigitalDriver = struct {
         };
         defer d.close(io);
         var it = d.iterate();
-        while (it.next(io) catch null) |entry| {
+        while (root.nextEntry(&it, redist_dir)) |entry| {
             if (entry.kind != .file) continue;
             const name = entry.name;
             if (!root.isPluginExtension(name)) continue;
             if (!root.isSafePluginFilename(name)) continue;
-            const full_path = std.fs.path.join(alloc, &.{ redist_dir, name }) catch continue;
+            const full_path = std.fs.path.join(alloc, &.{ redist_dir, name }) catch |err| {
+                log("loadAllAsi: cannot build a path for '{s}' in '{s}' ({any})\n", .{ name, redist_dir, err });
+                continue;
+            };
             defer alloc.free(full_path);
             const p = root.Provider.load(alloc, full_path) catch |err| {
                 log("loadAllAsi: failed to load plugin '{s}': {any}\n", .{ name, err });
                 continue;
             };
-            self.providers.append(alloc, p) catch {
+            self.providers.append(alloc, p) catch |err| {
+                log("loadAllAsi: cannot track loaded plugin '{s}' ({any}); it is unloaded\n", .{ name, err });
                 p.deinit();
             };
         }

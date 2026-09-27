@@ -960,12 +960,21 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
     // it (block_size/channels/rate come from the AILSOUNDINFO).
     const src_channels: u16 = @intCast(@max(1, @min(2, info.channels)));
     const block_size: u32 = if (info.block_size > 4 * @as(u32, src_channels)) info.block_size else 512;
-    const adpcm_wav = openmiles.wrapAdpcmInWav(openmiles.global_allocator, adpcm, block_size, src_channels, info.rate, info.samples) catch return 0;
+    const adpcm_wav = openmiles.wrapAdpcmInWav(openmiles.global_allocator, adpcm, block_size, src_channels, info.rate, info.samples) catch |err| {
+        log("AIL_decompress_ADPCM: wrapping {d} ADPCM blocks failed ({any})\n", .{ info.data_len, err });
+        openmiles.setLastError("Failed to wrap ADPCM image for decoding");
+        return 0;
+    };
     defer openmiles.global_allocator.free(adpcm_wav);
     const raw: []const u8 = adpcm_wav;
     var decoder: openmiles.ma.ma_decoder = undefined;
     var config = openmiles.ma.ma_decoder_config_init(openmiles.ma.ma_format_s16, 0, 0); // preserve channel/rate from source
-    if (openmiles.ma.ma_decoder_init_memory(raw.ptr, raw.len, &config, &decoder) != openmiles.ma.MA_SUCCESS) return 0;
+    const dec_result = openmiles.ma.ma_decoder_init_memory(raw.ptr, raw.len, &config, &decoder);
+    if (dec_result != openmiles.ma.MA_SUCCESS) {
+        log("AIL_decompress_ADPCM: ma_decoder_init_memory({d} bytes) failed with {d}\n", .{ raw.len, dec_result });
+        openmiles.setLastError("Failed to open ADPCM image for decoding");
+        return 0;
+    }
     defer _ = openmiles.ma.ma_decoder_uninit(&decoder);
 
     const channels = @as(u32, decoder.outputChannels);

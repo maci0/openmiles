@@ -82,10 +82,15 @@ fn applyElfFixups(lib: *std.DynLib, path: []const u8) !void {
     const dyn_vaddr = dynamic_vaddr orelse return error.ImageFixupFailed;
     if (dyn_vaddr >= img.len) return error.ImageFixupFailed;
     const dynv: [*]align(1) const usize = @ptrFromInt(base + dyn_vaddr);
+    // The DT_NULL terminator is what ends this walk, and a malformed image may
+    // not have one inside the mapping. Bound the scan by the image so a lying
+    // dynamic section fails the load instead of reading past the map.
+    const dyn_entries = (img.len - dyn_vaddr) / @sizeOf(usize);
+    if (dyn_entries < 2) return error.ImageFixupFailed;
     var rela_off: usize = 0;
     var rela_sz: usize = 0;
     var i: usize = 0;
-    while (dynv[i] != 0) : (i += 2) {
+    while (i < dyn_entries and dynv[i] != 0) : (i += 2) {
         switch (dynv[i]) {
             std.elf.DT_RELA => rela_off = dynv[i + 1],
             std.elf.DT_RELASZ => rela_sz = dynv[i + 1],

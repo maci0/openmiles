@@ -447,6 +447,17 @@ pub fn isSafePluginFilename(name: []const u8) bool {
     return true;
 }
 
+/// Read one directory entry, or null at end of directory. A read error is
+/// logged and ends the scan: `catch null` would hide an unreadable directory
+/// behind an apparently complete enumeration, and the caller would report a
+/// plugin count that silently omits whatever it never saw.
+pub fn nextEntry(it: *std.Io.Dir.Iterator, dir: []const u8) ?std.Io.Dir.Entry {
+    return it.next(io) catch |err| {
+        log("plugin directory scan: read of '{s}' failed, scan stopped ({any})\n", .{ dir, err });
+        return null;
+    };
+}
+
 pub fn loadApplicationProviders(dir: []const u8) i32 {
     const alloc = global_allocator;
     var count: i32 = 0;
@@ -456,18 +467,22 @@ pub fn loadApplicationProviders(dir: []const u8) i32 {
     };
     defer d.close(io);
     var it = d.iterate();
-    while (it.next(io) catch null) |entry| {
+    while (nextEntry(&it, dir)) |entry| {
         if (entry.kind != .file) continue;
         const name = entry.name;
         if (!isPluginExtension(name)) continue;
         if (!isSafePluginFilename(name)) continue;
-        const full_path = std.fs.path.join(alloc, &.{ dir, name }) catch continue;
+        const full_path = std.fs.path.join(alloc, &.{ dir, name }) catch |err| {
+            log("loadApplicationProviders: cannot build a path for '{s}' in '{s}' ({any})\n", .{ name, dir, err });
+            continue;
+        };
         defer alloc.free(full_path);
         const p = Provider.load(alloc, full_path) catch |err| {
             log("loadApplicationProviders: failed to load plugin '{s}': {any}\n", .{ name, err });
             continue;
         };
-        global_providers.append(alloc, p) catch {
+        global_providers.append(alloc, p) catch |err| {
+            log("loadApplicationProviders: cannot track loaded plugin '{s}' ({any}); it is unloaded\n", .{ name, err });
             p.deinit();
             continue;
         };

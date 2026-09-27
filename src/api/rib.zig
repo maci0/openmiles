@@ -147,9 +147,17 @@ fn appendSeparator(buf: []u8, dir: []const u8) ?[]const u8 {
 
 pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.winapi) ?*Provider {
     log("AIL_open_ASI_provider(buffer={*}, size={d})\n", .{ buffer, size });
-    if (size < 2) return null;
+    if (size < 2) {
+        log("AIL_open_ASI_provider: image is {d} bytes, too short for an MZ header\n", .{size});
+        openmiles.setLastError("ASI provider image is too small");
+        return null;
+    }
     const raw: []const u8 = @as([*]const u8, @ptrCast(@alignCast(buffer)))[0..size];
-    if (raw[0] != 'M' or raw[1] != 'Z') return null;
+    if (raw[0] != 'M' or raw[1] != 'Z') {
+        log("AIL_open_ASI_provider: image does not start with MZ\n", .{});
+        openmiles.setLastError("ASI provider image is not a DOS/PE image");
+        return null;
+    }
 
     var path_buf: [512:0]u8 = undefined;
 
@@ -167,18 +175,22 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     var id_bytes: [8]u8 = undefined;
     io.randomSecure(&id_bytes) catch |err| {
         log("AIL_open_ASI_provider: no entropy for temp file name: {any}\n", .{err});
+        openmiles.setLastError("No entropy available for ASI temp file name");
         return null;
     };
     var id = std.mem.readInt(u64, &id_bytes, .little);
-    for (0..4) |_| {
+    const name_attempts = 4;
+    for (0..name_attempts) |_| {
         path = if (tmp_dir) |dir|
             std.fmt.bufPrintZ(&path_buf, "{s}om_asi_{x:016}.dll", .{ dir, id }) catch |err| {
-                log("Error: {any}\n", .{err});
+                log("AIL_open_ASI_provider: cannot format temp path: {any}\n", .{err});
+                openmiles.setLastError("Failed to format temp path for ASI provider");
                 return null;
             }
         else
             std.fmt.bufPrintZ(&path_buf, "./om_asi_{x:016}.dll", .{id}) catch |err| {
-                log("Error: {any}\n", .{err});
+                log("AIL_open_ASI_provider: cannot format temp path: {any}\n", .{err});
+                openmiles.setLastError("Failed to format temp path for ASI provider");
                 return null;
             };
         if (std.Io.Dir.createFileAbsolute(io, path, .{ .exclusive = true })) |f| {
@@ -202,15 +214,22 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
                 continue;
             },
             else => {
-                log("Error: {any}\n", .{cwd_err});
+                log("AIL_open_ASI_provider: creating '{s}' failed ({any})\n", .{ path, cwd_err });
+                openmiles.setLastError("Failed to create temp file for ASI provider");
                 return null;
             },
         }
     }
-    const wf = created orelse return null;
-    wf.writeStreamingAll(io, raw) catch {
+    const wf = created orelse {
+        log("AIL_open_ASI_provider: no free temp name after {d} collisions (last '{s}')\n", .{ name_attempts, path });
+        openmiles.setLastError("Failed to create temp file for ASI provider");
+        return null;
+    };
+    wf.writeStreamingAll(io, raw) catch |err| {
+        log("AIL_open_ASI_provider: writing {d} bytes to '{s}' failed ({any})\n", .{ size, path, err });
         wf.close(io);
         std.Io.Dir.deleteFileAbsolute(io, path) catch {};
+        openmiles.setLastError("Failed to write temp file for ASI provider");
         return null;
     };
     wf.close(io);
@@ -219,18 +238,22 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     // Provider owns deleting the temp image: it records the path and removes
     // the file when released, once the OS has unlocked the loaded module. The
     // file must outlive the provider here — Windows cannot delete a loaded DLL.
-    const p = openmiles.Provider.load(openmiles.global_allocator, path) catch {
+    const p = openmiles.Provider.load(openmiles.global_allocator, path) catch |err| {
+        log("AIL_open_ASI_provider: loading '{s}' failed ({any})\n", .{ path, err });
         std.Io.Dir.deleteFileAbsolute(io, path) catch {};
         std.Io.Dir.cwd().deleteFile(io, path) catch {};
+        openmiles.setLastError("Failed to load ASI provider image");
         return null;
     };
-    p.temp_path = openmiles.global_allocator.dupeZ(u8, path) catch {
+    p.temp_path = openmiles.global_allocator.dupeZ(u8, path) catch |err| {
         // Without the recorded path the temp image can never be deleted (the
         // provider would otherwise leak one loaded-DLL file per call), so fail
         // the open rather than leave the file behind.
+        log("AIL_open_ASI_provider: cannot record temp path '{s}' ({any})\n", .{ path, err });
         p.deinit();
         std.Io.Dir.deleteFileAbsolute(io, path) catch {};
         std.Io.Dir.cwd().deleteFile(io, path) catch {};
+        openmiles.setLastError("Failed to record temp path for ASI provider");
         return null;
     };
     return p;
@@ -260,7 +283,8 @@ pub fn RIB_find_file_provider(name: [*:0]const u8, property: [*:0]const u8, file
 }
 pub fn RIB_load_provider_library(path: [*:0]const u8) callconv(.c) ?*Provider {
     const p = openmiles.Provider.load(openmiles.global_allocator, std.mem.span(path)) catch |err| {
-        log("Error: {any}\n", .{err});
+        log("RIB_load_provider_library: loading '{s}' failed ({any})\n", .{ std.mem.span(path), err });
+        openmiles.setLastError("Failed to load provider library");
         return null;
     };
     return p;

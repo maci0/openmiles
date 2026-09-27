@@ -17,6 +17,10 @@ const ASI_Stream_Impl = struct {
         defer root.global_allocator.free(resolved);
         const result = ma.ma_decoder_init_file(resolved.ptr, &config, &self.decoder);
         if (result != ma.MA_SUCCESS) {
+            // Name the file and miniaudio's status: the caller only sees
+            // error.DecoderInitFailed, which does not distinguish a missing
+            // file from a corrupt one or from a device/format rejection.
+            log("ASI_Stream_Impl.open: ma_decoder_init_file('{s}') failed with {d}\n", .{ filename, result });
             return error.DecoderInitFailed;
         }
         self.is_initialized = true;
