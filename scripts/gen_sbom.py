@@ -195,6 +195,11 @@ def document():
     version = project_version()
     if PROJECT_LICENSE_BANNER not in LICENSE.read_text():
         sys.exit(f"error: {LICENSE.relative_to(ROOT)} is not the license {PROJECT_LICENSE} names")
+    # read_sums returns (recorded, malformed); the malformed lines are
+    # check_vendored.py's to report, so only the recorded digests are looked up
+    # here. Passing the tuple made every `name not in sums` true and the gate
+    # failed on the first header.
+    recorded, _ = read_sums()
     return {
         "bomFormat": "CycloneDX",
         "specVersion": SPEC_VERSION,
@@ -209,7 +214,7 @@ def document():
                 "licenses": [{"license": {"id": PROJECT_LICENSE}}],
             }
         },
-        "components": vendored_components(read_sums()) + pip_components(),
+        "components": vendored_components(recorded) + pip_components(),
     }
 
 

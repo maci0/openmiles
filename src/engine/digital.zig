@@ -551,17 +551,12 @@ pub const DigitalDriver = struct {
 
     pub fn loadAllAsi(self: *DigitalDriver, redist_dir: []const u8) void {
         const alloc = self.allocator;
-        var d = fs_compat.openDir(io, redist_dir, .{ .iterate = true }) catch |err| {
+        const names = root.sortedPluginNames(alloc, redist_dir) catch |err| {
             log("loadAllAsi: failed to open directory '{s}': {any}\n", .{ redist_dir, err });
             return;
         };
-        defer d.close(io);
-        var it = d.iterate();
-        while (root.nextEntry(&it, redist_dir)) |entry| {
-            if (entry.kind != .file) continue;
-            const name = entry.name;
-            if (!root.isPluginExtension(name)) continue;
-            if (!root.isSafePluginFilename(name)) continue;
+        defer root.freePluginNames(alloc, &names);
+        for (names.items) |name| {
             const full_path = std.fs.path.join(alloc, &.{ redist_dir, name }) catch |err| {
                 log("loadAllAsi: cannot build a path for '{s}' in '{s}' ({any})\n", .{ name, redist_dir, err });
                 continue;

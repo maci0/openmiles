@@ -563,20 +563,55 @@ pub fn nextEntry(it: *std.Io.Dir.Iterator, dir: []const u8) ?std.Io.Dir.Entry {
     };
 }
 
-pub fn loadApplicationProviders(dir: []const u8) i32 {
-    const alloc = global_allocator;
-    var count: i32 = 0;
-    var d = fs_compat.openDir(io, dir, .{ .iterate = true }) catch |err| {
-        log("loadApplicationProviders: failed to open directory '{s}': {any}\n", .{ dir, err });
-        return 0;
-    };
+/// Owned copies of the plugin file names in `dir_path`, in ascending name
+/// order. A directory read hands entries back in whatever order the filesystem
+/// stored them, which differs between machines and between runs, so loading
+/// and enumerating in read order makes the provider list a function of the
+/// filesystem rather than of the directory's contents: a recorded run cannot
+/// be replayed provider-for-provider, and two builds of the same game can pick
+/// a different provider for the same query. Caller frees each name and the
+/// list.
+pub fn sortedPluginNames(allocator: std.mem.Allocator, dir_path: []const u8) !std.ArrayList([]u8) {
+    var names: std.ArrayList([]u8) = .empty;
+    errdefer {
+        for (names.items) |n| allocator.free(n);
+        names.deinit(allocator);
+    }
+    var d = try fs_compat.openDir(io, dir_path, .{ .iterate = true });
     defer d.close(io);
     var it = d.iterate();
-    while (nextEntry(&it, dir)) |entry| {
+    while (nextEntry(&it, dir_path)) |entry| {
         if (entry.kind != .file) continue;
         const name = entry.name;
         if (!isPluginExtension(name)) continue;
         if (!isSafePluginFilename(name)) continue;
+        // The entry name borrows the iterator's buffer, which is gone once the
+        // scan ends, so the sort owns a copy.
+        try names.append(allocator, try allocator.dupe(u8, name));
+    }
+    std.mem.sort([]u8, names.items, {}, lessThanName);
+    return names;
+}
+
+fn lessThanName(_: void, a: []u8, b: []u8) bool {
+    return std.mem.lessThan(u8, a, b);
+}
+
+pub fn freePluginNames(allocator: std.mem.Allocator, names: *const std.ArrayList([]u8)) void {
+    for (names.items) |n| allocator.free(n);
+    var list = names.*;
+    list.deinit(allocator);
+}
+
+pub fn loadApplicationProviders(dir: []const u8) i32 {
+    const alloc = global_allocator;
+    var count: i32 = 0;
+    const names = sortedPluginNames(alloc, dir) catch |err| {
+        log("loadApplicationProviders: failed to open directory '{s}': {any}\n", .{ dir, err });
+        return 0;
+    };
+    defer freePluginNames(alloc, &names);
+    for (names.items) |name| {
         const full_path = std.fs.path.join(alloc, &.{ dir, name }) catch |err| {
             log("loadApplicationProviders: cannot build a path for '{s}' in '{s}' ({any})\n", .{ name, dir, err });
             continue;

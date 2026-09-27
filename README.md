@@ -149,6 +149,16 @@ which is the only file the library writes; a short write there is discarded
 rather than loaded as a module the caller never handed over. Without a
 schedule installed, every one of these is a plain whole-file read or write.
 
+### Replaying plugin discovery
+
+Both plugin scans (`openmiles.loadApplicationProviders` and
+`DigitalDriver.loadAllAsi`) collect the directory's plugin names and sort them
+before loading, so the provider list `RIB_enumerate_providers` walks is a
+function of the directory's contents. A directory read returns entries in
+filesystem order, which differs per machine and per run; loading in that order
+made the enumeration unreplayable and could hand a query to a different provider
+on each install.
+
 ### Release archive
 
 `scripts/package_release.sh <out.zip> [sha256sums]` packages

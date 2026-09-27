@@ -1226,6 +1226,34 @@ test "loadApplicationProviders skips corrupt plugins and missing directories" {
     try testing.expectEqual(@as(i32, 0), openmiles.loadApplicationProviders(dirname ++ "/missing"));
 }
 
+test "sortedPluginNames returns the directory's plugins in name order" {
+    // The scan feeds provider registration and RIB_enumerate_providers, so the
+    // list it produces must depend on the directory's contents and nothing
+    // else. A directory read returns entries in filesystem order, so the names
+    // are created here in reverse and the result is asserted sorted.
+    const io = openmiles.io;
+    const cwd = std.Io.Dir.cwd();
+    const dirname = "om_prov_sort_test";
+    cwd.createDir(io, dirname, .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+    defer cwd.deleteTree(io, dirname) catch {};
+    for ([_][]const u8{ "zulu.asi", "mike.m3d", "alpha.flt", "readme.txt", "nested" }) |name| {
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dirname, name });
+        try cwd.writeFile(io, .{ .sub_path = path, .data = "x" });
+    }
+
+    const names = try openmiles.sortedPluginNames(testing.allocator, dirname);
+    defer openmiles.freePluginNames(testing.allocator, &names);
+    // Only plugins, ascending: the .txt is filtered by extension and the
+    // traversal order of the filesystem is not observable here.
+    const expected = [_][]const u8{ "alpha.flt", "mike.m3d", "zulu.asi" };
+    try testing.expectEqual(expected.len, names.items.len);
+    for (expected, names.items) |want, got| try testing.expectEqualStrings(want, got);
+}
+
 test "unregistering an interface name removes every registration of it" {
     // A provider can hold two registrations under one name (RIB_Main may call
     // register more than once). Unregistering must take both: dropping only

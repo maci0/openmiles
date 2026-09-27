@@ -152,6 +152,13 @@ everything below is unreleased.
 
 ### Fixed
 
+- Plugin discovery loaded providers in directory-read order, which the
+  filesystem chooses and changes between machines and between runs, so
+  `RIB_enumerate_providers` answered in an order no replay could reproduce and
+  two installs of the same redist directory could hand a query to different
+  providers. `openmiles.sortedPluginNames` now collects the plugin names first
+  and sorts them, and both scans (`loadApplicationProviders` and
+  `DigitalDriver.loadAllAsi`) load in that order.
 - `make lint` was red on a clean tree: 32 `docs/THREAT_MODEL.md` `file:line`
   anchors in `src/root.zig`, `src/api/digital.zig`, `src/api/v8.zig` and
   `src/engine/soundbank.zig` named lines their anchors had moved off, and
