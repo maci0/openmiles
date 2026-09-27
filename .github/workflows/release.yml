@@ -136,9 +136,15 @@ jobs:
       - name: Verify the archive is reproducible
         run: |
           set -euo pipefail
-          ./scripts/package_release.sh repeat.zip
-          cmp "openmiles-${TAG}-win32.zip" repeat.zip
-          rm repeat.zip
+          # Repackaged under a different timezone and locale. The archive must
+          # depend on the staged entries and their epoch alone; a host timezone
+          # reaching the MS-DOS entry timestamps is exactly the difference this
+          # run exists to catch. The script cd's to the repository root itself,
+          # so the output path has to be absolute to land outside the tree.
+          TZ=Asia/Tokyo LC_ALL=C.UTF-8 ./scripts/package_release.sh \
+            "$RUNNER_TEMP/repeat.zip"
+          cmp "openmiles-${TAG}-win32.zip" "$RUNNER_TEMP/repeat.zip"
+          rm "$RUNNER_TEMP/repeat.zip"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2

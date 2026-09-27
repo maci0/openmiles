@@ -18,6 +18,19 @@
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
+# zip renders each entry's mtime as an MS-DOS *local* date and time, so the
+# host timezone lands in the archive bytes: the same epoch packaged under
+# TZ=UTC and TZ=Asia/Tokyo produces two different zips. Pin the conversion,
+# and the collation of anything the tool sorts, for this process and every
+# child it spawns.
+export TZ=UTC
+export LC_ALL=C
+
+command -v zip >/dev/null 2>&1 || {
+  echo "error: zip not found on PATH (needed to build the release archive)" >&2
+  exit 1
+}
+
 OUT=${1:?"usage: scripts/package_release.sh <output.zip> [<sha256sums>]"}
 SUMS=${2:-}
 
