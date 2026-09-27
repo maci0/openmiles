@@ -66,8 +66,10 @@ fn wavImageLen(p: [*]const u8) ?usize {
 
 const WavCue = struct { id: u32, offset: u32 };
 
+const ChunkRange = struct { off: usize, len: usize };
+
 /// Find a chunk by fourcc within [12, len). Returns (data_offset, data_len).
-fn findChunk(img: []const u8, fourcc: *const [4]u8) ?struct { off: usize, len: usize } {
+fn findChunk(img: []const u8, fourcc: *const [4]u8) ?ChunkRange {
     var i: usize = 12;
     while (i + 8 <= img.len) {
         const csz = std.mem.readInt(u32, img[i + 4 ..][0..4], .little);
@@ -107,11 +109,27 @@ fn cueLabel(img: []const u8, id: u32) ?[*:0]const u8 {
     return null;
 }
 
-fn wavCueAt(img: []const u8, n: usize) ?WavCue {
+/// The 'cue ' chunk, or null when the image does not carry one with a count.
+fn findCueChunk(img: []const u8) ?ChunkRange {
     const cue = findChunk(img, "cue ") orelse return null;
     if (cue.len < 4) return null;
-    const count = std.mem.readInt(u32, img[cue.off..][0..4], .little);
-    if (n >= count) return null;
+    return cue;
+}
+
+/// The number of cue points the 'cue ' chunk really holds: its own count
+/// field, capped by the records that fit in the chunk. A file may claim more
+/// markers than it stores, and the bytes past the last record belong to the
+/// chunks after it, so counting the claim would hand out markers assembled
+/// from whatever follows.
+fn cueCount(img: []const u8) u32 {
+    const cue = findCueChunk(img) orelse return 0;
+    const declared = std.mem.readInt(u32, img[cue.off..][0..4], .little);
+    return @min(declared, (cue.len - 4) / 24);
+}
+
+fn wavCueAt(img: []const u8, n: usize) ?WavCue {
+    const cue = findCueChunk(img) orelse return null;
+    if (n >= cueCount(img)) return null;
     // Saturating so a huge file-supplied count cannot wrap the record offset
     // past the bounds check (usize is u32 on the shipped x86 build).
     const rec = cue.off +| 4 +| n *| 24; // each cue point is 24 bytes
@@ -126,10 +144,7 @@ pub fn AIL_WAV_marker_count(wav_image: ?*const anyopaque) callconv(.winapi) i32 
     const raw = wav_image orelse return 0;
     const p: [*]const u8 = @ptrCast(raw);
     const len = wavImageLen(p) orelse return 0;
-    const img = p[0..len];
-    const cue = findChunk(img, "cue ") orelse return 0;
-    if (cue.len < 4) return 0;
-    return @intCast(@min(std.mem.readInt(u32, img[cue.off..][0..4], .little), std.math.maxInt(i32)));
+    return @intCast(@min(cueCount(p[0..len]), std.math.maxInt(i32)));
 }
 
 pub fn AIL_WAV_marker_by_index(wav_image: ?*const anyopaque, n: i32, name: ?*?[*:0]const u8) callconv(.winapi) i32 {
@@ -150,9 +165,8 @@ pub fn AIL_WAV_marker_by_name(wav_image: ?*const anyopaque, name: ?[*:0]const u8
     const p: [*]const u8 = @ptrCast(raw);
     const len = wavImageLen(p) orelse return -1;
     const img = p[0..len];
-    const cue = findChunk(img, "cue ") orelse return -1;
-    if (cue.len < 4) return -1;
-    const count = std.mem.readInt(u32, img[cue.off..][0..4], .little);
+    const count = cueCount(img);
+    if (count == 0) return -1;
     var i: usize = 0;
     while (i < count) : (i += 1) {
         const c = wavCueAt(img, i) orelse break;

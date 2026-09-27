@@ -3,7 +3,9 @@
 //! (`event.nextStep`, a hand-written recursive-descent bytecode reader that
 //! copies names into a caller scratch buffer), the XMIDI IFF → SMF converter
 //! (`xmidiToSmf` / `xmidiBareToSmf`), the BANK image loader behind the bank
-//! query API, and the WAV container readers that classify a file.
+//! query API, the WAV container readers that classify a file, and the WAV
+//! cue-point marker API (count / by-index / by-name over a nested
+//! LIST-adtl-labl chunk tree).
 //!
 //! fuzz_test.zig drives these with fixed-seed PRNG bytes. These targets add
 //! what a PRNG loop cannot: `Smith` picks the shapes (which ASCII a field may
@@ -19,6 +21,7 @@
 const std = @import("std");
 const testing = std.testing;
 const openmiles = @import("openmiles");
+const api_v8 = @import("api/v8.zig");
 
 const Weight = std.testing.Smith.Weight;
 
@@ -523,7 +526,6 @@ fn fuzzSoundBankOne(ctx: *bank_ctx, smith: *std.testing.Smith) anyerror!void {
     try testing.expect(bank_name.len <= 4);
     try testing.expectEqualStrings(bank_name, std.mem.sliceTo(ctx.img[56..][0..4], 0));
 
-    var out: [1024]u8 = undefined;
     for (all_asset_kinds) |kind| {
         const cnt = bank.assetCount(kind);
         const limit = @min(cnt, 24);
@@ -543,7 +545,7 @@ fn fuzzSoundBankOne(ctx: *bank_ctx, smith: *std.testing.Smith) anyerror!void {
             }
             // The sound record is the one accessor that formats into a caller
             // buffer, so its declared size and its written string must agree.
-            if (kind == .sounds) try expectSoundRecord(bank, name, &out);
+            if (kind == .sounds) try expectSoundRecord(bank, name);
         }
         // Index past the declared count is out of range whatever the table says.
         try testing.expect(bank.assetName(kind, cnt) == null);
@@ -564,17 +566,28 @@ fn expectInBank(bank: *const openmiles.soundbank.Bank, p: [*]const u8) !void {
 /// returns the record's DataLen. Both format "*" + bank filename + the sound's
 /// own file name into a buffer the C API hands out with no size, so the number
 /// it returns and the string it wrote have to be the same length, and the sound
-/// record it copied out has to be the bytes at that offset.
-fn expectSoundRecord(bank: *const openmiles.soundbank.Bank, name: []const u8, out: []u8) !void {
-    @memset(out, 0xAA);
+/// record it copied out has to be the bytes at that offset. The write is made
+/// into a buffer sized from the number the other entry point reported, which is
+/// the contract a caller programs against: an accessors pair that under-reports
+/// overruns it.
+fn expectSoundRecord(bank: *const openmiles.soundbank.Bank, name: []const u8) !void {
     var info: [44]u8 = undefined;
     @memset(&info, 0xAA);
-    const req = bank.soundAssetInfo(name, out.ptr, &info);
+    // Ask for the requirement with no buffer attached, so the size is known
+    // before anything is written through it.
+    const req = bank.soundAssetInfo(name, null, null);
     if (req == 0) {
-        try testing.expectEqual(@as(u8, 0), out[0]);
+        var none: [1]u8 = undefined;
+        try testing.expectEqual(@as(i32, 0), bank.soundAssetInfo(name, &none, null));
+        try testing.expectEqual(@as(u8, 0), none[0]);
         return;
     }
     try testing.expect(req >= 2);
+    const out = try testing.allocator.alloc(u8, @intCast(req));
+    defer testing.allocator.free(out);
+    @memset(out, 0xAA);
+    const written_req = bank.soundAssetInfo(name, out.ptr, &info);
+    try testing.expectEqual(req, written_req);
     const written = std.mem.span(@as([*:0]u8, @ptrCast(out.ptr)));
     try testing.expectEqual(@as(usize, @intCast(req)) - 1, written.len);
     try testing.expectEqual(@as(u8, '*'), written[0]);
@@ -595,12 +608,15 @@ fn expectSoundRecord(bank: *const openmiles.soundbank.Bank, name: []const u8, ou
         );
     }
 
+    // soundAssetFilename writes the same string through the other entry point,
+    // into the buffer the requirement was measured against.
     @memset(out, 0xAA);
     const dlen = bank.soundAssetFilename(name, out.ptr);
     if (dlen == -1) {
         try testing.expectEqual(@as(u8, 0), out[0]);
     } else {
         try testing.expectEqual(@as(u8, '*'), out[0]);
+        try testing.expectEqual(@as(usize, @intCast(req)) - 1, std.mem.span(@as([*:0]u8, @ptrCast(out.ptr))).len);
     }
     // A sound that resolves has a duration; one that does not has none.
     try testing.expectEqual(bank.assetData(.sounds, name) != null, bank.soundDurationMs(name) != null);
@@ -878,4 +894,411 @@ const wav_corpus = [_][]const u8{
 test "fuzz: WAV container round trip and file classification" {
     var ctx: wav_ctx = .{};
     try std.testing.fuzz(&ctx, fuzzWavOne, .{ .corpus = &wav_corpus });
+}
+
+// --- Target 5: the WAV cue-point ("marker") API -----------------------------
+//
+// AIL_WAV_marker_count / _by_index / _by_name take a bare `wav_image` pointer
+// with no length and resolve a marker by walking a 'cue ' chunk of fixed-size
+// records and a LIST/adtl chunk holding one 'labl' chunk per cue id. Four
+// file-supplied lengths feed the one pointer they hand back: the RIFF size, the
+// chunk sizes, the cue count, and the labl body that has to contain a NUL
+// before the label is readable. Nothing in the fuzz suite reached this API
+// before (the PRNG suite only ever passes a null image), so this target builds
+// the chunk tree, lets the fuzzer lie about each declared size, and checks the
+// three entry points against each other rather than only for the absence of a
+// crash.
+
+const marker_ctx = struct {
+    img: [1536]u8 = undefined,
+    labels: [4][24]u8 = undefined,
+};
+
+/// Marker names are built from this alphabet, and the "no such marker" probe
+/// below uses a byte outside it, so a name the harness invents can never be
+/// confused with one the image carries.
+const marker_name_weights: []const Weight = &.{
+    w('a', 'z', 40),
+    w('0', '9', 10),
+    w(' ', ' ', 5),
+    w('-', '_', 5),
+};
+
+const no_such_marker = "~no-such-marker~";
+
+/// Cursor over the image being built, so a chunk is written as "id, declared
+/// size, body" in one place and the honest size is never recomputed by hand.
+const ChunkWriter = struct {
+    buf: []u8,
+    at: usize = 0,
+    body_at: usize = 0,
+    body_len: usize = 0,
+
+    fn begin(self: *ChunkWriter, id: *const [4]u8, body_len: usize, declared: u32) void {
+        @memcpy(self.buf[self.at..][0..4], id);
+        std.mem.writeInt(u32, self.buf[self.at + 4 ..][0..4], declared, .little);
+        self.at += 8;
+        self.body_at = self.at;
+        self.body_len = body_len;
+    }
+
+    /// Close the chunk: word-align the body, pad an odd one, leave the cursor
+    /// one past the chunk. The pad byte is what an off-by-one reads a tag out
+    /// of, so it is written rather than left undefined.
+    fn end(self: *ChunkWriter) void {
+        if (self.body_len & 1 != 0) self.buf[self.body_at + self.body_len] = 0;
+        self.at = self.body_at + self.body_len + (self.body_len & 1);
+    }
+
+    fn put32(self: *ChunkWriter, v: u32) void {
+        std.mem.writeInt(u32, self.buf[self.at..][0..4], v, .little);
+        self.at += 4;
+    }
+};
+
+/// Lay out one RIFF/WAVE image carrying a 'cue ' chunk and a LIST/adtl chunk of
+/// 'labl' chunks. The fuzzer decides how many of each there are, which cue ids
+/// are used, whether a label is NUL-terminated, and which of the four declared
+/// sizes lie.
+fn buildMarkerImage(ctx: *marker_ctx, smith: *std.testing.Smith, labels_terminated: bool) []u8 {
+    @memset(&ctx.img, 0);
+    @memcpy(ctx.img[0..4], "RIFF");
+    @memcpy(ctx.img[8..12], "WAVE");
+    var cw: ChunkWriter = .{ .buf = ctx.img[0..], .at = 12 };
+
+    // A minimal PCM fmt chunk, so the image is a WAV a tagger would produce
+    // rather than a container that happens to carry a cue list.
+    cw.begin("fmt ", 16, 16);
+    cw.put32(1); // PCM
+    cw.put32(1); // mono
+    cw.put32(22050); // rate
+    cw.put32(22050 * 2); // byte rate
+    cw.put32(2); // block align
+    cw.put32(16); // bits
+    cw.end();
+
+    const cue_count: usize = smith.index(4);
+    cw.begin("cue ", 4 + cue_count * 24, declaredSize(smith, 4 + cue_count * 24));
+    // The count is the field the record loop trusts, so it gets its own lie:
+    // more records than the chunk holds, fewer than it does, or a value large
+    // enough to wrap the record offset on the 32-bit target.
+    const declared_cue: u32 = switch (smith.index(5)) {
+        0 => @intCast(cue_count),
+        1 => 0,
+        2 => @intCast(cue_count + 1),
+        3 => std.math.maxInt(u32),
+        else => @intCast(smith.index(16)),
+    };
+    cw.put32(declared_cue);
+    var cue_ids: [4]u32 = undefined;
+    for (0..cue_count) |i| {
+        cue_ids[i] = if (smith.boolWeighted(3, 1)) @as(u32, @intCast(smith.index(8))) else @intCast(i);
+        cw.put32(cue_ids[i]);
+        cw.put32(0); // dwPosition
+        cw.put32(0); // fccChunk: "data"
+        cw.put32(0); // dwChunkStart
+        cw.put32(0); // dwBlockStart
+        cw.put32(smith.valueRangeAtMost(u32, 0, 1 << 24)); // dwSampleOffset
+    }
+    cw.end();
+
+    // LIST <size> "adtl" { "labl" <size> <cue id> <name> ... }
+    // The label lengths come first so the LIST size can be the honest total of
+    // the chunks that follow, padding included: a LIST that stops one byte
+    // short of its own last label is the off-by-one the walk must not have.
+    const labl_count: usize = smith.index(4);
+    var name_lens: [4]usize = undefined;
+    var labl_total: usize = 4; // "adtl"
+    for (0..labl_count) |i| {
+        name_lens[i] = smith.index(ctx.labels[i].len);
+        const body = 4 + name_lens[i];
+        labl_total += 8 + body + (body & 1);
+    }
+    cw.begin("LIST", labl_total, declaredSize(smith, labl_total));
+    @memcpy(ctx.img[cw.at..][0..4], if (smith.boolWeighted(4, 1)) "adtl" else "INFO");
+    cw.at += 4;
+    var labl_ids: [4]u32 = undefined;
+    for (0..labl_count) |i| {
+        const n = name_lens[i];
+        // Half the time the label is a cue id already in the list (a lookup
+        // resolves), half the time one that is not, or a repeat of an earlier
+        // label (the first match has to win).
+        labl_ids[i] = switch (smith.index(4)) {
+            0 => @intCast(smith.index(8)),
+            1 => if (cue_count == 0) 0 else cue_ids[smith.index(cue_count)],
+            2 => if (i == 0) 0 else labl_ids[0],
+            else => @intCast(smith.index(64)),
+        };
+        const body = 4 + n;
+        cw.begin("labl", body, declaredSize(smith, body));
+        cw.put32(labl_ids[i]);
+        const n_written: usize = @intCast(smith.sliceWeighted(
+            ctx.labels[i][0..n],
+            &.{.{ .min = n, .max = n, .weight = 1 }},
+            marker_name_weights,
+        ));
+        for (ctx.labels[i][0..n_written], 0..) |*dst, k| {
+            dst.* = if (labels_terminated) ctx.labels[i][k] else 'a' + @as(u8, @truncate(smith.index(26)));
+        }
+        cw.at += n;
+        cw.end();
+    }
+    cw.end();
+
+    // A data chunk after the marker chunks: a real file has one, and it is
+    // what the walk reaches when a declared size is short.
+    const data_len: usize = smith.index(64);
+    cw.begin("data", data_len, declaredSize(smith, data_len));
+    for (0..data_len) |i| ctx.img[cw.at + i] = @truncate(smith.index(256));
+    cw.at += data_len;
+    cw.end();
+
+    const len = cw.at;
+    // The top-level RIFF size stays honest: the marker API is handed a whole
+    // image and reads exactly riff_size + 8 bytes, so a lying value there is a
+    // truncated file the length-less signature cannot detect, not a parser
+    // bug. The lie belongs in the nested chunk sizes above.
+    std.mem.writeInt(u32, ctx.img[4..8], @intCast(len - 8), .little);
+    return ctx.img[0..len];
+}
+
+fn fuzzWavMarkersOne(ctx: *marker_ctx, smith: *std.testing.Smith) anyerror!void {
+    const img = buildMarkerImage(ctx, smith, true);
+    const exact = try testing.allocator.dupe(u8, img);
+    defer testing.allocator.free(exact);
+    try expectMarkers(exact);
+
+    // The same image with a handful of bytes flipped: the chunk ids, the cue
+    // ids and the label bodies are the fields a truncated or rewritten download
+    // leaves behind, and a reader that trusts a stale offset has to reject them.
+    const flips: u32 = smith.valueRangeAtMost(u32, 0, 5);
+    var f: u32 = 0;
+    while (f < flips) : (f += 1) exact[smith.index(exact.len)] = smith.valueRangeAtMost(u8, 0, 255);
+    try expectMarkers(exact);
+
+    // Labels with no NUL anywhere in their chunk: cueLabel requires the
+    // terminator, so the lookup has to miss rather than hand out a string that
+    // runs into the following chunk.
+    const unterminated = buildMarkerImage(ctx, smith, false);
+    const exact_unterminated = try testing.allocator.dupe(u8, unterminated);
+    defer testing.allocator.free(exact_unterminated);
+    try expectMarkers(exact_unterminated);
+}
+
+/// The three marker entry points are one contract seen from three sides: the
+/// count is what the 'cue ' chunk holds, every index below it answers, every
+/// name the index form hands out points inside the image and is NUL-terminated
+/// there, and the by-name form answers the offset of the first cue carrying
+/// that name. A disagreement between any two is a bug in whichever one is
+/// wrong.
+fn expectMarkers(img: []const u8) !void {
+    if (img.len < 12) return;
+    const lo = @intFromPtr(img.ptr);
+    const hi = lo + img.len;
+    const raw: *const anyopaque = img.ptr;
+
+    const count = api_v8.AIL_WAV_marker_count(raw);
+    try testing.expect(count >= 0);
+    if (count == 0) {
+        try testing.expectEqual(@as(i32, -1), api_v8.AIL_WAV_marker_by_index(raw, 0, null));
+        return;
+    }
+    // At, past, and far past the declared count, and a negative index: out of
+    // range whatever the file claims.
+    try testing.expectEqual(@as(i32, -1), api_v8.AIL_WAV_marker_by_index(raw, count, null));
+    try testing.expectEqual(@as(i32, -1), api_v8.AIL_WAV_marker_by_index(raw, std.math.maxInt(i32), null));
+    try testing.expectEqual(@as(i32, -1), api_v8.AIL_WAV_marker_by_index(raw, -1, null));
+
+    const limit: i32 = @intCast(@min(count, 24));
+    var offs: [24]i32 = undefined;
+    var labels: [24]?[*:0]const u8 = undefined;
+    var i: i32 = 0;
+    var answered: usize = 0;
+    while (i < limit) : (i += 1) {
+        var name: ?[*:0]const u8 = null;
+        const off = api_v8.AIL_WAV_marker_by_index(raw, i, &name);
+        // The count is capped by the records the cue chunk carries, so an
+        // index below it that does not answer is a bug, not a short image.
+        if (off < 0) return error.MarkerBelowCountMissing;
+        offs[@intCast(i)] = off;
+        labels[@intCast(i)] = name;
+        answered += 1;
+        if (name) |p| {
+            try testing.expect(@intFromPtr(p) >= lo and @intFromPtr(p) < hi);
+            const label = std.mem.span(p); // the NUL has to be inside the image
+            try testing.expect(label.len < img.len);
+        }
+    }
+
+    for (0..answered) |idx| {
+        const p = labels[idx] orelse continue;
+        // by-name answers the first cue carrying this name, which is this
+        // marker's offset or an earlier one's, so compare against the first
+        // index whose label matches rather than against this index alone.
+        const want = blk: {
+            for (0..idx + 1) |j| {
+                const q = labels[j] orelse continue;
+                if (std.mem.eql(u8, std.mem.span(q), std.mem.span(p))) break :blk offs[j];
+            }
+            continue;
+        };
+        try testing.expectEqual(want, api_v8.AIL_WAV_marker_by_name(raw, @ptrCast(p)));
+    }
+    // A name the image cannot carry, and no name at all, resolve to nothing.
+    try testing.expectEqual(@as(i32, -1), api_v8.AIL_WAV_marker_by_name(raw, no_such_marker));
+    try testing.expectEqual(@as(i32, -1), api_v8.AIL_WAV_marker_by_name(raw, null));
+    // The name out-parameter of the index form is a request for a pointer, not
+    // for a string: an index that resolves with no label must leave it null
+    // rather than hand back an uninitialized pointer.
+    var unset: ?[*:0]const u8 = @ptrCast(&no_such_marker);
+    if (api_v8.AIL_WAV_marker_by_index(raw, 0, &unset) >= 0) {
+        if (unset) |p| try testing.expect(@intFromPtr(p) >= lo and @intFromPtr(p) < hi);
+    }
+}
+
+/// One tagged WAV with two cue points and the adtl list that names them, built
+/// at comptime so the malformed seeds below can replace a field by offset
+/// instead of being cut out of a string literal at a guessed index.
+const marker_seed_bytes: usize = 192;
+const marker_seed_layout = blk: {
+    const Seed = struct { bytes: [marker_seed_bytes]u8, len: usize, cue_count: usize, list_type: usize, labl1_body: usize, labl1_size: usize, labl2_size: usize, data_size: usize };
+    var s: [marker_seed_bytes]u8 = [_]u8{0} ** marker_seed_bytes;
+    var cw: ChunkWriter = .{ .buf = s[0..] };
+    @memcpy(s[0..4], "RIFF");
+    @memcpy(s[8..12], "WAVE");
+    cw.at = 12;
+    cw.begin("fmt ", 16, 16);
+    cw.put32(1);
+    cw.put32(1);
+    cw.put32(22050);
+    cw.put32(22050 * 2);
+    cw.put32(2);
+    cw.put32(16);
+    cw.end();
+    cw.begin("cue ", 4 + 2 * 24, 4 + 2 * 24);
+    const cue_count = cw.at;
+    cw.put32(2);
+    for ([_]u32{ 1, 2 }, 0..) |id, i| {
+        cw.put32(id);
+        cw.put32(0);
+        cw.put32(0);
+        cw.put32(0);
+        cw.put32(0);
+        cw.put32(if (i == 0) 0 else 22050);
+    }
+    cw.end();
+    cw.begin("LIST", 4 + 2 * (8 + 10), 4 + 2 * (8 + 10));
+    const list_type = cw.at;
+    @memcpy(s[cw.at..][0..4], "adtl");
+    cw.at += 4;
+    cw.begin("labl", 9, 9);
+    cw.put32(1);
+    const labl1_body = cw.at;
+    @memcpy(s[cw.at..][0..5], "mark\x00");
+    cw.at += 5;
+    cw.end();
+    cw.begin("labl", 9, 9);
+    cw.put32(2);
+    @memcpy(s[cw.at..][0..5], "ends\x00");
+    cw.at += 5;
+    cw.end();
+    cw.end();
+    cw.begin("data", 4, 4);
+    cw.put32(0);
+    cw.end();
+    std.mem.writeInt(u32, s[4..8], @intCast(cw.at - 8), .little);
+    break :blk Seed{
+        .bytes = s,
+        .len = cw.at,
+        .cue_count = cue_count,
+        .list_type = list_type,
+        .labl1_body = labl1_body,
+        .labl1_size = labl1_body - 4,
+        .labl2_size = labl1_body + 4 + 8,
+        .data_size = cw.at - 4,
+    };
+};
+
+const marker_seed_arr = marker_seed_layout.bytes;
+const marker_seed: []const u8 = marker_seed_arr[0..marker_seed_layout.len];
+
+/// The same image with one field replaced, which is how each malformed seed
+/// below is derived from the loadable one. The image is returned by value, so
+/// a caller's `&` at comptime names a constant with static storage.
+fn markerWithU32(at: usize, v: u32) [marker_seed_bytes]u8 {
+    var s = marker_seed_arr;
+    std.mem.writeInt(u32, s[at..][0..4], v, .little);
+    return s;
+}
+
+fn markerWithBytes(at: usize, bytes: []const u8) [marker_seed_bytes]u8 {
+    var s = marker_seed_arr;
+    @memcpy(s[at..][0..bytes.len], bytes);
+    return s;
+}
+
+const marker_corpus = [_][]const u8{
+    marker_seed,
+    // A cue count larger than the records the chunk holds.
+    &markerWithU32(marker_seed_layout.cue_count, 0xFFFF),
+    // A labl body with no NUL in it, and the same chunk with the size field
+    // pushed past the image.
+    &markerWithBytes(marker_seed_layout.labl1_body, "mark!"),
+    &markerWithU32(marker_seed_layout.labl1_size, std.math.maxInt(u32)),
+    &markerWithU32(marker_seed_layout.labl2_size, 0),
+    // A LIST that is not an adtl list, and a data chunk running past the end.
+    &markerWithBytes(marker_seed_layout.list_type, "INFO"),
+    &markerWithU32(marker_seed_layout.data_size, std.math.maxInt(u32)),
+    // The RIFF/DLS, RIFF/RMID and RIFF/XMID shapes a bank ships beside a WAV:
+    // the chunk walk has to pass them without finding a cue list.
+    "RIFF" ++ "\x10\x00\x00\x00" ++ "DLS ",
+    "RIFF" ++ "\x10\x00\x00\x00" ++ "RMID",
+    "RIFF" ++ "\x10\x00\x00\x00" ++ "XMID",
+    // A WAV header with nothing after it, a cue chunk with no records, an
+    // image cut inside its cue chunk, and an empty image.
+    "RIFF" ++ "\x04\x00\x00\x00" ++ "WAVE",
+    "RIFF" ++ "\x10\x00\x00\x00" ++ "WAVE" ++ "cue " ++ "\x04\x00\x00\x00" ++ "\x00\x00\x00\x00",
+    marker_seed[0..48],
+    "",
+};
+
+test "fuzz: WAV cue-point marker lookup" {
+    var ctx: marker_ctx = .{};
+    try std.testing.fuzz(&ctx, fuzzWavMarkersOne, .{ .corpus = &marker_corpus });
+}
+
+// The corpus and the builder above are only worth anything if a well-formed
+// tagged WAV actually resolves, so the seed image is pinned here: a fuzz target
+// whose shapes never reach the interesting branch would pass on anything.
+test "WAV marker API resolves a well-formed tagged WAV" {
+    const raw: *const anyopaque = marker_seed.ptr;
+    try testing.expectEqual(@as(i32, 2), api_v8.AIL_WAV_marker_count(raw));
+
+    var first: ?[*:0]const u8 = null;
+    try testing.expectEqual(@as(i32, 0), api_v8.AIL_WAV_marker_by_index(raw, 0, &first));
+    try testing.expectEqualStrings("mark", std.mem.span(first.?));
+    var second: ?[*:0]const u8 = null;
+    try testing.expectEqual(@as(i32, 22050), api_v8.AIL_WAV_marker_by_index(raw, 1, &second));
+    try testing.expectEqualStrings("ends", std.mem.span(second.?));
+
+    try testing.expectEqual(@as(i32, 0), api_v8.AIL_WAV_marker_by_name(raw, "mark"));
+    try testing.expectEqual(@as(i32, 22050), api_v8.AIL_WAV_marker_by_name(raw, "ends"));
+    try testing.expectEqual(@as(i32, -1), api_v8.AIL_WAV_marker_by_name(raw, "missing"));
+
+    // The same image with the cue count raised past the records the chunk
+    // holds: the count is capped at what the chunk carries, the two real
+    // records still resolve, and the rest report -1 rather than being read out
+    // of the chunks that follow the cue chunk.
+    const overrun = markerWithU32(marker_seed_layout.cue_count, 99);
+    try testing.expectEqual(@as(i32, 2), api_v8.AIL_WAV_marker_count(overrun[0..].ptr));
+    try testing.expectEqual(@as(i32, 22050), api_v8.AIL_WAV_marker_by_index(overrun[0..].ptr, 1, null));
+    try testing.expectEqual(@as(i32, -1), api_v8.AIL_WAV_marker_by_index(overrun[0..].ptr, 2, null));
+
+    // A labl body with no NUL: the label is not readable, so the lookup misses
+    // rather than handing out a string that runs into the next chunk.
+    const unterminated = markerWithBytes(marker_seed_layout.labl1_body, "mark!");
+    var unterminated_name: ?[*:0]const u8 = @ptrCast(&no_such_marker);
+    try testing.expectEqual(@as(i32, 0), api_v8.AIL_WAV_marker_by_index(unterminated[0..].ptr, 0, &unterminated_name));
+    try testing.expect(unterminated_name == null);
+    try testing.expectEqual(@as(i32, -1), api_v8.AIL_WAV_marker_by_name(unterminated[0..].ptr, "mark"));
 }
