@@ -791,6 +791,10 @@ pub const Sample = struct {
     reverb_level: f32 = 0.0, // wet level
     reverb_dry_level: f32 = 1.0, // dry level (independent of wet; SDK default 1.0)
     reverb_reflect_time: f32 = 0.0,
+    // Delay the live delay node was built with. miniaudio takes the delay only
+    // at node creation, so this is what a new reflect_time is compared against
+    // to decide whether the node has to be rebuilt.
+    reverb_delay_frames: u32 = 0,
     // MSS v7 unified-API attenuation hints (stored; queried back).
     v7_obstruction: f32 = 0.0,
     v7_occlusion: f32 = 0.0,
@@ -1590,6 +1594,17 @@ pub const Sample = struct {
         // (clamp() also bounds NaN to 0.95 instead of passing it through).
         const decay: f32 = std.math.clamp(room_type * 0.15, 0.0, 0.95);
 
+        // miniaudio's delay node takes its delay at creation and has no runtime
+        // setter, so a node that already exists cannot absorb a new
+        // reflect_time. Update the live node in place only when the delay is
+        // unchanged, and rebuild it when it is not: otherwise delay_frames is
+        // computed and dropped, the echo keeps the reflection time it was first
+        // given, and AIL_sample_reverb reports the new one. removeReverb
+        // preserves playback across the rewire, so the rebuilt node comes back
+        // with the voice still running.
+        const rebuild_delay = self.reverb_node != null and self.reverb_delay_frames != delay_frames;
+        if (rebuild_delay) self.removeReverb();
+
         if (self.reverb_node) |node| {
             ma.ma_delay_node_set_wet(node, level);
             // Drive the node dry from the independently-stored dry level (set via
@@ -1616,6 +1631,7 @@ pub const Sample = struct {
             ma.ma_delay_node_set_wet(node, level);
             ma.ma_delay_node_set_dry(node, std.math.clamp(self.reverb_dry_level, 0.0, 1.0));
             self.reverb_node = node;
+            self.reverb_delay_frames = delay_frames;
         }
     }
 

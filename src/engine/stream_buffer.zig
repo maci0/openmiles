@@ -200,7 +200,20 @@ pub const StreamSource = struct {
             }
 
             const avail = slot.len - slot.pos;
-            if (avail == 0) {
+            // A buffer can end mid-frame: AIL_load_sample_buffer forwards the
+            // caller's byte count without a whole-frame check, so 16-bit stereo
+            // (frame_size 4) accepts an odd length. The trailing bytes are not a
+            // frame and cannot be completed from the next submission, so the slot
+            // drains once no whole frame is left. Testing `avail == 0` instead
+            // would leave the sub-frame remainder in place forever: avail would
+            // stay nonzero, take_frames would be 0, the read loop would break
+            // every call, and the sample would never fire EOB or EOS.
+            const whole_frames = avail - (avail % self.frame_size);
+            if (whole_frames == 0) {
+                if (avail != 0) {
+                    root.log("StreamSource.onRead: dropping {d} trailing byte(s) of a {d}-byte partial frame in slot {d}\n", .{ avail, self.frame_size, self.current });
+                    slot.pos = slot.len;
+                }
                 // Buffer drained: capture EOB, free the slot, advance.
                 if (self.eob_hook != null and eob_n < eob_events.len) {
                     eob_events[eob_n] = .{

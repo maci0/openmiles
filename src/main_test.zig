@@ -4630,6 +4630,44 @@ test "StreamSource underrun emits silence and keeps playing" {
     try testing.expectEqualSlices(u8, &([_]u8{0} ** 6), out[2..8]); // silence
 }
 
+// A buffer whose length is not a whole number of frames must still drain: the
+// trailing bytes are not a frame and cannot be completed from the next
+// submission, so they are dropped and the slot fires EOB and moves on. (Before,
+// the sub-frame remainder left `avail` nonzero while yielding 0 whole frames, so
+// the read loop broke on every call and the sample never reached EOS.)
+test "StreamSource drains a buffer ending mid-frame" {
+    var ctx = StreamTestCtx{};
+    var ss: openmiles.StreamSource = undefined;
+    try ss.init(16, 2, 44100, streamTestHook, &ctx); // 16-bit stereo → 4 bytes/frame
+    defer ss.deinit();
+
+    // 2 whole frames plus 3 stray bytes.
+    const buf_a = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 0xEE, 0xEE, 0xEE };
+    ss.loadBuffer(0, &buf_a, buf_a.len);
+    ss.loadBuffer(1, null, 0); // EOF marker
+
+    var out: [16]u8 = undefined;
+    var total: u64 = 0;
+    var hit_end = false;
+    var guard: u32 = 0;
+    while (guard < 8) : (guard += 1) {
+        var read: u64 = 0;
+        const r = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, out[@intCast(total * 4)..].ptr, 4 - total, &read);
+        total += read;
+        if (r == openmiles.ma.MA_AT_END) {
+            hit_end = true;
+            break;
+        }
+        if (read == 0) break;
+    }
+    // Reached end of stream instead of wedging, and the 2 whole frames survived.
+    try testing.expect(hit_end);
+    try testing.expectEqual(@as(u64, 2), total);
+    try testing.expectEqualSlices(u8, buf_a[0..8], out[0..8]);
+    try testing.expectEqual(@as(u32, 1), ctx.eob_count);
+    try testing.expectEqual(@as(i32, 0), ctx.last_idx);
+}
+
 // The configured ring depth (AIL_set_sample_buffer_count, 2..8) must be honored
 // by the transport: a 4-deep ring stores and drains slots 0..3 in order, firing
 // EOB per drain. (Regression: the transport used to be a fixed ping-pong and
@@ -5860,6 +5898,33 @@ test "MP3 inspector parses real Layer III frames" {
     try testing.expectEqual(@as(i32, 1), api_v7b.AIL_enumerate_MP3_frames(&es));
     try testing.expectEqual(@as(i32, frame_size), es.byte_offset);
     // End.
+    try testing.expectEqual(@as(i32, 0), api_v7b.AIL_enumerate_MP3_frames(&es));
+}
+
+// A free-format header (bitrate_index 0) computes to a zero-byte frame. It used
+// to be clamped to 0 and reported as a valid frame, which advanced neither the
+// cursor nor the remaining-byte count: AIL_enumerate_MP3_frames returned 1
+// forever on the same header, so the app's `while (AIL_enumerate_MP3_frames(&s))`
+// loop never terminated. The enumerator must skip past it and reach the end.
+test "MP3 inspector skips a free-format zero-length frame instead of looping" {
+    // A valid 128 kbps frame (FF FB 90 00, 417 bytes) followed by two free-format
+    // headers (bitrate_index 0) that no tabulated bitrate can size.
+    var img: [417 + 8]u8 = [_]u8{0} ** (417 + 8);
+    inline for (.{ 0, 417, 421 }) |base| {
+        img[base + 0] = 0xFF;
+        img[base + 1] = 0xFB;
+        img[base + 2] = 0x90;
+        img[base + 3] = 0x00;
+    }
+    img[417 + 2] = 0x00; // bitrate_index 0 → free format
+    img[421 + 2] = 0x00;
+    var es: openmiles.mp3.MP3_INFO = undefined;
+    api_v7b.AIL_inspect_MP3(&es, &img, img.len);
+
+    try testing.expectEqual(@as(i32, 1), api_v7b.AIL_enumerate_MP3_frames(&es));
+    try testing.expectEqual(@as(i32, 0), es.byte_offset);
+    try testing.expectEqual(@as(i32, 128000), es.bit_rate);
+    // The two free-format headers are not frames; the scan runs off the end.
     try testing.expectEqual(@as(i32, 0), api_v7b.AIL_enumerate_MP3_frames(&es));
 }
 

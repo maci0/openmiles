@@ -289,21 +289,33 @@ pub fn AIL_send_channel_voice_message(mdi_opt: ?*MidiDriver, seq_opt: ?*Sequence
     const tsf_mod = openmiles.tsf;
     const msg_type = status & 0xF0;
     const channel = status & 0x0F;
+    // A channel voice message carries two 7-bit data bytes, but the SDK takes
+    // them as S32 and the caller supplies them unchecked. Every handler below
+    // scales or indexes the raw value, so an out-of-range byte is not rejected
+    // but lands in the soundfont as a value the format cannot hold: d2 = 256
+    // reaches tsf as note-on velocity 2.0 (a gain above unity), and the
+    // 14-bit pitch bend assembled as (d2 << 7) | d1 overflows its own field for
+    // any d2 above 0x3F, which tsf then stores as a bend past full deflection.
+    // Reduce both to the byte the format defines.
+    const b1: i32 = d1 & 0x7F;
+    const b2: i32 = d2 & 0x7F;
     switch (msg_type) {
-        0x80 => tsf_mod.tsf_channel_note_off(sf, channel, d1),
-        0x90 => if (d2 > 0) {
-            _ = tsf_mod.tsf_channel_note_on(sf, channel, d1, @as(f32, @floatFromInt(d2)) / 127.0);
+        0x80 => tsf_mod.tsf_channel_note_off(sf, channel, b1),
+        0x90 => if (b2 > 0) {
+            _ = tsf_mod.tsf_channel_note_on(sf, channel, b1, @as(f32, @floatFromInt(b2)) / 127.0);
         } else {
-            tsf_mod.tsf_channel_note_off(sf, channel, d1);
+            tsf_mod.tsf_channel_note_off(sf, channel, b1);
         },
         0xB0 => {
-            _ = tsf_mod.tsf_channel_midi_control(sf, channel, d1, d2);
+            _ = tsf_mod.tsf_channel_midi_control(sf, channel, b1, b2);
         },
         0xC0 => {
-            _ = tsf_mod.tsf_channel_set_presetnumber(sf, channel, d1, if (channel == 9) 1 else 0);
+            _ = tsf_mod.tsf_channel_set_presetnumber(sf, channel, b1, if (channel == 9) 1 else 0);
         },
         0xE0 => {
-            const bend = (d2 << 7) | d1;
+            // 14 bits: data byte 1 is the low 7, data byte 2 the high 7 with its
+            // top bit unused, so the pair spans 0..16383 with 8192 as centre.
+            const bend = ((b2 & 0x3F) << 7) | b1;
             _ = tsf_mod.tsf_channel_set_pitchwheel(sf, channel, bend);
         },
         0xA0 => {},

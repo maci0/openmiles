@@ -44,7 +44,15 @@ pub const Input = struct {
             return error.CaptureDeviceInitFailed;
         }
         self.is_initialized = true;
-        self.max_buffer_bytes = self.sample_rate * self.channels * (self.bits / 8);
+        // The backend is free to hand back a device that runs at a different
+        // rate than the one requested (WASAPI shared mode adopts the device mix
+        // format, ALSA follows the hardware); ma_device_init writes the rate it
+        // settled on into the device. Everything below, and every AIL_input_info
+        // field derived from it, has to describe the rate the bytes actually
+        // arrive at, or the app resamples by the ratio of the two without ever
+        // being told. Fall back to the request if the backend reported nothing.
+        self.sample_rate = if (self.device.sampleRate != 0) self.device.sampleRate else config.sampleRate;
+        self.max_buffer_bytes = @as(usize, self.sample_rate) * self.channels * (self.bits / 8);
         // Pre-allocate both buffers so the audio-thread callback never hits the
         // allocator. getInfo swaps the two, so each one is at some point the
         // capture target: a buffer that failed to pre-allocate has no capacity

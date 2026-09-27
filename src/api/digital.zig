@@ -9,6 +9,11 @@ const Filter = openmiles.Filter;
 const MidiDriver = openmiles.MidiDriver;
 const AILSOUNDINFO = openmiles.AILSOUNDINFO;
 
+/// Channel ceiling AIL_WAV_file_write will put in a WAV header. Matches
+/// miniaudio's MA_MAX_CHANNELS, the widest the engine mixes; a header claiming
+/// more is a file the decoder cannot open.
+const max_wav_channels: u16 = 254;
+
 // Miles startup is reference-counted: AIL_startup returns the new use count (1
 // on the first call), and the public AIL_startup maps to AIL_startup_reg/_stack
 // in mss.h. AIL_shutdown stays void. We don't re-init the engine on nested
@@ -953,13 +958,16 @@ pub fn AIL_WAV_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32, r
     // no multichannel path -- and there bit 16 meant DIG_F_USING_ASI, an unrelated
     // state flag -- so only the stereo bit applies. Gate to match each release.
     const channels: u16 = blk: {
-        if (openmiles.mss_version >= 80 and (format & 16) != 0) {
-            // A caller can set the multichannel bit without packing a count in
-            // the high half; a zero-channel WAV would carry blockAlign and
-            // byteRate of 0, so clamp to the same one channel the other arm uses.
-            break :blk @intCast(@max(@as(u32, @bitCast(format)) >> 16, 1));
-        }
-        break :blk if (format & 2 != 0) 2 else 1;
+        // The multichannel half of `format` is app-supplied and unvalidated, so it
+        // can be 0 (bit 16 set, high word empty) or up to 65535. buildWavFromPcm
+        // then writes byte_rate 0 and block_align 0, and a count past the engine's
+        // channel cap saturates both fields into a header no decoder agrees with.
+        // Hold the count to the range the writer can actually represent, with the
+        // same one-channel floor the stereo arm uses.
+        const raw: u16 = if (openmiles.mss_version >= 80 and (format & 16) != 0)
+            @intCast(@as(u32, @bitCast(format)) >> 16)
+        else if (format & 2 != 0) 2 else 1;
+        break :blk std.math.clamp(raw, 1, max_wav_channels);
     };
     const bits: u16 = if (format & 1 != 0) 16 else 8;
     const pcm_data: []const u8 = @as([*]const u8, @ptrCast(@alignCast(data)))[0..len];

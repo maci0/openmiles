@@ -300,7 +300,15 @@ pub fn enumerateFrames(es: *MP3_INFO) i32 {
         else
             @divTrunc(72 * es.bit_rate, es.sample_rate);
         es.data_size = es.average_frame_size + es.padding_bit - (es.header_size + es.side_info_size);
-        if (es.data_size < 0) es.data_size = 0;
+        // A frame whose header and side info do not fit in its own bitrate window
+        // is not a frame. The reachable case is a free-format header
+        // (bitrate_index 0, bit_rate 0), whose frame computes to zero bytes; the
+        // lowest tabulated bitrates all still fit. Clamping to 0 instead would
+        // report a valid frame that consumes no bytes, so es.ptr and es.bytes_left
+        // never move and the caller's enumerate loop spins on the same header
+        // forever. Rescan for the next sync, which always advances past the 4
+        // sync bytes.
+        if (es.data_size <= 0) continue :read_frame_header;
         es.samples_per_frame = if (es.sample_rate == 44100 or es.sample_rate == 48000 or es.sample_rate == 32000) 1152 else 576;
 
         if (es.bytes_left < es.data_size) return 0;

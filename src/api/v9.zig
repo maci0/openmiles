@@ -300,9 +300,10 @@ pub fn AIL_schedule_start_sample(s_opt: ?*Sample, mix_time_to_start: u64) callco
     const s = s_opt orelse return;
     // Begin playback at an absolute point on the engine clock, so groups of
     // samples can be started sample-accurately. mix_time_to_start is mixer time
-    // in milliseconds, the same clock AIL_sample_mixed_ms reports; the engine
-    // takes it in frames, so the conversion belongs to the engine. start() runs
-    // first because it clears any earlier schedule on the voice.
+    // in milliseconds, the clock AIL_digital_mixed_samples reports; it is not the
+    // per-sample playback position AIL_sample_mixed_ms returns. The engine takes
+    // it in frames, so the conversion belongs to the engine. start() runs first
+    // because it clears any earlier schedule on the voice.
     s.start();
     s.setScheduledStartMs(mix_time_to_start);
     s.v9_schedule_time = mix_time_to_start;
