@@ -298,11 +298,14 @@ pub fn AIL_sample_schedule_time(s_opt: ?*Sample) callconv(.winapi) u64 {
 }
 pub fn AIL_schedule_start_sample(s_opt: ?*Sample, mix_time_to_start: u64) callconv(.winapi) void {
     const s = s_opt orelse return;
-    // Begin playback at an absolute mixer time (engine PCM clock), so groups of
-    // samples can be started sample-accurately.
-    s.v9_schedule_time = mix_time_to_start;
-    if (s.is_initialized) openmiles.ma.ma_sound_set_start_time_in_pcm_frames(&s.sound, mix_time_to_start);
+    // Begin playback at an absolute point on the engine clock, so groups of
+    // samples can be started sample-accurately. mix_time_to_start is mixer time
+    // in milliseconds, the same clock AIL_sample_mixed_ms reports; the engine
+    // takes it in frames, so the conversion belongs to the engine. start() runs
+    // first because it clears any earlier schedule on the voice.
     s.start();
+    s.setScheduledStartMs(mix_time_to_start);
+    s.v9_schedule_time = mix_time_to_start;
 }
 pub fn AIL_set_sample_loop_samples(s_opt: ?*Sample, loop_start_samples: i32, loop_end_samples: i32) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;

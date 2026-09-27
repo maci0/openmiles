@@ -125,6 +125,18 @@ fn seekMsPosition(self: anytype, ms: i32, rate_factor: f32) void {
     _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, frame);
 }
 
+/// Engine PCM frames for an absolute point on the engine clock expressed in
+/// mixer milliseconds, the unit the AIL_* time calls (AIL_sample_mixed_ms,
+/// AIL_ms_count) speak. miniaudio schedules in frames, so a millisecond value
+/// handed to it unscaled started the sound tens of thousands of times too
+/// early. An engine with no output rate cannot place a frame, so it schedules
+/// nothing.
+pub fn mixTimeMsToFrames(mix_ms: u64, sample_rate: u32) u64 {
+    if (sample_rate == 0) return 0;
+    const rate: u64 = sample_rate;
+    return @min(mix_ms, std.math.maxInt(u64) / rate) * rate / 1000;
+}
+
 /// A peak soft-limiter as a custom miniaudio node: passes audio below the knee
 /// untouched and saturates peaks toward unity so a bus can't clip.
 pub const LimiterNode = extern struct {
@@ -811,7 +823,10 @@ pub const Sample = struct {
     // per AIL_set_sample_3D_*_falloff; count 0 = no graph. Mirrors HSAMPLE.S3D.
     falloff_count: [4]u8 = [_]u8{0} ** 4,
     falloff_graph: [4][max_falloff_points]FalloffGraphPoint = undefined,
+    // AIL_schedule_start_sample's mix timestamp, in mixer milliseconds, and the
+    // engine PCM frame it converts to (see setScheduledStartMs).
     v9_schedule_time: u64 = 0,
+    scheduled_start_frames: u64 = 0,
     v9_playback_delay: i32 = 0, // ms before playback starts (AIL_set_sample_playback_delay)
     // 5.1 per-speaker volume levels: FL, FR, FC, LFE, BL, BR.
     v51_levels: [6]f32 = [_]f32{1.0} ** 6,
@@ -1320,8 +1335,14 @@ pub const Sample = struct {
         self.is_paused = false;
         self.was_stopped = false;
         self.has_played = true;
+        self.scheduled_start_frames = 0;
         if (self.is_initialized) {
             applyLoopCount(&self.sound, self.loop_count);
+            // A start is immediate unless AIL_schedule_start_sample re-schedules
+            // it right after this call. miniaudio keeps a start time set on a
+            // previous start, so a plain restart would inherit that stale
+            // schedule and wait for a point in the engine's past.
+            ma.ma_sound_reset_start_time(&self.sound);
             // SDK wavefile.cpp AIL_API_start_sample rewinds to the beginning
             // (buf[tail].pos = 0) before playing -- it does NOT resume from the
             // current position. Continuing from where a sample was stopped is
@@ -1335,6 +1356,13 @@ pub const Sample = struct {
             const cb: *const fn (?*anyopaque) callconv(.winapi) void = @ptrFromInt(self.sob_callback);
             cb(@ptrCast(self));
         }
+    }
+
+    /// AIL_schedule_start_sample: begin playback at an absolute point on the
+    /// engine clock, given in mixer milliseconds.
+    pub fn setScheduledStartMs(self: *Sample, mix_ms: u64) void {
+        self.scheduled_start_frames = mixTimeMsToFrames(mix_ms, self.driver.getSampleRate());
+        if (self.is_initialized) ma.ma_sound_set_start_time_in_pcm_frames(&self.sound, self.scheduled_start_frames);
     }
 
     pub fn stop(self: *Sample) void {
@@ -2221,6 +2249,20 @@ const CbProbe = struct {
         eos_calls += 1;
     }
 };
+
+test "mixer milliseconds convert to engine frames at the engine rate" {
+    // 1 s of mixer time is the engine's own frame count, not one frame.
+    try std.testing.expectEqual(@as(u64, 44_100), mixTimeMsToFrames(1_000, 44_100));
+    try std.testing.expectEqual(@as(u64, 0), mixTimeMsToFrames(0, 48_000));
+    // Sub-millisecond remainders truncate downward rather than over-shooting
+    // into the next millisecond.
+    try std.testing.expectEqual(@as(u64, 1), mixTimeMsToFrames(1, 1_000));
+    // A far-future timestamp saturates instead of wrapping into the past,
+    // which would start the sound immediately.
+    try std.testing.expect(mixTimeMsToFrames(std.math.maxInt(u64), 44_100) > 0);
+    // No output rate: nothing to schedule against.
+    try std.testing.expectEqual(@as(u64, 0), mixTimeMsToFrames(1_000, 0));
+}
 
 test "EOB/EOS callbacks fire with single HSAMPLE arg" {
     const s = try std.testing.allocator.create(Sample);
