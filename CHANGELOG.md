@@ -189,6 +189,16 @@ All notable changes to OpenMiles are recorded here. The format follows
 - A GM/GS/XG reset SysEx names the channel and the controller of a reset control the soundfont could not apply. A rejected one leaves that channel half reset, with voices still sounding and the old volume and pan in place.
 - A plugin module that opens but exports no `RIB_Main` is named in the log. The scan counted it and the provider was adopted, so every interface query answered absent with nothing saying why.
 - The remaining `docs/THREAT_MODEL.md` anchors, the ones a commit since 0.2.0 moved, resolve again. `make check-threat-model`, and with it `make lint` and the release job's gate, was failing on a tree the changelog above says is clean.
+- Two `file:line` anchors in the event-bytecode row of `docs/THREAT_MODEL.md`
+  had drifted with the event decoder. The `nextStep` anchor no longer sat on the
+  line that declares it, and the `copyString` anchor resolved only because a doc
+  comment names the function, which is the false pass the check's own docstring
+  warns about. Both now point at the definitions.
+- The release-archive section of `README.md` described the archive as the DLL,
+  the license, the README, the changelog, and the vendored attribution. It has
+  also carried `mss.h` and `SBOM.cdx.json` since the header started shipping, so
+  a reader had no way to learn from it that the archive holds the header they
+  compile against.
 
 ## [0.2.0] - 2026-09-28
 
