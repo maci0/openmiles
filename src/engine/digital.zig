@@ -506,6 +506,10 @@ pub const DigitalDriver = struct {
         // the volume an earlier level saved. Reserving up front makes every push
         // inside the cap infallible, so the count and the saved values cannot
         // come apart.
+        // The serve baseline is not seeded here: serve() takes its first
+        // reading itself (serve_started), so the opening frame advances every
+        // auto-updating 3D source by its own duration rather than by the whole
+        // process uptime.
         self.system_state_stack.ensureTotalCapacity(allocator, max_system_state_level) catch {
             log("DigitalDriver.init: system-state stack reservation failed\n", .{});
             allocator.destroy(self);
