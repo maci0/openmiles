@@ -127,9 +127,42 @@ GPL_COMPATIBLE = {
 # project redistributes.
 PIP_LICENSES = {"pefile": "MIT"}
 
-# "pefile==2024.8.26" with an exact pin, or a range the file does not use.
-PIP_PIN_RE = re.compile(r"^([A-Za-z0-9_.-]+)==(\S+)$")
+# A requirements.txt record is a pin line plus any number of backslash-continued
+# "--hash=sha256:<64 hex>" lines. The pin is the only line carrying a name; a
+# continuation is joined onto it before either is matched, so the parse sees the
+# one logical record the installer does.
+PIP_PIN_RE = re.compile(r"^([A-Za-z0-9_.-]+)==(\S+)((?:\s*--hash=sha256:[0-9a-f]{64})+)$")
+PIP_HASH_RE = re.compile(r"--hash=sha256:([0-9a-f]{64})")
 ZON_VERSION_RE = re.compile(r'^\s*\.version\s*=\s*"([^"]*)"', re.MULTILINE)
+
+
+def pip_records(text):
+    """Yield (lineno, logical record) for every non-comment line in the file.
+
+    A trailing backslash continues a record onto the next line, which is how
+    pip writes a hash list under one pin. An unterminated continuation at end of
+    file is yielded as it stands, so the pin check below names the line rather
+    than the file silently losing its last requirement.
+    """
+    pending = ""
+    start = 0
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        line = raw.split("#", 1)[0].rstrip()
+        if not line.strip():
+            continue
+        if not pending:
+            start = lineno
+        stripped = line.strip()
+        if stripped.endswith("\\"):
+            pending += stripped[:-1] + " "
+            continue
+        if pending:
+            yield start, pending + stripped
+            pending = ""
+        else:
+            yield start, stripped
+    if pending:
+        yield start, pending
 
 
 def spdx_ids(declared, where):
@@ -220,19 +253,22 @@ def vendored_components(sums):
 
 
 def pip_components():
-    """One component per exactly pinned package in scripts/requirements.txt."""
+    """One component per exactly pinned, hash-pinned package in requirements.txt."""
     components = []
-    for lineno, raw in enumerate(REQUIREMENTS.read_text(encoding="utf-8").splitlines(), 1):
-        line = raw.split("#", 1)[0].strip()
-        if not line:
-            continue
+    for lineno, line in pip_records(REQUIREMENTS.read_text(encoding="utf-8")):
         match = PIP_PIN_RE.match(line)
         if not match:
-            sys.exit(f"{REQUIREMENTS.relative_to(ROOT)}:{lineno}: {line!r} is not an exact == pin")
-        name, version = match.groups()
+            sys.exit(
+                f"{REQUIREMENTS.relative_to(ROOT)}:{lineno}: {line!r} is not an exact == pin "
+                f"carrying at least one --hash=sha256"
+            )
+        name, version, hashes = match.groups()
         license_id = PIP_LICENSES.get(name)
         if license_id is None:
             sys.exit(f"error: {name} has no license in PIP_LICENSES; check it before recording it")
+        digests = PIP_HASH_RE.findall(hashes)
+        if len(set(digests)) != len(digests):
+            sys.exit(f"{REQUIREMENTS.relative_to(ROOT)}:{lineno}: {name} repeats a digest")
         components.append(
             {
                 "type": "library",
@@ -241,6 +277,10 @@ def pip_components():
                 "version": version,
                 "purl": f"pkg:pypi/{name}@{version}",
                 "licenses": [{"license": {"id": license_id}}],
+                # The digests the installer checks the downloaded artifacts
+                # against, so the inventory carries the integrity of this package
+                # and not only its version, the way a vendored header's does.
+                "hashes": [{"alg": "SHA-256", "content": d} for d in dict.fromkeys(digests)],
                 "externalReferences": [
                     {"type": "distribution", "url": f"https://pypi.org/project/{name}/"}
                 ],
@@ -249,6 +289,8 @@ def pip_components():
                 "properties": [{"name": "openmiles:shipped-in-release", "value": "false"}],
             }
         )
+    if not components:
+        sys.exit(f"error: {REQUIREMENTS.relative_to(ROOT)} declares no package")
     return components
 
 

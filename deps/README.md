@@ -41,9 +41,10 @@ Each vendored entry names the upstream **Package** as well as the file, because
 a CVE database and a license scanner know `TinyMidiLoader`, not `tml.h`.
 
 ## SBOM
-`scripts/gen_sbom.py` reads the entries above, `SHA256SUMS`, and the pins in
-`scripts/requirements.txt`, and writes `SBOM.cdx.json`: the third-party surface
-of a release, in the format vulnerability scanners and compliance audits read.
+`scripts/gen_sbom.py` reads the entries above, `SHA256SUMS`, and the pins and
+digests in `scripts/requirements.txt`, and writes `SBOM.cdx.json`: the
+third-party surface of a release, in the format vulnerability scanners and
+compliance audits read.
 `make check-sbom` (part of `make lint`) regenerates it in memory and fails when
 the committed file no longer matches the tree, so a header swap that skips
 step 6 of the checklist below cannot ship a stale inventory. The file is
