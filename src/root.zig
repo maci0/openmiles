@@ -146,6 +146,14 @@ pub const xmidiBareToSmf = xmidi.xmidiBareToSmf;
 
 pub const deg2rad = std.math.pi / 180.0;
 
+/// Clamp to the 0..1 range a gain or pan is specified in, with a non-finite
+/// input resolving to 0 rather than to the upper bound: std.math.clamp maps NaN
+/// to hi, so a NaN level would otherwise become full volume.
+pub fn clampUnit(v: f32) f32 {
+    if (!std.math.isFinite(v)) return 0.0;
+    return std.math.clamp(v, 0.0, 1.0);
+}
+
 // AIL_MAX_FILE_HEADER_SIZE bounds how far AIL_file_type scans for an MPEG frame
 // sync (miscutil.cpp clamps the scan length to it). MSS 7.0 doubled it from 4096
 // to 8192 — verified by disassembling AIL_file_type in the reference DLLs: 6.5h

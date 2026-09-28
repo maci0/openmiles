@@ -368,7 +368,11 @@ fn updateInstances() void {
     const now = openmiles.getMsCount64();
     for (g_instances.items) |inst| {
         if (inst.status == STATUS_PLAYING) {
-            if (now -% inst.start_ms >= inst.duration_ms) inst.status = STATUS_COMPLETE;
+            // Not wrapping arithmetic: installing a virtual clock rebases the
+            // ms counter, so an instance started before the rebase reads as
+            // already elapsed under `-%` and completes on the first poll.
+            const elapsed: u64 = if (now > inst.start_ms) @intCast(now - inst.start_ms) else 0;
+            if (elapsed >= inst.duration_ms) inst.status = STATUS_COMPLETE;
         }
     }
 }

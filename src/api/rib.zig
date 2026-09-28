@@ -41,8 +41,12 @@ pub fn RIB_provider_library_handle() callconv(.winapi) ?*anyopaque {
 pub fn RIB_load_application_providers(dir: [*:0]const u8) callconv(.winapi) i32 {
     const dir_str = std.mem.span(dir);
     log("RIB_load_application_providers(dir={s})\n", .{dir_str});
+    // loadApplicationProviders returns the number registered and never a
+    // negative, so testing the sign reported success for a directory that held
+    // no .asi. The return is the count: a caller branching on 0 to fall back to
+    // its own codec search has to see the empty case.
     const count = openmiles.loadApplicationProviders(dir_str);
-    return if (count >= 0) 1 else 0;
+    return if (count > 0) count else 0;
 }
 pub fn RIB_enumerate_providers(name: [*:0]const u8, next: ?*?*anyopaque, handle: ?*?*Provider) callconv(.winapi) i32 {
     const iface_name = std.mem.span(name);

@@ -282,7 +282,7 @@ pub fn AIL_3D_sample_cone(s: ?*anyopaque, inner_angle: ?*f32, outer_angle: ?*f32
 pub fn AIL_set_3D_sample_effects_level(s: ?*anyopaque, effects_level: f32) callconv(.winapi) void {
     const p = s orelse return;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
-    sample.effects_level = @min(1.0, @max(0.0, effects_level));
+    sample.effects_level = openmiles.clampUnit(effects_level);
 }
 pub fn AIL_3D_sample_effects_level(s: ?*anyopaque) callconv(.winapi) f32 {
     const p = s orelse return 0.0;
@@ -338,7 +338,7 @@ pub fn AIL_set_3D_sample_preference(s: ?*anyopaque, name: [*:0]const u8, val: *a
         // Same clamp as AIL_set_3D_sample_effects_level: two entry points
         // writing one field, and the unclamped one let a preference file
         // raise it past 1.0 while the setter could not.
-        sample.effects_level = @min(1.0, @max(0.0, v.*));
+        sample.effects_level = openmiles.clampUnit(v.*);
     } else if (std.mem.eql(u8, n, "Position")) {
         const v: *const [3]f32 = @ptrCast(@alignCast(val));
         sample.setPosition(v.*[0], v.*[1], v.*[2]);

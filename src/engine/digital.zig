@@ -506,6 +506,10 @@ pub const DigitalDriver = struct {
         // the volume an earlier level saved. Reserving up front makes every push
         // inside the cap infallible, so the count and the saved values cannot
         // come apart.
+        // The first AIL_serve measures its frame from here, not from the epoch:
+        // with a zero baseline the opening frame advances every auto-updating 3D
+        // source by the whole process uptime.
+        self.last_serve_ms = @divTrunc(root.nowNs(), std.time.ns_per_ms);
         self.system_state_stack.ensureTotalCapacity(allocator, max_system_state_level) catch {
             log("DigitalDriver.init: system-state stack reservation failed\n", .{});
             allocator.destroy(self);
@@ -1329,7 +1333,10 @@ pub const Sample = struct {
     pub fn setAddress(self: *Sample, data: *anyopaque, size: u32) !void {
         const raw: []const u8 = @as([*]const u8, @ptrCast(data))[0..@intCast(size)];
         if (self.pcm_format) |fmt| {
-            const rate: u32 = if (self.target_rate) |r| root.satU32(r) else 22050;
+            // Without an app-set rate the PCM is wrapped at the same seed rate
+            // AIL_sample_playback_rate reports, so the WAV's header rate and
+            // the getter's answer cannot disagree.
+            const rate: u32 = if (self.target_rate) |r| root.satU32(r) else @intCast(init_sample_default_rate);
             const wav = try buildWavFromPcm(self.driver.allocator, raw, fmt.channels, rate, fmt.bits);
             errdefer self.driver.allocator.free(wav);
             try self.loadFromOwnedMemory(wav);
@@ -1365,7 +1372,9 @@ pub const Sample = struct {
             // Tear down any prior decoder-based playback before switching modes.
             self.cleanupPlaybackState();
             const fmt = self.pcm_format orelse SamplePcmFormat{ .channels = 2, .bits = 16 };
-            const rate: u32 = if (self.target_rate) |r| root.satU32(r) else 22050;
+            // Same seed rate as setAddress, so the transport's rate and the
+            // playback-rate getter agree when the app set none.
+            const rate: u32 = if (self.target_rate) |r| root.satU32(r) else @intCast(init_sample_default_rate);
             try self.stream_src.init(fmt.bits, fmt.channels, rate, streamEobBridge, self);
             errdefer self.stream_src.deinit();
             // Size the transport's ring to the configured buffer count so every
@@ -1793,11 +1802,15 @@ pub const Sample = struct {
         // given, and AIL_sample_reverb reports the new one. removeReverb
         // preserves playback across the rewire, so the rebuilt node comes back
         // with the voice still running.
+        // The stored level is unclamped so the getter reports what was set, but
+        // the node gain is a unity-scaled mix: a level above 1 (or an Inf) would
+        // make the wet path louder than the dry one it is mixed against.
+        const wet: f32 = std.math.clamp(level, 0.0, 1.0);
         const rebuild_delay = self.reverb_node != null and self.reverb_delay_frames != delay_frames;
         if (rebuild_delay) self.removeReverb();
 
         if (self.reverb_node) |node| {
-            ma.ma_delay_node_set_wet(node, level);
+            ma.ma_delay_node_set_wet(node, wet);
             // Drive the node dry from the independently-stored dry level (set via
             // AIL_set_sample_reverb_levels; SDK default 1.0) so that control
             // actually reaches the audio, instead of a fixed wet-derived value.
@@ -1819,7 +1832,7 @@ pub const Sample = struct {
             const endpoint = ma.ma_engine_get_endpoint(&self.driver.engine);
             _ = ma.ma_node_attach_output_bus(@ptrCast(node), 0, endpoint, 0);
             _ = ma.ma_node_attach_output_bus(@ptrCast(&self.sound), 0, @ptrCast(node), 0);
-            ma.ma_delay_node_set_wet(node, level);
+            ma.ma_delay_node_set_wet(node, wet);
             ma.ma_delay_node_set_dry(node, std.math.clamp(self.reverb_dry_level, 0.0, 1.0));
             self.reverb_node = node;
             self.reverb_delay_frames = delay_frames;
@@ -2470,6 +2483,20 @@ const CbProbe = struct {
         eos_calls += 1;
     }
 };
+
+test "the first AIL_serve advances 3D sources by one frame, not by process uptime" {
+    const drv = try DigitalDriver.init(std.testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s3d = try Sample3D.init(drv);
+    defer s3d.deinit();
+    s3d.setVelocity(1.0, 0, 0);
+    s3d.auto_update = true;
+
+    drv.serve();
+    // The dead-reckoning step is velocity * dt, so an unbounded dt (the epoch
+    // as baseline) put the source thousands of seconds away on the first frame.
+    try std.testing.expect(@abs(s3d.pos_x) < 1000.0);
+}
 
 test "mixer milliseconds convert to engine frames at the engine rate" {
     // 1 s of mixer time is the engine's own frame count, not one frame.

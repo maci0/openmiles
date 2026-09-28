@@ -471,7 +471,12 @@ const Decoder = struct {
 
     fn hexDigit(c: u8) u8 {
         var w = c -% '0';
-        if (w > 9) w = c -% 'a' +% 10;
+        // Only lowercase 'a'..'f' folded, so an uppercase digit fell through as
+        // e.g. 'F' - 'a' + 10 = 0xEF and every field containing one decoded to
+        // garbage. Bank text authored by hand uses both cases.
+        if (w > 9) {
+            w = if (c >= 'A' and c <= 'F') c -% 'A' +% 10 else c -% 'a' +% 10;
+        }
         return w;
     }
     // Step past the type byte and its ';' separator. A string that ends at the
@@ -832,6 +837,20 @@ test "a non-finite float field decodes to 0 rather than reaching the step" {
     // A finite field is unaffected.
     _ = nextStep(":n;l;2.500000;tg;0;0;0;", &step, &scratch) orelse return error.TestUnexpectedResult;
     try testing.expectEqual(@as(f32, 2.5), step.u.ramp.time);
+}
+
+test "a hex field decodes the same in upper and lower case" {
+    const testing = std.testing;
+    // Every fixed-width step field (delaymin, delaymax, priority, the digit
+    // flags) reads through this fold. Only lowercase letters used to be
+    // handled, so a delay of "FFFE" in externally authored bank text decoded
+    // as 0xEFEF and the sound started at the wrong time.
+    for ("0123456789abcdef", 0..) |c, i| {
+        try testing.expectEqual(@as(u8, @intCast(i)), Decoder.hexDigit(c));
+    }
+    for ("0123456789ABCDEF", 0..) |c, i| {
+        try testing.expectEqual(@as(u8, @intCast(i)), Decoder.hexDigit(c));
+    }
 }
 
 test "nextStep stops at a premature NUL inside float/decimal fields" {

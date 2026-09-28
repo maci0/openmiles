@@ -79,8 +79,15 @@ pub fn AIL_set_sample_3D_velocity(obj: ?*Sample, dx: f32, dy: f32, dz: f32, magn
 }
 pub fn AIL_set_sample_3D_velocity_vector(obj: ?*Sample, dx: f32, dy: f32, dz: f32) callconv(.winapi) void {
     const s = obj orelse return;
-    s.s3d_vel = .{ dx, dy, dz }; // SDK stores S3D.velocity verbatim (MSS space)
-    if (s.is_initialized) ma.ma_sound_set_velocity(&s.sound, dx, dy, -dz);
+    // Same NaN/Inf guard as every other velocity entry point (Sample3D.setVelocity,
+    // AIL_set_listener_3D_velocity): a non-finite component reaches the Doppler
+    // pitch and the dead-reckoning update, neither of which re-checks it, and
+    // poisons the sample's position for the rest of the sequence.
+    const vx = if (std.math.isFinite(dx)) dx else 0.0;
+    const vy = if (std.math.isFinite(dy)) dy else 0.0;
+    const vz = if (std.math.isFinite(dz)) dz else 0.0;
+    s.s3d_vel = .{ vx, vy, vz }; // SDK stores S3D.velocity verbatim (MSS space)
+    if (s.is_initialized) ma.ma_sound_set_velocity(&s.sound, vx, vy, -vz);
 }
 pub fn AIL_set_sample_3D_orientation(obj: ?*Sample, fx: f32, fy: f32, fz: f32, ux: f32, uy: f32, uz: f32) callconv(.winapi) void {
     const s = obj orelse return;
@@ -105,7 +112,7 @@ pub fn AIL_set_sample_3D_cone(obj: ?*Sample, inner_angle: f32, outer_angle: f32,
     s.s3d_cone_inner_deg = inner_angle;
     s.s3d_cone_outer_deg = outer_angle;
     s.s3d_cone_outer_vol = outer_volume_level;
-    if (s.is_initialized) ma.ma_sound_set_cone(&s.sound, inner_angle * openmiles.deg2rad, outer_angle * openmiles.deg2rad, std.math.clamp(outer_volume_level, 0.0, 1.0));
+    if (s.is_initialized) ma.ma_sound_set_cone(&s.sound, inner_angle * openmiles.deg2rad, outer_angle * openmiles.deg2rad, openmiles.clampUnit(outer_volume_level));
 }
 pub fn AIL_set_sample_3D_distances(obj: ?*Sample, max_dist: f32, min_dist: f32, auto_3D_wet_atten: i32) callconv(.winapi) void {
     const s = obj orelse return;
