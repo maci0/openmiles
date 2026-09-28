@@ -49,6 +49,11 @@ const error_envvar_not_found: u32 = 203;
 const debug_on_values = [_][]const u8{ "1", "true", "yes", "on" };
 const debug_off_values = [_][]const u8{ "0", "false", "no", "off" };
 
+/// Longest rejected value echoed back on stderr. Past this the message says
+/// only that the value is not one of the documented ones: an operator reading a
+/// 4 KiB echo of their own export learns nothing a one-line reason does not say.
+const max_echoed_debug_value: usize = 64;
+
 fn parseDebugFlag(value: []const u8) ?bool {
     // An empty value is "set to empty", not "off": an exported
     // OPENMILES_DEBUG= with nothing after the '=' is a broken launcher
@@ -57,6 +62,20 @@ fn parseDebugFlag(value: []const u8) ?bool {
     for (debug_on_values) |v| if (std.ascii.eqlIgnoreCase(value, v)) return true;
     for (debug_off_values) |v| if (std.ascii.eqlIgnoreCase(value, v)) return false;
     return null;
+}
+
+/// What one GetEnvironmentVariableW return means. Windows cannot tell an
+/// unset variable from one set to the empty string by the length alone: both
+/// return 0, and only the last error separates them (a variable that exists
+/// with nothing in it leaves the last error as it was, ERROR_SUCCESS). A value
+/// that does not fit the buffer comes back as a length at or past the buffer
+/// size, so a caller that ignores that reads a truncated string as the setting.
+const EnvRead = enum { unset, empty, value, too_long };
+
+fn classifyEnvRead(len: u32, buf_len: u32, not_found: bool) EnvRead {
+    if (len == 0) return if (not_found) .unset else .empty;
+    if (len >= buf_len) return .too_long;
+    return .value;
 }
 
 fn logPath() []const u8 {
@@ -106,9 +125,23 @@ fn applyDebugEnvValue(value: []const u8) void {
     // stderr, not log(): the log is what the operator was trying to turn on,
     // so a message in it would never be seen. This is the one message init
     // always emits.
+    if (value.len > max_echoed_debug_value) {
+        reportDebugIgnored("not one of the documented values");
+        return;
+    }
     std.debug.print(
         "openmiles: ignoring OPENMILES_DEBUG='{s}': expected 1/0, true/false, yes/no, or on/off\n",
         .{value},
+    );
+}
+
+/// Report a value that was never a candidate setting (a length past the read
+/// buffer, a conversion failure) without echoing it: the string itself is
+/// noise, the build default staying in place is the part an operator needs.
+fn reportDebugIgnored(reason: []const u8) void {
+    std.debug.print(
+        "openmiles: ignoring OPENMILES_DEBUG ({s}); the build default stays in place\n",
+        .{reason},
     );
 }
 
@@ -139,28 +172,39 @@ pub fn init() void {
         // rather than aborting init, so the log file still opens.
         if (wide.toWide("OPENMILES_DEBUG", &name_wbuf)) |name| {
             const len = GetEnvironmentVariableW(name.ptr, &wbuf, wbuf.len);
-            if (len > 0 and len < wbuf.len) {
-                if (wide.toUtf8(wbuf[0..len], &buf)) |val| {
+            // The last error is only meaningful straight after the call, so it
+            // is read here rather than after the switch has started.
+            switch (classifyEnvRead(len, wbuf.len, GetLastError() == error_envvar_not_found)) {
+                .unset => {},
+                // Set to empty is a broken launcher environment, and it is
+                // reported the same way the other systems report it, rather
+                // than being read as "nothing was asked for".
+                .empty => applyDebugEnvValue(""),
+                .too_long => reportDebugIgnored(std.fmt.comptimePrint("longer than {d} characters", .{value_units - 1})),
+                .value => if (wide.toUtf8(wbuf[0..len], &buf)) |val| {
                     applyDebugEnvValue(val);
-                } else |_| {}
+                } else |_| {
+                    reportDebugIgnored("not valid UTF-8");
+                },
             }
         } else |_| {}
         if (wide.toWide("OPENMILES_LOG_PATH", &name_wbuf)) |name| {
             var path_w: [max_log_path_bytes]u16 = undefined;
             var path_utf8: [max_log_path_bytes * 3]u8 = undefined;
             const len = GetEnvironmentVariableW(name.ptr, &path_w, path_w.len);
-            if (len == 0) {
-                if (GetLastError() != error_envvar_not_found) applyLogPath("");
-            } else if (len >= path_w.len) {
-                applyLogPath(&[_]u8{'x'} ** max_log_path_bytes);
-            } else if (wide.toUtf8(path_w[0..len], &path_utf8)) |val| {
-                applyLogPath(val);
-            } else |_| {
-                std.debug.print(
-                    "openmiles: ignoring OPENMILES_LOG_PATH (not valid UTF-8); using {s} in the current directory\n",
-                    .{default_log_name},
-                );
-                setDefaultLogPath();
+            switch (classifyEnvRead(len, path_w.len, GetLastError() == error_envvar_not_found)) {
+                .unset => {},
+                .empty => applyLogPath(""),
+                .too_long => applyLogPath(&[_]u8{'x'} ** max_log_path_bytes),
+                .value => if (wide.toUtf8(path_w[0..len], &path_utf8)) |val| {
+                    applyLogPath(val);
+                } else |_| {
+                    std.debug.print(
+                        "openmiles: ignoring OPENMILES_LOG_PATH (not valid UTF-8); using {s} in the current directory\n",
+                        .{default_log_name},
+                    );
+                    setDefaultLogPath();
+                },
             }
         } else |_| {}
     } else {
@@ -404,12 +448,46 @@ test "OPENMILES_LOG_PATH selects the file and rejects an empty or oversized valu
     try testing.expectEqualStrings("/var/tmp/openmiles.log", logPath());
 }
 
+test "an environment read that Windows cannot decode by length alone is classified" {
+    // A zero length is "unset" only when the last error says the variable does
+    // not exist; set to empty leaves the last error as success, and reading the
+    // two the same way is how an exported-but-empty value turns into a silent
+    // "nobody asked for anything" on Windows while the other systems report it.
+    try testing.expectEqual(EnvRead.unset, classifyEnvRead(0, 256, true));
+    try testing.expectEqual(EnvRead.empty, classifyEnvRead(0, 256, false));
+    try testing.expectEqual(EnvRead.value, classifyEnvRead(1, 256, false));
+    try testing.expectEqual(EnvRead.value, classifyEnvRead(255, 256, false));
+    // A value that does not fit comes back as a length at or past the buffer
+    // size; taking it as a value would read the truncated prefix as the setting.
+    try testing.expectEqual(EnvRead.too_long, classifyEnvRead(256, 256, false));
+    try testing.expectEqual(EnvRead.too_long, classifyEnvRead(300, 256, false));
+}
+
 test "an unrecognized OPENMILES_DEBUG is rejected, not read as off" {
     // A typo silently disabling the log is the failure this guards: the
     // operator asks for a trace and gets none with no message.
     for ([_][]const u8{ "", " ", "2", "enabled", "TRUE-ish", "t", "no!", "-1" }) |v| {
         try testing.expectEqual(@as(?bool, null), parseDebugFlag(v));
     }
+}
+
+test "a rejected OPENMILES_DEBUG leaves the build default in place" {
+    // Every rejection path, however it was reached (an empty value, a
+    // misspelling, a value too long to echo), ends with the same state: the
+    // build default still decides, and the source still says it did.
+    const before = debug_enabled;
+    const source_before = debug_source;
+    applyDebugEnvValue("");
+    try testing.expectEqual(before, debug_enabled);
+    try testing.expectEqualStrings(source_before, debug_source);
+    applyDebugEnvValue(&[_]u8{'x'} ** (max_echoed_debug_value + 1));
+    try testing.expectEqual(before, debug_enabled);
+    try testing.expectEqualStrings(source_before, debug_source);
+    applyDebugEnvValue("1");
+    try testing.expectEqual(true, debug_enabled);
+    try testing.expectEqualStrings("OPENMILES_DEBUG", debug_source);
+    applyDebugEnvValue("0");
+    try testing.expectEqual(false, debug_enabled);
 }
 
 test "an oversized record is replaced by a marker, not dropped silently" {

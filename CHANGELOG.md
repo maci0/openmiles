@@ -72,6 +72,17 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ### Fixed
 
+- On Windows, an `OPENMILES_DEBUG` set to the empty string, longer than the
+  value buffer, or not valid UTF-8 was ignored without a word, where the other
+  systems report it. `GetEnvironmentVariableW` returns 0 both for a variable
+  that does not exist and for one set to nothing, and the two were read the
+  same way, so an exported-but-empty setting left the build default in place
+  silently. Both variables now classify the read the same way on every
+  platform, and a rejected value that is too long to be worth echoing is
+  reported by reason rather than by value.
+- Forty-four further `file:line` anchors in `docs/THREAT_MODEL.md` that no
+  longer resolved, which failed `make check-threat-model` and with it
+  `make lint`.
 - Four `file:line` references in `docs/THREAT_MODEL.md` pointed two lines above
   the code they claim, so `make lint` failed on a clean tree and the mitigation
   claims behind them were no longer checkable.
