@@ -43,8 +43,12 @@ pub fn AIL_sample_level_mask(s_opt: ?*Sample) callconv(.winapi) u8 {
     return s.v9_level_mask;
 }
 pub fn AIL_set_sample_3D_spread(s_opt: ?*Sample, spread: f32) callconv(.winapi) void {
-    const s = s_opt orelse return;
-    s.v9_spread = spread;
+    // The SDK's HSAMPLE.S3D.spread has no reader and no getter in the v9 surface,
+    // and the 3D mix this engine renders has no per-sample spread term, so
+    // nothing observes the value. The SDK's per-sample spread shaping is the
+    // AIL_set_sample_3D_spread_falloff graph below, which is stored.
+    _ = s_opt;
+    _ = spread;
 }
 pub fn AIL_add_clear_state_event_step(event: ?*anyopaque) callconv(.winapi) i32 {
     const e: *openmiles.event.EventConstruct = @ptrCast(@alignCast(event orelse return 0));

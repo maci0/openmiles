@@ -222,9 +222,7 @@ pub fn AIL_set_sample_reverb_levels(s_opt: ?*Sample, dry_level: f32, wet_level: 
     // The SDK (AIL_API_set_sample_reverb_levels) stores dry and wet verbatim
     // (independent, need not sum to 1) and the getter returns them as-is. Drive
     // the engine with a clamped wet, then store the verbatim wet for the getter.
-    s.reverb_dry_level = dry_level;
-    s.setReverb(s.reverb_room_type, std.math.clamp(wet_level, 0.0, 1.0), if (s.reverb_reflect_time > 0) s.reverb_reflect_time else 0.05);
-    s.reverb_level = wet_level; // verbatim for the getter (engine used the clamped value)
+    s.setReverbLevels(dry_level, wet_level);
 }
 pub fn AIL_sample_reverb_levels(s_opt: ?*Sample, dry_level: ?*f32, wet_level: ?*f32) callconv(.winapi) void {
     // SDK (wavefile.cpp AIL_API_sample_reverb_levels): unlike the volume getters,
@@ -485,6 +483,11 @@ pub fn AIL_enumerate_sample_stage_attributes(s_opt: ?*Sample, next: *?*anyopaque
     next.* = null;
     return 0;
 }
+// Logical output channels the routing tables cover: the widest DirectSound
+// speaker config, and the edge of the [9][9] channel-level matrix and of the
+// 18-entry speaker order rows below.
+const max_logical_channels = 9;
+
 // Number of source channels carried by the sample (S->n_channels).
 fn sampleSourceChannels(s: *Sample) u32 {
     if (s.pcm_format) |f| return @max(1, f.channels);
@@ -500,7 +503,7 @@ fn srcChanOf(s: *Sample, spk: i32) i32 {
     const idx: u32 = @popCount(s.channel_mask & (bit - 1));
     // The channel-level matrix is [9][9]: source lanes beyond it are unroutable
     // even when set_sample_info accepted a wider channel count.
-    const routed = @min(sampleSourceChannels(s), 9);
+    const routed = @min(sampleSourceChannels(s), max_logical_channels);
     return if (idx >= routed) -1 else @intCast(idx);
 }
 // Default mono/stereo routing (set_user_channel_defaults) used until the matrix
@@ -509,8 +512,10 @@ fn defaultChannelLevel(s: *Sample, dest: usize, src: usize) f32 {
     if (sampleSourceChannels(s) >= 2) return if (dest < 2 and dest == src) 1.0 else 0.0;
     return if (src == 0 and dest < 2) 1.0 else 0.0;
 }
-fn logicalChannels(s: *Sample) usize {
-    return @min(@as(usize, ma.ma_engine_get_channels(&s.driver.engine)), 9);
+// Logical output channels of an engine, capped at the width of the routing
+// tables. A sample routes through its own driver's engine.
+fn logicalChannels(engine: *ma.ma_engine) usize {
+    return @min(@as(usize, ma.ma_engine_get_channels(engine)), max_logical_channels);
 }
 pub fn AIL_sample_channel_levels(s_opt: ?*Sample, src: ?*const anyopaque, dst: ?*const anyopaque, levels: ?*f32, n_levels: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
@@ -518,7 +523,7 @@ pub fn AIL_sample_channel_levels(s_opt: ?*Sample, src: ?*const anyopaque, dst: ?
     const dst_idx: [*]const i32 = @ptrCast(@alignCast(dst orelse return));
     const lv: [*]f32 = @ptrCast(@alignCast(levels orelse return));
     if (n_levels <= 0) return;
-    const row = speaker.output_speaker_index[logicalChannels(s)];
+    const row = speaker.output_speaker_index[logicalChannels(&s.driver.engine)];
     var i: usize = 0;
     while (i < @as(usize, @intCast(n_levels))) : (i += 1) {
         const sc = srcChanOf(s, src_idx[i]);
@@ -545,12 +550,12 @@ pub fn AIL_set_sample_channel_levels(s_opt: ?*Sample, src: ?*const anyopaque, ds
     // Materialize the current defaults before the first explicit edit so
     // unspecified entries keep their default routing.
     if (!s.user_channel_levels_set) {
-        for (0..9) |d| for (0..9) |c| {
+        for (0..max_logical_channels) |d| for (0..max_logical_channels) |c| {
             s.user_channel_levels[d][c] = defaultChannelLevel(s, d, c);
         };
         s.user_channel_levels_set = true;
     }
-    const row = speaker.output_speaker_index[logicalChannels(s)];
+    const row = speaker.output_speaker_index[logicalChannels(&s.driver.engine)];
     var i: usize = 0;
     while (i < @as(usize, @intCast(n_levels))) : (i += 1) {
         const sc = srcChanOf(s, src_idx[i]);
@@ -654,14 +659,11 @@ pub const output_speaker_order = [10][18]i32{
 };
 var g_speaker_wet_reverb = [_]f32{1.0} ** 9; // D3D.speaker_wet_reverb_response
 var g_speaker_dry_reverb = [_]f32{1.0} ** 9; // D3D.speaker_dry_reverb_response
-fn drvLogical(d: *DigitalDriver) usize {
-    return @min(@as(usize, ma.ma_engine_get_channels(&d.engine)), 9);
-}
 pub fn AIL_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array: ?*?*f32, dry_array: ?*?*f32, speaker_index_array: ?*?*const anyopaque) callconv(.winapi) i32 {
     // SDK (wavefile.cpp): hand back pointers to the driver's per-speaker wet/dry
     // reverb response arrays and the speaker order, returning the channel count.
     const d = dig_opt orelse return 0;
-    const logical = drvLogical(d);
+    const logical = logicalChannels(&d.engine);
     if (logical == 0) return 0;
     if (speaker_index_array) |p| p.* = @ptrCast(&output_speaker_order[logical][0]);
     if (wet_array) |p| p.* = &g_speaker_wet_reverb[0];
@@ -673,7 +675,7 @@ pub fn AIL_set_speaker_reverb_levels(dig_opt: ?*DigitalDriver, wet_array: ?*cons
     // that response to 1.0; a null speaker array returns after resetting; else
     // store per-speaker levels at the mapped driver channel.
     const d = dig_opt orelse return;
-    const logical = drvLogical(d);
+    const logical = logicalChannels(&d.engine);
     if (logical == 0) return;
     if (wet_array == null or speaker_index_array == null) {
         for (0..logical) |i| g_speaker_wet_reverb[i] = 1.0;
@@ -897,24 +899,24 @@ pub fn AIL_enumerate_sample_stage_attributes_v7(s_opt: ?*Sample, stage_index: i3
 // The v7 arrays are indexed by logical output channel, so the identity matrix
 // reproduces the old call: forwarding null src/dst would land in the v8 reset
 // branch and discard the caller's levels.
-fn v7ChannelMatrix(buf: *[9]i32, n: usize) [*]const i32 {
+fn v7ChannelMatrix(buf: *[max_logical_channels]i32, n: usize) [*]const i32 {
     for (0..n) |i| buf[i] = @intCast(i);
     return @ptrCast(&buf[0]);
 }
 pub fn AIL_sample_channel_levels_v7(s_opt: ?*Sample, levels: ?*f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     const lv = levels orelse return;
-    const n = @min(logicalChannels(s), 9);
-    var ids: [9]i32 = undefined;
+    const n = logicalChannels(&s.driver.engine);
+    var ids: [max_logical_channels]i32 = undefined;
     const idx = v7ChannelMatrix(&ids, n);
     AIL_sample_channel_levels(s, idx, idx, lv, @intCast(n));
 }
 pub fn AIL_set_sample_channel_levels_v7(s_opt: ?*Sample, levels: ?*const f32, n_levels: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     const lv = levels orelse return AIL_set_sample_channel_levels(s, null, null, null, n_levels);
-    const n: usize = @min(@as(usize, @intCast(@max(n_levels, 0))), @min(logicalChannels(s), 9));
+    const n: usize = @min(@as(usize, @intCast(@max(n_levels, 0))), logicalChannels(&s.driver.engine));
     if (n == 0) return;
-    var ids: [9]i32 = undefined;
+    var ids: [max_logical_channels]i32 = undefined;
     const idx = v7ChannelMatrix(&ids, n);
     AIL_set_sample_channel_levels(s, idx, idx, lv, @intCast(n));
 }
@@ -922,7 +924,7 @@ pub fn AIL_set_sample_channel_levels_v7(s_opt: ?*Sample, levels: ?*const f32, n_
 // its arrays are already in driver-channel order; forward the driver row.
 pub fn AIL_set_speaker_reverb_levels_v7(dig_opt: ?*DigitalDriver, wet_array: ?*f32, dry_array: ?*f32, n_levels: i32) callconv(.winapi) void {
     const d = dig_opt orelse return;
-    const logical = drvLogical(d);
+    const logical = logicalChannels(&d.engine);
     if (logical == 0) return;
     AIL_set_speaker_reverb_levels(dig_opt, wet_array, dry_array, @ptrCast(&output_speaker_order[logical][0]), n_levels);
 }

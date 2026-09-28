@@ -837,6 +837,11 @@ fn resolvePlaybackRate(target_rate: ?f32, decoder: ?*ma.ma_decoder) i32 {
     return init_sample_default_rate;
 }
 
+/// The reflection delay the 6.5/6.6 dry/wet reverb setters drive the engine
+/// with when the handle carries none: a delay of zero or less drops the reverb
+/// node outright, so the SDK's own default stands in for it.
+pub const default_reverb_reflect_time: f32 = 0.05;
+
 pub const Sample = struct {
     driver: *DigitalDriver,
     sound: ma.ma_sound,
@@ -969,7 +974,6 @@ pub const Sample = struct {
     v9_id: i32 = 0,
     v9_bus: i32 = 0,
     v9_level_mask: u8 = 0xFF,
-    v9_spread: f32 = 0.0,
     // S3D falloff graphs (volume, exclusion, lowpass, spread). Stored verbatim
     // per AIL_set_sample_3D_*_falloff; count 0 = no graph. Mirrors HSAMPLE.S3D.
     falloff_count: [falloff_kind_count]u8 = [_]u8{0} ** falloff_kind_count,
@@ -1730,6 +1734,17 @@ pub const Sample = struct {
         // setVolume/setPan clobbered save_*; overwrite with the exact reconstruction.
         self.save_pan_f = std.math.clamp(save_pan, 0.0, 1.0);
         self.save_vol_f = std.math.pow(f32, @max(save_volume, 0.0), 6.0 / 10.0);
+    }
+
+    /// The 6.5/6.6 dry/wet reverb pair (AIL_set_sample_reverb_levels and its
+    /// stream form). The SDK stores both verbatim and independently, so they
+    /// need not sum to 1, and the getter hands them back as stored. The engine
+    /// is driven with the wet clamped to 0..1, and the stored wet is put back
+    /// afterwards so the getter still reads what the app wrote.
+    pub fn setReverbLevels(self: *Sample, dry_level: f32, wet_level: f32) void {
+        self.reverb_dry_level = dry_level;
+        self.setReverb(self.reverb_room_type, std.math.clamp(wet_level, 0.0, 1.0), if (self.reverb_reflect_time > 0) self.reverb_reflect_time else default_reverb_reflect_time);
+        self.reverb_level = wet_level; // verbatim for the getter (engine used the clamped value)
     }
 
     /// Set reverb parameters for this sample. Creates or updates a ma_delay_node

@@ -32,7 +32,7 @@ to set both.
 | 5 | `AIL_WAV_file_write` creates or truncates a game-named path | game to DLL, DLL to disk | Overwrite of any file the game user can write | Unmitigated by ABI necessity (`src/api/digital.zig:1003 AIL_WAV_file_write`) |
 | 6 | Malformed soundbank / event bytecode (`.BANK`) | file to process | Crash, in-process memory corruption, audio DoS | Partial: bounds chokepoint in `src/engine/soundbank.zig:257 rdU32`, step decode bounded in `src/engine/event.zig:495 copyString`) |
 | 7 | Malformed XMIDI / MIDI sequence | file to process | Crash, memory exhaustion | Partial: saturating cursor arithmetic, fixed loop stack (`src/engine/xmidi.zig:383 xmidiToSmf`, `src/engine/midi.zig:452 xmidi_loop_stack`), and a per-buffer jump budget (`src/engine/midi.zig:378 max_xmidi_jumps_per_buffer`) |
-| 8 | Malformed or oversized audio file (MP3/OGG/WAV/FLAC) | file to process | Crash, memory exhaustion | Partial: declared-size caps in `src/engine/audio_detect.zig:15 max_declared_image_size`, whole-file cap in `src/engine/digital.zig:1288 root.max_file_load_bytes`; the decode itself is delegated to miniaudio and TinySoundFont (`src/engine/digital.zig:1276 loadFromFile`) |
+| 8 | Malformed or oversized audio file (MP3/OGG/WAV/FLAC) | file to process | Crash, memory exhaustion | Partial: declared-size caps in `src/engine/audio_detect.zig:15 max_declared_image_size`, whole-file cap in `src/engine/digital.zig:1292 root.max_file_load_bytes`; the decode itself is delegated to miniaudio and TinySoundFont (`src/engine/digital.zig:1280 loadFromFile`) |
 | 9 | App VFS callback reports an arbitrary file size | game to DLL | Heap exhaustion in the game process | Mitigated: same 256 MiB cap as the direct path (`src/root.zig:372 max_file_load_bytes`) |
 | 10 | Caller-supplied pointer/length pairs trusted verbatim | game to DLL | Read/write of game memory on a bad call | Unmitigated by ABI necessity (see [Game process boundary](#1-game-process-boundary)) |
 | 11 | Debug logging enabled by environment variable | environment to process | Verbose internal logging to disk, paths and asset names disclosed | Mitigated: opt-in, 64 MiB cap (`src/utils/logger.zig:14 max_log_bytes`) |
@@ -82,18 +82,18 @@ these are not remote attack vectors, they are the ABI contract.
 
 There is no `AIL_open_file`/`AIL_close_file`/`HSFILE` handle API. The file
 service surface is `src/api/file.zig`, the v9 spellings
-(`src/api/v9.zig:99 AIL_file_read_info`, `src/api/v9.zig:107 AIL_file_size_info`,
+(`src/api/v9.zig:103 AIL_file_read_info`, `src/api/v9.zig:111 AIL_file_size_info`,
 which forward to the same uncapped-`dest` write described above), and the
 callback VFS in `src/root.zig:330 setFileCallbacks`.
 
 Callbacks are a second game-to-DLL-to-game boundary and the set is larger than
 the four named above. Stored and later invoked, several of them on the audio
 thread: `AIL_register_EOS_callback` (`src/api/digital.zig:200 AIL_register_EOS_callback`),
-`AIL_register_mix_callback` (`src/api/v9.zig:278 AIL_register_mix_callback`),
+`AIL_register_mix_callback` (`src/api/v9.zig:282 AIL_register_mix_callback`),
 `AIL_set_sample_processor` (`src/api/digital.zig:547 AIL_set_sample_processor`),
 `AIL_register_stream_callback` (`src/api/stream.zig:112 AIL_register_stream_callback`),
 `AIL_register_beat_callback` (`src/api/midi.zig:391 AIL_register_beat_callback`),
-and `AIL_configure_logging` (`src/api/v9.zig:80 AIL_configure_logging`). Like the
+and `AIL_configure_logging` (`src/api/v9.zig:84 AIL_configure_logging`). Like the
 file callbacks, these are the ABI contract rather than an attack vector: the
 module calls back into the game it was loaded by, and a plugin that has already
 run holds the game's authority anyway. They are named here so the boundary count
@@ -113,11 +113,11 @@ hostile file, download, or mod pack reaches.
 
 | Input | Entry point | Notes |
 |-------|-------------|-------|
-| Audio file | `AIL_open_stream` / `AIL_quick_load` / `AIL_quick_load_and_play` -> `Sample.loadFromFile` (`src/engine/digital.zig:1276 loadFromFile`) | Rejects a zero length and anything above the shared 256 MiB cap (`src/engine/digital.zig:1288 root.max_file_load_bytes`), then allocates the whole file. That check is the direct-filesystem branch only: with a VFS installed the same three entry points read through `fileCallbackReadAll` (`src/root.zig:352 fileCallbackReadAll`) and are capped by the shared cap there (`src/root.zig:372 max_file_load_bytes`) instead. |
-| Audio in memory | `Sample.load` (`src/engine/digital.zig:1303 load`) | A positive caller length is used as a slice length with no cap; a zero or negative length falls to `loadFromUnownedMemoryUnknownSize`, which derives a bounded image from the header. The uncapped case is the in-process ABI, not a file input. |
+| Audio file | `AIL_open_stream` / `AIL_quick_load` / `AIL_quick_load_and_play` -> `Sample.loadFromFile` (`src/engine/digital.zig:1280 loadFromFile`) | Rejects a zero length and anything above the shared 256 MiB cap (`src/engine/digital.zig:1292 root.max_file_load_bytes`), then allocates the whole file. That check is the direct-filesystem branch only: with a VFS installed the same three entry points read through `fileCallbackReadAll` (`src/root.zig:352 fileCallbackReadAll`) and are capped by the shared cap there (`src/root.zig:372 max_file_load_bytes`) instead. |
+| Audio in memory | `Sample.load` (`src/engine/digital.zig:1307 load`) | A positive caller length is used as a slice length with no cap; a zero or negative length falls to `loadFromUnownedMemoryUnknownSize`, which derives a bounded image from the header. The uncapped case is the in-process ABI, not a file input. |
 | XMIDI / MIDI | `AIL_init_sequence` -> `xmidiToSmf` (`src/engine/xmidi.zig:383 xmidiToSmf`) | Declared extents clamped to the buffer with saturating arithmetic; VLQ continuation capped at 4 bytes (`src/engine/xmidi.zig:85 bytes_read`); FOR/NEXT loop stack fixed at 8 with a depth check (`src/engine/midi.zig:451 xmidi_loop_depth`). |
 | BANK soundbank | `AIL_open_soundbank` (`src/api/v8.zig:534 AIL_open_soundbank`), `AIL_open_soundbank_v8` (`src/api/v8.zig:946 AIL_open_soundbank_v8`), `MilesAddSoundBank` (`src/api/miles.zig:765 MilesAddSoundBank`) -> `loadFromMemory` (`src/engine/soundbank.zig:610 loadFromMemory`) | Tag and version are validated before any allocation; every offset read passes through the bounds-checked `rdU32` (`src/engine/soundbank.zig:257 rdU32`); metadata is NUL-terminated by an allocated sentinel. `meta_size` is checked after a path dupe and a registry reserve (`src/engine/soundbank.zig:620 dupeResolvedPathZ`, `src/engine/soundbank.zig:626 registryReserve`), so it is not validated before the first allocation; both of those are sized by the caller's path, not by file content. |
-| Bank asset path | `AIL_sound_asset_info` (`src/api/v9.zig:197 AIL_sound_asset_info`) -> `soundAssetInfo` (`src/engine/soundbank.zig:550 soundAssetInfo`) | Writes `*<bank file name><sound file name>` into a caller buffer that the ABI passes no size for, from two names that come out of the bank file. Bounded by the module instead: a pair over `max_asset_path_bytes` is reported unresolved and nothing is written (`src/engine/soundbank.zig:203 max_asset_path_bytes`). `AIL_sound_asset_filename` (`src/api/v8.zig:871 AIL_sound_asset_filename`) is a no-op stub. |
+| Bank asset path | `AIL_sound_asset_info` (`src/api/v9.zig:201 AIL_sound_asset_info`) -> `soundAssetInfo` (`src/engine/soundbank.zig:550 soundAssetInfo`) | Writes `*<bank file name><sound file name>` into a caller buffer that the ABI passes no size for, from two names that come out of the bank file. Bounded by the module instead: a pair over `max_asset_path_bytes` is reported unresolved and nothing is written (`src/engine/soundbank.zig:203 max_asset_path_bytes`). `AIL_sound_asset_filename` (`src/api/v8.zig:871 AIL_sound_asset_filename`) is a no-op stub. |
 | Event bytecode | `AIL_next_event_step` (`src/api/v8.zig:518 AIL_next_event_step`) -> `nextStep` (`src/engine/event.zig:653 nextStep`) | Step type is range-checked before the enum conversion, the header chain is depth-limited, and string copies refuse to pass `wlimit` (`src/engine/event.zig:495 copyString`). |
 | DLS container | `AIL_extract_DLS` / `AIL_find_DLS` / `AIL_list_DLS` / `AIL_merge_DLS_with_XMI` / `AIL_filter_DLS_with_XMI` (`src/api/dls.zig:96 AIL_filter_DLS_with_XMI`) | Pointer images capped at 256 MiB (`src/engine/dls_container.zig:74 max_ptr_image_size`); merged image size checked with `std.math.add`. `AIL_list_DLS` takes a pointer with no length and derives one from the header, so a lying RIFF size would otherwise drive a scan past the caller's buffer; only a 64 KiB prefix of the declared image is dereferenced (`src/api/dls.zig:380 list_dls_scan_limit`, `src/api/dls.zig:385 AIL_list_DLS`). The `cmemdup` paths read up to the declared 256 MiB from a bare pointer. |
 | DLS / SF2 soundfont load | `AIL_DLS_load_file` (`src/api/dls.zig:21 AIL_DLS_load_file`), `AIL_DLS_load_memory` (`src/api/dls.zig:116 AIL_DLS_load_memory`) | The VFS read is capped by the shared 256 MiB cap; the memory form takes a declared size and rejects only what exceeds `maxInt(c_int)`. The SF2 parse itself is delegated to TinySoundFont, so the container bounds here are the only ones the module applies. |
@@ -125,7 +125,7 @@ hostile file, download, or mod pack reaches.
 | Event string enqueue | `MilesEnqueueEvent` (`src/api/miles.zig:622 MilesEnqueueEvent`), `MilesEnqueueEventByName` (`src/api/miles.zig:631 MilesEnqueueEventByName`), `MilesStartSoundInstance` (`src/api/miles.zig:666 MilesStartSoundInstance`) | The Miles event path is separate from `AIL_next_event_step` and reaches the same event decoder. The Miles fuzz harness covers it (`src/fuzz_native_test.zig:1718 test`). |
 | SMF conversion and listing | `AIL_MIDI_to_XMI` (`src/api/midi.zig:197 AIL_MIDI_to_XMI`), `AIL_list_MIDI` (`src/api/midi.zig:220 AIL_list_MIDI`) | `AIL_list_MIDI` has a 14-byte header floor and no upper bound; `AIL_MIDI_to_XMI` sizes its output from the caller-supplied input length. |
 | File type sniffing | `AIL_file_type` (`src/api/file.zig:17 AIL_file_type`), `AIL_file_type_named` (`src/api/v8.zig:324 AIL_file_type_named`) -> `detectFileType` (`src/engine/audio_detect.zig:109 detectFileType`) | Walks WAV/AIFF/MIDI/MP3/OGG/FLAC headers of a caller buffer. The SMF sniffer `AIL_init_sequence` reaches is bounded by the 16 MiB streaming sentinel (`src/engine/audio_detect.zig:9 streaming_sentinel_size`), not by the 256 MiB declared-image cap the DLS pointer path uses. |
-| MP3 frame walk | `AIL_inspect_MP3` (`src/api/v7.zig:810 AIL_inspect_MP3`), `AIL_enumerate_MP3_frames` (`src/api/v7.zig:825 AIL_enumerate_MP3_frames`) | Frame walk is bounded by the image, not by a frame count (`src/engine/mp3.zig:199 enumerateFrames`). |
+| MP3 frame walk | `AIL_inspect_MP3` (`src/api/v7.zig:815 AIL_inspect_MP3`), `AIL_enumerate_MP3_frames` (`src/api/v7.zig:827 AIL_enumerate_MP3_frames`) | Frame walk is bounded by the image, not by a frame count (`src/engine/mp3.zig:199 enumerateFrames`). |
 
 Amplification and quota notes: there is no rate limit, quota, or frame-count
 cap anywhere in the module. The whole-file reads scale with the input. The 256 MiB
@@ -323,7 +323,7 @@ Gaps:
 | Control | Where | Covers |
 |---------|-------|--------|
 | Whole-file read cap, 256 MiB | `src/root.zig:372 max_file_load_bytes` | Oversized file allocation on every whole-file read path: the VFS branch checks it at `src/root.zig:372 max_file_load_bytes`, the direct branch at `src/root.zig:414 max_file_load_bytes`, and `AIL_file_read` before its `malloc` at `src/root.zig:466 max_file_load_bytes` |
-| Whole-file read cap on the sample loader | `src/engine/digital.zig:1288 root.max_file_load_bytes` | Oversized audio file through `AIL_open_stream` / `AIL_quick_load` on the direct-filesystem branch; the VFS branch is covered by the shared cap above |
+| Whole-file read cap on the sample loader | `src/engine/digital.zig:1292 root.max_file_load_bytes` | Oversized audio file through `AIL_open_stream` / `AIL_quick_load` on the direct-filesystem branch; the VFS branch is covered by the shared cap above |
 | Declared container size cap, 256 MiB | `src/engine/audio_detect.zig:15 max_declared_image_size` | Lying RIFF/FORM headers |
 | Pointer image cap, 256 MiB | `src/engine/dls_container.zig:74 max_ptr_image_size` | Lying DLS container sizes over bare pointers |
 | Bounds-checked offset read | `src/engine/soundbank.zig:257 rdU32` | Every BANK offset and count |
@@ -447,7 +447,7 @@ something other than a control in this tree.
    `dest` branch above it), so a game that hands in a short buffer has it
    overrun by the file length. The ABI passes no destination capacity, so this
    cannot be closed inside the module. `AIL_file_read_info`
-   (`src/api/v9.zig:99 AIL_file_read_info`) forwards to the same write.
+   (`src/api/v9.zig:103 AIL_file_read_info`) forwards to the same write.
 5. No cap on the number of loaded banks, so a caller that keeps the handles
    for many distinct `.BANK` files retains every parsed metadata block
    (`src/engine/soundbank.zig:46 registryReserve`). Per-read 256 MiB is not a
