@@ -38,6 +38,10 @@ No disclosure deadline or embargo policy is defined by this project yet.
   that variable chooses where the image lands.
 - Anything reachable from `AIL_startup`'s scan of the game directory for
   plugin files.
+- `RIB_load_provider_library`, which loads a caller-named path as plugin code.
+  Unlike the two directory scans it applies no plugin-extension allowlist, no
+  filename check, and no already-loaded check, so a report is in scope wherever
+  a game can be made to pass a path it does not control.
 - Anything reachable from the scan of the redist directory the game sets with
   `AIL_set_redist_directory`. That directory is not restricted to the game
   directory, so it is in scope wherever the game is pointed.
