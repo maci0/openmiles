@@ -224,6 +224,16 @@ clean:
 parity: check-parity-tools
 	./scripts/check_all_versions.sh
 
+# A name that is not a target gets make's own "No rule to make target", which
+# names the mistake and nothing else, on a makefile that carries twenty of
+# them. Printing the list turns the dead end into the same answer `make help`
+# gives. 2 is make's own code for the same condition.
+.DEFAULT:
+	@printf 'error: no target %s\n' "'$@'" >&2
+	@echo "run 'make help' for the list." >&2
+	@$(MAKE) --no-print-directory help >&2
+	@exit 2
+
 help:
 	@echo "Usage: make <target> [VAR=value ...]"
 	@echo ""

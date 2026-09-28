@@ -24,7 +24,19 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-ROOT = Path(__file__).resolve().parent.parent
+PROG = "check_vendored.py"
+
+# Walk up for the project marker rather than assuming a fixed depth, so the
+# gate runs the same from the repo root, from scripts/, and from a build dir.
+for ROOT in Path(__file__).resolve().parents:
+    if (ROOT / "build.zig.zon").is_file():
+        break
+else:  # pragma: no cover - the script always lives inside the repository
+    # 1, not 2: nothing about the invocation is wrong, the check cannot run.
+    # Every gate reserves 2 for a bad argument.
+    print("error: build.zig.zon not found above scripts/", file=sys.stderr)
+    sys.exit(1)
+
 DEPS = ROOT / "deps"
 SUMS = DEPS / "SHA256SUMS"
 CHUNK = 1 << 20
@@ -207,7 +219,7 @@ def read_sums():
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="check_vendored.py",
+        prog=PROG,
         # The docstring is laid out as prose and a column-aligned finding list;
         # the default formatter reflows both into one paragraph, which is what
         # turned the finding names into run-on text.
@@ -264,4 +276,11 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except (OSError, ValueError) as exc:
+        # A file this gate reads is missing or unparsable: the invocation was
+        # fine, the check could not run. 1, the code the sibling gates use for
+        # the same condition, not a traceback.
+        print(f"{PROG}: {exc}", file=sys.stderr)
+        sys.exit(1)

@@ -14,6 +14,7 @@ import sys
 import pefile
 
 EXIT_OK = 0
+PROG = "check_exports.py"
 # 1 covers both a parity difference and a check that could not run at all: an
 # unreadable DLL, or a file that is not a PE image. The invocation was fine in
 # both cases, which is what every sibling gate means by 1 and what keeps 2 for
@@ -56,7 +57,7 @@ def norm(n):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        prog="check_exports.py",
+        prog=PROG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Diff a built mss32.dll export table against a real Miles DLL.",
         epilog=(
@@ -82,7 +83,7 @@ def main(argv=None):
         ours = exports(args.ours)
         ref = exports(args.reference)
     except ValueError as exc:
-        print(f"check_exports.py: {exc}", file=sys.stderr)
+        print(f"{PROG}: {exc}", file=sys.stderr)
         return EXIT_FAIL
 
     on = {norm(x): x for x in ours}
@@ -111,4 +112,11 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except (OSError, ValueError) as exc:
+        # A DLL named on the command line is missing or unparsable: the
+        # invocation was fine, the check could not run. 1, the code the
+        # sibling gates use for the same condition, not a traceback.
+        print(f"{PROG}: {exc}", file=sys.stderr)
+        sys.exit(EXIT_FAIL)

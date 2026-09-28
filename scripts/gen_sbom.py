@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from check_vendored import DEPS, ROOT, read_sums, readme_entries
 
+PROG = "gen_sbom.py"
 SBOM = ROOT / "SBOM.cdx.json"
 ZON = ROOT / "build.zig.zon"
 REQUIREMENTS = ROOT / "scripts" / "requirements.txt"
@@ -331,7 +332,7 @@ def document():
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="gen_sbom.py",
+        prog=PROG,
         # The docstring is laid out as prose and a list of the records the
         # inventory is derived from; the default formatter reflows both into
         # one paragraph.
@@ -368,4 +369,11 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except (OSError, ValueError) as exc:
+        # A file this gate reads is missing or unparsable: the invocation was
+        # fine, the check could not run. 1, the code the sibling gates use for
+        # the same condition, not a traceback.
+        print(f"{PROG}: {exc}", file=sys.stderr)
+        sys.exit(1)

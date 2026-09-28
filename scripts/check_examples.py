@@ -28,14 +28,18 @@ import sys
 import tempfile
 from pathlib import Path
 
+PROG = "check_examples.py"
+
 # Walk up for the project marker rather than assuming a fixed depth, so the
 # gate runs the same from the repo root, from scripts/, and from a build dir.
 for ROOT in Path(__file__).resolve().parents:
     if (ROOT / "build.zig.zon").is_file():
         break
 else:  # pragma: no cover - the script always lives inside the repository
+    # 1, not 2: nothing about the invocation is wrong, the check cannot run.
+    # Every gate reserves 2 for a bad argument.
     print("error: build.zig.zon not found above scripts/", file=sys.stderr)
-    sys.exit(2)
+    sys.exit(1)
 
 MSS_H = ROOT / "src" / "mss.h"
 DOCS = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
@@ -77,7 +81,7 @@ CFLAGS = [
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="check_examples.py",
+        prog=PROG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=__doc__,
         epilog="Exit status: 0 every snippet compiles, 1 one does not, 2 bad invocation.",
@@ -145,4 +149,11 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except (OSError, ValueError) as exc:
+        # A file this gate reads is missing or unparsable: the invocation was
+        # fine, the check could not run. 1, the code the sibling gates use for
+        # the same condition, not a traceback.
+        print(f"{PROG}: {exc}", file=sys.stderr)
+        sys.exit(1)

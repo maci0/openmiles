@@ -36,7 +36,19 @@ REF_RE = re.compile(
 # so a half-written reference is reported rather than skipped.
 CANDIDATE_RE = re.compile(r"`(?P<path>[\w./-]+\.(?:zig|py|sh|h|yml|yaml|zon)):\d[^`]*`")
 
-ROOT = Path(__file__).resolve().parent.parent
+PROG = "check_threat_model_refs.py"
+
+# Walk up for the project marker rather than assuming a fixed depth, so the
+# gate runs the same from the repo root, from scripts/, and from a build dir.
+for ROOT in Path(__file__).resolve().parents:
+    if (ROOT / "build.zig.zon").is_file():
+        break
+else:  # pragma: no cover - the script always lives inside the repository
+    # 1, not 2: nothing about the invocation is wrong, the check cannot run.
+    # Every gate reserves 2 for a bad argument.
+    print("error: build.zig.zon not found above scripts/", file=sys.stderr)
+    sys.exit(1)
+
 DOC = ROOT / "docs" / "THREAT_MODEL.md"
 
 
@@ -58,7 +70,7 @@ def anchor_re(anchor: str) -> re.Pattern[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        prog="check_threat_model_refs.py",
+        prog=PROG,
         # The docstring is laid out as prose and a column-aligned list of the
         # four finding kinds; the default formatter reflows both into one
         # paragraph, losing the list.

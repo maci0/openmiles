@@ -26,7 +26,19 @@ import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+PROG = "check_versions.py"
+
+# Walk up for the project marker rather than assuming a fixed depth, so the
+# gate runs the same from the repo root, from scripts/, and from a build dir.
+for ROOT in Path(__file__).resolve().parents:
+    if (ROOT / "build.zig.zon").is_file():
+        break
+else:  # pragma: no cover - the script always lives inside the repository
+    # 1, not 2: nothing about the invocation is wrong, the check cannot run.
+    # Every gate reserves 2 for a bad argument.
+    print("error: build.zig.zon not found above scripts/", file=sys.stderr)
+    sys.exit(1)
+
 BUILD_ZIG = ROOT / "build.zig"
 CHECK_HEADER = ROOT / "scripts" / "check_header.py"
 MSS_H = ROOT / "src" / "mss.h"
@@ -103,7 +115,7 @@ def parse_header_error_versions(text: str) -> set[int]:
 
 def main():
     argparse.ArgumentParser(
-        prog="check_versions.py",
+        prog=PROG,
         # The docstring is laid out as prose and a column-aligned list of the
         # four files that must agree; the default formatter reflows both into
         # one paragraph, losing the alignment that makes it readable.
@@ -169,5 +181,8 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except (OSError, ValueError) as exc:
-        print(f"check_versions: {exc}", file=sys.stderr)
+        # A file this gate reads is missing or unparsable: the invocation was
+        # fine, the check could not run. 1, the code the sibling gates use for
+        # the same condition, not a traceback.
+        print(f"{PROG}: {exc}", file=sys.stderr)
         sys.exit(1)
