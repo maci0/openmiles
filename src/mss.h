@@ -117,6 +117,37 @@ typedef void* HREDBOOK;
 #define DIG_F_STEREO_8           2
 #define DIG_F_STEREO_16          3
 
+/* AIL_file_type / AIL_file_type_named return one of these, the numbering MSS
+ * 3.x-9.x gives its AILFILETYPE_* constants. Naming the result beats comparing
+ * it against a bare number: a caller can switch on it. A buffer shorter than 8
+ * bytes, and one no branch recognises, is AILFILETYPE_UNKNOWN. */
+#define AILFILETYPE_UNKNOWN          0
+#define AILFILETYPE_PCM_WAV          1
+#define AILFILETYPE_ADPCM_WAV        2
+#define AILFILETYPE_OTHER_WAV        3
+#define AILFILETYPE_VOC              4
+#define AILFILETYPE_MIDI             5
+#define AILFILETYPE_XMIDI            6
+#define AILFILETYPE_DLS              9
+#define AILFILETYPE_MLS             10
+#define AILFILETYPE_MPEG_L1_AUDIO   11
+#define AILFILETYPE_MPEG_L2_AUDIO   12
+#define AILFILETYPE_MPEG_L3_AUDIO   13
+#define AILFILETYPE_XBOX_ADPCM_WAV  15
+#define AILFILETYPE_OGG_VORBIS      16
+#define AILFILETYPE_V12_VOICE       17
+#define AILFILETYPE_V24_VOICE       18
+#define AILFILETYPE_V29_VOICE       19
+#define AILFILETYPE_OGG_SPEEX       20
+#define AILFILETYPE_S8_VOICE        21
+#define AILFILETYPE_S16_VOICE       22
+#define AILFILETYPE_S32_VOICE       23
+#define AILFILETYPE_BINKA           24
+
+/* The head of a double-buffer ring, the slot AIL_load_sample_buffer resolves to
+ * when the caller does not name one. */
+#define MSS_BUFFER_HEAD        (-1)
+
 /* AIL_get_preference / AIL_set_preference take a slot number, and the number is
  * ABI: MSS 9.0 renumbered the whole table, so one name is a different slot
  * before and after 9.0. A caller that hard-codes an index instead of naming it
@@ -367,8 +398,8 @@ void       MSS_CALLBACK AIL_init_sample(HSAMPLE S, S32 cb_type, S32 cb_param);
 void       MSS_CALLBACK AIL_init_sample(HSAMPLE S);
 #endif
 /* block is not meaningful here: the call always reads a whole file image out
- * of memory. Chunked double-buffered playback uses AIL_set_sample_type plus
- * AIL_load_sample_buffer instead. Pass 0. */
+ * of memory. Chunked double-buffered playback uses AIL_load_sample_buffer
+ * instead. Pass 0. */
 S32        MSS_CALLBACK AIL_set_sample_file(HSAMPLE S, void const* file_image, S32 block);
 #if MSS_AT_LEAST(50)
 S32        MSS_CALLBACK AIL_set_named_sample_file(HSAMPLE S, char const* file_type, void const* file_image, S32 size, U32 flags);
@@ -432,6 +463,47 @@ void       MSS_CALLBACK AIL_stream_ms_position(HSTREAM stream, S32* total_ms, S3
 S32        MSS_CALLBACK AIL_stream_status(HSTREAM stream);
 void*      MSS_CALLBACK AIL_register_stream_callback(HSTREAM stream, AILSTREAMCB callback);
 void       MSS_CALLBACK AIL_auto_service_stream(HSTREAM stream, S32 onoff);
+
+// Double-buffered streaming
+/* The one route to playing a file the caller does not hold whole in memory:
+ * a fixed-size ring of application-owned buffers the mixer plays while the
+ * application fills the next one. AIL_open_stream covers the file case; this
+ * covers an asset the title streams out of its own archive.
+ *
+ * The sample needs a format before the ring means anything, and where that
+ * format comes from is the version split: a pre-6.7 build takes it from
+ * AIL_set_sample_type, while 6.7 dropped that call and every later build takes
+ * it from AIL_set_sample_info, which fills an AILSOUNDINFO's channels and bits
+ * and is declared below. Without one, AIL_load_sample_buffer reads each buffer
+ * as a complete encoded file image instead of as PCM.
+ *
+ * Each slot stays owned by the caller until the transport reports it free
+ * again, so a buffer must not be refilled while a "ready" call below still
+ * names it as in use. */
+S32        MSS_CALLBACK AIL_load_sample_buffer(HSAMPLE S, S32 buffer_num, void* data, U32 len);
+#if MSS_BEFORE(71)
+/* The slot AIL_load_sample_buffer would fill next (MSS_BUFFER_HEAD), or -1 when
+ * the ring is full. A whole-image sample reports 0 once it is finished and -1
+ * while it is still playing. */
+S32        MSS_CALLBACK AIL_sample_buffer_ready(HSAMPLE S);
+#endif
+#if MSS_AT_LEAST(80)
+/* Ring size, 2 to 8; the setter returns 0 for a count outside that range and 1
+ * when it took, and both default to 2. The setter is the only way to get a ring
+ * deeper than 2, and it has to run before the first AIL_load_sample_buffer. */
+S32        MSS_CALLBACK AIL_set_sample_buffer_count(HSAMPLE S, S32 count);
+S32        MSS_CALLBACK AIL_sample_buffer_count(HSAMPLE S);
+/* 8.0 replaced the pre-8 "which slot" question with a yes/no: 1 when at least
+ * one slot is free to refill, 0 when the ring is full, -1 for a null handle.
+ * AIL_sample_buffer_ready, which named the slot, is not exported by this
+ * build. */
+S32        MSS_CALLBACK AIL_sample_buffer_available(HSAMPLE S);
+#endif
+/* Start/end of buffer, fired as each AIL_load_sample_buffer is accepted. The
+ * callback is handed the sample; which slot it concerns is asked for with the
+ * "ready"/"available" call above, and the previous callback is returned so it
+ * can be restored. A NULL callback unregisters. */
+void*      MSS_CALLBACK AIL_register_SOB_callback(HSAMPLE S, AILSTREAMCB callback);
 
 // MIDI API
 /* The build exports the XMIDI-spelled driver pair, not AIL_open_midi_driver /
@@ -660,14 +732,16 @@ void        MSS_CALLBACK MilesGetEventSystemState(MILESEVENTSTATE* state);
 
 #if MSS_AT_LEAST(90)
 /* Variables: the name is resolved against the system's own variable table, and
- * an unknown name is a no-op rather than an error. The
- * Get forms report whether the name resolved and write through `value` when it
- * did. `system` is a handle, not a pointer into the heap. A v8 build has one
- * global system and does not export these four at all. */
-void        MSS_CALLBACK MilesSetVarI(U32 system, char const* name, S32 value);
-void        MSS_CALLBACK MilesSetVarF(U32 system, char const* name, F32 value);
-S32         MSS_CALLBACK MilesGetVarI(U32 system, char const* name, S32* value);
-S32         MSS_CALLBACK MilesGetVarF(U32 system, char const* name, F32* value);
+ * an unknown name is a no-op rather than an error. The Get forms report whether
+ * the name resolved and write through `value` when it did, leaving it untouched
+ * otherwise; `value` may be NULL. `system` is the handle
+ * MilesStartupEventSystem returned, the same handle MilesGetEventSystemState
+ * and MilesSetSoundLabelLimits take. A v8 build has one global system and does
+ * not export these four at all. */
+void        MSS_CALLBACK MilesSetVarI(void* system, char const* name, S32 value);
+void        MSS_CALLBACK MilesSetVarF(void* system, char const* name, F32 value);
+S32         MSS_CALLBACK MilesGetVarI(void* system, char const* name, S32* value);
+S32         MSS_CALLBACK MilesGetVarF(void* system, char const* name, F32* value);
 #endif
 
 /* Queue a compiled event for playback. `event` points at event text, either
@@ -734,8 +808,10 @@ S32         MSS_CALLBACK MilesEnumeratePresetPersists(void** io_next, char** out
 #endif
 
 #if MSS_AT_LEAST(90)
-/* Seek a playing instance. `offset` is in samples or in milliseconds, decided
- * by `is_ms`; an offset before the start clamps to the start. */
+/* Accepted and ignored: this build's instances have no start offset to seek, so
+ * a call reports success and the instance keeps playing from where it was. The
+ * instance comes from MilesStartSoundInstance, whose U64 ID is truncated to 32
+ * bits for this call. */
 void        MSS_CALLBACK MilesSetSoundStartOffset(U32 instance, S32 offset, S32 is_ms);
 #endif
 
@@ -837,8 +913,11 @@ HSAMPLE     MSS_CALLBACK AIL_quick_copy(HSAMPLE S);
 void        MSS_CALLBACK AIL_quick_unload(HSAMPLE S);
 S32         MSS_CALLBACK AIL_quick_play(HSAMPLE S, S32 loop_count);
 S32         MSS_CALLBACK AIL_quick_status(HSAMPLE S);
-/* No AIL_quick_stop: the Quick API's stop entry point is exported under
- * AIL_quick_halt. */
+/* The Quick API's stop entry point is AIL_quick_halt, not AIL_quick_stop: it
+ * stops the sound, marks it done, and leaves the handle allocated, so
+ * AIL_quick_play can be called on it again. (AIL_quick_stop is a separate
+ * pre-4.0 name this build no longer exports.) */
+void        MSS_CALLBACK AIL_quick_halt(HSAMPLE S);
 void        MSS_CALLBACK AIL_quick_set_volume(HSAMPLE S, S32 volume, S32 extravol);
 void        MSS_CALLBACK AIL_quick_set_speed(HSAMPLE S, S32 rate);
 #if MSS_AT_LEAST(50)
@@ -890,15 +969,15 @@ void*      MSS_CALLBACK AIL_file_read(char const* filename, void* dest);
 U32        MSS_CALLBACK AIL_file_size(char const* filename);
 S32        MSS_CALLBACK AIL_file_write(char const* filename, void const* data, U32 len);
 #if MSS_AT_LEAST(50)
-/* Returns a file-type code (0 for a buffer shorter than 8 bytes and for an
- * unrecognised one, 1 for PCM WAV, 2 for ADPCM WAV, 5 for MIDI, 11-13 for the
- * MPEG layers), the same numbering MSS 3.x-9.x uses for its AILFILETYPE_*
- * constants, which this header does not declare. */
+/* Returns one of the AILFILETYPE_* codes above, so the result can be named
+ * rather than compared against a bare number. */
 S32        MSS_CALLBACK AIL_file_type(void const* data, U32 size);
 #endif
 #if MSS_AT_LEAST(70)
 /* AIL_file_type with the filename's extension consulted first, for the
- * Voxware/Speex voice suffixes that carry no distinguishing magic. */
+ * Voxware/Speex voice suffixes that carry no distinguishing magic. Same codes,
+ * and AIL_file_type_named is the one that can return the S8/S16/S32_VOICE
+ * spellings. */
 S32        MSS_CALLBACK AIL_file_type_named(void const* data, char const* filename, U32 size);
 #endif
 

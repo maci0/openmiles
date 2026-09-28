@@ -439,8 +439,12 @@ core busy for as long as the sound plays.
 
 The header covers playback, streaming, 3D, RIB, filters, the timers, the
 v6.5+ unified level/pan/reverb/low-pass and v7+ 3D calls on `HSAMPLE`,
-file I/O (`AIL_file_read`, `AIL_file_size`, `AIL_file_type`, and
-`AIL_set_file_callbacks` for routing file access through the game's own VFS),
+double-buffered streaming for an asset the game holds in its own archive
+(`AIL_load_sample_buffer`, `AIL_sample_buffer_available` on 8.0 and later, and
+`AIL_set_sample_buffer_count` for a ring deeper than two),
+file I/O (`AIL_file_read`, `AIL_file_size`, `AIL_file_type`, whose result is
+one of the `AILFILETYPE_*` constants, and `AIL_set_file_callbacks` for routing
+file access through the game's own VFS),
 and the `Miles*` event-system and SoundBank API a v8 or v9 build exports
 (`MilesStartupEventSystem`, `MilesAddSoundBank`, `MilesEnqueueEvent`,
 `MilesEnumerateSoundInstances`, and the rest, with the `MSS_FIRST` walk
@@ -476,7 +480,10 @@ rather than in your build. It runs
 as part of `make lint`, together with `make check-examples`, which compiles
 every `c` snippet in this file and in `docs/` against the header at the
 `OPENMILES_MSS_VERSION` each one names, so the example above cannot drift from
-the surface it documents.
+the surface it documents. A constant in the header is outside what that script
+can see, so `src/header_test.zig` reads the `AILFILETYPE_*` block out of
+`mss.h` and drives each name through the real classifier: a constant the engine
+renumbers, or one added to the header without a fixture, fails the test build.
 
 ### Configuration
 

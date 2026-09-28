@@ -467,6 +467,7 @@ behaviour, not linkability.
 | `Miles*SoundInstances` (Enumerate/Stop/Pause/Resume) | 🟢 Implemented | Full instance lifecycle (PENDING→PLAYING→COMPLETE, duration-driven) with status-bitmask + label-query (token/glob) filtering and per-label concurrent caps |
 | `MilesBegin/CompleteEventQueueProcessing` / `MilesClearEventQueue` | 🟢 Implemented | Process-cycle state transitions and reaping |
 | `MilesGetEventLength` | 🟢 Implemented | `Container_GetEvent` → first start_sound → `Container_GetSound.DurationMs` |
+| `MilesSetSoundStartOffset` | ⚪ Stub | Accepted and ignored: a tracked instance has no start offset to seek to, so a call reports success and playback continues from where it was |
 | `MilesSetSoundLabelLimits` / `MilesEnumeratePresetPersists` / `MilesTextDumpEventSystem` | 🟢 Implemented | Per-label caps; persisted-preset list; diagnostic dump |
 | Audio output for event-driven sounds | ⚪ Not wired | Instances are duration-tracked, **not** routed through the miniaudio mixer (blocked on the bank's embedded-audio data format); ramp/blend/LFO are not yet applied to live volume/pitch |
 | Async file I/O (`MilesAsync*`) | ⚪ Stub | Returns success/empty defaults |
