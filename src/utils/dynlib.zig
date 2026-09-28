@@ -7,12 +7,15 @@
 //! provide our own thin loader: Win32 LoadLibrary/GetProcAddress/FreeLibrary on
 //! Windows, delegating to `std.DynLib` everywhere else.
 //!
-//! On Linux + static musl, std.DynLib uses its minimal ElfDynLib mapper, which
-//! (a) copies each writable segment's initialized data from file offset 0
-//! instead of the segment's p_offset, corrupting `.data`, and (b) applies no
-//! relocations, so pointer fields in plugin data still hold link-time
-//! addresses and crash on first dereference. `applyElfFixups` repairs both
-//! after the map so RIB plugins register correctly.
+//! On Linux without a libc (or with static musl), std.DynLib uses its minimal
+//! ElfDynLib mapper, which (a) copies each writable segment's initialized data
+//! from file offset 0 instead of the segment's p_offset, corrupting `.data`,
+//! and (b) applies no relocations, so pointer fields in plugin data still hold
+//! link-time addresses and crash on first dereference. `applyElfFixups`
+//! repairs both after the map so RIB plugins register correctly. The
+//! condition is std's own (`dynamic_library.zig`), not an arch-narrowed copy
+//! of it: a gate that named one architecture left every other Linux build
+//! with the broken mapper and no repair.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -20,11 +23,21 @@ const wide = @import("wide.zig");
 const native_os = builtin.os.tag;
 
 /// Same condition under which std.DynLib picks its relocation-less ElfDynLib
-/// backend (plus an arch gate: the relocation pass knows x86_64 types).
+/// backend. It names no architecture, so neither does this: aarch64 and every
+/// other Linux target reach the same broken map and get the same repair.
 const needs_elf_fixup = native_os == .linux and
-    builtin.abi == .musl and
-    builtin.link_mode == .static and
-    builtin.cpu.arch == .x86_64;
+    (!builtin.link_libc or (builtin.abi == .musl and builtin.link_mode == .static));
+
+/// The relocation an architecture uses to rebase a pointer against the load
+/// base, or null where the pass below does not apply. Two things narrow it: a
+/// 32-bit target, whose `Elf32_Dyn` entries the walk reads at 64-bit stride,
+/// and an architecture std names no RELATIVE type for. The writable-segment
+/// recopy that precedes this needs neither, so it runs either way.
+const relative_reloc_type: ?u32 = switch (builtin.cpu.arch) {
+    .x86_64 => @intFromEnum(std.elf.R_X86_64.RELATIVE),
+    .aarch64 => @intFromEnum(std.elf.R_AARCH64.RELATIVE),
+    else => null,
+};
 
 pub const DynLib = if (native_os == .windows) WindowsDynLib else StdDynLib;
 
@@ -36,7 +49,7 @@ const StdDynLib = struct {
     pub fn open(path: []const u8) !DynLib {
         var self: DynLib = .{ .inner = try std.DynLib.open(path) };
         errdefer self.inner.close();
-        if (needs_elf_fixup) try applyElfFixups(&self.inner, path);
+        if (comptime needs_elf_fixup) try applyElfFixups(&self.inner, path);
         return self;
     }
 
@@ -66,7 +79,8 @@ fn programHeaderTableFits(eh: *const std.elf.Ehdr, img_len: usize) bool {
 }
 
 /// Repair std.DynLib's ElfDynLib map: re-copy writable segments from their real
-/// file offsets and apply R_X86_64_RELATIVE relocations against the load base.
+/// file offsets and apply the load-base-relative relocations against the load
+/// base.
 fn applyElfFixups(lib: *std.DynLib, path: []const u8) !void {
     const img = lib.inner.memory;
     const base = @intFromPtr(img.ptr);
@@ -87,11 +101,12 @@ fn applyElfFixups(lib: *std.DynLib, path: []const u8) !void {
             std.elf.PT_LOAD => if ((ph.p_flags & std.elf.PF_W) != 0) {
                 recopyWritableSegment(fd, img, ph) catch return error.ImageFixupFailed;
             },
-            std.elf.PT_DYNAMIC => dynamic_vaddr = ph.p_vaddr,
+            std.elf.PT_DYNAMIC => dynamic_vaddr = std.math.cast(usize, ph.p_vaddr) orelse return error.ImageFixupFailed,
             else => {},
         }
     }
 
+    const rel_type = relative_reloc_type orelse return;
     const dyn_vaddr = dynamic_vaddr orelse return error.ImageFixupFailed;
     if (dyn_vaddr >= img.len) return error.ImageFixupFailed;
     const dynv: [*]align(1) const usize = @ptrFromInt(base + dyn_vaddr);
@@ -117,15 +132,27 @@ fn applyElfFixups(lib: *std.DynLib, path: []const u8) !void {
     if (rela_off >= img.len or rela_sz > img.len - rela_off) return error.ImageFixupFailed;
 
     const relas: [*]align(1) const std.elf.Rela = @ptrFromInt(base + rela_off);
-    for (relas[0 .. rela_sz / @sizeOf(std.elf.Rela)]) |r| {
-        if (@as(u32, @truncate(r.r_info)) == @intFromEnum(std.elf.R_X86_64.RELATIVE)) {
-            // r_offset is file-controlled and not implied by the rela table's
-            // own bounds, so a crafted entry would otherwise write anywhere in
-            // the address space. Only in-image, 8-byte-aligned slots are ours.
-            if (r.r_offset % @alignOf(u64) != 0 or r.r_offset > img.len -| @sizeOf(u64)) return error.ImageFixupFailed;
-            const slot: *u64 = @ptrFromInt(base + r.r_offset);
-            slot.* = @bitCast(base +% @as(u64, @bitCast(r.r_addend)));
-        }
+    try applyRelativeRelocations(base, img.len, rel_type, relas[0 .. rela_sz / @sizeOf(std.elf.Rela)]);
+}
+
+/// Rebase every relocation of type `rel_type` in `relas` against `base`.
+///
+/// The slot is a pointer-width word, so the bounds are in the address space's
+/// own units: an x86_64 or aarch64 slot is 8 bytes and 8-aligned, a 32-bit one
+/// 4 and 4. A hardcoded 8 is only right on the architecture it was written
+/// for, and would misalign-check the wrong slots on every other one.
+fn applyRelativeRelocations(base: usize, img_len: usize, rel_type: u32, relas: []align(1) const std.elf.Rela) !void {
+    for (relas) |r| {
+        if (@as(u32, @truncate(r.r_info)) != rel_type) continue;
+        // r_offset is file-controlled and not implied by the rela table's own
+        // bounds, so a crafted entry would otherwise write anywhere in the
+        // address space. Only in-image, pointer-aligned slots are ours.
+        if (r.r_offset % @alignOf(usize) != 0 or r.r_offset > img_len -| @sizeOf(usize)) return error.ImageFixupFailed;
+        const slot: *usize = @ptrFromInt(base + r.r_offset);
+        // The addend is a signed file-controlled field; a negative one wraps
+        // rather than traps, and the load base added to it wraps the same way.
+        const addend: std.meta.Int(.unsigned, @bitSizeOf(@TypeOf(r.r_addend))) = @bitCast(r.r_addend);
+        slot.* = base +% @as(usize, @truncate(addend));
     }
 }
 
@@ -207,6 +234,10 @@ test "a program header table past the end of the image is rejected" {
 }
 
 test "a program header table whose end overflows u64 is rejected" {
+    // The field is 32 bits on a 32-bit target, so the image this describes
+    // cannot be spelled there and the overflow cannot happen: the literal would
+    // not compile, taking the whole test binary down with it.
+    if (@bitSizeOf(@TypeOf(std.mem.zeroes(std.elf.Ehdr).e_phoff)) < 64) return error.SkipZigTest;
     var eh: std.elf.Ehdr = std.mem.zeroes(std.elf.Ehdr);
     // e_phoff + e_phentsize * e_phnum stays inside u64 but lands at
     // 2^64 - 122879, which a u32 bound would truncate to 0x2001 and accept as a
@@ -222,4 +253,41 @@ test "an image with no program header table is rejected" {
     eh.e_phentsize = @sizeOf(std.elf.Phdr);
     eh.e_phnum = 4;
     try testing.expect(!programHeaderTableFits(&eh, 4096));
+}
+
+test "a relative relocation rebases the slot against the load base" {
+    const rel_type = relative_reloc_type orelse return error.SkipZigTest;
+    // Aligned as the mapped image is, so a slot at a pointer-aligned offset is
+    // one a *usize can be formed at.
+    var image: [64]u8 align(@alignOf(usize)) = @splat(0);
+    const base = @intFromPtr(&image);
+    var relas = [_]std.elf.Rela{.{ .r_offset = 32, .r_info = rel_type, .r_addend = 0x1234 }};
+    try applyRelativeRelocations(base, image.len, rel_type, relas[0..]);
+    const slot: *usize = @ptrFromInt(base + 32);
+    try testing.expectEqual(base + 0x1234, slot.*);
+}
+
+test "a relocation of another type leaves the slot alone" {
+    const rel_type = relative_reloc_type orelse return error.SkipZigTest;
+    var image: [64]u8 align(@alignOf(usize)) = @splat(0);
+    const base = @intFromPtr(&image);
+    var relas = [_]std.elf.Rela{.{ .r_offset = 32, .r_info = rel_type ^ 1, .r_addend = 0x1234 }};
+    try applyRelativeRelocations(base, image.len, rel_type, relas[0..]);
+    const slot: *const usize = @ptrFromInt(base + 32);
+    try testing.expectEqual(@as(usize, 0), slot.*);
+}
+
+test "a slot at a misaligned or out-of-image offset is rejected" {
+    const rel_type = relative_reloc_type orelse return error.SkipZigTest;
+    var image: [64]u8 align(@alignOf(usize)) = @splat(0);
+    const base = @intFromPtr(&image);
+
+    // A pointer-sized slot the base address cannot hold at this alignment: the
+    // bound has to be the address space's own alignment, not a fixed 8.
+    const misaligned: usize = @alignOf(usize) + 1;
+    var bad_align = [_]std.elf.Rela{.{ .r_offset = misaligned, .r_info = rel_type, .r_addend = 0 }};
+    try testing.expectError(error.ImageFixupFailed, applyRelativeRelocations(base, image.len, rel_type, bad_align[0..]));
+
+    var past_end = [_]std.elf.Rela{.{ .r_offset = image.len, .r_info = rel_type, .r_addend = 0 }};
+    try testing.expectError(error.ImageFixupFailed, applyRelativeRelocations(base, image.len, rel_type, past_end[0..]));
 }

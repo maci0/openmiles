@@ -260,7 +260,14 @@ The `.asi` plugin ABI (`RIB_INTERFACE_ENTRY` layout + ASI/RIB callback
 signatures) is stable across MSS v4–v9, so a plugin built for any v4+ release
 loads into any v4+ build; the loader is absent only from a v3 build.
 
-> **Note:** Native builds on macOS aarch64 (Apple Silicon) are not supported because Zig's stage2 backend does not implement the `aarch64_aapcs_win` calling convention used by the stdcall exports. Use Linux or Windows for native builds, or cross-compile to `x86-windows`.
+> **Note:** Native builds on an **aarch64** host are not supported, on any
+> operating system. Zig maps `callconv(.winapi)` to `aarch64_aapcs_win` by
+> architecture, not by target OS, and its stage2 backend does not implement
+> that convention, so the stdcall exports do not compile: a native
+> `aarch64-linux` or `aarch64-macos` build fails in `src/engine/digital.zig` at
+> the first `.winapi` declaration. The constraint is the architecture, not the
+> platform, so a Linux or Windows host builds the tree and cross-compiles the
+> shipped DLL normally, and only an ARM build host is blocked.
 
 The output DLL is at `zig-out/bin/mss32.dll`.
 
