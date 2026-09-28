@@ -1177,7 +1177,7 @@ pub const Sequence = struct {
         self.current_msg = self.midi;
         self.time_ms = 0;
         // Extract time signature from SMF data
-        self.beats_per_measure = root.parseSmfTimeSigNumerator(smf_data);
+        self.beats_per_measure = root.parseSmfBeatsPerMeasure(smf_data);
         // Single pass: find initial tempo AND compute total duration.
         {
             self.initial_tempo = 120;

@@ -344,7 +344,7 @@ fn fuzzXmidiOne(ctx: *xmidi_ctx, smith: *std.testing.Smith) anyerror!void {
 
     // The time-signature reader is the other consumer of a converted file; it
     // must return a usable value for any track the converter emitted.
-    if (openmiles.parseSmfTimeSigNumerator(smf) <= 0) return error.BadTimeSignature;
+    if (openmiles.parseSmfBeatsPerMeasure(smf) <= 0) return error.BadTimeSignature;
 
     // The container walkers parse the same bytes with a length-aware parser, so
     // cross-check their answers: every slice they report must lie in the image,

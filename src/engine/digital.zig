@@ -107,7 +107,23 @@ fn applyLoopBlock(self: anytype, start_bytes: i32, end_bytes: i32) void {
         self.loop_start_frame = 0;
     }
     if (end_bytes > 0 and bpf > 0) {
-        self.loop_end_frame = @as(u64, @intCast(end_bytes)) / @as(u64, bpf);
+        const end_frame: u64 = @as(u64, @intCast(end_bytes)) / @as(u64, bpf);
+        // A block that does not span at least one whole frame once converted
+        // (start == end after the byte-to-frame divide, or a caller passing the
+        // arguments the wrong way round) leaves miniaudio a loop point that can
+        // never be crossed, and truncating the range to it cuts the sample off
+        // at the loop start. Play it through instead: an unlooping voice is the
+        // only reading of a zero-length loop block that is not a shorter sound.
+        if (end_frame <= self.loop_start_frame) {
+            root.log("Sample: loop block ({d}..{d} bytes) is empty at {d} bytes per frame; the sample plays without a loop\n", .{ start_bytes, end_bytes, bpf });
+            self.loop_end_frame = 0;
+            if (self.decoder) |d| {
+                _ = ma.ma_data_source_set_range_in_pcm_frames(d, 0, std.math.maxInt(u64));
+                _ = ma.ma_data_source_set_loop_point_in_pcm_frames(d, 0, std.math.maxInt(u64));
+            }
+            return;
+        }
+        self.loop_end_frame = end_frame;
         if (self.decoder) |d| {
             _ = ma.ma_data_source_set_range_in_pcm_frames(d, 0, self.loop_end_frame);
             // An infinite loop count is miniaudio's own, and it seeks to the

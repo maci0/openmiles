@@ -139,7 +139,7 @@ pub const speaker = @import("engine/speaker.zig");
 pub const get_ASI_INTERFACE = @import("engine/asi.zig").get_ASI_INTERFACE;
 
 const xmidi = @import("engine/xmidi.zig");
-pub const parseSmfTimeSigNumerator = xmidi.parseSmfTimeSigNumerator;
+pub const parseSmfBeatsPerMeasure = xmidi.parseSmfBeatsPerMeasure;
 pub const xmidiToSmf = xmidi.xmidiToSmf;
 pub const xmidiBareToSmf = xmidi.xmidiBareToSmf;
 

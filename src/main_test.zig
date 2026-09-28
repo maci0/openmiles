@@ -693,7 +693,7 @@ test "xmidiBareToSmf returns error on invalid data" {
     try testing.expectError(error.NotForm, openmiles.xmidiBareToSmf(allocator, &bad_magic));
 }
 
-test "parseSmfTimeSigNumerator extracts time signature" {
+test "parseSmfBeatsPerMeasure extracts time signature" {
     // SMF with time sig 3/4: FF 58 04 03 02 18 08
     const smf = [_]u8{
         'M', 'T', 'h', 'd', 0x00, 0x00, 0x00, 0x06, // MThd, size=6
@@ -702,10 +702,43 @@ test "parseSmfTimeSigNumerator extracts time signature" {
         0x00, 0xFF, 0x58, 0x04, 0x03, 0x02, 0x18, 0x08, // delta=0, time sig 3/4
         0x00, 0xFF, 0x2F, 0x00, // end of track
     };
-    try testing.expectEqual(@as(i32, 3), openmiles.parseSmfTimeSigNumerator(&smf));
+    try testing.expectEqual(@as(i32, 3), openmiles.parseSmfBeatsPerMeasure(&smf));
 }
 
-test "parseSmfTimeSigNumerator returns 4 when no time sig present" {
+test "parseSmfBeatsPerMeasure scales the signature by its denominator" {
+    // A signature is numerator over 2^dd, and the beat clock counts quarter
+    // notes: 6/8 is three quarter notes to the bar, not the six the numerator
+    // alone reads as. A 6/8 file whose bar lines sit every three beats was
+    // reporting a bar every six, twice the length of the music.
+    const with_sig = struct {
+        fn f(numerator: u8, dd: u8) [34]u8 {
+            var smf = [_]u8{
+                'M',  'T',  'h',  'd',  0x00, 0x00, 0x00, 0x06,
+                0x00, 0x00, 0x00, 0x01, 0x00, 0x78, 'M',  'T',
+                'r',  'k',  0x00, 0x00, 0x00, 0x0C, 0x00, 0xFF,
+                0x58, 0x04, 0,    0,    0x18, 0x08, 0x00, 0xFF,
+                0x2F, 0x00,
+            };
+            smf[26] = numerator;
+            smf[27] = dd;
+            return smf;
+        }
+    }.f;
+    try testing.expectEqual(@as(i32, 3), openmiles.parseSmfBeatsPerMeasure(&with_sig(6, 3))); // 6/8
+    try testing.expectEqual(@as(i32, 4), openmiles.parseSmfBeatsPerMeasure(&with_sig(2, 1))); // 2/2
+    try testing.expectEqual(@as(i32, 4), openmiles.parseSmfBeatsPerMeasure(&with_sig(4, 2))); // 4/4
+    try testing.expectEqual(@as(i32, 4), openmiles.parseSmfBeatsPerMeasure(&with_sig(1, 0))); // 1/1
+    // 7/8 is three and a half quarter notes: the nearest whole answer, so the
+    // bar keeps one length instead of alternating between two.
+    try testing.expectEqual(@as(i32, 4), openmiles.parseSmfBeatsPerMeasure(&with_sig(7, 3)));
+    // A zero numerator, and a denominator below a 64th note, both stay on the
+    // 4/4 default rather than collapsing the measure to nothing or dividing by
+    // a shift no file means.
+    try testing.expectEqual(@as(i32, 4), openmiles.parseSmfBeatsPerMeasure(&with_sig(0, 2)));
+    try testing.expectEqual(@as(i32, 4), openmiles.parseSmfBeatsPerMeasure(&with_sig(2, 40)));
+}
+
+test "parseSmfBeatsPerMeasure returns 4 when no time sig present" {
     // SMF with only end-of-track, no time signature
     const smf = [_]u8{
         'M',  'T',  'h',  'd',  0x00, 0x00, 0x00, 0x06,
@@ -713,7 +746,7 @@ test "parseSmfTimeSigNumerator returns 4 when no time sig present" {
         'r',  'k',  0x00, 0x00, 0x00, 0x04, 0x00, 0xFF,
         0x2F, 0x00,
     };
-    try testing.expectEqual(@as(i32, 4), openmiles.parseSmfTimeSigNumerator(&smf));
+    try testing.expectEqual(@as(i32, 4), openmiles.parseSmfBeatsPerMeasure(&smf));
 }
 
 test "detectAudioSize for MThd MIDI format" {
@@ -5741,6 +5774,34 @@ test "Sample setLoopBlock stores frame boundaries" {
     sample.setLoopBlock(0, -1);
     try testing.expectEqual(@as(u64, 0), sample.loop_start_frame);
     try testing.expectEqual(@as(u64, 0), sample.loop_end_frame);
+}
+
+test "a loop block that spans no whole frame plays through instead of cutting off" {
+    // An 8-bit mono sample is one byte a frame, so a block whose two ends land
+    // inside the same frame is impossible; use a 16-bit one, where 100..101 is
+    // two ends inside frame 50. Handing that to the engine as a loop point
+    // truncates the play range to frame 50, so the sound stops as soon as it
+    // starts.
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const sample = try openmiles.Sample.init(driver);
+    defer sample.deinit();
+
+    const wav = try openmiles.buildWavFromPcm(allocator, &([_]u8{0} ** 4410), 1, 44100, 16);
+    defer allocator.free(wav);
+
+    try sample.loadFromMemory(wav, true);
+
+    sample.setLoopBlock(100, 101);
+    try testing.expectEqual(@as(u64, 50), sample.loop_start_frame);
+    try testing.expectEqual(@as(u64, 0), sample.loop_end_frame);
+
+    // A later well-formed block still loops, so the fallback is per call and
+    // not a one-way latch on the handle.
+    sample.setLoopBlock(400, 4000);
+    try testing.expect(sample.loop_end_frame > sample.loop_start_frame);
 }
 
 test "Sample setPosition on initialized sample" {

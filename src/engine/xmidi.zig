@@ -11,9 +11,10 @@ const std = @import("std");
 // ---------------------------------------------------------------------------
 
 /// Scan an SMF byte slice for the first time signature meta event (0xFF 0x58)
-/// and return the numerator (beats per measure). Returns 4 if not found.
+/// and return how many quarter-note beats one measure of it holds, which is the
+/// unit the beat and measure counters count in. Returns 4 if not found.
 /// Uses a proper SMF event parser to avoid false matches on VLQ continuation bytes.
-pub fn parseSmfTimeSigNumerator(smf: []const u8) i32 {
+pub fn parseSmfBeatsPerMeasure(smf: []const u8) i32 {
     // MThd = 14 bytes, MTrk tag = 4 bytes, MTrk length = 4 bytes → track data starts at 22
     if (smf.len < 22) return 4;
     const trk_len: usize = std.mem.readInt(u32, smf[18..22][0..4], .big);
@@ -37,8 +38,8 @@ pub fn parseSmfTimeSigNumerator(smf: []const u8) i32 {
             // Read VLQ meta length (readVlq caps at 4 bytes so a corrupt
             // continuation run cannot overflow)
             const meta_len = readVlq(smf[0..trk_end], &i);
-            if (meta_type == 0x58 and meta_len >= 1 and i < trk_end) {
-                return @max(1, @as(i32, @intCast(smf[i])));
+            if (meta_type == 0x58 and meta_len >= 2 and i + 1 < trk_end) {
+                return beatsPerMeasure(smf[i], smf[i + 1]);
             }
             if (meta_type == 0x2F) break; // End of Track
             i +|= meta_len;
@@ -60,6 +61,26 @@ pub fn parseSmfTimeSigNumerator(smf: []const u8) i32 {
 fn readBe32(data: []const u8, pos: usize) u32 {
     if (pos + 4 > data.len) return 0;
     return std.mem.readInt(u32, data[pos..][0..4], .big);
+}
+
+/// Quarter-note beats in one measure of an SMF time signature. The event
+/// carries the notated numerator and a denominator stored as its log2 (`dd`),
+/// so 4/4 is 4/2 and 6/8 is 6/3: reading the numerator alone reported 6 beats
+/// to a 6/8 bar, twice the length the music is in, and put every measure
+/// boundary and every seek-derived bar line in the wrong place. A `dd` past 8
+/// names a unit below a 64th note and is not a signature any file means, so it
+/// is read as 4/4. A signature that does not divide into whole quarter notes
+/// (7/8, 5/8) rounds to the nearest, which keeps the measure from changing
+/// length every other bar.
+fn beatsPerMeasure(numerator: u8, dd: u8) i32 {
+    if (numerator == 0 or dd > 8) return 4;
+    const shift: u5 = @intCast(dd);
+    const quarter_units: u32 = @as(u32, numerator) * 4;
+    // The +2^(shift-1) term is the rounding, and a shift of 0 has nothing to
+    // round: a 1/1 signature is already whole.
+    const round_term: u32 = if (shift > 0) @as(u32, 1) << (shift - 1) else 0;
+    const rounded = (quarter_units +| round_term) >> shift;
+    return @max(1, @as(i32, @intCast(rounded)));
 }
 
 /// Longest VLQ this file reads or writes. The SMF spec caps a variable-length
