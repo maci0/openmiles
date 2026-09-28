@@ -7,9 +7,13 @@ Four tools, the first three version-pinned in the tree:
 | Tool | Version | Declared in | Install (any equivalent works) |
 |------|---------|-------------|---------------------------------|
 | Zig | 0.16.0 | `.minimum_zig_version` in `build.zig.zon` | <https://ziglang.org/download/> |
+| uv | 0.12.19 | `UV_VERSION` in the `Makefile` | <https://docs.astral.sh/uv/getting-started/installation/> |
 | ruff | 0.16.4 | `RUFF_VERSION` in the `Makefile` | `uv tool install ruff==0.16.4` |
 | yamllint | 1.38.0 | `YAMLLINT_VERSION` in the `Makefile` | `uv tool install yamllint==1.38.0` |
 | shellcheck | any recent | required by `make lint` | your package manager |
+
+`uv` is only the installer for the two pinned linters (CI brings it in the same
+way), so nothing else in the tree needs it.
 
 `make` reads the Zig version out of `build.zig.zon` and refuses to build on
 any other one; `make check-pins` (part of `make lint`) fails when the Makefile,
@@ -40,6 +44,7 @@ make build                # zig build
 make test FILTER=redbook  # one test, by substring of its name
 make test                 # the whole suite (minutes)
 make sanitize             # the same suite with the C undefined-behaviour sanitizer
+make harnesses            # the native plugin harness in tests/
 make check                # everything CI runs, in CI's order
 ```
 
@@ -65,11 +70,11 @@ noticeably longer than a plain run, so it is its own CI step rather than part of
 
 ## Before you push
 
-`make check` runs `make lint`, `make build`, `make test`, `make sanitize`, and
-the x86-windows cross-compile, which is what `.github/workflows/ci.yml` runs on
-Ubuntu. CI additionally runs the build and tests on Windows; nothing in the
-library is Linux-only, but a change that only builds on one host shows up there
-rather than locally.
+`make check` runs `make lint`, `make build`, `make test`, `make sanitize`,
+`make harnesses`, and the x86-windows cross-compile, which is what
+`.github/workflows/ci.yml` runs on Ubuntu. CI additionally runs the build and
+tests on Windows; nothing in the library is Linux-only, but a change that only
+builds on one host shows up there rather than locally.
 
 The library builds and tests on any host Zig supports, through `zig build` and
 `zig build test`. The `make` targets and the two `scripts/*.sh` gates need more:
@@ -88,20 +93,30 @@ formatters.
 
 ## The harnesses in `tests/`
 
-`make test` runs the Zig test binaries only. Nothing runs the files in `tests/`,
-locally or in CI, so a change needs a Zig test; a harness there covers ground
-the Zig binaries cannot and does not replace one.
+`make test` runs the Zig test binaries only. A change needs a Zig test; a
+harness in `tests/` covers ground the Zig binaries cannot and does not replace
+one. Of the five, `native_rib_test` is the only one the host runs, and it has a
+target:
 
-`play_test`, `midi_test`, `full_suite`, and `rib_test` are Windows harnesses
-that `LoadLibrary` the built `mss32.dll` and call its exports, and
-`native_rib_test` is a Zig harness that exercises the plugin `dlopen` path the
-test binaries cannot (they link musl statically, where `dlopen` is a stub).
-Run them on Windows, from `zig-out/bin` so each finds `mss32.dll` and
-`plugins/mock.asi` next to itself:
+```bash
+make harnesses            # rebuilds, then runs it from zig-out/bin
+```
+
+It is in `make check` and in CI, and it is the only coverage of the plugin
+`dlopen` path: the test binaries link musl statically, where `dlopen` is a
+stub. It finds `plugins/mock.asi` next to its own executable, so it has to run
+from `zig-out/bin`, which is what the recipe does. `make cross` installs a PE
+plugin at that same path, so the target rebuilds first; run it in that order
+and nothing is left over from a Windows build.
+
+The other four, `play_test`, `midi_test`, `full_suite`, and `rib_test`, are
+Windows harnesses that `LoadLibrary` the built `mss32.dll` and call its
+exports. Nothing runs them, here or in CI, so a change to them is verified by
+hand on Windows, from `zig-out/bin` so each finds `mss32.dll` next to itself:
 
 ```
 zig build
-cd zig-out/bin && full_suite.exe && native_rib_test.exe
+cd zig-out/bin && full_suite.exe
 ```
 
 `play_test`, `midi_test`, and `full_suite` take the fixture paths as arguments

@@ -118,6 +118,16 @@ jobs:
         # undefined-behaviour report: the run fails, nothing is suppressed.
         run: make sanitize
 
+      - name: Run native plugin harness
+        if: matrix.os == 'ubuntu-latest'
+        # native_rib_test reaches the dlopen path the test bundle cannot (it
+        # links musl statically, where dlopen is a stub). It is a `make check`
+        # step, so CI runs it here too. Ubuntu only, the leg where it has been
+        # run: the Windows leg builds the same executable but `make` is not on
+        # the runner, which is the same reason the other make targets are gated
+        # on this leg.
+        run: make harnesses
+
       - name: Cross-compile Windows DLL
         if: matrix.os == 'ubuntu-latest'
         run: zig build -Dtarget=x86-windows -Doptimize=ReleaseFast

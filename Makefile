@@ -1,4 +1,4 @@
-.PHONY: all build test check clean lint format check-header check-examples check-versions check-pins check-python check-yaml check-threat-model check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity sanitize help
+.PHONY: all build test check clean lint format check-header check-examples check-versions check-pins check-python check-yaml check-threat-model check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity sanitize harnesses help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -12,6 +12,11 @@ ZIG_VERSION := $(shell sed -n 's/^[[:space:]]*\.minimum_zig_version[[:space:]]*=
 # shebang line is not honoured by every shell that can run make. The gates are
 # invoked as `$(PYTHON) scripts/...` so one resolution covers every call site.
 PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
+
+# The harness binary carries a .exe suffix on a Windows host, where the file
+# name the build installs is native_rib_test.exe. Resolved rather than assumed
+# so the same recipe runs under MSYS2, Cygwin, and Git Bash.
+EXE_SUFFIX := $(if $(findstring MINGW,$(shell uname -s 2>/dev/null)),.exe,)
 
 # Exported so the `test` and `sanitize` recipes read FILTER from the
 # environment rather than splicing a caller's argument into the recipe text.
@@ -67,7 +72,7 @@ sanitize: check-toolchain
 
 # Everything .github/workflows/ci.yml runs, in the same order, so a failure
 # here is the same failure CI would give.
-check: lint build test sanitize cross
+check: lint build test sanitize harnesses cross
 
 # The shipped artifact. A build that only passes natively can still fail to
 # link as a 32-bit stdcall DLL, so check what ships. Gated on the toolchain for
@@ -75,6 +80,20 @@ check: lint build test sanitize cross
 # nobody compared against the references, and this is the output that ships.
 cross: check-toolchain
 	zig build -Dtarget=x86-windows -Doptimize=ReleaseFast
+
+# The one harness in tests/ the host can actually run. native_rib_test links
+# the native C runtime, so it reaches the dlopen path that `zig build test`
+# cannot: the test bundle links musl statically, where dlopen is a stub. The
+# other four harnesses load the built mss32.dll and only run on Windows.
+#
+# It has to run from zig-out/bin, because the plugin it loads is found in
+# ./plugins next to the executable, so the recipe cds rather than naming the
+# path. It depends on `build` so the native copy of plugins/mock.asi is
+# installed first: `cross` puts a PE image at that same path, so a run ordered
+# after it would dlopen an executable of the wrong format and report a plugin
+# failure that is really a leftover artifact.
+harnesses: build
+	cd zig-out/bin && ./native_rib_test$(EXE_SUFFIX)
 
 # Every gate under scripts/ needs an interpreter, and $(PYTHON) is resolved
 # when make reads the makefile, so on a machine with neither name the recipe
@@ -150,20 +169,20 @@ check-threat-model: check-interpreter
 	$(PYTHON) scripts/check_threat_model_refs.py
 
 check-python:
-	@command -v ruff >/dev/null 2>&1 || { echo "error: ruff $(RUFF_VERSION) not found on PATH" >&2; exit 1; }
-	@v=`ruff --version | cut -d' ' -f2`; [ "$$v" = "$(RUFF_VERSION)" ] || { echo "error: ruff $(RUFF_VERSION) required, found $$v" >&2; exit 1; }
+	@command -v ruff >/dev/null 2>&1 || { echo "error: ruff $(RUFF_VERSION) not found on PATH; uv tool install ruff==$(RUFF_VERSION)" >&2; exit 1; }
+	@v=`ruff --version | cut -d' ' -f2`; [ "$$v" = "$(RUFF_VERSION)" ] || { echo "error: ruff $(RUFF_VERSION) required, found $$v; uv tool install ruff==$(RUFF_VERSION)" >&2; exit 1; }
 	ruff check .
 	ruff format --check .
 
 # .yamllint carries the rule set, so the gate reads the same file CI does.
 check-yaml:
-	@command -v yamllint >/dev/null 2>&1 || { echo "error: yamllint $(YAMLLINT_VERSION) not found on PATH; 'make lint' checks .github with it" >&2; exit 1; }
-	@v=`yamllint --version | cut -d' ' -f2`; [ "$$v" = "$(YAMLLINT_VERSION)" ] || { echo "error: yamllint $(YAMLLINT_VERSION) required, found $$v" >&2; exit 1; }
+	@command -v yamllint >/dev/null 2>&1 || { echo "error: yamllint $(YAMLLINT_VERSION) not found on PATH; 'make lint' checks .github with it, uv tool install yamllint==$(YAMLLINT_VERSION)" >&2; exit 1; }
+	@v=`yamllint --version | cut -d' ' -f2`; [ "$$v" = "$(YAMLLINT_VERSION)" ] || { echo "error: yamllint $(YAMLLINT_VERSION) required, found $$v; uv tool install yamllint==$(YAMLLINT_VERSION)" >&2; exit 1; }
 	yamllint .github
 
 check-host-tools:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "error: shellcheck not found on PATH; 'make lint' shellchecks scripts/*.sh" >&2; exit 1; }
-	@command -v yamllint >/dev/null 2>&1 || { echo "error: yamllint $(YAMLLINT_VERSION) not found on PATH; 'make lint' checks .github with it" >&2; exit 1; }
+	@command -v yamllint >/dev/null 2>&1 || { echo "error: yamllint $(YAMLLINT_VERSION) not found on PATH; 'make lint' checks .github with it, uv tool install yamllint==$(YAMLLINT_VERSION)" >&2; exit 1; }
 	@[ -n "$(PYTHON)" ] || { echo "error: neither python3 nor python found on PATH; the scripts/*.py gates need one" >&2; exit 1; }
 
 # The parity sweep alone needs a third-party package. `make lint` deliberately
@@ -208,7 +227,8 @@ help:
 	@echo "  build      build the library and the test binaries (zig build)"
 	@echo "  test       run the test suite (zig build test); FILTER=<substr> runs a subset"
 	@echo "  sanitize   run the test suite with the C undefined-behaviour sanitizer (-Dsanitize)"
-	@echo "  check      run every CI check in order: lint, build, test, sanitize, cross"
+	@echo "  harnesses  run the native plugin harness in tests/, the one that reaches the dlopen path"
+	@echo "  check      run every CI check in order: lint, build, test, sanitize, harnesses, cross"
 	@echo "  lint       pinned zig fmt, ruff, shellcheck, yamllint, header/vendored parity, pin agreement"
 	@echo "  format     apply zig fmt and ruff format"
 	@echo "  cross      cross-compile the shipped x86-windows DLL"
