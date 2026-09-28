@@ -62,6 +62,23 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ### Changed
 
+- The C warning set gains six groups the tree already passes: `-Wenum-conversion`,
+  `-Winit-self`, `-Wredundant-decls`, `-Wnested-externs`, `-Wpointer-arith` and
+  `-Wstrict-overflow=2`. They are declared once in `build.zig` and repeated by
+  `scripts/check_header.py` and `scripts/check_examples.py`, which
+  `scripts/check_toolchain_pins.py` holds to the same list. A signed overflow
+  that is only undefined once the optimizer assumes it cannot happen now fails
+  the build rather than the release it reaches.
+- `ruff.toml` selects `ASYNC`, `FA`, `FAST`, `PD`, `SLOT`, `TCH`, `TD` and
+  `YTT`. They sat out because nothing in the tree could trip them yet, which is
+  a reason to leave a rule off until it has something to say, not a reason to
+  leave it off: the first script that blocks inside an async function, or leaves
+  a `TODO` in the gate that is itself the gate, is what they were there to
+  catch. `ANN` and `D` stay out, and say so.
+- Both workflows run the test suite as `zig build test --summary all`, the
+  invocation `make test` uses. Without the summary a green run ends on the
+  `failed command: ... --listen=-` line zig prints after a test artifact writes
+  to stderr, and the `N/N tests passed` line that settles it never appears.
 - The release job runs the same analysis gate as `make lint` before it builds
   anything. A tag is published with no merge gate in between, so a release cut
   from a commit the CI gate refused, or re-run after a linter moved, could

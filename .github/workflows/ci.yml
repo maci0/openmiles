@@ -107,7 +107,12 @@ jobs:
         run: zig build
 
       - name: Run Tests
-        run: zig build test
+        # --summary all is what `make test` asks for, and the reason is in the
+        # Makefile: zig 0.16 prints a "failed command: ... --listen=-" line after
+        # a test artifact writes to stderr and still exits 0, so an unannotated
+        # run ends on a line that reads as a failure and the "N/N tests passed"
+        # line that settles it never appears.
+        run: zig build test --summary all
 
       - name: Run Tests (C undefined-behaviour sanitizer)
         if: matrix.os == 'ubuntu-latest'

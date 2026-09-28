@@ -93,8 +93,16 @@ const OpenmilesModule = struct {
 // for anything outside c99, -Wshadow for a variable that hides another, the
 // two prototype groups for declarations that do not match a header, -Wvla for
 // stack arrays of unknown size, -Wformat=2 for a format string that does not
-// match its arguments, and -Wwrite-strings for a string literal written
-// through a mutable pointer.
+// match its arguments, -Wwrite-strings for a string literal written through a
+// mutable pointer, -Wenum-conversion for an enum that changed width under a
+// value, -Winit-self for an initializer that reads its own storage,
+// -Wredundant-decls for a declaration repeated in the same scope,
+// -Wnested-externs for a function defined inside an extern block, and
+// -Wpointer-arith for arithmetic on void* or a function pointer.
+//
+// -Wstrict-overflow=2 is the last group, and the one that is about the build
+// rather than the source: a signed overflow that is only undefined once the
+// optimizer assumes it cannot happen. At -O0 it is a plain overflow.
 //
 // Three of them need a counter-flag, each for vendored code, never ours:
 // -Wno-c11-extensions because tml.h declares an anonymous union, and
@@ -103,10 +111,11 @@ const OpenmilesModule = struct {
 // vendored tsf.h computes struct member offsets via
 // ((struct tsf_region*)0)->FIELD pointer math.
 const c_flags = [_][]const u8{
-    "-std=c99",               "-Wall",               "-Wextra",    "-Werror",
-    "-Wpedantic",             "-Wno-c11-extensions", "-Wshadow",   "-Wstrict-prototypes",
-    "-Wold-style-definition", "-Wvla",               "-Wformat=2", "-Wno-format-nonliteral",
-    "-Wwrite-strings",
+    "-std=c99",               "-Wall",               "-Wextra",             "-Werror",
+    "-Wpedantic",             "-Wno-c11-extensions", "-Wshadow",            "-Wstrict-prototypes",
+    "-Wold-style-definition", "-Wvla",               "-Wformat=2",          "-Wno-format-nonliteral",
+    "-Wwrite-strings",        "-Wenum-conversion",   "-Winit-self",         "-Wredundant-decls",
+    "-Wnested-externs",       "-Wpointer-arith",     "-Wstrict-overflow=2",
 };
 const c_flags_tsf = c_flags ++ [_][]const u8{"-Wno-null-pointer-subtraction"};
 

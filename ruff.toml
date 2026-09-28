@@ -9,14 +9,19 @@
 # Not selected, and why: COM (COM812/COM819 fight the formatter over trailing
 # commas, and the formatter wins), T20 (printing the report is the job), ANN
 # and D (annotating 60-line scripts and documenting every three-line accessor
-# is a separate pass), TCH, ASYNC, FAST and PD (no typing-only imports, no
-# async, no pytest fixtures and no numpy yet, so all four are no-ops until ANN
-# lands). S is selected: the scripts parse vendored C headers and a DLL, which
-# is exactly the untrusted-shape input worth checking, and the tree passes it.
-# So are BLE, PGH, SLF and T10: a swallowed exception, a bare `# noqa` that
-# silences every rule on the line, a reach into another object's private
-# member, and a leftover breakpoint are all defects a gate should catch, and
-# none of them is present.
+# is a separate pass). S is selected: the scripts parse vendored C headers and
+# a DLL, which is exactly the untrusted-shape input worth checking, and the
+# tree passes it. So are BLE, PGH, SLF and T10: a swallowed exception, a bare
+# `# noqa` that silences every rule on the line, a reach into another object's
+# private member, and a leftover breakpoint are all defects a gate should
+# catch, and none of them is present.
+#
+# TCH, ASYNC, FAST, PD, FA, SLOT, TD and YTT used to sit out on the grounds
+# that nothing in the tree could trip them yet, which is a reason to leave a
+# rule off until it has something to say, not a reason to leave it off for
+# good: the next script that blocks an import inside a function, or opens a
+# socket without a timeout, is the first thing they would have caught, and by
+# then nothing does. The tree passes all eight today, so they run.
 
 line-length = 100
 # The floor the scripts/ gates need, not a guess. Entry, a typing.NamedTuple in
@@ -30,6 +35,7 @@ extend-exclude = ["deps", "zig-out", ".zig-cache", ".scratch"]
 
 [lint]
 select = [
+    "ASYNC",# a blocking call inside an async function
     "F",    # pyflakes
     "E",    # pycodestyle errors
     "W",    # pycodestyle warnings
@@ -45,6 +51,8 @@ select = [
     "EM",   # exception message handling
     "ERA",  # commented-out code
     "EXE",  # shebang/executable-bit agreement
+    "FA",   # from __future__ the target version actually needs
+    "FAST", # postponed annotation evaluation
     "FBT",  # boolean positional argument
     "FURB", # refurb
     "FLY",  # string joins and f-strings that need not be built at runtime
@@ -53,6 +61,7 @@ select = [
     "ISC",  # implicit string concatenation
     "LOG",  # logging misuse
     "PERF", # per-file performance
+    "PD",   # pytest-style raises outside a test
     "PGH",  # suppression hygiene: blanket noqa, type: ignore
     "PIE",  # misc lints
     "PL",   # pylint
@@ -65,9 +74,13 @@ select = [
     "S",    # flake8-bandit
     "SIM",  # simplify
     "SLF",  # private member access
+    "SLOT", # dataclass __slots__
     "T10",  # stray debugger
+    "TCH",  # imports only needed for typing
+    "TD",   # TODO/FIXME/XXX left in a gate that is the gate
     "TID",  # tidy imports
     "TRY",  # tryceratops
+    "YTT",  # sys.version / sys.version_info misuse
 ]
 # TRY003: every message here names the offending symbol and version, which is
 # the point of the tool; moving them into exception classes would hide it.

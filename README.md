@@ -464,8 +464,10 @@ build does not name reads as 0 and is not stored.
 table, and the `AILSOUNDINFO` layout against `src/root.zig`, for all ten distinct
 version encodings, and compiles the header once per encoding with the same
 warning set `build.zig` compiles C with (`-Wall -Wextra -Werror` plus the
-pedantic, shadow, prototype, VLA, format and write-strings groups), so a
-declaration that only parses is caught here rather than in your build. It runs
+pedantic, shadow, prototype, VLA, format, write-strings, enum-conversion,
+init-self, redundant-declaration, nested-extern, pointer-arithmetic and
+signed-overflow groups), so a declaration that only parses is caught here
+rather than in your build. It runs
 as part of `make lint`, together with `make check-examples`, which compiles
 every `c` snippet in this file and in `docs/` against the header at the
 `OPENMILES_MSS_VERSION` each one names, so the example above cannot drift from

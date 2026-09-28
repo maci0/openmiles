@@ -66,6 +66,12 @@ CFLAGS = [
     "-Wformat=2",
     "-Wno-format-nonliteral",
     "-Wwrite-strings",
+    "-Wenum-conversion",
+    "-Winit-self",
+    "-Wredundant-decls",
+    "-Wnested-externs",
+    "-Wpointer-arith",
+    "-Wstrict-overflow=2",
 ]
 
 
