@@ -46,6 +46,22 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-28
+
+CI and test fixes that landed after 0.1.0, plus the GitHub Actions bumps merged with them.
+
+### Changed
+
+- The Ubuntu CI job installs uv 0.12.19 before ruff and yamllint. The runner image has pipx and not uv, so the lint gate exited 127 before any check ran.
+- The release workflow reads the changelog section by version prefix, so a heading with a date (`## [0.2.0] - 2026-09-28`) is the notes that ship. Matching the whole line against `## [v0.2.0]` published an empty body.
+- `actions/checkout` is 7.0.1, `actions/cache` is 6.1.0, and `softprops/action-gh-release` is 3.0.3.
+
+### Fixed
+
+- The fuzz-all export sweep runs on a virtual clock, bounds the locked allocations it requests, and closes the driver `AIL_waveOutOpen` builds each round. On Windows those leaks exhausted the process commit charge and killed the test with no assertion.
+- The timer self-stop test waits until `is_running` is clear before it restarts the timer. Restarting on the first fire could beat `stop()` and leave the timer stopped.
+- The configured TMPDIR test expects the platform path separator, so a Windows run checks a trailing backslash instead of a hardcoded slash.
+
 ## [0.1.0] - 2026-09-27
 
 First tagged release. While the version is `0.x`, a minor bump may carry a
