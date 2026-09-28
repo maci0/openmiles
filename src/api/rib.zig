@@ -580,12 +580,16 @@ pub fn AIL_compress_ASI(info_opt: ?*const openmiles.AILSOUNDINFO, ext: ?[*:0]con
         return 0;
     };
     defer openmiles.global_allocator.free(wav);
-    const buf: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse {
-        openmiles.setLastError("AIL_compress_ASI: out of memory");
-        return 0;
-    });
-    @memcpy(buf[0..wav.len], wav);
-    if (outdata) |o| o.* = buf;
+    // C-allocated only when there is an out-pointer to take it: a copy made
+    // for a caller that passed none could be freed by no one.
+    if (outdata) |o| {
+        const buf: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse {
+            openmiles.setLastError("AIL_compress_ASI: out of memory");
+            return 0;
+        });
+        @memcpy(buf[0..wav.len], wav);
+        o.* = buf;
+    }
     if (outsize) |o| o.* = @intCast(wav.len);
     return 1;
 }
@@ -645,12 +649,16 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
         return 0;
     };
     defer openmiles.global_allocator.free(wav);
-    const buf: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse {
-        openmiles.setLastError("AIL_decompress_ASI: out of memory");
-        return 0;
-    });
-    @memcpy(buf[0..wav.len], wav);
-    if (wav_out) |o| o.* = buf;
+    // C-allocated only when there is an out-pointer to take it: a copy made
+    // for a caller that passed none could be freed by no one.
+    if (wav_out) |o| {
+        const buf: [*]u8 = @ptrCast(std.c.malloc(wav.len) orelse {
+            openmiles.setLastError("AIL_decompress_ASI: out of memory");
+            return 0;
+        });
+        @memcpy(buf[0..wav.len], wav);
+        o.* = buf;
+    }
     if (wavsize) |o| o.* = @intCast(wav.len);
     return 1;
 }

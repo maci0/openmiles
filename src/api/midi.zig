@@ -248,13 +248,17 @@ pub fn AIL_list_MIDI(midi: ?*const anyopaque, midi_size: u32, lst: ?*?*anyopaque
     }
     defer openmiles.global_allocator.free(text);
 
-    const p = std.c.malloc(text.len + 1) orelse {
-        openmiles.setLastError("AIL_list_MIDI: cannot allocate the listing");
-        return 0;
-    };
-    const dst: [*]u8 = @ptrCast(p);
-    @memcpy(dst[0 .. text.len + 1], text[0 .. text.len + 1]); // include NUL
-    if (lst) |pp| pp.* = p;
+    // C-allocated only when there is an out-pointer to receive the listing: a
+    // copy made for a caller that passed none could be freed by no one.
+    if (lst) |pp| {
+        const p = std.c.malloc(text.len + 1) orelse {
+            openmiles.setLastError("AIL_list_MIDI: cannot allocate the listing");
+            return 0;
+        };
+        const dst: [*]u8 = @ptrCast(p);
+        @memcpy(dst[0 .. text.len + 1], text[0 .. text.len + 1]); // include NUL
+        pp.* = p;
+    }
     if (lst_size) |pp| pp.* = @intCast(text.len);
     return 1;
 }

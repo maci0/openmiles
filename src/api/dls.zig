@@ -106,8 +106,10 @@ pub fn AIL_filter_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyopaque, d
         openmiles.setLastError("AIL_filter_DLS_with_XMI: unrecognized DLS image");
         return 0;
     }
-    const copy = cmemdup(raw[0..sz]) orelse return 0;
-    if (dlsout) |pp| pp.* = copy;
+    // The copy exists only to be handed back through dlsout. A caller that
+    // passed no out-pointer had nowhere to put it and no way to free it, so the
+    // C-heap image was unreachable from the moment it was made.
+    if (dlsout) |pp| pp.* = cmemdup(raw[0..sz]) orelse return 0;
     if (dlssize) |p| p.* = @intCast(sz);
     return 1;
 }
@@ -312,15 +314,30 @@ pub fn AIL_extract_DLS(src: ?*const anyopaque, src_len: u32, xmi_out: ?*?*anyopa
     var found: i32 = 0;
 
     if (parts.dls) |img| {
-        if (cmemdup(img)) |c| {
-            if (dls_out) |pp| pp.* = c;
+        // A copy is taken only when there is an out-pointer to receive it: an
+        // image extracted for a caller that passed no pointer could never be
+        // freed, and the extraction still reports what it found.
+        var delivered = dls_out == null;
+        if (dls_out) |pp| {
+            if (cmemdup(img)) |c| {
+                pp.* = c;
+                delivered = true;
+            }
+        }
+        if (delivered) {
             if (dls_len) |p| p.* = @intCast(img.len);
             found = 1;
         }
     }
     if (parts.xmi) |img| {
-        if (cmemdup(img)) |c| {
-            if (xmi_out) |pp| pp.* = c;
+        var delivered = xmi_out == null;
+        if (xmi_out) |pp| {
+            if (cmemdup(img)) |c| {
+                pp.* = c;
+                delivered = true;
+            }
+        }
+        if (delivered) {
             if (xmi_len) |p| p.* = @intCast(img.len);
             // A merged image reports success on its DLS copy alone, as the SDK does.
             if (parts.dls == null) found = 1;
@@ -389,8 +406,9 @@ pub fn AIL_list_DLS(dls: ?*const anyopaque, lst: ?*?*anyopaque, lst_size: ?*u32,
         return 0;
     };
     defer openmiles.global_allocator.free(text);
-    const out = cmemdup(text[0 .. text.len + 1]) orelse return 0; // include NUL
-    if (lst) |pp| pp.* = out;
+    // C-allocated only when there is an out-pointer to hand it to: a listing
+    // made for a caller that passed none could not be freed by anyone.
+    if (lst) |pp| pp.* = cmemdup(text[0 .. text.len + 1]) orelse return 0; // include NUL
     if (lst_size) |p| p.* = @intCast(text.len);
     return 1;
 }
@@ -422,14 +440,18 @@ pub fn AIL_merge_DLS_with_XMI(xmi: ?*const anyopaque, dls: ?*const anyopaque, ou
         openmiles.setLastError("AIL_merge_DLS_with_XMI: image sizes overflow");
         return 0;
     };
-    const buf = std.c.malloc(total) orelse {
-        openmiles.setLastErrorFmt("AIL_merge_DLS_with_XMI: cannot allocate {d} bytes", .{total});
-        return 0;
-    };
-    const dst: [*]u8 = @ptrCast(buf);
-    @memcpy(dst[0..xsz], xraw[0..xsz]);
-    @memcpy(dst[xsz .. xsz + dsz], draw[0..dsz]);
-    if (out) |pp| pp.* = buf;
+    // The merged image is built only when there is an out-pointer to take it: a
+    // copy made for a caller that passed none was unreachable and unfreeable.
+    if (out) |pp| {
+        const buf = std.c.malloc(total) orelse {
+            openmiles.setLastErrorFmt("AIL_merge_DLS_with_XMI: cannot allocate {d} bytes", .{total});
+            return 0;
+        };
+        const dst: [*]u8 = @ptrCast(buf);
+        @memcpy(dst[0..xsz], xraw[0..xsz]);
+        @memcpy(dst[xsz .. xsz + dsz], draw[0..dsz]);
+        pp.* = buf;
+    }
     if (out_len) |p| p.* = @intCast(total);
     return 1;
 }
