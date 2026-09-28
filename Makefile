@@ -1,4 +1,4 @@
-.PHONY: all build test check clean lint format check-header check-examples check-versions check-pins check-python check-yaml check-threat-model check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity sanitize harnesses help
+.PHONY: all build test check clean lint format check-header check-examples check-versions check-pins check-python check-yaml check-threat-model check-release-archive check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity sanitize harnesses help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -172,6 +172,14 @@ check-pins: check-interpreter
 check-threat-model: check-interpreter
 	$(PYTHON) scripts/check_threat_model_refs.py
 
+# The release archive stages what package_release.sh lists, and nothing checks
+# that what it stages can be verified by whoever unpacks it. Assert the archive
+# carries every file deps/SHA256SUMS records and every file the shipped docs
+# link, read out of the packager's own entry list. See
+# scripts/check_release_archive.py.
+check-release-archive: check-interpreter
+	$(PYTHON) scripts/check_release_archive.py
+
 check-python:
 	@command -v ruff >/dev/null 2>&1 || { echo "error: ruff $(RUFF_VERSION) not found on PATH; uv tool install ruff==$(RUFF_VERSION)" >&2; exit 1; }
 	@v=`ruff --version | cut -d' ' -f2`; [ "$$v" = "$(RUFF_VERSION)" ] || { echo "error: ruff $(RUFF_VERSION) required, found $$v; uv tool install ruff==$(RUFF_VERSION)" >&2; exit 1; }
@@ -209,6 +217,7 @@ lint: check-toolchain check-host-tools
 	$(PYTHON) scripts/check_vendored.py
 	$(PYTHON) scripts/gen_sbom.py --check
 	$(PYTHON) scripts/check_threat_model_refs.py
+	$(PYTHON) scripts/check_release_archive.py
 	@$(MAKE) --no-print-directory check-python
 	@$(MAKE) --no-print-directory check-yaml
 	@$(MAKE) --no-print-directory check-pins
@@ -243,7 +252,7 @@ help:
 	@echo "  sanitize   run the test suite with the C undefined-behaviour sanitizer (-Dsanitize)"
 	@echo "  harnesses  run the native plugin harness in tests/, the one that reaches the dlopen path"
 	@echo "  check      run every CI check in order: lint, build, test, sanitize, harnesses, cross"
-	@echo "  lint       pinned zig fmt, ruff, shellcheck, yamllint, header/vendored parity, pin agreement"
+	@echo "  lint       pinned zig fmt, ruff, shellcheck, yamllint, header/vendored/archive parity, pin agreement"
 	@echo "  format     apply zig fmt and ruff format"
 	@echo "  cross      cross-compile the shipped x86-windows DLL"
 	@echo "  parity     diff every -Dmss-version export table against its reference DLL (needs scripts/requirements.txt)"
@@ -259,6 +268,7 @@ help:
 	@echo "  check-vendored      assert deps/ matches the digests in deps/SHA256SUMS, and that each vendored entry names its upstream commit and states the version its own header carries"
 	@echo "  check-sbom          assert SBOM.cdx.json matches the vendored deps and the declared pip pins"
 	@echo "  check-threat-model  assert every file:line anchor in docs/THREAT_MODEL.md resolves"
+	@echo "  check-release-archive  assert the release archive carries every file deps/SHA256SUMS records and every file the shipped docs link"
 	@echo "  check-python        assert ruff on PATH is the pinned version, then lint and format-check"
 	@echo "  check-yaml          assert yamllint on PATH is the pinned version, then lint .github"
 	@echo "  check-interpreter   assert a Python 3 interpreter is named python3 or python"

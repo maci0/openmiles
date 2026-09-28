@@ -196,13 +196,26 @@ entries=(
   # link that 404s in an unpacked archive is a link that names a file the
   # archive does not hold.
   "CONTRIBUTING.md:CONTRIBUTING.md"
-  # The vendored headers are compiled into the DLL, not shipped as source, but
-  # the project license covers redistributing them under their own terms, so
-  # the attribution and the reviewed digests travel with the binary. They keep
-  # the paths the README links them by: renamed to a flat VENDORED.md, every
-  # one of those links is dead in an unpacked archive.
+  # The vendored headers, the attribution, and the reviewed digests. The
+  # project license covers redistributing the headers under their own terms,
+  # and they keep the paths the README links them by: renamed to a flat
+  # VENDORED.md, every one of those links is dead in an unpacked archive.
+  #
+  # The headers themselves ship because the two records that describe them
+  # ship, and a record a consumer cannot check is not a record. deps/SHA256SUMS
+  # names every header below and SBOM.cdx.json repeats those digests, so an
+  # archive holding the manifests and not the files fails `sha256sum -c
+  # deps/SHA256SUMS` on all of them the moment it is unpacked, and the bytes
+  # README.md pins the consumer to are the only ones a consumer cannot obtain
+  # from what they downloaded. `make check-release-archive` fails when a header
+  # is vendored and the archive does not carry it.
   "deps/README.md:deps/README.md"
   "deps/SHA256SUMS:deps/SHA256SUMS"
+  "deps/miniaudio.h:deps/miniaudio.h"
+  "deps/tml.h:deps/tml.h"
+  "deps/tsf.h:deps/tsf.h"
+  "deps/tsf_tml.h:deps/tsf_tml.h"
+  "deps/windows_stub.h:deps/windows_stub.h"
   # The docs the shipped README links: the API status matrix, the support and
   # version tables, the plugin coverage list, the threat model, and the logo
   # its first line renders. Every one of those links is in the README a

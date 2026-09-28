@@ -185,8 +185,8 @@ on each install.
 `scripts/package_release.sh <out.zip> [sha256sums]` packages
 `zig-out/bin/mss32.dll` with the header a consumer compiles against
 (`mss.h`), the license, this README, the changelog, the security policy, the
-contributor guide, the vendored-dependency attribution (`deps/README.md`,
-`deps/SHA256SUMS`), the `docs/` this README links, so every relative link
+contributor guide, the vendored headers with their attribution and digests
+(`deps/`), the `docs/` this README links, so every relative link
 in it resolves in an unpacked archive, and the third-party inventory
 (`SBOM.cdx.json`). It needs `zip` on PATH and says so if it is missing, and
 takes the digests for the optional checksum file from `sha256sum` or, where
@@ -201,6 +201,17 @@ time) pinned to UTC, and no host metadata is stored. Packaging it twice yields
 byte-identical files, on any host timezone and locale, which the release
 workflow checks with `cmp` after repackaging under a different `TZ` and
 `LC_ALL`.
+
+The archive is checkable rather than merely described. `deps/SHA256SUMS` and
+`SBOM.cdx.json` name the vendored headers, so the headers ship beside those
+records: `cd deps && sha256sum -c SHA256SUMS` on an unpacked archive passes,
+where an archive holding the manifests alone failed on every entry. The
+packager stages what its entry list names and does not look at what those files
+point at, so `make check-release-archive` reads that list back out of
+`package_release.sh` and fails when the archive would drop a file
+`deps/SHA256SUMS` records or a file the shipped docs link. It runs in
+`make lint`, so CI rejects a vendored header or a written doc that the next
+release would not carry.
 
 Publishing is a tag push: set `.version` in `build.zig.zon`, push `v<version>`,
 and the workflow builds, smoke-tests the DLL, verifies the archive is

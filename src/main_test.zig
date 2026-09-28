@@ -8814,7 +8814,7 @@ test "a miniaudio result code reaches the log as something an operator can act o
     try testing.expectEqualStrings("Unknown error", openmiles.maResultDescription(-123456));
 }
 
-test "concurrent Miles starts, drains and queries lose no instance" {    // A game's worker thread starting sounds while its main thread drains the
+test "concurrent Miles starts, drains and queries lose no instance" { // A game's worker thread starting sounds while its main thread drains the
     // queue and reads the state is the ordinary split. Every registry behind
     // these calls is process-global: the instance list appends and grows its own
     // backing array, the id counter is a read-modify-write, and the status walk

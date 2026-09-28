@@ -129,6 +129,19 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ### Fixed
 
+- The release archive shipped `deps/SHA256SUMS` and `SBOM.cdx.json` without the
+  vendored headers those records describe. Unpacking it and running
+  `sha256sum -c deps/SHA256SUMS` failed on all five entries, and the SBOM's
+  component digests resolved to nothing, so the archive's own verification
+  records were decoration. The headers now ship beside them, which is what the
+  README already told a consumer the archive was for.
+- `make check-release-archive` (part of `make lint`, and so of both CI and the
+  release job's gate) asserts the archive carries every file `deps/SHA256SUMS`
+  records and every file the shipped docs link, reading the entry list back out
+  of `package_release.sh`. The packager stages what its list names and never
+  looked at what those files point at, so a header vendored or a doc written
+  after the list was last edited produced an archive nobody noticed was
+  incomplete until a consumer hit it.
 - `AIL_open_soundbank`'s optional name check compared the caller's whole string
   against the bank's four-byte `SoundBankName` field. A name the field spells
   but that is longer than the field, or that the field's own read-back is
