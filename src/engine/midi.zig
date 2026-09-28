@@ -154,6 +154,21 @@ pub const MidiDriver = struct {
         return sf;
     }
 
+    /// Drop the image identity of a bank whose source buffer the caller is
+    /// about to free, keeping the bank itself. AIL_DLS_load_file's VFS path
+    /// reads an image into a buffer it releases when it returns, so leaving
+    /// that address recorded keyed a live bank to memory that no longer
+    /// existed: the next image the allocator handed out at the same address,
+    /// with a size its header matched, was answered with this bank instead of
+    /// being loaded. The refs the loads took are untouched, so the bank still
+    /// closes on the unload that answers the last of them.
+    pub fn forgetSoundfontImage(self: *MidiDriver, data: [*c]const u8, size: u32) void {
+        if (self.soundfont_image_ptr != @intFromPtr(data)) return;
+        if (self.soundfont_image_size != size) return;
+        self.soundfont_image_ptr = 0;
+        self.soundfont_image_size = 0;
+    }
+
     /// Milliseconds of MIDI time one output frame carries. A driver with no
     /// output rate has no frame time at all, and the unguarded 1000/rate it
     /// would otherwise yield is an infinity: the render loop would add it to

@@ -168,6 +168,36 @@ test "MidiDriver loading the same soundfont image twice keeps one bank" {
     try testing.expectEqual(sentinel, try driver.loadSoundfontImage(image.ptr, @intCast(image.len)));
 }
 
+// AIL_DLS_load_file reads through the file callbacks into a buffer it releases
+// when it returns, so the record of which buffer the bank came from has to go
+// with the memory: the next image the allocator hands out at that address is a
+// different image, and answering its load with this bank would give the game a
+// soundfont it never asked for.
+test "MidiDriver forgets the image identity of a buffer the caller frees" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.MidiDriver.init(allocator);
+    defer driver.deinit();
+
+    const sentinel: *openmiles.tsf.tsf = @ptrFromInt(0x3000);
+    const image = "RIFF\x24\x00\x00\x00sfbkLIST";
+    driver.soundfont = sentinel;
+    driver.owns_soundfont = false;
+    driver.soundfont_image_ptr = @intFromPtr(image.ptr);
+    driver.soundfont_image_size = @intCast(image.len);
+    driver.soundfont_refs = 1;
+
+    driver.forgetSoundfontImage(image.ptr, @intCast(image.len));
+    try testing.expectEqual(@as(?*openmiles.tsf.tsf, null), driver.soundfontFromImage(image.ptr, @intCast(image.len)));
+    // The bank and the reference its load took both stay: releasing the source
+    // image is not an unload.
+    try testing.expectEqual(sentinel, driver.soundfont.?);
+    try testing.expectEqual(@as(u32, 1), driver.soundfont_refs);
+    // A different size at the same address is a different image too.
+    driver.soundfont_image_ptr = @intFromPtr(image.ptr);
+    driver.soundfont_image_size = @intCast(image.len);
+    try testing.expectEqual(@as(?*openmiles.tsf.tsf, null), driver.soundfontFromImage(image.ptr, @intCast(image.len - 1)));
+}
+
 test "MidiDriver ms-per-frame stays finite for any output rate" {
     const allocator = testing.allocator;
     const driver = try openmiles.MidiDriver.init(allocator);
@@ -6910,6 +6940,24 @@ test "Miles event-system variables roundtrip on default and named systems" {
     // default system unchanged by the named-system write
     _ = api_miles_t.MilesGetVarI(0, "hp", &iv);
     try testing.expectEqual(@as(i32, 7), iv);
+}
+
+// The cap map owns the lowercased label it stores, so a limits string naming
+// one label twice is one entry and the name handed to the second put is freed
+// rather than dropped: a set_limits step repeated over a bank of them leaked a
+// copy of every repeat. The leak-checked allocator is what makes it visible,
+// the map holding one entry either way.
+test "Miles label limits take a repeated label once and leak no name" {
+    const saved = openmiles.global_allocator;
+    openmiles.global_allocator = testing.allocator;
+    defer openmiles.global_allocator = saved;
+
+    _ = api_miles_t.MilesSetSoundLabelLimits(null, "music 2:sfx 1:MUSIC 5:music 7");
+    // Resetting empties the map, and with it every name the string carried.
+    _ = api_miles_t.MilesSetSoundLabelLimits(null, "");
+    // The v8 entry point reaches the same map.
+    _ = api_miles_t.MilesSetSoundLabelLimits_v8("music 3:music 3");
+    _ = api_miles_t.MilesSetSoundLabelLimits_v8("");
 }
 
 // bufPrint leaves the buffer unterminated; the AIL_* calls take C strings.

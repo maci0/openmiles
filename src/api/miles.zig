@@ -261,7 +261,18 @@ fn setLimits(limits_str: []const u8) void {
         const label = pit.next() orelse continue;
         const count_s = pit.next() orelse continue;
         const count = std.fmt.parseInt(u32, count_s, 10) catch continue;
-        const key = lowerDupe(label) orelse continue;
+        // A label repeated in one string is one entry, the last count winning.
+        // put() on a name the map already owns keeps the key it stored and drops
+        // the one passed in, so the dupe went with it: every repeated label
+        // leaked a copy of its name on each set_limits step.
+        var probe: NameKey = undefined;
+        probe.init(label);
+        defer probe.deinit();
+        if (g_limits.getPtr(probe.key)) |slot| {
+            slot.* = count;
+            continue;
+        }
+        const key = lowerDupe(probe.key) orelse continue;
         g_limits.put(openmiles.global_allocator, key, count) catch openmiles.global_allocator.free(key);
     }
 }

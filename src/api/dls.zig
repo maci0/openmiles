@@ -36,6 +36,11 @@ pub fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flag
                 openmiles.setLastError("Failed to load DLS/SF2 from callback");
                 return null;
             };
+            // The buffer is released when this call returns, so the driver's
+            // record of which buffer the bank came from is dropped with it: an
+            // address the allocator hands to the next image would otherwise
+            // answer that image's load with this bank.
+            driver.forgetSoundfontImage(b.ptr, @intCast(b.len));
             return @ptrCast(loaded);
         } else |err| {
             // Not fatal on its own: fall through to a direct filesystem read,
