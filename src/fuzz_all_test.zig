@@ -767,7 +767,7 @@ test "fuzz: invoke every export with adversarial inputs" {
                 _ = api_rib.RIB_type_string_std(&tsv2, ru);
             }
             api_rib.RIB_unregister_interface_std(prov, rstr, rszi, scp);
-            // --- functions added this session (v8/v9 subsystems) ---
+            // --- v8/v9 subsystem exports ---
             const h3a: ?*anyopaque = @ptrCast(h3);
             api_3d.AIL_3D_update_position(h3a, rf);
             api_3d.AIL_3D_auto_update_position(h3a, ri);

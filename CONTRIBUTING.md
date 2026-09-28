@@ -2,7 +2,7 @@
 
 ## Setup
 
-Four tools, the first three version-pinned in the tree:
+Five tools, the first four version-pinned in the tree:
 
 | Tool | Version | Declared in | Install (any equivalent works) |
 |------|---------|-------------|---------------------------------|

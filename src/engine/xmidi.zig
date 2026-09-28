@@ -204,13 +204,13 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
 
     var events: std.ArrayListUnmanaged(SmfEvent) = .empty;
     defer events.deinit(allocator);
-    // Pre-allocate: each event is ~3 bytes minimum, note-on generates 2 events (on + synthetic off).
-    // The reservation is only a hint, so it is capped rather than sized straight
-    // from evnt.len. An EVNT chunk is file-controlled and the whole-file load cap
-    // still admits a 256 MiB image, which this ratio turns into a multi-gigabyte
-    // reservation (16 bytes per event) — and a failed reservation aborts the load
-    // of a file that would otherwise convert. Past the cap the list grows on
-    // demand, which is what it already does whenever the estimate is short.
+    // Pre-allocate at the note-on ratio: a note-on expands to two events, itself
+    // and its synthetic off. The reservation is only a hint, so it is capped rather
+    // than sized straight from evnt.len. An EVNT chunk is file-controlled and the
+    // whole-file load cap still admits a 256 MiB image, which this ratio turns into
+    // a multi-gigabyte reservation (16 bytes per event) — and a failed reservation
+    // aborts the load of a file that would otherwise convert. Past the cap the list
+    // grows on demand, which is what it already does whenever the estimate is short.
     try events.ensureTotalCapacity(allocator, @min(evnt.len / 2, max_preallocated_events));
 
     var pos: usize = 0;

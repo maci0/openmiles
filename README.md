@@ -504,16 +504,16 @@ selecting a version requires a rebuild.
 
 #### Debug logging
 
-Set `OPENMILES_DEBUG=1` in your environment to enable verbose logging. The file
-is `openmiles.log` in the game directory unless `OPENMILES_LOG_PATH` names
-another one.
-
 ```bash
 OPENMILES_DEBUG=1 wine YourGame.exe
 OPENMILES_DEBUG=1 OPENMILES_LOG_PATH=/tmp/openmiles.log wine YourGame.exe
 ```
 
-Debug builds enable logging by default; set `OPENMILES_DEBUG=0` to turn it off. Release builds log only when `OPENMILES_DEBUG` names a true value (`1`, `true`, `yes`, or `on`). The on-disk log is capped at 64 MiB per process to prevent unbounded growth. Its first line is the effective configuration, naming whether `OPENMILES_DEBUG` or the build default decided it, which file it appends to, and which `-Dmss-version` the loaded DLL was built for, so a log that never appears reads back as a configuration answer and a game compiled against a different `OPENMILES_MSS_VERSION` than the DLL it loads is visible in the first line.
+The log's first line is the effective configuration, naming whether
+`OPENMILES_DEBUG` or the build default decided it, which file it appends to, and
+which `-Dmss-version` the loaded DLL was built for, so a log that never appears
+reads back as a configuration answer and a game compiled against a different
+`OPENMILES_MSS_VERSION` than the DLL it loads is visible in the first line.
 
 ## Architecture
 

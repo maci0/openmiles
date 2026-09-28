@@ -329,10 +329,6 @@ def document():
     }
 
 
-def render():
-    return json.dumps(document(), indent=2, ensure_ascii=False) + "\n"
-
-
 def main():
     parser = argparse.ArgumentParser(
         prog="gen_sbom.py",
@@ -350,7 +346,8 @@ def main():
     )
     args = parser.parse_args()
 
-    text = render()
+    doc = document()
+    text = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
     if args.check:
         if not SBOM.exists():
             print(f"{SBOM.relative_to(ROOT)} MISSING  run scripts/gen_sbom.py")
@@ -366,7 +363,7 @@ def main():
     # Bytes, not write_text: a Windows run would otherwise write CRLF and leave
     # a file the next run's comparison (and git) reads as a diff.
     SBOM.write_bytes(text.encode("utf-8"))
-    print(f"wrote {SBOM.relative_to(ROOT)} ({len(document()['components'])} components)")
+    print(f"wrote {SBOM.relative_to(ROOT)} ({len(doc['components'])} components)")
     return 0
 
 

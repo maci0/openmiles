@@ -989,9 +989,7 @@ comptime {
         // only, so for v65 we emit just that and match it exactly.
         if (openmiles.mss_version == 61) {
             asm (".section .drectve\n .ascii \" /EXPORT:@stream_background@0=mss_stream_background_stub\"\n .text\n");
-        } else if (openmiles.mss_version == 65) {
-            asm (".section .drectve\n .ascii \" /EXPORT:stream_background=mss_stream_background_stub\"\n .text\n");
-        } else if (openmiles.mss_version == 66) {
+        } else if (openmiles.mss_version == 65 or openmiles.mss_version == 66) {
             asm (".section .drectve\n .ascii \" /EXPORT:stream_background=mss_stream_background_stub\"\n .text\n");
         }
     }

@@ -2418,7 +2418,7 @@ pub const Sample3D = struct {
     /// object: the stored position moves even before a sound is loaded, and
     /// only the ma_sound push waits for initialization.
     fn advancePosition(self: *Sample3D, dt_ms: f32) void {
-        if (!(dt_ms == dt_ms) or std.math.isInf(dt_ms)) return; // NaN/Inf guard
+        if (!std.math.isFinite(dt_ms)) return; // NaN/Inf guard
         self.pos_x += self.velocity_x * dt_ms;
         self.pos_y += self.velocity_y * dt_ms;
         self.pos_z += self.velocity_z * dt_ms;

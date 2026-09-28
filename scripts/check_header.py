@@ -413,13 +413,6 @@ def live_header_lines(text, version):
             live = outer_live and eval_guard(directive.group(2), version)
             stack.append(TAKEN if live else PENDING)
             continue
-        if re.match(r"#elif\s+", line):
-            if stack:
-                if stack[-1] == PENDING and eval_guard(re.sub(r"^#elif\s+", "", line), version):
-                    stack[-1] = TAKEN
-                elif stack[-1] == TAKEN:
-                    stack[-1] = DONE
-            continue
         if line == "#else":
             if stack:
                 stack[-1] = PENDING if stack[-1] == TAKEN else TAKEN
@@ -668,7 +661,6 @@ def main():
         help="report the undeclared-symbol count per version too",
     )
     args = parser.parse_args()
-    verbose = args.verbose
 
     main_zig = MAIN_ZIG.read_text(encoding="utf-8")
     exports = parse_exports(main_zig)
@@ -704,7 +696,7 @@ def main():
         covered = len(provided & declared_by_version[version])
         print(
             f"v{version}: {covered}/{len(provided)} exported symbols declared in mss.h"
-            + (f" ({len(provided) - covered} undeclared)" if verbose else "")
+            + (f" ({len(provided) - covered} undeclared)" if args.verbose else "")
         )
 
     return 1 if problems else 0
