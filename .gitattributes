@@ -9,6 +9,14 @@
 *.h text eol=lf
 Makefile text eol=lf
 
+# The workflows carry shell in their `run:` blocks, so they belong beside the
+# scripts: a CRLF checkout puts a stray \ at the end of every one of them, which
+# a line continuation or a `\` -quoted word then reads as part of the command.
+# `* text=auto` normalizes them in the repository but still hands a Windows
+# clone CRLF on the way out.
+*.yml text eol=lf
+*.yaml text eol=lf
+
 # Vendored third-party headers are kept byte-for-byte. tsf.h and tml.h ship
 # from upstream with CRLF line endings, and their SHA-256 digests in
 # deps/SHA256SUMS are only reproducible if git does not rewrite line endings

@@ -42,7 +42,7 @@ Environment:
   SOURCE_DATE_EPOCH  mtime stamped on every archive entry, as a Unix epoch.
                      Defaults to the HEAD commit time; set it to reproduce an
                      archive from a tree that is not a git checkout. Must be an
-                     integer in 315532800..253402300799 (1980-01-01..9999-12-31):
+                     integer in 315532800..4354819198 (1980-01-01..2107-12-31):
                      a zip entry cannot record anything outside that, and an
                      older value would be clamped to 1980-01-01.
 
@@ -83,9 +83,13 @@ if [ "$#" -gt 2 ]; then
 fi
 
 # Bounds are what a zip entry can actually record: the MS-DOS epoch it clamps
-# anything older to, and the last instant representable as a timestamp.
-min_epoch=315532800    # 1980-01-01T00:00:00Z
-max_epoch=253402300799 # 9999-12-31T23:59:59Z
+# anything older to, and the last instant its timestamp field can spell. The
+# field is 7 bits of years past 1980, so the top of the range is 2107-12-31
+# 23:59:58, at the format's 2-second resolution. A later epoch is not stored as
+# itself and not clamped to the top either: zip wraps the 7-bit year, and an
+# entry asked to carry 9999-12-31 comes back out of the archive reading 2064.
+min_epoch=315532800   # 1980-01-01T00:00:00Z
+max_epoch=4354819198  # 2107-12-31T23:59:58Z
 epoch=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || true)}
 if [ -z "$epoch" ]; then
   echo "error: no commit time available; set SOURCE_DATE_EPOCH" >&2
@@ -103,8 +107,9 @@ case $epoch in
     ;;
 esac
 if [ "${#epoch}" -gt 12 ] || [ "$((10#$epoch))" -lt "$min_epoch" ] || [ "$((10#$epoch))" -gt "$max_epoch" ]; then
-  echo "error: SOURCE_DATE_EPOCH=$epoch is outside $min_epoch..$max_epoch (1980-01-01..9999-12-31)" >&2
+  echo "error: SOURCE_DATE_EPOCH=$epoch is outside $min_epoch..$max_epoch (1980-01-01..2107-12-31)" >&2
   echo "  a zip entry cannot record it: older stamps are clamped to 1980-01-01" >&2
+  echo "  and a later one wraps to a year between 1980 and 2064" >&2
   exit 2
 fi
 
@@ -138,11 +143,18 @@ fi
 # an epoch is `date -r` there and `date -d @` here. Both spellings name the
 # same instant, and TZ is pinned to UTC above, so the archive bytes do not
 # depend on which one the host has.
+#
+# The stamp carries a four-digit year, which both touches accept as the [[CC]YY]
+# form. A two-digit one does not survive the range: `date -u -r 4354819198
+# +%y` gives 07, and `touch -t 0712312359.58` stamps 1999 instead, so an epoch
+# past 2068 would be packaged differently by a host on the BSD path than by one
+# that takes the GNU branch, and the reproducibility the archive is built for
+# would hold only below 2069.
 stamp_mtime() {
   local file=$1 stamp
   if touch -d "@$epoch" "$file" 2>/dev/null; then return 0; fi
-  stamp=$(date -u -r "$epoch" +%y%m%d%H%M.%S 2>/dev/null) ||
-    stamp=$(date -u -d "@$epoch" +%y%m%d%H%M.%S 2>/dev/null) || {
+  stamp=$(date -u -r "$epoch" +%Y%m%d%H%M.%S 2>/dev/null) ||
+    stamp=$(date -u -d "@$epoch" +%Y%m%d%H%M.%S 2>/dev/null) || {
       echo "error: cannot read SOURCE_DATE_EPOCH=$epoch as a date (need 'date -r' or 'date -d @')" >&2
       return 1
     }

@@ -761,6 +761,18 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
         if (found == null or inst.instance_id < found.?.instance_id) found = inst;
     }
     const inst = found orelse return 0;
+    // The cursor is a pointer, so the id travels through the target's address
+    // space rather than as a u64: @ptrFromInt on a 64-bit id does not compile
+    // for a 32-bit target, which is what the shipped x86 DLL is. The ids are
+    // sequential from 1, one per created instance, so they stay inside the
+    // address space as long as a process can run, and the round trip through
+    // usize the read above performs is exact. The bound is checked rather than
+    // truncated, so an id that somehow outgrew it ends the walk instead of
+    // wrapping the cursor back to an earlier id and repeating entries.
+    if (inst.instance_id > std.math.maxInt(usize)) {
+        log("MilesEnumerateSoundInstances: instance id {d} does not fit the cursor on this target; ending the walk\n", .{inst.instance_id});
+        return 0;
+    }
     if (out_info) |oi| {
         const o: *MILESEVENTSOUNDINFO = @ptrCast(@alignCast(oi));
         o.* = .{
@@ -773,7 +785,7 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
             .UsedSound = inst.sound_name.ptr,
         };
     }
-    np.* = @ptrFromInt(inst.instance_id);
+    np.* = @ptrFromInt(@as(usize, @intCast(inst.instance_id)));
     return 1;
 }
 pub fn MilesEnumeratePresetPersists(system: ?*anyopaque, io_next: ?*?*anyopaque, out_name: ?*?[*:0]const u8) callconv(.winapi) i32 {

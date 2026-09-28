@@ -134,6 +134,25 @@ All notable changes to OpenMiles are recorded here. The format follows
   sink and was dropped whole by `OutputDebugStringW`, so the two sinks
   disagreed about what was logged. The debug stream now gets the record up to
   the first byte that is not a character.
+- `zig build -Dtarget=x86-windows` did not compile. `MilesEnumerateSoundInstances`
+  carries the instance id it is walking through the caller's `io_next` pointer
+  and built that pointer from the 64-bit id, which a 32-bit target rejects, so
+  the shipped DLL, the CI cross-compile step and `make cross` all failed. The
+  id now travels through the target's address space, which the read on the way
+  back in already assumed.
+- `scripts/package_release.sh` accepted a `SOURCE_DATE_EPOCH` up to 9999 and
+  stamped an archive no tool could reproduce. A zip entry's timestamp is 7 bits
+  of years past 1980, so a later epoch is not clamped to the top of the range
+  but wrapped: an entry asked to carry 9999-12-31 comes back out of the archive
+  reading 2064. The accepted range now ends where the format does,
+  2107-12-31T23:59:58Z. The BSD timestamp path also formatted a two-digit year,
+  so on a host without `touch -d` any epoch past 2068 was stamped 1999 and
+  produced an archive that differed from the one the GNU path built for the
+  same input; it now stamps the four-digit year both touches accept.
+- `make harnesses` named `./native_rib_test` on every Windows POSIX shell.
+  The `.exe` suffix was resolved from a `findstring` that matched only the
+  `MINGW` family, so Cygwin and an MSYS2 `msys` shell ran a name the build
+  never installed. All four Windows families are matched now.
 - A temporary directory that was accepted and then turned out to be unusable
   (the platform resolves none, it leaves no room for the image name under the
   path limit, or the image cannot be written there) was reported only through

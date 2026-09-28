@@ -15,8 +15,12 @@ PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/nul
 
 # The harness binary carries a .exe suffix on a Windows host, where the file
 # name the build installs is native_rib_test.exe. Resolved rather than assumed
-# so the same recipe runs under MSYS2, Cygwin, and Git Bash.
-EXE_SUFFIX := $(if $(findstring MINGW,$(shell uname -s 2>/dev/null)),.exe,)
+# so the same recipe runs under MSYS2, Cygwin, and Git Bash. Each of those
+# reports a different `uname -s` family (MINGW*, MSYS*, CYGWIN*), and a
+# findstring naming only the first left Cygwin and an MSYS2 msys shell
+# running ./native_rib_test against a name that does not exist.
+HOST_OS := $(shell uname -s 2>/dev/null)
+EXE_SUFFIX := $(if $(filter MINGW% MSYS% CYGWIN% Windows%,$(HOST_OS)),.exe,)
 
 # Exported so the `test` and `sanitize` recipes read FILTER from the
 # environment rather than splicing a caller's argument into the recipe text.
