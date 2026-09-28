@@ -20,9 +20,20 @@ const default_log_name = "openmiles.log";
 /// is accepted only while strictly shorter, so the longest one is one byte less.
 const max_log_path_bytes = 1024;
 
+// Width of the prefix every record carries: "2026-09-28T08:27:37.123Z ". Fixed
+// so the timestamp occupies the same columns in every line, which is what lets
+// a reader sort records and cut a window out of a 64 MiB log.
+const stamp_bytes = 25;
+
 // One formatted record. A record that does not fit is not written silently: see
 // the overflow marker in log(). Sized to hold a long path plus its context.
-const max_log_record_bytes = 1024;
+const max_log_message_bytes = 1024;
+
+// The whole record: the stamp, the message, and the slack the overflow marker
+// needs for the format string that overflowed. It is also the wide sink buffer,
+// sized for the marker as well as a normal record, so a dropped record still
+// reaches OutputDebugString instead of failing the conversion and vanishing.
+const max_log_record_bytes = max_log_message_bytes + stamp_bytes + 128 + 1;
 
 var log_file: ?std.Io.File = null;
 var log_offset: u64 = 0;
@@ -264,7 +275,7 @@ pub fn deinit() void {
 fn logConfigOnce() void {
     if (@atomicLoad(bool, &config_logged, .acquire)) return;
     @atomicStore(bool, &config_logged, true, .release);
-    log("openmiles: debug log {s}, enabled by {s} ({s} build, default {s}), mss_version {d}, appending to '{s}', cap {d} bytes\n", .{
+    log("openmiles: debug log {s}, enabled by {s} ({s} build, default {s}), mss_version {d}, appending to '{s}', cap {d} bytes, stamps are UTC ISO 8601 with milliseconds\n", .{
         if (debug_enabled) "on" else "off",
         debug_source,
         @tagName(builtin.mode),
@@ -346,39 +357,65 @@ pub fn log(comptime fmt: []const u8, args: anytype) void {
     init();
     if (!debug_enabled) return;
     logConfigOnce();
-    var buf: [max_log_record_bytes]u8 = undefined;
-    var over_buf: [wide_record_units]u8 = undefined;
-    const out = formatRecord(&buf, &over_buf, fmt, args);
+    var rec: [max_log_record_bytes]u8 = undefined;
+    const out = formatRecord(&rec, fmt, args);
     emit(out);
 }
 
-/// Render one record into `buf`, or an overflow marker into `over_buf` when the
-/// formatted text does not fit. bufPrint yields nothing on overflow, so the
-/// record has to be replaced rather than dropped: the content is gone, but the
-/// loss is on the record and the format string names the call site that caused
-/// it. Returns a slice into one of the two buffers.
-fn formatRecord(
-    buf: []u8,
-    over_buf: []u8,
-    comptime fmt: []const u8,
-    args: anytype,
-) []const u8 {
-    const msg = std.fmt.bufPrint(buf, fmt, args) catch {
-        return std.fmt.bufPrint(
-            over_buf,
-            "openmiles: log record exceeded {d} bytes and was dropped: {s}\n",
-            .{ buf.len, fmt },
-        ) catch "";
-    };
-    // The formatted message can carry an untrusted path or name, so scrub it
-    // before it reaches any sink.
-    return msg[0..sanitizeText(msg)];
+/// Render the current time as the fixed-width stamp that opens every record.
+///
+/// UTC, and marked `Z`, because the library cannot read the host's time zone
+/// without either a libc call or a Win32 call that differ per platform, and a
+/// stamp whose zone is unstated is worse than one that is stated. A reader
+/// converting to local time is one step; a reader guessing wrong is not.
+///
+/// `Clock.real` rather than the monotonic clock: a log read back after a
+/// session has ended is read against a wall clock, and NTP adjusting the clock
+/// mid-session is a smaller problem than a stamp that cannot be lined up with
+/// the game's own log at all.
+fn writeStamp(rec: []u8) []const u8 {
+    const now = std.Io.Clock.real.now(io);
+    const secs = std.time.epoch.EpochSeconds{ .secs = @intCast(now.toSeconds()) };
+    const year_day = secs.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_secs = secs.getDaySeconds();
+    const millis: u16 = @intCast(@mod(now.toMilliseconds(), std.time.ms_per_s));
+    return std.fmt.bufPrint(
+        rec[0..stamp_bytes],
+        "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z ",
+        .{
+            year_day.year,
+            @as(u16, @intFromEnum(month_day.month)) + 1,
+            @as(u16, month_day.day_index) + 1,
+            day_secs.getHoursIntoDay(),
+            day_secs.getMinutesIntoHour(),
+            day_secs.getSecondsIntoMinute(),
+            millis,
+        },
+    ) catch unreachable;
 }
 
-/// Wide sink buffer. Sized for the overflow marker as well as a normal record,
-/// so a dropped record still reaches OutputDebugString instead of failing the
-/// conversion and vanishing.
-const wide_record_units = max_log_record_bytes + 128 + 1;
+/// Render one record into `rec`: the stamp, then the formatted message, or an
+/// overflow marker in its place when the formatted text does not fit. bufPrint
+/// yields nothing on overflow, so the record has to be replaced rather than
+/// dropped: the content is gone, but the loss is on the record and the format
+/// string names the call site that caused it. Returns a slice into `rec`.
+fn formatRecord(rec: []u8, comptime fmt: []const u8, args: anytype) []const u8 {
+    const stamp = writeStamp(rec);
+    const body = rec[stamp.len..];
+    const msg = std.fmt.bufPrint(body, fmt, args) catch {
+        const marker = std.fmt.bufPrint(
+            body,
+            "openmiles: log record exceeded {d} bytes and was dropped: {s}\n",
+            .{ body.len, fmt },
+        ) catch "";
+        return rec[0 .. stamp.len + marker.len];
+    };
+    // The formatted message can carry an untrusted path or name, so scrub it
+    // before it reaches any sink. The stamp is generated here and is not
+    // untrusted, so it is left out of the pass.
+    return rec[0 .. stamp.len + sanitizeText(msg)];
+}
 
 /// Write one record to every enabled sink. The caller has already formatted and
 /// sanitized it, so this is the only place that knows about the console, the
@@ -388,7 +425,7 @@ fn emit(out: []const u8) void {
     defer mutex.unlock(io);
 
     if (builtin.os.tag == .windows) {
-        var w_buf: [wide_record_units]u16 = undefined;
+        var w_buf: [max_log_record_bytes]u16 = undefined;
         if (wide.toWide(out, &w_buf)) |w| {
             OutputDebugStringW(w.ptr);
         } else |_| {}
@@ -498,15 +535,54 @@ test "a rejected OPENMILES_DEBUG leaves the build default in place" {
 }
 
 test "an oversized record is replaced by a marker, not dropped silently" {
-    var buf: [64]u8 = undefined;
-    var over_buf: [192]u8 = undefined;
+    // A record buffer smaller than the real one, so the message cannot fit and
+    // the overflow path is taken without a string a megabyte long.
+    var rec: [128]u8 = undefined;
     const long = "x" ** 200;
-    const out = formatRecord(&buf, &over_buf, "{s}", .{long});
+    const out = formatRecord(&rec, "{s}", .{long});
     // The record did not fit, so the marker names the failure and the format
-    // string, rather than the caller receiving an empty log line.
+    // string, rather than the caller receiving an empty log line. The stamp
+    // still leads it: a dropped record is still a record with a time on it.
     try testing.expect(out.len > 0);
+    try testing.expectEqual(stamp_bytes, stampWidth(out));
     try testing.expect(std.mem.indexOf(u8, out, "was dropped") != null);
     try testing.expect(std.mem.indexOf(u8, out, "{s}") != null);
+
+    // The same at the size log() actually renders, so the cap the marker
+    // reports is the one a real call hits rather than a test's own buffer.
+    var full: [max_log_record_bytes]u8 = undefined;
+    const out_full = formatRecord(&full, "{s}", .{"x" ** (max_log_message_bytes + 512)});
+    try testing.expectEqual(stamp_bytes, stampWidth(out_full));
+    try testing.expect(std.mem.indexOf(u8, out_full, "was dropped") != null);
+    // A record that fits keeps its content, so the marker above is not simply
+    // what every call returns.
+    const out_ok = formatRecord(&full, "AIL_startup\n", .{});
+    try testing.expectEqualStrings("AIL_startup\n", out_ok[stamp_bytes..]);
+}
+
+test "every record opens with a fixed-width UTC stamp the format can read back" {
+    var rec: [max_log_record_bytes]u8 = undefined;
+    const out = formatRecord(&rec, "AIL_startup\n", .{});
+    // The stamp is what makes a log written across a session readable: without
+    // it there is no way to say when a line was written, so a log can only be
+    // read in order, and a truncated or interleaved one cannot be read at all.
+    try testing.expectEqual(stamp_bytes, stampWidth(out));
+    const year_end = std.mem.indexOfScalar(u8, out, '-').?;
+    try testing.expectEqual(@as(usize, 4), year_end);
+    const year = try std.fmt.parseInt(u32, out[0..year_end], 10);
+    try testing.expect(year >= 2020);
+    // The record ends at the newline the caller wrote, stamp included, so the
+    // framing still holds and a reader splitting on '\n' still gets whole
+    // records.
+    try testing.expectEqualStrings("AIL_startup\n", out[stamp_bytes..]);
+}
+
+/// Length of the leading stamp on `out`, or 0 when the record does not open
+/// with one. The stamp ends at the space that separates it from the message.
+fn stampWidth(out: []const u8) usize {
+    const end = std.mem.indexOfScalar(u8, out, ' ') orelse return 0;
+    if (end + 1 != stamp_bytes) return 0;
+    return end + 1;
 }
 
 test "log text from an untrusted name cannot forge a record" {

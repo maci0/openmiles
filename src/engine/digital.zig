@@ -360,7 +360,7 @@ pub const MixBus = struct {
             // Same reasoning as the allocation failure above: the slot stays
             // empty, so a later query reports the effect as off with no reason
             // anywhere for the operator to find.
-            log("MixBus: {s} node init failed with {d}\n", .{ @typeName(Node), init_result });
+            log("MixBus: {s} node init failed with {d} ({s})\n", .{ @typeName(Node), init_result, root.maResultDescription(init_result) });
             self.driver.allocator.destroy(node);
             return;
         }
@@ -524,7 +524,7 @@ pub const DigitalDriver = struct {
         config.pProcessUserData = self;
         const result = ma.ma_engine_init(&config, &self.engine);
         if (result != ma.MA_SUCCESS) {
-            log("ma_engine_init failed: {d}\n", .{result});
+            log("ma_engine_init failed: {d} ({s})\n", .{ result, root.maResultDescription(result) });
             allocator.destroy(self);
             return error.EngineInitFailed;
         }
@@ -1537,7 +1537,7 @@ pub const Sample = struct {
             _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, 0);
 
             const res = ma.ma_sound_start(&self.sound);
-            log("Sample.start: ma_sound_start returned {d}\n", .{res});
+            log("Sample.start: ma_sound_start returned {d} ({s})\n", .{ res, root.maResultDescription(res) });
         }
         fireSampleCallback(&self.sob_callback, self);
     }
@@ -1811,7 +1811,7 @@ pub const Sample = struct {
             const config = ma.ma_delay_node_config_init(channels, sample_rate, delay_frames, decay);
             const result = ma.ma_delay_node_init(@ptrCast(&self.driver.engine), &config, null, node);
             if (result != ma.MA_SUCCESS) {
-                log("Sample.setReverb: delay node init failed: {d}\n", .{result});
+                log("Sample.setReverb: delay node init failed: {d} ({s})\n", .{ result, root.maResultDescription(result) });
                 self.driver.allocator.destroy(node);
                 return;
             }

@@ -654,7 +654,7 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
         // the stream had finished; fail the call instead of returning a
         // truncated image under a success return code.
         if (read_result != openmiles.ma.MA_SUCCESS and read_result != openmiles.ma.MA_AT_END) {
-            log("AIL_decompress_ASI: ma_decoder_read_pcm_frames failed with {d}\n", .{read_result});
+            log("AIL_decompress_ASI: ma_decoder_read_pcm_frames failed with {d} ({s})\n", .{ read_result, openmiles.maResultDescription(read_result) });
             openmiles.setLastError("AIL_decompress_ASI: decode failed mid-stream");
             return 0;
         }

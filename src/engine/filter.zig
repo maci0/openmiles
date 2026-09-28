@@ -58,7 +58,7 @@ pub const Filter = struct {
             &self.lpf_node,
         );
         if (result != ma.MA_SUCCESS) {
-            log("Filter.initLpfNode failed: {d}\n", .{result});
+            log("Filter.initLpfNode failed: {d} ({s})\n", .{ result, root.maResultDescription(result) });
             return error.FilterInitFailed;
         }
         // Connect filter output to the engine endpoint
@@ -69,7 +69,7 @@ pub const Filter = struct {
             0,
         );
         if (attach_result != ma.MA_SUCCESS) {
-            log("Filter: failed to attach to endpoint: {d}\n", .{attach_result});
+            log("Filter: failed to attach to endpoint: {d} ({s})\n", .{ attach_result, root.maResultDescription(attach_result) });
             ma.ma_lpf_node_uninit(&self.lpf_node, null);
             return error.FilterAttachFailed;
         }
@@ -118,7 +118,7 @@ pub const Filter = struct {
             0,
         );
         if (result != ma.MA_SUCCESS) {
-            log("Filter.attachSample failed: {d}\n", .{result});
+            log("Filter.attachSample failed: {d} ({s})\n", .{ result, root.maResultDescription(result) });
             return;
         }
         // Track the sample for cleanup BEFORE setting the back-reference: if the

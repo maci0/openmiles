@@ -30,7 +30,7 @@ const ASI_Stream_Impl = struct {
             // Name the file and miniaudio's status: the caller only sees
             // error.DecoderInitFailed, which does not distinguish a missing
             // file from a corrupt one or from a device/format rejection.
-            log("ASI_Stream_Impl.open: ma_decoder_init_file('{s}') failed with {d}\n", .{ filename, result });
+            log("ASI_Stream_Impl.open: ma_decoder_init_file('{s}') failed with {d} ({s})\n", .{ filename, result, root.maResultDescription(result) });
             return error.DecoderInitFailed;
         }
         return self;
@@ -68,7 +68,7 @@ fn openmiles_ASI_stream_process(stream: *ASI_stream, buffer: *anyopaque, len: i3
     // end of the stream. Name the status so a truncated or corrupt file is not
     // taken for a file that simply ended.
     if (result != ma.MA_SUCCESS and result != ma.MA_AT_END) {
-        log("openmiles.ASI_stream_process: ma_decoder_read_pcm_frames failed with {d}\n", .{result});
+        log("openmiles.ASI_stream_process: ma_decoder_read_pcm_frames failed with {d} ({s})\n", .{ result, root.maResultDescription(result) });
         return 0;
     }
     return @intCast(frames_read * bytes_per_frame);
@@ -83,7 +83,7 @@ fn openmiles_ASI_stream_seek(stream: *ASI_stream, pos: i32) callconv(.c) i32 {
     // position. A failed seek reports 0, the SDK's failure return.
     const result = ma.ma_decoder_seek_to_pcm_frame(&s.decoder, frame);
     if (result != ma.MA_SUCCESS) {
-        log("openmiles.ASI_stream_seek: seek to frame {d} failed with {d}\n", .{ frame, result });
+        log("openmiles.ASI_stream_seek: seek to frame {d} failed with {d} ({s})\n", .{ frame, result, root.maResultDescription(result) });
         return 0;
     }
     return pos;

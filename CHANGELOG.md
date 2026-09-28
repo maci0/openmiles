@@ -59,8 +59,22 @@ All notable changes to OpenMiles are recorded here. The format follows
   meaningful, since the call always reads a whole image out of memory.
 - `openmiles.tickAllTimers()` fires every registered, running timer once and advances the virtual clock by the sum of their periods. A simulated run that starts the whole timer set through `AIL_start_all_timers` has no thread to wait on, so it had no way to reach those callbacks; it had to start and step the timers one handle at a time.
 - `openmiles.startSimulation(seed)` logs the seed. The seed is a run's replay key and the caller is usually a test runner that reports only the failure, so a run whose seed was never written down could not be replayed.
+- Every `openmiles.log` record opens with a fixed-width UTC timestamp
+  (`2026-09-28T08:27:37.123Z`), milliseconds included. A record carried no time
+  at all, so a log read after the session that produced it could say what
+  happened but never when, and a log that hit the 64 MiB cap or interleaved
+  lines from two engine instances could not be sorted back into order. The
+  first line names the format.
 
 ### Changed
+
+- A miniaudio result code in a log line is printed with the text miniaudio
+  returns for it, next to the code, rather than the code alone. `ma_engine_init
+  failed: -1003` is unreadable to anyone who is not holding the miniaudio
+  header, and a field log is read precisely when there is no one holding
+  anything; no-playback-device under Wine is the common report, and it now
+  names the reason. Every site that logged a `ma_result` uses the same
+  `root.maResultDescription` helper.
 
 - The C warning set gains six groups the tree already passes: `-Wenum-conversion`,
   `-Winit-self`, `-Wredundant-decls`, `-Wnested-externs`, `-Wpointer-arith` and

@@ -515,6 +515,18 @@ which `-Dmss-version` the loaded DLL was built for, so a log that never appears
 reads back as a configuration answer and a game compiled against a different
 `OPENMILES_MSS_VERSION` than the DLL it loads is visible in the first line.
 
+Every record opens with a fixed-width UTC timestamp, so a log can be sorted by
+time and a window cut out of a capped one:
+
+```text
+2026-09-28T08:27:37.123Z openmiles: debug log on, enabled by OPENMILES_DEBUG ...
+2026-09-28T08:27:37.140Z AIL_startup
+```
+
+The stamp is UTC and says so with the `Z`, because the library reads no time
+zone. A record whose message exceeded the per-record budget is replaced by a
+marker naming the format string that produced it, and keeps its stamp.
+
 ## Architecture
 
 ```mermaid

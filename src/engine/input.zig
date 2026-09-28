@@ -39,7 +39,7 @@ pub const Input = struct {
 
         const result = ma.ma_device_init(null, &config, &self.device);
         if (result != ma.MA_SUCCESS) {
-            log("Input.init: ma_device_init failed: {d}\n", .{result});
+            log("Input.init: ma_device_init failed: {d} ({s})\n", .{ result, root.maResultDescription(result) });
             allocator.destroy(self);
             return error.CaptureDeviceInitFailed;
         }

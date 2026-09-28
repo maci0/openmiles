@@ -734,7 +734,7 @@ fn decodeWavToPcm(allocator: std.mem.Allocator, wav: []const u8) !DecodedPcm {
         // stream. Fail the decode instead of returning a silently truncated
         // image, and name the status the callers cannot see.
         if (read_result != openmiles.ma.MA_SUCCESS and read_result != openmiles.ma.MA_AT_END) {
-            log("decodeWavToPcm: ma_decoder_read_pcm_frames failed with {d}\n", .{read_result});
+            log("decodeWavToPcm: ma_decoder_read_pcm_frames failed with {d} ({s})\n", .{ read_result, openmiles.maResultDescription(read_result) });
             return error.DecodeFailed;
         }
         if (fr == 0) break;

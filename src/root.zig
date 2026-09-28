@@ -49,6 +49,22 @@ pub const tsf = @import("tsf_c");
 /// facilities, so this is safe for our use.
 pub const io: std.Io = std.Io.Threaded.global_single_threaded.io();
 
+/// Describe a miniaudio result code for the log.
+///
+/// A bare `ma_result` in a log line is a number an operator cannot act on:
+/// -1003 means nothing to anyone who is not holding the miniaudio header, and
+/// the log is read precisely when there is no one holding anything. The code
+/// stays in the line next to the description so a reader can match it against
+/// upstream, and so a result miniaudio has no description for is still visible
+/// as something other than an empty string.
+pub fn maResultDescription(result: c_int) []const u8 {
+    const described = ma.ma_result_description(result);
+    if (described == null) return "(no description)";
+    const text = std.mem.span(described);
+    if (text.len == 0) return "(no description)";
+    return text;
+}
+
 // --- Engine type re-exports ---
 
 const digital_mod = @import("engine/digital.zig");

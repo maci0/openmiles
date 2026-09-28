@@ -8617,3 +8617,20 @@ test "StreamSource.isStarved latches until the next submission" {
     _ = ss.loadBuffer(0, &[_]u8{0} ** 4, 4);
     try testing.expect(!ss.isStarved());
 }
+
+test "a miniaudio result code reaches the log as something an operator can act on" {
+    // The failure lines this formats are the ones a field log is read for: no
+    // playback device under Wine is the common report, and a bare -1003 tells
+    // the reader nothing. The code stays alongside the description so the line
+    // can still be matched against upstream.
+    const ok = openmiles.maResultDescription(openmiles.ma.MA_SUCCESS);
+    try testing.expect(ok.len > 0);
+    try testing.expect(!std.mem.eql(u8, ok, "(no description)"));
+
+    // An unlisted code still comes back as text ("Unknown error"), never as a
+    // blank: the fallback exists for a null or empty string, which the C API
+    // does not currently produce, and a blank would erase the code's meaning
+    // from the line that carries it.
+    try testing.expect(openmiles.maResultDescription(-123456).len > 0);
+    try testing.expectEqualStrings("Unknown error", openmiles.maResultDescription(-123456));
+}
