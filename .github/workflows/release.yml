@@ -130,6 +130,30 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-zig-${{ steps.zig.outputs.version }}-
 
+      # A tag is published from this job with no merge gate in between, so the
+      # analyzer set `make lint` runs has to run here too: a release cut from a
+      # commit the CI gate refused, or re-run after one of the linters moved,
+      # would otherwise publish a tree the merge gate says is not shippable.
+      # shellcheck is on the runner image, as it is for the CI job.
+      - name: Install the pinned linters
+        run: |
+          set -euo pipefail
+          # Read both pins from the Makefile rather than repeating them, so the
+          # only copy is the one check-pins already watches.
+          ruff_version=$(sed -n 's/^RUFF_VERSION := //p' Makefile)
+          yamllint_version=$(sed -n 's/^YAMLLINT_VERSION := //p' Makefile)
+          [ -n "$ruff_version" ] && [ -n "$yamllint_version" ] || {
+            echo "no RUFF_VERSION or YAMLLINT_VERSION in the Makefile" >&2
+            exit 1
+          }
+          pipx install uv==0.12.19
+          uv tool install "ruff==${ruff_version}"
+          uv tool install "yamllint==${yamllint_version}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Lint (zig fmt, ruff, shellcheck, yamllint, gate parity, pins)
+        run: make lint
+
       - name: Run Tests
         run: zig build test
 

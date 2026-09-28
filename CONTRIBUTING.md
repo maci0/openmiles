@@ -81,7 +81,7 @@ are invoked as `$(PYTHON) scripts/<name>.py`, so they run unchanged under a
 Windows Python; only their launcher is platform-specific.
 
 `make lint` is `zig fmt --check`, `ruff check`, `ruff format --check`,
-`shellcheck scripts/*.sh`, `yamllint .github/workflows`, plus the header-parity,
+`shellcheck scripts/*.sh`, `yamllint .github`, plus the header-parity,
 example-compile, version-sweep, vendored-checksum, SBOM-drift,
 threat-model-reference, and pin-agreement checks. `make format` applies the two
 formatters.

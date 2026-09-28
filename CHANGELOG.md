@@ -13,8 +13,9 @@ All notable changes to OpenMiles are recorded here. The format follows
   published under a name the package does not claim. It fails the same way when
   `CHANGELOG.md` has no `## [<version>]` section, so a version cannot be tagged
   with its notes still sitting under `## [Unreleased]`.
-- The release workflow runs the test suite, cross-compiles the DLL, and smoke
-  tests the produced binary (32-bit PE, core exports present) before packaging.
+- The release workflow runs the same analysis gate as `make lint`, the test
+  suite, cross-compiles the DLL, and smoke tests the produced binary (32-bit PE,
+  core exports present) before packaging.
 - The published release notes are that `## [<version>]` section verbatim, not
   a generated commit list: the tag check already fails without it, and an
   empty section fails the publish rather than shipping a release whose notes
@@ -46,8 +47,21 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The release job runs the same analysis gate as `make lint` before it builds
+  anything. A tag is published with no merge gate in between, so a release cut
+  from a commit the CI gate refused, or re-run after a linter moved, could
+  publish a tree the merge gate says is not shippable. The ruff and yamllint
+  versions are read from the Makefile rather than repeated in the workflow.
+- `make lint` lints `.github` rather than `.github/workflows`, so the dependabot
+  config is checked beside the workflows it steers.
+
 ### Fixed
 
+- Four `file:line` references in `docs/THREAT_MODEL.md` pointed two lines above
+  the code they claim, so `make lint` failed on a clean tree and the mitigation
+  claims behind them were no longer checkable.
 - Three claims in `docs/` that the code contradicts. `docs/EXPORT_PARITY.md`
   put the 6.5/6.6-only exclusion pair in the same ver 65-66 group as the ten
   other functions added in that pass; `src/main.zig` gates

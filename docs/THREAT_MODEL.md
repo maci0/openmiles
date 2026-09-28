@@ -121,7 +121,7 @@ hostile file, download, or mod pack reaches.
 | DLS container | `AIL_extract_DLS` / `AIL_find_DLS` / `AIL_list_DLS` / `AIL_merge_DLS_with_XMI` / `AIL_filter_DLS_with_XMI` (`src/api/dls.zig:91 AIL_filter_DLS_with_XMI`) | Pointer images capped at 256 MiB (`src/engine/dls_container.zig:74 max_ptr_image_size`); merged image size checked with `std.math.add`. `AIL_list_DLS` takes a pointer with no length and derives one from the header, so a lying RIFF size would otherwise drive a scan past the caller's buffer; only a 64 KiB prefix of the declared image is dereferenced (`src/api/dls.zig:348 list_dls_scan_limit`, `src/api/dls.zig:353 AIL_list_DLS`). The `cmemdup` paths read up to the declared 256 MiB from a bare pointer. |
 | DLS / SF2 soundfont load | `AIL_DLS_load_file` (`src/api/dls.zig:21 AIL_DLS_load_file`), `AIL_DLS_load_memory` (`src/api/dls.zig:109 AIL_DLS_load_memory`) | The VFS read is capped by the shared 256 MiB cap; the memory form takes a declared size and rejects only what exceeds `maxInt(c_int)`. The SF2 parse itself is delegated to TinySoundFont, so the container bounds here are the only ones the module applies. |
 | WAV cue markers | `AIL_WAV_marker_count` (`src/api/v8.zig:143 AIL_WAV_marker_count`), `AIL_WAV_marker_by_index` (`src/api/v8.zig:150 AIL_WAV_marker_by_index`), `AIL_WAV_marker_by_name` (`src/api/v8.zig:161 AIL_WAV_marker_by_name`) | A full RIFF chunk walk over a length-less image, bounded by the same 256 MiB declared-size cap rather than by the caller's buffer. |
-| Event string enqueue | `MilesEnqueueEvent` (`src/api/miles.zig:605 MilesEnqueueEvent`), `MilesEnqueueEventByName` (`src/api/miles.zig:614 MilesEnqueueEventByName`), `MilesStartSoundInstance` (`src/api/miles.zig:650 MilesStartSoundInstance`) | The Miles event path is separate from `AIL_next_event_step` and reaches the same event decoder. The Miles fuzz harness covers it (`src/fuzz_native_test.zig:1716 test`). |
+| Event string enqueue | `MilesEnqueueEvent` (`src/api/miles.zig:605 MilesEnqueueEvent`), `MilesEnqueueEventByName` (`src/api/miles.zig:614 MilesEnqueueEventByName`), `MilesStartSoundInstance` (`src/api/miles.zig:650 MilesStartSoundInstance`) | The Miles event path is separate from `AIL_next_event_step` and reaches the same event decoder. The Miles fuzz harness covers it (`src/fuzz_native_test.zig:1718 test`). |
 | SMF conversion and listing | `AIL_MIDI_to_XMI` (`src/api/midi.zig:197 AIL_MIDI_to_XMI`), `AIL_list_MIDI` (`src/api/midi.zig:220 AIL_list_MIDI`) | `AIL_list_MIDI` has a 14-byte header floor and no upper bound; `AIL_MIDI_to_XMI` sizes its output from the caller-supplied input length. |
 | File type sniffing | `AIL_file_type` (`src/api/file.zig:17 AIL_file_type`), `AIL_file_type_named` (`src/api/v8.zig:324 AIL_file_type_named`) -> `detectFileType` (`src/engine/audio_detect.zig:109 detectFileType`) | Walks WAV/AIFF/MIDI/MP3/OGG/FLAC headers of a caller buffer. The SMF sniffer `AIL_init_sequence` reaches is bounded by the 16 MiB streaming sentinel (`src/engine/audio_detect.zig:9 streaming_sentinel_size`), not by the 256 MiB declared-image cap the DLS pointer path uses. |
 | MP3 frame walk | `AIL_inspect_MP3` (`src/api/v7.zig:810 AIL_inspect_MP3`), `AIL_enumerate_MP3_frames` (`src/api/v7.zig:825 AIL_enumerate_MP3_frames`) | Frame walk is bounded by the image, not by a frame count (`src/engine/mp3.zig:199 enumerateFrames`). |
@@ -271,7 +271,7 @@ Controls present:
   so a planted name cannot be opened for overwrite and a race replacement loses.
 - The file is deleted after the module is unloaded (`src/rib/provider.zig:174 deinit`).
   The removal goes through the same fault seam as the rest of the file I/O
-  (`src/utils/fs_compat.zig:289 deleteFile`), so the locked-image case, where
+  (`src/utils/fs_compat.zig:290 deleteFile`), so the locked-image case, where
   the file stays on disk for the life of the process, is a step a replay can
   reproduce rather than one that needs a real load to provoke.
 
@@ -328,8 +328,8 @@ Gaps:
 | Step-type range check, header depth limit, `wlimit`-bounded string copies | `src/engine/event.zig:495 copyString` | Crafted event bytecode |
 | Log cap, 64 MiB | `src/utils/logger.zig:14 max_log_bytes` | Unbounded debug log growth |
 | Fuzz harness over every export that takes input | `src/fuzz_all_test.zig:35 test` | Regression coverage on the export surface |
-| Native-path fuzz harness | `src/fuzz_native_test.zig:238 test` | Regression coverage on non-Windows paths |
-| Miles event-enqueue fuzz harness | `src/fuzz_native_test.zig:1716 test` | Crafted event strings driving the instance list, the cache and persist sets, and the per-label caps |
+| Native-path fuzz harness | `src/fuzz_native_test.zig:240 test` | Regression coverage on non-Windows paths |
+| Miles event-enqueue fuzz harness | `src/fuzz_native_test.zig:1718 test` | Crafted event strings driving the instance list, the cache and persist sets, and the per-label caps |
 | Export-parity and unit suites | `src/main_test.zig:25 test`, `src/api_coverage_test.zig:45 test` | ABI regressions |
 
 Single points of failure:

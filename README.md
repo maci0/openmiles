@@ -76,7 +76,7 @@ pushing.
 versions, checked before they run) besides Zig, since the `scripts/` gate and
 the workflows are linted too; `make lint` names any of the four that is
 missing, and CI installs them through the runner image. It checks `zig fmt`,
-shellchecks `scripts/*.sh`, lints `.github/workflows`, and asserts that every
+shellchecks `scripts/*.sh`, lints `.github`, and asserts that every
 declaration in `src/mss.h` agrees with the export table for each
 `-Dmss-version` (return type, argument count, calling convention, version
 range, struct layout). `src/mss.h` is a documented core subset, so symbols it

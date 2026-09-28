@@ -123,8 +123,10 @@ check-sbom: check-interpreter
 # cannot turn the tree red against a green CI.
 RUFF_VERSION := 0.16.4
 
-# Same reasoning for yamllint over the workflows. A workflow is the one file
-# whose mistakes stay invisible until CI or a release is already running.
+# Same reasoning for yamllint over .github. A workflow is the one file whose
+# mistakes stay invisible until CI or a release is already running, and
+# dependabot.yml decides which tool versions CI runs, so it is linted beside
+# the workflows rather than left out of a directory-scoped run.
 YAMLLINT_VERSION := 1.38.0
 
 # The Zig, ruff, and yamllint pins live in the Makefile, ci.yml, and
@@ -148,13 +150,13 @@ check-python:
 
 # .yamllint carries the rule set, so the gate reads the same file CI does.
 check-yaml:
-	@command -v yamllint >/dev/null 2>&1 || { echo "error: yamllint $(YAMLLINT_VERSION) not found on PATH; 'make lint' checks the workflows with it" >&2; exit 1; }
+	@command -v yamllint >/dev/null 2>&1 || { echo "error: yamllint $(YAMLLINT_VERSION) not found on PATH; 'make lint' checks .github with it" >&2; exit 1; }
 	@v=`yamllint --version | cut -d' ' -f2`; [ "$$v" = "$(YAMLLINT_VERSION)" ] || { echo "error: yamllint $(YAMLLINT_VERSION) required, found $$v" >&2; exit 1; }
-	yamllint .github/workflows
+	yamllint .github
 
 check-host-tools:
 	@command -v shellcheck >/dev/null 2>&1 || { echo "error: shellcheck not found on PATH; 'make lint' shellchecks scripts/*.sh" >&2; exit 1; }
-	@command -v yamllint >/dev/null 2>&1 || { echo "error: yamllint $(YAMLLINT_VERSION) not found on PATH; 'make lint' checks .github/workflows with it" >&2; exit 1; }
+	@command -v yamllint >/dev/null 2>&1 || { echo "error: yamllint $(YAMLLINT_VERSION) not found on PATH; 'make lint' checks .github with it" >&2; exit 1; }
 	@[ -n "$(PYTHON)" ] || { echo "error: neither python3 nor python found on PATH; the scripts/*.py gates need one" >&2; exit 1; }
 
 # The parity sweep alone needs a third-party package. `make lint` deliberately
@@ -217,7 +219,7 @@ help:
 	@echo "  check-sbom          assert SBOM.cdx.json matches the vendored deps and the declared pip pins"
 	@echo "  check-threat-model  assert every file:line anchor in docs/THREAT_MODEL.md resolves"
 	@echo "  check-python        assert ruff on PATH is the pinned version, then lint and format-check"
-	@echo "  check-yaml          assert yamllint on PATH is the pinned version, then lint .github/workflows"
+	@echo "  check-yaml          assert yamllint on PATH is the pinned version, then lint .github"
 	@echo "  check-interpreter   assert a Python 3 interpreter is named python3 or python"
 	@echo "  check-parity-tools  assert pefile is importable (only make parity needs it)"
 	@echo "  check-pins          assert the zig, ruff, and yamllint pins agree across the tree, the C warning set matches c_flags, and the interpreter meets ruff.toml's floor"

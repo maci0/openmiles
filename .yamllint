@@ -1,7 +1,7 @@
-# Lint config for the GitHub Actions workflows. They are the one place a
-# mistake is invisible until the release it guards is already running, and
-# nothing else in the tree parses them, so `make lint` runs yamllint over them
-# and CI runs the same gate.
+# Lint config for the GitHub Actions workflows and dependabot config. They are
+# the one place a mistake is invisible until the release it guards is already
+# running, and nothing else in the tree parses them, so `make lint` runs
+# yamllint over .github and CI runs the same gate.
 #
 # Enforced by `make lint` (yamllint .github/workflows).
 #
