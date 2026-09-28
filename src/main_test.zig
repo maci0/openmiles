@@ -1705,8 +1705,12 @@ test "adopting a module already in the plugin list unloads the second copy" {
     // in that window. adoptPlugin is where the identity is re-checked under the
     // lock both lists share, so the second copy is unloaded instead of tracked
     // and held for the life of the process.
+    //
+    // The fixture is installed by `zig build` and the test step depends on that
+    // install, so a missing file is broken wiring; returning quietly here would
+    // report a green run with adoptPlugin untested.
     const img_path = "zig-out/bin/plugins/mock.asi";
-    std.Io.Dir.cwd().access(openmiles.io, img_path, .{}) catch return;
+    std.Io.Dir.cwd().access(openmiles.io, img_path, .{}) catch return error.MissingMockPlugin;
     // A copy under a path of its own, so the identity under test is one no
     // other test in this process has registered. The copy needs a directory
     // component: the loader resolves a bare file name as a system library.
@@ -2599,6 +2603,56 @@ test "AIL_set/sample_channel_levels round-trip + default routing (SDK)" {
     api_v7.AIL_set_sample_channel_levels(s, null, null, null, 0);
     api_v7.AIL_sample_channel_levels(s, &src, &dst, &out[0], 3);
     try testing.expectEqual(@as(f32, 0.0), out[2]);
+}
+
+test "AIL_set/sample_channel_levels_v7 round-trips through the identity matrix" {
+    // The v7 entry points have no src/dst speaker arrays, so they synthesize an
+    // identity matrix: logical output channel i carries source channel i. It
+    // has to be a real array, not a forwarded null: null src/dst is the v8
+    // reset path, so a wrapper that passed nulls through would report success
+    // and hand the caller back the defaults it had just replaced.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2); // stereo out
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    s.channel_mask = ~@as(u32, 0); // FL->src0, FR->src1
+    s.pcm_format = .{ .channels = 2, .bits = 16 }; // stereo source
+
+    var out = [_]f32{ -1, -1 };
+    api_v7.AIL_sample_channel_levels_v7(s, &out[0]);
+    try testing.expectEqual(@as(f32, 1.0), out[0]); // FL->FL default
+    try testing.expectEqual(@as(f32, 1.0), out[1]); // FR->FR default
+
+    const set = [_]f32{ 0.25, 0.75 };
+    api_v7.AIL_set_sample_channel_levels_v7(s, &set[0], 2);
+    out = .{ -1, -1 };
+    api_v7.AIL_sample_channel_levels_v7(s, &out[0]);
+    try testing.expectEqual(@as(f32, 0.25), out[0]);
+    try testing.expectEqual(@as(f32, 0.75), out[1]);
+
+    // A count of zero with a real array is not the null-args reset: the levels
+    // the caller just set survive it.
+    api_v7.AIL_set_sample_channel_levels_v7(s, &set[0], 0);
+    out = .{ -1, -1 };
+    api_v7.AIL_sample_channel_levels_v7(s, &out[0]);
+    try testing.expectEqual(@as(f32, 0.25), out[0]);
+    try testing.expectEqual(@as(f32, 0.75), out[1]);
+
+    // A null level array is the reset, the same as the v8 form.
+    api_v7.AIL_set_sample_channel_levels_v7(s, null, 0);
+    out = .{ -1, -1 };
+    api_v7.AIL_sample_channel_levels_v7(s, &out[0]);
+    try testing.expectEqual(@as(f32, 1.0), out[0]);
+    try testing.expectEqual(@as(f32, 1.0), out[1]);
+
+    // Null handles on either side are no-ops, not crashes.
+    api_v7.AIL_sample_channel_levels_v7(null, &out[0]);
+    api_v7.AIL_sample_channel_levels_v7(s, null);
+    api_v7.AIL_set_sample_channel_levels_v7(null, &set[0], 2);
+    out = .{ -1, -1 };
+    api_v7.AIL_sample_channel_levels_v7(s, &out[0]);
+    try testing.expectEqual(@as(f32, 1.0), out[0]);
+    try testing.expectEqual(@as(f32, 1.0), out[1]);
 }
 
 test "AIL_set/sample_speaker_scale_factors round-trip via the channel map (SDK)" {
@@ -4871,6 +4925,51 @@ test "fresh driver master reverb levels default to dry=1.0, wet=1.0 (SDK init)" 
     api_v7.AIL_digital_master_reverb_levels(drv, 0, &dry, &wet);
     try testing.expectApproxEqAbs(@as(f32, 1.0), dry, 0.0001);
     try testing.expectApproxEqAbs(@as(f32, 1.0), wet, 0.0001);
+}
+
+test "the _v7 spellings forward to bus 0 with their arguments in slot order" {
+    // The v7 names predate the bus index the v9 bus mixer inserted as the second
+    // argument, so each one forwards to the wider form with a literal 0 in that
+    // slot. A slot-order slip is invisible from either name alone: the getters
+    // take the same argument positions, so a transposed pair would read back
+    // exactly what was written. Read the wide form back by slot instead.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+
+    api_v7.AIL_set_digital_master_reverb_levels_v7(drv, 0.3, 0.7);
+    var dry: f32 = -1;
+    var wet: f32 = -1;
+    api_v7.AIL_digital_master_reverb_levels(drv, 0, &dry, &wet);
+    try testing.expectApproxEqAbs(@as(f32, 0.3), dry, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0.7), wet, 0.0001);
+
+    // decay, predelay, damping: three f32s, so a shifted argument lands in a
+    // neighbouring slot and still looks like a plausible value.
+    api_v7.AIL_set_digital_master_reverb_v7(drv, 1.5, 0.02, 0.25);
+    var decay: f32 = -1;
+    var predelay: f32 = -1;
+    var damping: f32 = -1;
+    api_v7.AIL_digital_master_reverb(drv, 0, &decay, &predelay, &damping);
+    try testing.expectApproxEqAbs(@as(f32, 1.5), decay, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0.02), predelay, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0.25), damping, 0.0001);
+
+    // Room type: the setter also applies the EAX preset, which is how the bus
+    // index is caught if it lands somewhere other than slot 0.
+    api_v7.AIL_set_room_type_v7(drv, 2);
+    try testing.expectEqual(@as(i32, 2), api_v7.AIL_room_type(drv, 0));
+    api_v7.AIL_digital_master_reverb_levels(drv, 0, &dry, &wet);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), dry, 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0.417), wet, 0.0001);
+
+    // Sample low-pass: the channel slot is the one the v9 form takes.
+    api_v7.AIL_set_sample_low_pass_cut_off_v7(s, 0.4);
+    try testing.expectApproxEqAbs(@as(f32, 0.4), api_v7.AIL_sample_low_pass_cut_off(s, 0), 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0.4), api_v7.AIL_sample_low_pass_cut_off_v7(s), 0.0001);
+    // A null handle keeps the SDK's "no filtering" reading rather than crashing.
+    try testing.expectEqual(@as(f32, 1.0), api_v7.AIL_sample_low_pass_cut_off_v7(null));
 }
 
 test "AIL_set_room_type applies the EAX preset to the master reverb (m3d.cpp rooms[])" {
