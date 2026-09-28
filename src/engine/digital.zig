@@ -205,12 +205,11 @@ pub fn mixTimeMsToFrames(mix_ms: u64, sample_rate: u32) u64 {
 /// are a function of the steps alone.
 pub fn engineTimeFrames(self: *DigitalDriver) u64 {
     if (!root.clock.isVirtual()) return ma.ma_engine_get_time_in_pcm_frames(&self.engine);
-    // minInt stands for "no base captured yet": every other i64 is a legal
-    // virtual reading, including the 0 a clock installed at the epoch starts on.
-    if (self.virtual_base_ns.load(.acquire) == no_virtual_base) {
-        self.virtual_base_ns.store(root.nowNs(), .release);
-    }
-    const elapsed_ns: i64 = @max(0, root.nowNs() - self.virtual_base_ns.load(.acquire));
+    // A clock installed at the epoch reads 0, so a sentinel reading could not
+    // stand for "no base captured yet"; CapturedOnceI64 carries that in its
+    // own state word and returns the origin in force either way.
+    const base: i64 = self.virtual_base_ns.read() orelse self.virtual_base_ns.capture(root.nowNs());
+    const elapsed_ns: i64 = @max(0, root.nowNs() - base);
     const rate: i96 = self.getSampleRate();
     if (rate == 0) return 0;
     const frames: i96 = @divTrunc(@as(i96, elapsed_ns) * rate, std.time.ns_per_s);
@@ -466,8 +465,55 @@ pub const SampleStatus = enum(u32) {
 /// its capacity reserved at init so a push inside the cap cannot fail to grow.
 pub const max_system_state_level: usize = 255;
 
-/// Sentinel for a virtual engine-clock origin not yet captured.
-const no_virtual_base: i64 = std.math.minInt(i64);
+/// A 64-bit reading, captured exactly once, on targets whose atomics are not
+/// 64 bits wide. `std.atomic.Value(i64)` is not lock-free on x86, and
+/// `@atomicLoad` on it does not compile for x86-windows, the target the DLL
+/// ships for, so a 64-bit atomic field breaks that build outright. The value
+/// is two 32-bit halves behind a state word instead.
+///
+/// The state word is what makes this exactly-once and not merely lock-free:
+/// two callers racing the first read must not each write a different origin.
+/// The writer claims the value with a compare-exchange out of state 0, so only
+/// one of them owns the halves; the loser's read spins through state 1 and
+/// then sees the winner's number. State 2 is stored with .release after both
+/// halves, and the reader's .acquire load of it is what makes that pair
+/// visible, so no reader can observe one half from the winning write and the
+/// other from before it.
+const CapturedOnceI64 = struct {
+    /// 0 nothing captured, 1 a caller owns the capture, 2 both halves written.
+    state: std.atomic.Value(u32) = .init(0),
+    lo: std.atomic.Value(u32) = .init(0),
+    hi: std.atomic.Value(u32) = .init(0),
+
+    /// The captured value, or null while nothing has been captured. A caller
+    /// that reads null and then calls capture is one caller among any number
+    /// racing it; capture resolves the race, it does not create it.
+    fn read(self: *const CapturedOnceI64) ?i64 {
+        while (true) {
+            switch (self.state.load(.acquire)) {
+                0 => return null,
+                2 => break,
+                else => std.atomic.spinLoopHint(),
+            }
+        }
+        const bits = (@as(u64, self.hi.load(.monotonic)) << 32) | @as(u64, self.lo.load(.monotonic));
+        return @bitCast(bits);
+    }
+
+    /// Capture `v` unless some caller already has, and return the value in
+    /// force afterwards, so a caller that lost the race measures from the
+    /// origin that won rather than from the one it proposed.
+    fn capture(self: *CapturedOnceI64, v: i64) i64 {
+        if (self.state.cmpxchgStrong(0, 1, .acquire, .monotonic) == null) {
+            const bits: u64 = @bitCast(v);
+            self.lo.store(@truncate(bits), .monotonic);
+            self.hi.store(@truncate(bits >> 32), .monotonic);
+            self.state.store(2, .release);
+            return v;
+        }
+        return self.read() orelse v;
+    }
+};
 
 pub const DigitalDriver = struct {
     engine: ma.ma_engine,
@@ -499,7 +545,7 @@ pub const DigitalDriver = struct {
     // Origin of the virtual engine clock (see engineTimeFrames): the library
     // reading captured on first use under a virtual clock, which every later
     // reading is measured from.
-    virtual_base_ns: std.atomic.Value(i64) = .init(no_virtual_base),
+    virtual_base_ns: CapturedOnceI64 = .{},
     rolloff_factor: f32 = 1.0,
     doppler_factor: f32 = 1.0,
     distance_factor: f32 = 1.0,
@@ -2536,6 +2582,28 @@ test "the first AIL_serve advances 3D sources by one frame, not by process uptim
     // The dead-reckoning step is velocity * dt, so an unbounded dt (the epoch
     // as baseline) put the source thousands of seconds away on the first frame.
     try std.testing.expect(@abs(s3d.pos_x) < 1000.0);
+}
+
+test "the virtual clock origin is captured once, and keeps all 64 bits" {
+    // The value is stored as two 32-bit halves because a 64-bit atomic does
+    // not compile for the x86 target the DLL ships for, so a wide reading, a
+    // first read that captures, and a second read that must not recapture are
+    // all behaviours the split can lose and have to be checked for.
+    var c: CapturedOnceI64 = .{};
+    try std.testing.expectEqual(@as(?i64, null), c.read());
+
+    const wide: i64 = @bitCast(@as(u64, 0x1234_5678_9abc_def0));
+    try std.testing.expectEqual(wide, c.capture(wide));
+    try std.testing.expectEqual(wide, c.read());
+    // A later caller proposing a different origin gets the first one back, so
+    // two threads racing here cannot measure elapsed from different bases.
+    try std.testing.expectEqual(wide, c.capture(1));
+
+    // A value whose halves differ in sign is the case a 32-bit-wide atomic
+    // would silently flatten.
+    var neg: CapturedOnceI64 = .{};
+    try std.testing.expectEqual(@as(i64, -2), neg.capture(-2));
+    try std.testing.expectEqual(@as(i64, -2), neg.read());
 }
 
 test "mixer milliseconds convert to engine frames at the engine rate" {
