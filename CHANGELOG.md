@@ -101,8 +101,12 @@ All notable changes to OpenMiles are recorded here. The format follows
   `never_export` wrappers stay reachable from the project's C harnesses; they
   are not, since those harnesses resolve entry points by name through
   `GetProcAddress` and `LOAD_FUNC_EX` aborts on a name the DLL does not export.
-  `tests/midi_test.c`, `tests/full_suite.c`, and `tests/rib_test.c` still name
-  four of them and cannot run against a current DLL.
+  `tests/midi_test.c`, `tests/full_suite.c`, and `tests/rib_test.c` name four of
+  them, and named the v6.1 to v7.0 sequence surface as a requirement, so none of
+  the three ran against a v8 or v9 build. A name no Miles release exported now
+  loads optionally: the harnesses report it, skip the part that needs it, and
+  exit 0, so a build without the sequence surface is a skip rather than a
+  failure and `rib_test` still runs its provider scan.
 - `AIL_send_channel_voice_message` sends the full 14-bit pitch bend (8192 centre). It masked the high byte to 6 bits, so a wheel at centre or full up reached the soundfont as a bend down.
 - `AIL_resume_sample` on a sample that had finished clears SMP_DONE. The voice played again while its status still read done, so a game polling status saw a finished voice.
 - `AIL_load_sample_buffer` reports a buffer that was refused (the slot still held an unsubmitted one) as -1 with the reason in `AIL_last_error`, and fires no SOB, instead of returning the slot as loaded. A null buffer ends the stream on a streaming sample and is refused on a whole-image one.
@@ -122,6 +126,13 @@ All notable changes to OpenMiles are recorded here. The format follows
   `mss.h` and the implementation both return `S32`, so the harness's view of
   the ABI disagreed with the one a consumer compiles against. `full_suite.c`
   now checks the startup result rather than discarding it.
+- A soundfont loaded through the file callbacks is no longer keyed to the buffer the callback read it into. That buffer is released when `AIL_DLS_load_file` returns, so the next image the allocator handed out at the same address, with a size its header matched, was answered with the earlier bank instead of being loaded.
+- `AIL_DLS_unload_all` reports no size for a bank it has released. `AIL_DLS_get_info` answers with the size unconditionally, so a released bank kept reporting the length of an image it no longer held.
+- A bank name that does not fit `SoundBankName[4]` keeps whole characters. The 4-byte field cut a name like `café` mid-character, and `AIL_open_soundbank` matches the result against the name the game asked for.
+- The log neutralizes the C1 controls, the bidi embedding and override characters, the isolates, and the zero-width and BOM characters in a path, VFS name, or error string. A name carrying U+009B moved the cursor as one carrying ESC does, and U+202E rendered reversed in whatever reads the log.
+- A GM/GS/XG reset SysEx names the channel and the controller of a reset control the soundfont could not apply. A rejected one leaves that channel half reset, with voices still sounding and the old volume and pan in place.
+- A plugin module that opens but exports no `RIB_Main` is named in the log. The scan counted it and the provider was adopted, so every interface query answered absent with nothing saying why.
+- The remaining `docs/THREAT_MODEL.md` anchors, the ones a commit since 0.2.0 moved, resolve again. `make check-threat-model`, and with it `make lint` and the release job's gate, was failing on a tree the changelog above says is clean.
 
 ## [0.2.0] - 2026-09-28
 

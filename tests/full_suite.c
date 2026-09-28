@@ -21,6 +21,7 @@ static void __stdcall timer_cb(unsigned int user) {
 }
 
 typedef void (__stdcall *t_AIL_set_timer_user_data)(void*, unsigned int);
+typedef unsigned int (__stdcall *t_AIL_set_timer_user)(void*, unsigned int);
 
 int play_test_main(int argc, char** argv) {
     printf("--- OpenMiles Full API Suite ---\n");
@@ -67,7 +68,9 @@ int play_test_main(int argc, char** argv) {
     t_AIL_register_timer p_AIL_register_timer;
     t_AIL_set_timer_frequency p_AIL_set_timer_frequency;
     t_AIL_set_timer_user_data p_AIL_set_timer_user_data;
+    t_AIL_set_timer_user p_AIL_set_timer_user;
     t_AIL_start_timer p_AIL_start_timer;
+    t_AIL_stop_timer p_AIL_stop_timer;
     t_AIL_quick_startup p_AIL_quick_startup;
     t_AIL_quick_shutdown p_AIL_quick_shutdown;
 
@@ -79,7 +82,7 @@ int play_test_main(int argc, char** argv) {
     LOAD_FUNC_EX(AIL_set_preference, 8);
     LOAD_FUNC_EX(AIL_open_digital_driver, 16);
     LOAD_FUNC_EX(AIL_close_digital_driver, 4);
-    LOAD_FUNC_EX(AIL_set_digital_master_volume, 8);
+    LOAD_FUNC_OPT(AIL_set_digital_master_volume, 8);
     LOAD_FUNC_EX(AIL_allocate_sample_handle, 4);
     LOAD_FUNC_EX(AIL_release_sample_handle, 4);
     /* The v8+ table keeps the export name; AIL_init_sample_v8 is the internal
@@ -88,26 +91,36 @@ int play_test_main(int argc, char** argv) {
     LOAD_FUNC_EX(AIL_set_sample_file, 12);
     LOAD_FUNC_EX(AIL_start_sample, 4);
     LOAD_FUNC_EX(AIL_stop_sample, 4);
-    LOAD_FUNC_EX(AIL_set_sample_volume, 8);
+    LOAD_FUNC_OPT(AIL_set_sample_volume, 8);
     LOAD_FUNC_EX(AIL_sample_status, 4);
-    LOAD_FUNC_EX(AIL_open_midi_driver, 4);
-    LOAD_FUNC_EX(AIL_close_midi_driver, 4);
-    LOAD_FUNC_EX(AIL_allocate_sequence_handle, 4);
-    LOAD_FUNC_EX(AIL_release_sequence_handle, 4);
-    LOAD_FUNC_EX(AIL_init_sequence, 12);
-    LOAD_FUNC_EX(AIL_start_sequence, 4);
-    LOAD_FUNC_EX(AIL_DLS_load_file, 12);
-    LOAD_FUNC_EX(AIL_allocate_3D_sample_handle, 4);
-    LOAD_FUNC_EX(AIL_release_3D_sample_handle, 4);
-    LOAD_FUNC_EX(AIL_set_3D_position, 16);
+    /* The sequence surface is v6.1-v7.0 and AIL_open_midi_driver /
+     * AIL_close_midi_driver are in no Miles export table, so section 4 runs
+     * only against a build that has it. */
+    LOAD_FUNC_OPT(AIL_open_midi_driver, 4);
+    LOAD_FUNC_OPT(AIL_close_midi_driver, 4);
+    LOAD_FUNC_OPT(AIL_allocate_sequence_handle, 4);
+    LOAD_FUNC_OPT(AIL_release_sequence_handle, 4);
+    LOAD_FUNC_OPT(AIL_init_sequence, 12);
+    LOAD_FUNC_OPT(AIL_start_sequence, 4);
+    LOAD_FUNC_OPT(AIL_DLS_load_file, 12);
+    /* The 3D sample handle surface stops at 6.6, and the quick API at 7.0, so
+     * sections 3 and 6 run only against a build that has them. */
+    LOAD_FUNC_OPT(AIL_allocate_3D_sample_handle, 4);
+    LOAD_FUNC_OPT(AIL_release_3D_sample_handle, 4);
+    LOAD_FUNC_OPT(AIL_set_3D_position, 16);
     LOAD_FUNC_EX(AIL_set_listener_3D_position, 16);
     LOAD_FUNC_EX(AIL_register_timer, 4);
     LOAD_FUNC_EX(AIL_set_timer_frequency, 8);
-    LOAD_FUNC_EX(AIL_set_timer_user_data, 8);
+    /* AIL_set_timer_user is the exported spelling and AIL_set_timer_user_data
+     * is in no Miles export table, so the user word the callback reads is set
+     * through the first where it exists and the second otherwise. */
+    LOAD_FUNC_OPT(AIL_set_timer_user_data, 8);
+    LOAD_FUNC_EX(AIL_set_timer_user, 8);
     LOAD_FUNC_EX(AIL_start_timer, 4);
+    LOAD_FUNC_EX(AIL_stop_timer, 4);
     LOAD_FUNC_EX(AIL_release_timer_handle, 4);
-    LOAD_FUNC_EX(AIL_quick_startup, 20);
-    LOAD_FUNC_EX(AIL_quick_shutdown, 0);
+    LOAD_FUNC_OPT(AIL_quick_startup, 20);
+    LOAD_FUNC_OPT(AIL_quick_shutdown, 0);
 
     printf("1. Core System Test\n");
     TEST_ASSERT(p_AIL_startup() != 0, "Startup");
@@ -117,7 +130,7 @@ int play_test_main(int argc, char** argv) {
     printf("2. Digital Audio Test\n");
     void* dig = p_AIL_open_digital_driver(44100, 16, 2, 0);
     TEST_ASSERT(dig != NULL, "Open Digital Driver");
-    p_AIL_set_digital_master_volume(dig, 100);
+    if (p_AIL_set_digital_master_volume) p_AIL_set_digital_master_volume(dig, 100);
 
     void* S = p_AIL_allocate_sample_handle(dig);
     TEST_ASSERT(S != NULL, "Allocate Sample Handle");
@@ -139,37 +152,48 @@ int play_test_main(int argc, char** argv) {
     p_AIL_release_sample_handle(S);
 
     printf("3. 3D Audio Test\n");
-    void* S3D = p_AIL_allocate_3D_sample_handle(dig);
-    TEST_ASSERT(S3D != NULL, "Allocate 3D Sample Handle");
-    p_AIL_set_3D_position(S3D, 10.0f, 0.0f, 5.0f);
-    p_AIL_set_listener_3D_position(dig, 0.0f, 0.0f, 0.0f);
-    p_AIL_release_3D_sample_handle(S3D);
+    if (!p_AIL_allocate_3D_sample_handle || !p_AIL_release_3D_sample_handle ||
+        !p_AIL_set_3D_position) {
+        printf("SKIPPED: this build exports no 3D sample handle surface; test a -Dmss-version=50 to 66 build\n");
+    } else {
+        void* S3D = p_AIL_allocate_3D_sample_handle(dig);
+        TEST_ASSERT(S3D != NULL, "Allocate 3D Sample Handle");
+        p_AIL_set_3D_position(S3D, 10.0f, 0.0f, 5.0f);
+        p_AIL_set_listener_3D_position(dig, 0.0f, 0.0f, 0.0f);
+        p_AIL_release_3D_sample_handle(S3D);
+    }
 
     printf("4. MIDI Test\n");
-    void* midi = p_AIL_open_midi_driver(0);
-    TEST_ASSERT(midi != NULL, "Open MIDI Driver");
-    TEST_ASSERT(p_AIL_DLS_load_file(midi, sf2_file, 0) != 0, "Load SoundFont");
-    FILE* fm = fopen(mid_file, "rb");
-    TEST_ASSERT(fm != NULL, "MIDI file found");
-    fseek(fm, 0, SEEK_END);
-    long msz = ftell(fm);
-    fseek(fm, 0, SEEK_SET);
-    void* mdata = malloc(msz);
-    fread(mdata, 1, msz, fm);
-    fclose(fm);
-    void* seq = p_AIL_allocate_sequence_handle(midi);
-    TEST_ASSERT(seq != NULL, "Allocate Sequence Handle");
-    p_AIL_init_sequence(seq, mdata, (int)msz);
-    p_AIL_start_sequence(seq);
-    p_AIL_release_sequence_handle(seq);
-    free(mdata);
-    p_AIL_close_midi_driver(midi);
+    void* midi = p_AIL_open_midi_driver ? p_AIL_open_midi_driver(0) : NULL;
+    if (!midi || !p_AIL_allocate_sequence_handle || !p_AIL_init_sequence ||
+        !p_AIL_start_sequence || !p_AIL_release_sequence_handle ||
+        !p_AIL_DLS_load_file || !p_AIL_close_midi_driver) {
+        printf("SKIPPED: this build exports no sequence surface; test a -Dmss-version=61 or 70 build\n");
+    } else {
+        TEST_ASSERT(midi != NULL, "Open MIDI Driver");
+        TEST_ASSERT(p_AIL_DLS_load_file(midi, sf2_file, 0) != 0, "Load SoundFont");
+        FILE* fm = fopen(mid_file, "rb");
+        TEST_ASSERT(fm != NULL, "MIDI file found");
+        fseek(fm, 0, SEEK_END);
+        long msz = ftell(fm);
+        fseek(fm, 0, SEEK_SET);
+        void* mdata = malloc(msz);
+        fread(mdata, 1, msz, fm);
+        fclose(fm);
+        void* seq = p_AIL_allocate_sequence_handle(midi);
+        TEST_ASSERT(seq != NULL, "Allocate Sequence Handle");
+        p_AIL_init_sequence(seq, mdata, (int)msz);
+        p_AIL_start_sequence(seq);
+        p_AIL_release_sequence_handle(seq);
+        free(mdata);
+        p_AIL_close_midi_driver(midi);
+    }
 
     printf("5. Timer Test\n");
     volatile int timer_called = 0;
     void* T = p_AIL_register_timer(timer_cb);
     TEST_ASSERT(T != NULL, "Register Timer");
-    p_AIL_set_timer_user_data(T, (unsigned int)(uintptr_t)&timer_called);
+    p_AIL_set_timer_user(T, (unsigned int)(uintptr_t)&timer_called);
     p_AIL_set_timer_frequency(T, 100);
     p_AIL_start_timer(T);
     int timeout = 500; // 5 seconds max
@@ -178,9 +202,13 @@ int play_test_main(int argc, char** argv) {
     p_AIL_release_timer_handle(T);
 
     printf("6. Quick API Test\n");
-    p_AIL_quick_startup(1, 0, 44100, 16, 2);
-    TEST_ASSERT(p_AIL_get_preference(1) == 123, "Preference survives Quick API cycle");
-    p_AIL_quick_shutdown();
+    if (!p_AIL_quick_startup || !p_AIL_quick_shutdown) {
+        printf("SKIPPED: this build exports no quick API; test a -Dmss-version=30 to 70 build\n");
+    } else {
+        p_AIL_quick_startup(1, 0, 44100, 16, 2);
+        TEST_ASSERT(p_AIL_get_preference(1) == 123, "Preference survives Quick API cycle");
+        p_AIL_quick_shutdown();
+    }
 
     p_AIL_close_digital_driver(dig);
     p_AIL_shutdown();

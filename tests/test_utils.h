@@ -20,6 +20,19 @@
         return 1; \
     }
 
+/* A name this build may not export. Some of the surface a harness names is
+ * gone from a given export table: the sequence and XMIDI driver entry points
+ * are v6.1-v7.0 only, and AIL_ASI_provider_attribute and
+ * AIL_set_timer_user_data are in no Miles export table at all, so the DLL never
+ * provides them (src/main.zig lists them as never_export, and src/mss.h says
+ * so). Loading one of those as required fails the whole run over a function the
+ * build never claimed, so it loads optionally and the caller skips or narrows
+ * what needs it. */
+#define LOAD_FUNC_OPT(name, bytes) \
+    p_##name = (t_##name)GetProcAddress(mss, #name); \
+    if (!p_##name) p_##name = (t_##name)GetProcAddress(mss, MSS_DECORATE(name, bytes)); \
+    if (!p_##name) printf("Not exported by this build, skipping what needs it: %s\n", #name);
+
 // Type definitions
 // These mirror the declarations in src/mss.h, which is what a consumer
 // compiles against; a divergence here hides a header defect from the harness
