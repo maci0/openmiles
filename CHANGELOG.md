@@ -159,6 +159,15 @@ All notable changes to OpenMiles are recorded here. The format follows
   them. The flag is read and written atomically, and the configuration record is
   rendered under the lock `init()` holds, so a record cannot name a path that is
   being overwritten.
+- `AIL_close_digital_driver` tore the device down on the first close instead of
+  the last. Opens are counted, and a second open through `AIL_open_digital_driver`
+  or `AIL_waveOutOpen` takes a reference on the driver the first one built, but
+  the close path ignored the count and destroyed the engine unconditionally. A
+  game that opened the device through both names and closed it through either
+  was left holding a handle to an uninitialised engine over freed memory, and
+  its second close was reported as a close of a driver that was already gone. The
+  close now drops one open and tears the device down only when it drops the
+  last, leaving a driver another open still owns published and tracked.
 - The release archive shipped `deps/SHA256SUMS` and `SBOM.cdx.json` without the
   vendored headers those records describe. Unpacking it and running
   `sha256sum -c deps/SHA256SUMS` failed on all five entries, and the SBOM's

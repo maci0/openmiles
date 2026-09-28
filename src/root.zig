@@ -1042,25 +1042,14 @@ pub fn unregisterDriver(driver: *DigitalDriver) void {
     removeFirst(&known_drivers, driver);
 }
 
-/// Take `driver` out of the digital table and report whether it was in it.
+/// Take `driver` out of the MIDI table and report whether it was in it.
 /// The table entry is the claim token a close needs: it is removed under the
 /// same lock that guards the table, so of two closes of one handle only the
 /// first finds it. A close of a handle the table does not name is a close of a
 /// driver that is already gone, and tearing it down a second time uninitializes
-/// an engine and frees a struct the first close released.
-pub fn claimDigitalDriverClose(driver: *DigitalDriver) bool {
-    driver_table_mutex.lockUncancelable(io);
-    defer driver_table_mutex.unlock(io);
-    for (known_drivers.items, 0..) |d, i| {
-        if (d == driver) {
-            _ = known_drivers.swapRemove(i);
-            return true;
-        }
-    }
-    return false;
-}
-
-/// The MIDI counterpart of claimDigitalDriverClose.
+/// an engine and frees a struct the first close released. The digital driver
+/// does not claim its closes this way: its opens are counted, so a close is
+/// matched against the open count rather than against the table entry.
 pub fn claimMidiDriverClose(driver: *MidiDriver) bool {
     driver_table_mutex.lockUncancelable(io);
     defer driver_table_mutex.unlock(io);
@@ -1813,17 +1802,20 @@ pub fn destroyDigitalDriver(driver: *DigitalDriver) void {
     driver.deinit();
 }
 
-/// Close the digital driver, once. A second close of the same handle is a
-/// close of memory the first one released: DigitalDriver.deinit would uninit
-/// an engine struct over freed memory and destroy the allocation again. The
-/// table entry is claimed first, so a close repeated from two threads, or
-/// from a game that closes on two exit paths, closes the driver once and
-/// reports the repeat.
+/// Close one open of the digital driver. Opens are counted (see
+/// `DigitalDriver.refs`), so the device goes away with the last close rather
+/// than the first: a game that opened through both `AIL_open_digital_driver`
+/// and `AIL_waveOutOpen` holds the same handle twice, and tearing it down on
+/// the first close would leave the other open pointing at an uninitialised
+/// engine over freed memory. A handle the table does not name is not a close
+/// of an open driver but a close of memory that is already gone, so it is
+/// reported and dropped.
 pub fn closeDigitalDriver(driver: *DigitalDriver) void {
-    if (!claimDigitalDriverClose(driver)) {
+    if (!isKnownDriver(driver)) {
         log("closeDigitalDriver: this handle is not an open digital driver; the close is ignored\n", .{});
         return;
     }
+    if (!driver.releaseOwner()) return;
     destroyDigitalDriver(driver);
 }
 

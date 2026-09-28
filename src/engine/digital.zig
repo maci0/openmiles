@@ -720,9 +720,14 @@ pub const DigitalDriver = struct {
         _ = self.refs.fetchAdd(1, .monotonic);
     }
 
-    /// One owner done with the handle; the last one tears the device down.
-    pub fn release(self: *DigitalDriver) void {
-        if (self.refs.fetchSub(1, .acq_rel) == 1) self.deinit();
+    /// One owner done with the handle. Reports whether it was the last one, so
+    /// the caller that also has to unpublish the handle can tell an
+    /// intermediate close from the final one: a driver another open still owns
+    /// must stay in the table and stay published, or the next open builds a
+    /// second engine. The last close is the caller's to make, because only the
+    /// caller knows whether it has unpublished the handle already.
+    pub fn releaseOwner(self: *DigitalDriver) bool {
+        return self.refs.fetchSub(1, .acq_rel) == 1;
     }
 
     /// Unconditional teardown, ignoring outstanding opens. Shutdown uses it:
