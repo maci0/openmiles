@@ -137,6 +137,11 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ### Fixed
 
+- 46 of the 192 `file:line anchor` references in `docs/THREAT_MODEL.md` named
+  a line the anchor had moved off, so `scripts/check_threat_model_refs.py` and
+  with it `make lint` and CI failed. Every one was re-anchored to the line its
+  anchor now sits on, and `MilesAddSoundBank` (which moved without a uniform
+  file shift) was re-aimed by hand.
 - Loading, unloading, or replacing a SoundFont could deadlock the process
   against its own audio thread. The swap published the replacement and then
   spun on the render-claim count while holding the driver lock, so a render
