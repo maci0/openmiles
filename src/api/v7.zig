@@ -18,6 +18,7 @@ const log = openmiles.log;
 const Sample = openmiles.Sample;
 const DigitalDriver = openmiles.DigitalDriver;
 const Redbook = openmiles.Redbook;
+const api_filter = @import("filter.zig");
 const MidiDriver = openmiles.MidiDriver;
 const AILSOUNDINFO = openmiles.AILSOUNDINFO;
 const speaker = openmiles.speaker;
@@ -450,9 +451,19 @@ pub fn AIL_DLS_sample_handle(dls: ?*MidiDriver) callconv(.winapi) ?*anyopaque {
 // --- find_filter (reuse the built-in filter provider) ------------------------
 
 pub fn AIL_find_filter(name: [*:0]const u8, ret: ?*?*openmiles.Provider) callconv(.winapi) i32 {
-    _ = name;
-    if (ret) |p| p.* = openmiles.startupProvider();
-    return if (openmiles.startupProvider() != null) 1 else 0;
+    // A lookup by name: a name no filter provider answers to fails, which is
+    // what a caller checks AIL_open_filter's provider argument against.
+    const p = openmiles.startupProvider();
+    if (p == null) {
+        if (ret) |rp| rp.* = null;
+        return 0;
+    }
+    if (!std.mem.eql(u8, std.mem.span(name), std.mem.span(api_filter.builtin_filter_name))) {
+        if (ret) |rp| rp.* = null;
+        return 0;
+    }
+    if (ret) |rp| rp.* = p;
+    return 1;
 }
 
 // SDK returns S32 (integer percent in EAX), not F32.

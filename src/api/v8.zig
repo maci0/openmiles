@@ -559,7 +559,13 @@ pub fn AIL_open_soundbank(filename: ?*anyopaque, name: ?*anyopaque) callconv(.wi
         const want_s = std.mem.span(want);
         const have_s = std.mem.span(bank.name());
         const n = @min(@min(want_s.len, have_s.len), openmiles.soundbank.bank_name_field_bytes);
-        if (have_s.len == 0 or n != have_s.len or !std.ascii.eqlIgnoreCase(have_s[0..n], want_s[0..n])) {
+        // A caller name longer than the bank's read-back differs in the byte
+        // after the read-back, unless the read-back is short only because the
+        // 4-byte field cut a multi-byte character in half. Comparing over the
+        // shorter of the two hid that byte: "TSTX" against a bank whose field
+        // spells "TST" opened the bank.
+        const past_field = !bank.name_field_full and want_s.len > have_s.len;
+        if (have_s.len == 0 or n != have_s.len or past_field or !std.ascii.eqlIgnoreCase(have_s[0..n], want_s[0..n])) {
             bank.deinit();
             openmiles.setLastError("Bank name mismatch");
             return null;

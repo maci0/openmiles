@@ -254,9 +254,26 @@ pub const provider_3d_attr_names = [_][*:0]const u8{
     "Distance factor",
 };
 
+// Every name AIL_3D_sample_attribute accepts, so a caller that walks the
+// enumeration and reads each attribute finds the whole surface. The list and
+// the getter are kept in step by the test that drives every name through it.
 pub const sample_3d_attr_names = [_][*:0]const u8{
+    "Position",
+    "Velocity",
+    "Orientation",
+    "Minimum distance",
+    "Maximum distance",
+    "Cone inner angle",
+    "Cone outer angle",
+    "Cone outer volume",
     "Obstruction",
     "Occlusion",
+    "Effects level",
+    "Exclusion",
+    "Frequency",
+    "Volume",
+    "Status",
+    "Loop count",
 };
 
 // --- Allocator ---
@@ -372,8 +389,10 @@ pub fn currentFileCallbacks() ?FileCallbacks {
 }
 
 /// If file callbacks are set, open the file via the game's VFS, read it all into
-/// a freshly-allocated slice (caller must free with global_allocator), and close it.
-pub fn fileCallbackReadAll(filename: [*:0]const u8) ![]u8 {
+/// a freshly-allocated slice, and close it. The buffer comes from `allocator`
+/// and must be freed with it: a caller that hands it to a Sample hands over the
+/// free as well, so the two allocators have to be the same one.
+pub fn fileCallbackReadAll(allocator: std.mem.Allocator, filename: [*:0]const u8) ![]u8 {
     const cbs = currentFileCallbacks() orelse return error.NoCallbacks;
     const open_fn = cbs.open orelse return error.NoCallbacks;
     const close_fn = cbs.close orelse return error.NoCallbacks;
@@ -395,8 +414,8 @@ pub fn fileCallbackReadAll(filename: [*:0]const u8) ![]u8 {
     // 32-bit target, a wrap).
     if (@as(u64, file_size) > max_file_load_bytes) return error.BadSize;
 
-    const buf = try global_allocator.alloc(u8, file_size);
-    errdefer global_allocator.free(buf);
+    const buf = try allocator.alloc(u8, file_size);
+    errdefer allocator.free(buf);
     const bytes_read = read_fn(handle, buf.ptr, file_size);
     if (bytes_read != file_size) return error.ReadFailed;
     return buf;
@@ -430,7 +449,7 @@ pub fn readWholeFile(path: []const u8) ![]u8 {
         if (path.len >= zbuf.len) return error.NameTooLong;
         @memcpy(zbuf[0..path.len], path);
         zbuf[path.len] = 0;
-        return fileCallbackReadAll(@ptrCast(&zbuf));
+        return fileCallbackReadAll(global_allocator, @ptrCast(&zbuf));
     }
     const f = fs_compat.openFile(io, path, .{}) catch return error.FileNotFound;
     defer f.close(io);
@@ -454,7 +473,7 @@ pub fn readWholeFile(path: []const u8) ![]u8 {
 pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
     clearFileError();
     if (currentFileCallbacks() != null) {
-        const buf = fileCallbackReadAll(filename) catch |err| {
+        const buf = fileCallbackReadAll(global_allocator, filename) catch |err| {
             // Name the real failure mode: a blanket "not found" would send an
             // operator chasing a missing file when the VFS read or its
             // allocation actually failed.

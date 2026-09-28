@@ -84,7 +84,12 @@ fn applyLoopCount(sound: *ma.ma_sound, count: i32) void {
 /// caller must fire its end callbacks.
 fn restartLoopOnEnd(self: anytype) bool {
     const remaining = self.loops_remaining.load(.acquire);
-    if (remaining == 1) return false;
+    // The last pass spends the final count, so a poll of the getter after
+    // playback ends reads 0 (no loops left) rather than the 1 it started from.
+    if (remaining == 1) {
+        self.loops_remaining.store(0, .release);
+        return false;
+    }
     if (remaining > 1) _ = self.loops_remaining.fetchSub(1, .acq_rel);
     _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
     _ = ma.ma_sound_start(&self.sound);
@@ -105,11 +110,16 @@ fn applyLoopBlock(self: anytype, start_bytes: i32, end_bytes: i32) void {
         self.loop_end_frame = @as(u64, @intCast(end_bytes)) / @as(u64, bpf);
         if (self.decoder) |d| {
             _ = ma.ma_data_source_set_range_in_pcm_frames(d, 0, self.loop_end_frame);
+            // An infinite loop count is miniaudio's own, and it seeks to the
+            // data source's loop point, which defaults to frame 0. Without this
+            // the pre-roll before loop_start_frame is replayed on every pass.
+            _ = ma.ma_data_source_set_loop_point_in_pcm_frames(d, self.loop_start_frame, self.loop_end_frame);
         }
     } else {
         self.loop_end_frame = 0;
         if (self.decoder) |d| {
             _ = ma.ma_data_source_set_range_in_pcm_frames(d, 0, std.math.maxInt(u64));
+            _ = ma.ma_data_source_set_loop_point_in_pcm_frames(d, 0, std.math.maxInt(u64));
         }
     }
 }

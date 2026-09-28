@@ -385,7 +385,7 @@ fn writeStamp(rec: []u8) []const u8 {
         "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z ",
         .{
             year_day.year,
-            @as(u16, @intFromEnum(month_day.month)) + 1,
+            @intFromEnum(month_day.month),
             @as(u16, month_day.day_index) + 1,
             day_secs.getHoursIntoDay(),
             day_secs.getMinutesIntoHour(),

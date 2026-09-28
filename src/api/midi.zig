@@ -272,6 +272,9 @@ pub fn AIL_controller_value(seq_opt: ?*Sequence, channel: i32, controller: i32) 
     const seq = seq_opt orelse return 0;
     const sf = seq.driver.soundfont orelse return 0;
     const tsf_mod = openmiles.tsf;
+    // TinySoundFont indexes the channel array with no lower bound of its own, so
+    // a caller passing a negative channel would read in front of it.
+    if (channel < 0) return 0;
     switch (controller) {
         0 => return tsf_mod.tsf_channel_get_preset_bank(sf, channel),
         7, 11 => {
@@ -279,8 +282,12 @@ pub fn AIL_controller_value(seq_opt: ?*Sequence, channel: i32, controller: i32) 
             return openmiles.satI32(v * 127.0);
         },
         10 => {
+            // tsf_channel_get_pan subtracts another 0.5 from the stored offset
+            // (which is itself pan - 0.5), so pan - 1.0 comes back. That makes
+            // a 0..1 float of (value / 127) recoverable; scaling by 64 instead
+            // halved every answer, and no pan above 64 was reachable.
             const p = tsf_mod.tsf_channel_get_pan(sf, channel);
-            return openmiles.satI32(@min(127.0, @max(0.0, (p + 1.0) * 64.0)));
+            return openmiles.satI32(@min(127.0, @max(0.0, (p + 1.0) * 127.0)));
         },
         else => return 0,
     }

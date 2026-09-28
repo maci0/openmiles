@@ -14,8 +14,13 @@ pub fn AIL_file_read(filename: [*:0]const u8, dest: ?*anyopaque) callconv(.winap
 pub fn AIL_file_size(filename: [*:0]const u8) callconv(.winapi) u32 {
     return openmiles.ailFileSize(filename);
 }
-pub fn AIL_file_type(data: *anyopaque, len: u32) callconv(.winapi) i32 {
-    return openmiles.detectFileType(data, len);
+pub fn AIL_file_type(data: ?*anyopaque, len: u32) callconv(.winapi) i32 {
+    // SDK: data == 0 is one of the two ways to ask for an unknown type, and
+    // detectFileType only short-circuits on a short length. The named sibling
+    // (AIL_file_type_named) already null-checks; this one reaches it from the
+    // ABI with a raw null.
+    const d = data orelse return 0;
+    return openmiles.detectFileType(d, len);
 }
 pub fn AIL_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32) callconv(.winapi) i32 {
     const path = std.mem.span(filename);
@@ -28,16 +33,23 @@ pub fn AIL_file_write(filename: [*:0]const u8, data: *anyopaque, len: u32) callc
         openmiles.setFileErrorFmt("Cannot create '{s}'", .{path});
         return 0;
     };
-    // A write that fails partway leaves a truncated file on disk; the failure
-    // is reported, but the partial contents stay, so say which file is short.
-    errdefer openmiles.setFileErrorFmt("Write to '{s}' failed", .{path});
     defer file.close(io);
     const buf: [*]const u8 = @ptrCast(@alignCast(data));
-    file.writeStreamingAll(io, buf[0..len]) catch |err| {
+    // Through the compat shim, like every other whole-file write the engine
+    // performs, so an injected truncate_write schedule can produce the short
+    // write this reports rather than only a real disk failure.
+    const written = fs_compat.writeAll(io, file, path, buf[0..len]) catch |err| {
         log("AIL_file_write: writing {d} bytes to '{s}' failed ({any})\n", .{ len, path, err });
         openmiles.setFileErrorFmt("Write of {d} bytes to '{s}' failed", .{ len, path });
         return 0;
     };
+    // A short write is a failed write: the file on disk holds a prefix, and a
+    // caller told it succeeded would read a truncated image back.
+    if (written != len) {
+        log("AIL_file_write: wrote {d} of {d} bytes to '{s}'\n", .{ written, len, path });
+        openmiles.setFileErrorFmt("Write of {d} bytes to '{s}' failed", .{ len, path });
+        return 0;
+    }
     return 1;
 }
 // SDK arg order is (open, close, SEEK, READ) — not (open, close, read, seek).

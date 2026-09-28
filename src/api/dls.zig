@@ -28,7 +28,7 @@ pub fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flag
         // would take: reading it again would close the bank the game is still
         // holding and return a second copy of it.
         if (driver.retainSoundfontForFile(name)) |existing| return existing;
-        if (openmiles.fileCallbackReadAll(filename)) |b| {
+        if (openmiles.fileCallbackReadAll(openmiles.global_allocator, filename)) |b| {
             defer openmiles.global_allocator.free(b);
             // tsf_load_memory takes a C `int`; see AIL_DLS_load_memory for why a
             // buffer past that is bogus rather than something to truncate.
@@ -261,16 +261,20 @@ pub fn AIL_DLS_open(mdi_opt: ?*MidiDriver, dig_opt: ?*DigitalDriver, libname: ?[
             return null;
         };
     }
+    driver.displaced_driver = prev_driver;
     return driver;
 }
 pub fn AIL_DLS_close(driver_opt: ?*MidiDriver, flags: u32) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     _ = flags;
     // The shared close, so the sequences allocated on this device are stopped
-    // and released before the driver they read through goes away, and the
-    // driver's other users (AIL_open_midi_driver handing back the current one)
-    // are restored rather than left with nothing.
+    // and released before the driver they read through goes away. It clears the
+    // "current" MIDI driver, so the one this device displaced goes back into
+    // that slot: AIL_open_midi_driver's next caller gets the app's own driver
+    // rather than nothing.
+    const displaced = driver.displaced_driver;
     openmiles.closeMidiDriver(driver);
+    if (displaced) |d| openmiles.setLastMidiDriver(d);
 }
 pub fn AIL_set_DLS_processor(driver_opt: ?*MidiDriver, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const driver = driver_opt orelse return null;

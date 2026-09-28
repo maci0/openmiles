@@ -244,6 +244,8 @@ fn cacheRemove(name: []const u8) void {
     }
 }
 fn cacheClear() void {
+    var it = g_cached.keyIterator();
+    while (it.next()) |k| openmiles.global_allocator.free(k.*);
     g_cached.deinit(openmiles.global_allocator);
     g_cached = .empty;
 }
@@ -418,20 +420,20 @@ fn destroyInstance(inst: *SoundInstance) void {
 
 // Create a tracked instance for a start-sound step. soundname is taken up to the
 // first ':'; its duration is resolved from the loaded-bank container.
-fn createInstance(queued_id: u64, soundname_full: []const u8, labels_in: []const u8, user_buffer: ?*anyopaque, ubl: i32) void {
+fn createInstance(queued_id: u64, soundname_full: []const u8, labels_in: []const u8, user_buffer: ?*anyopaque, ubl: i32) u64 {
     enforceLimits(labels_in); // evict to make room under each labelled cap
     const cut = std.mem.indexOfScalar(u8, soundname_full, ':') orelse soundname_full.len;
     const sound = soundname_full[0..cut];
     const dur: u32 = openmiles.soundbank.containerSoundDurationMs(sound) orelse 0;
-    const name = openmiles.global_allocator.dupeZ(u8, sound) catch return;
+    const name = openmiles.global_allocator.dupeZ(u8, sound) catch return 0;
     const labels = openmiles.global_allocator.dupeZ(u8, labels_in) catch {
         openmiles.global_allocator.free(name);
-        return;
+        return 0;
     };
     const inst = openmiles.global_allocator.create(SoundInstance) catch {
         openmiles.global_allocator.free(name);
         openmiles.global_allocator.free(labels);
-        return;
+        return 0;
     };
     inst.* = .{
         .queued_id = queued_id,
@@ -446,7 +448,9 @@ fn createInstance(queued_id: u64, soundname_full: []const u8, labels_in: []const
     };
     g_instances.append(openmiles.global_allocator, inst) catch {
         destroyInstance(inst);
+        return 0;
     };
+    return inst.instance_id;
 }
 
 // Shared walk over an event string's decoded steps: nextStep with a per-walk
@@ -491,7 +495,7 @@ fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: 
             const sn = st.u.start.soundname;
             const lb = st.u.start.labels;
             const lbl: []const u8 = if (lb.str) |lp| lp[0..@intCast(@max(lb.len, 0))] else "";
-            if (sn.str) |sp| createInstance(qid, sp[0..@intCast(@max(sn.len, 0))], lbl, user_buffer, ubl);
+            if (sn.str) |sp| _ = createInstance(qid, sp[0..@intCast(@max(sn.len, 0))], lbl, user_buffer, ubl);
         } else if (st.type == @intFromEnum(openmiles.event.StepType.cache_sounds)) {
             applyCacheStep(st.u.load, true);
         } else if (st.type == @intFromEnum(openmiles.event.StepType.purge_sounds)) {
@@ -761,8 +765,10 @@ pub fn MilesStartSoundInstance(bank: ?*anyopaque, sound_name: ?[*:0]const u8, lo
     stateLock();
     defer stateUnlock();
     const qid = nextId();
-    createInstance(qid, std.mem.span(nm), lbl, user_buffer, user_buffer_len);
-    return qid;
+    // The handle a caller holds from here is the instance ID, the one
+    // AILSOUNDINSTANCE reports; the queue ID belongs to MilesEnqueueEvent and
+    // names the batch the step came from.
+    return createInstance(qid, std.mem.span(nm), lbl, user_buffer, user_buffer_len);
 }
 // Stop/Pause/Resume operate over instances matching both the status filter
 // (filter 0 = all) and the label query (null/empty = all). Returns the count.

@@ -67,6 +67,10 @@ pub const MidiDriver = struct {
     soundfont_refs: u32 = 0,
     // DLS processor callback (stored but not invoked; TSF has its own pipeline)
     dls_processor: usize = 0,
+    // The driver AIL_DLS_open displaced when it published itself as the current
+    // MIDI driver, so AIL_DLS_close can hand that one back instead of leaving
+    // the process with no "current" driver at all.
+    displaced_driver: ?*MidiDriver = null,
     // Driver-level MIDI callbacks (MSS registers these on HMDIDRIVER, not a
     // sequence): AILEVENTCB(hmi, seq, status, d1, d2) and AILTIMBRECB(hmi, bank, patch).
     // Fired from the audio thread (onRead), registered from the game thread.

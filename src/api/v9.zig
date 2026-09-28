@@ -315,14 +315,30 @@ pub fn AIL_schedule_start_sample(s_opt: ?*Sample, mix_time_to_start: u64) callco
 }
 pub fn AIL_set_sample_loop_samples(s_opt: ?*Sample, loop_start_samples: i32, loop_end_samples: i32) callconv(.winapi) i32 {
     const s = s_opt orelse return 0;
+    // setLoopBlock takes byte offsets; a frame count that does not fit one
+    // clamps to the largest a caller can express.
+    const bpf = @as(u64, s.bytesPerFrame());
+    const byteOffset = struct {
+        fn f(frames: u64, bytes_per_frame: u64) i32 {
+            return @intCast(@min(frames *| bytes_per_frame, @as(u64, std.math.maxInt(i32))));
+        }
+    }.f;
     // The *_samples form counts per-channel samples; loop_start_frame is a
     // frame index and AIL_sample_loop_block converts it back with
     // bytesPerFrame (bytes per frame = bytes per sample * channels). Storing
     // the raw count put a stereo 16-bit sample's loop a factor of
     // channels * bytesPerSample too far in, and reported it back that way.
     const ch = @as(u64, s.channelCount());
-    s.loop_start_frame = if (loop_start_samples > 0) @intCast(@as(u64, @intCast(loop_start_samples)) / ch) else 0;
-    s.loop_end_frame = if (loop_end_samples > 0) @intCast(@as(u64, @intCast(loop_end_samples)) / ch) else 0;
+    var start: u64 = if (loop_start_samples > 0) @as(u64, @intCast(loop_start_samples)) / ch else 0;
+    var end: u64 = if (loop_end_samples > 0) @as(u64, @intCast(loop_end_samples)) / ch else 0;
+    if (start > end) {
+        const t = start;
+        start = end;
+        end = t;
+    }
+    // setLoopBlock, not the fields directly: it is what narrows the decoder's
+    // range to the loop end and sets the loop point an infinite count loops on.
+    s.setLoopBlock(byteOffset(start, bpf), byteOffset(end, bpf));
     return 1;
 }
 
@@ -407,7 +423,9 @@ fn falloffPtr(graph: ?*anyopaque) ?[*]const MSSGraphPoint {
 pub fn AIL_set_sample_3D_volume_falloff(s_opt: ?*Sample, graph: ?*anyopaque, pointcount: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     // SDK rejects pointcount outside 0..MILES_MAX_FALLOFF_GRAPH_POINTS (5), and
-    // so does setFalloff: an out-of-range count leaves the previous graph.
+    // so does setFalloff: an out-of-range count leaves the previous graph, and
+    // a rejected call has to leave the distances alone with it.
+    if (pointcount < 0 or pointcount > openmiles.max_falloff_points) return;
     s.setFalloff(.volume, falloffPtr(graph), pointcount);
     // Adaptation: map the graph's first/last distance onto ma's min/max distance.
     const n = s.falloff_count[@intFromEnum(openmiles.FalloffKind.volume)];

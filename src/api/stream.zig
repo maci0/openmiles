@@ -39,7 +39,9 @@ pub fn AIL_open_stream(driver_opt: ?*DigitalDriver, filename_opt: ?[*:0]const u8
 
     if (filename_opt == null) {
         log("AIL_open_stream: Memory stream loading...\n", .{});
-        if (stream_mem != 0) {
+        // A negative stream_mem is a caller's error sentinel, not an address;
+        // reading through the pointer it casts to dereferences 0xFFFFFFFF.
+        if (stream_mem > 0) {
             const mem_ptr: [*]const u8 = @ptrFromInt(@as(usize, @as(u32, @bitCast(stream_mem))));
             s.loadFromUnownedMemoryUnknownSize(mem_ptr) catch |err| {
                 log("AIL_open_stream: memory load failed ({any})\n", .{err});
@@ -51,6 +53,7 @@ pub fn AIL_open_stream(driver_opt: ?*DigitalDriver, filename_opt: ?[*:0]const u8
             return s;
         } else {
             log("AIL_open_stream: Null filename and null stream_mem!\n", .{});
+            openmiles.setLastError("Null filename and null stream_mem");
             s.deinit();
             return null;
         }
@@ -59,14 +62,15 @@ pub fn AIL_open_stream(driver_opt: ?*DigitalDriver, filename_opt: ?[*:0]const u8
 
     if (openmiles.currentFileCallbacks() != null) {
         log("AIL_open_stream: Using custom file callbacks\n", .{});
-        const buf = openmiles.fileCallbackReadAll(filename) catch |err| {
+        const buf = openmiles.fileCallbackReadAll(driver.allocator, filename) catch |err| {
             log("AIL_open_stream: fileCallbackReadAll failed ({any})\n", .{err});
+            openmiles.setLastError("Failed to open stream file");
             s.deinit();
             return null;
         };
         s.loadFromOwnedMemory(buf) catch |err| {
             log("AIL_open_stream: loadFromOwnedMemory failed ({any})\n", .{err});
-            openmiles.global_allocator.free(buf);
+            driver.allocator.free(buf);
             openmiles.setLastError("Failed to load stream from callback buffer");
             s.deinit();
             return null;

@@ -86,7 +86,7 @@ fn openmiles_ASI_stream_seek(stream: *ASI_stream, pos: i32) callconv(.c) i32 {
         log("openmiles.ASI_stream_seek: seek to frame {d} failed with {d} ({s})\n", .{ frame, result, root.maResultDescription(result) });
         return 0;
     }
-    return pos;
+    return @intCast(frame * bytes_per_frame);
 }
 
 fn openmiles_ASI_stream_attribute(stream: *ASI_stream, name: [*:0]const u8) callconv(.c) i32 {

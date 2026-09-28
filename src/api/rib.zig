@@ -585,9 +585,13 @@ pub fn RIB_find_provider(name: [*:0]const u8, property: [*:0]const u8, value: [*
 pub fn AIL_request_EOB_ASI_reset(s_opt: ?*Sample, buff_num: u32, new_stream_position: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     _ = buff_num;
-    _ = new_stream_position;
     if (s.is_initialized) {
-        _ = openmiles.ma.ma_sound_seek_to_pcm_frame(&s.sound, s.loop_start_frame);
+        // The position is the caller's: it exists to say where playback
+        // resumes, and rewinding to the loop start on every call made the
+        // argument inert.
+        const bpf = @as(u64, s.bytesPerFrame());
+        const frame: u64 = if (new_stream_position > 0) @as(u64, @intCast(new_stream_position)) / @max(bpf, 1) else 0;
+        _ = openmiles.ma.ma_sound_seek_to_pcm_frame(&s.sound, frame);
         s.is_done.store(false, .release);
     }
 }

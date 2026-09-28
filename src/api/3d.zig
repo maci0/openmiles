@@ -339,6 +339,9 @@ pub fn AIL_set_3D_sample_preference(s: ?*anyopaque, name: [*:0]const u8, val: *a
         // writing one field, and the unclamped one let a preference file
         // raise it past 1.0 while the setter could not.
         sample.effects_level = openmiles.clampUnit(v.*);
+    } else if (std.mem.eql(u8, n, "Exclusion")) {
+        const v: *const f32 = @ptrCast(@alignCast(val));
+        sample.exclusion = v.*;
     } else if (std.mem.eql(u8, n, "Position")) {
         const v: *const [3]f32 = @ptrCast(@alignCast(val));
         sample.setPosition(v.*[0], v.*[1], v.*[2]);
@@ -437,6 +440,9 @@ pub fn AIL_3D_sample_attribute(s: ?*anyopaque, name: [*:0]const u8, val: *anyopa
     } else if (std.mem.eql(u8, n, "Volume")) {
         const v: *i32 = @ptrCast(@alignCast(val));
         v.* = sample.original_volume;
+    } else if (std.mem.eql(u8, n, "Exclusion")) {
+        const v: *f32 = @ptrCast(@alignCast(val));
+        v.* = sample.exclusion;
     } else if (std.mem.eql(u8, n, "Status")) {
         const v: *u32 = @ptrCast(@alignCast(val));
         v.* = @intFromEnum(sample.status());
@@ -577,9 +583,8 @@ pub fn AIL_close_3D_object(obj: *anyopaque) callconv(.winapi) void {
 // AIL_open_3D_object does, and only treat the handle as a driver when it
 // really is one.
 fn providerDriver(provider: *anyopaque) ?*DigitalDriver {
-    if (openmiles.lastDigitalDriver()) |d| return d;
-    if (!openmiles.isKnownDriver(provider)) return null;
-    return @ptrCast(@alignCast(provider));
+    if (openmiles.isKnownDriver(provider)) return @ptrCast(@alignCast(provider));
+    return openmiles.lastDigitalDriver();
 }
 pub fn AIL_3D_provider_attribute(provider: *anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
     const dig = providerDriver(provider) orelse return;

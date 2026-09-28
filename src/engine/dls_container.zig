@@ -124,6 +124,14 @@ pub fn findDls(data: []const u8) ?[]const u8 {
     while (std.mem.indexOfPos(u8, data, i, "RIFF")) |hit| {
         if (hit + 12 <= data.len and std.mem.eql(u8, data[hit + 8 .. hit + 12], "DLS ")) {
             const body = std.mem.readInt(u32, data[hit + 4 .. hit + 8][0..4], .little);
+            // The DLS magic sits four bytes into the body, so a chunk that
+            // declares fewer than four bytes of body cannot hold it. Handing
+            // that out would give the caller an image without the magic it was
+            // matched on, and would stop the scan before a real bank behind it.
+            if (body < 4) {
+                i = hit + 1;
+                continue;
+            }
             // Saturating, like every other size field walked in this file: a
             // body of 0xFFFFFFFF wraps to 7 on the 32-bit target and yields a
             // 7-byte "DLS image" instead of the whole remainder.

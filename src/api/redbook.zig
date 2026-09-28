@@ -28,16 +28,20 @@ pub fn AIL_redbook_stop(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
 pub fn AIL_redbook_pause(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
     const rb = hb orelse return 0;
     log("AIL_redbook_pause(hb={*})\n", .{rb});
-    rb.pause();
     // Report the transition that happened: a pause on a stopped or already
     // paused drive changes nothing, and a caller branching on this must see that.
-    return if (rb.status == .paused) 1 else 0;
+    // Reading the status after the call reported 1 for a no-op, since the drive
+    // was already paused.
+    const was_playing = rb.status == .playing;
+    rb.pause();
+    return if (was_playing and rb.status == .paused) 1 else 0;
 }
 pub fn AIL_redbook_resume(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
     const rb = hb orelse return 0;
     log("AIL_redbook_resume(hb={*})\n", .{rb});
+    const was_paused = rb.status == .paused;
     rb.resumePlayback();
-    return if (rb.status == .playing) 1 else 0;
+    return if (was_paused and rb.status == .playing) 1 else 0;
 }
 pub fn AIL_redbook_status(hb: ?*openmiles.Redbook) callconv(.winapi) u32 {
     const rb = hb orelse return openmiles.redbook_status_error;

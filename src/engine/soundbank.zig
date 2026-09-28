@@ -234,6 +234,13 @@ pub const Bank = struct {
     // would let C-string consumers run past the block (over-read under
     // ReleaseFast). Immutable after load, so sharing it is race-free.
     name_buf: [5]u8 = [_]u8{0} ** 5,
+    /// Whether the 4-byte name field ended in a character rather than a NUL,
+    /// i.e. whether name_buf is shorter than the field because a multi-byte
+    /// character was cut in half rather than because the field ended there. A
+    /// name comparison treats the two differently: a caller name longer than
+    /// the read-back matches a field that is full, and mismatches one that
+    /// ended.
+    name_field_full: bool = false,
     filename: [:0]u8,
     /// Resolved form of `filename`, and the key the global registry dedups on.
     /// Owned like `filename` — sentinel-typed, which is the slice type its
@@ -690,6 +697,7 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
     @memcpy(name_field[0..nlen], image[off_name..][0..nlen]);
     const cut_name = wide.utf8Prefix(&name_field, nlen);
     @memcpy(self.name_buf[0..cut_name.len], cut_name);
+    self.name_field_full = nlen == bank_name_field_bytes and name_field[bank_name_field_bytes - 1] != 0;
 
     // Build the events/sounds name indexes before the bank joins the registry:
     // until registryAdd publishes it, no other thread can reach the Bank, so

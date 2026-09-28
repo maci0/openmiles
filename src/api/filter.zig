@@ -9,7 +9,7 @@ const Sample = openmiles.Sample;
 const Provider = openmiles.Provider;
 const Filter = openmiles.Filter;
 
-const builtin_filter_name: [*:0]const u8 = "OpenMiles Low-Pass Filter";
+pub const builtin_filter_name: [*:0]const u8 = "OpenMiles Low-Pass Filter";
 const filter_attr_names = [_][*:0]const u8{ "Cutoff", "Order" };
 
 pub fn AIL_open_filter(provider_opt: ?*Provider, driver_opt: ?*DigitalDriver) callconv(.winapi) ?*anyopaque {

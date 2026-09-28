@@ -301,7 +301,7 @@ pub const Provider = struct {
         // an OOM partway through the entry loop must not leak it (or the entry
         // names duped so far).
         errdefer iface.deinit();
-        const rib_entries: [*]RIB_INTERFACE_ENTRY = @ptrCast(@alignCast(entries));
+        const rib_entries: [*]RIB_INTERFACE_ENTRY = if (entry_count == 0) undefined else @ptrCast(@alignCast(entries.?));
         var i: usize = 0;
         while (i < entry_count) : (i += 1) {
             const entry = rib_entries[i];
