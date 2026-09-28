@@ -51,6 +51,12 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 - `AIL_serve` advances the 3D sources that asked for automatic position updating, by the time since the previous serve. The flag `AIL_auto_update_3D_position` sets had no effect before, and the call was a documented no-op.
 - A `set_limits` step inside an event installs the per-label caps its text declares, the same call `MilesSetSoundLabelLimits` makes. Only the out-of-band call applied them.
+- `mss.h` is installed to `zig-out/include/mss.h` and ships in the release
+  archive next to `mss32.dll`. The header is the only thing a consumer
+  compiles against, and until now a release archive handed a caller a DLL that
+  no new code could call without pulling the source tree for the header.
+- `mss.h` documents that `AIL_set_sample_file`'s `block` argument is not
+  meaningful, since the call always reads a whole image out of memory.
 
 ### Changed
 
@@ -110,6 +116,10 @@ All notable changes to OpenMiles are recorded here. The format follows
 - `AIL_redbook_play` takes millisecond offsets: `AIL_redbook_position` counts from the offset given, and `AIL_redbook_track` (a track number on a drive with no disc) stays 0 instead of reporting the offset as a track.
 - `openmiles.clock.advance` ignores a negative step, as its contract says. A rewind put virtual time below the epoch, where every elapsed counter reads 0.
 - A limits string naming the same label twice keeps the last count and no longer leaks the duplicate key.
+- `tests/test_utils.h` declared `AIL_startup` as returning `void` while
+  `mss.h` and the implementation both return `S32`, so the harness's view of
+  the ABI disagreed with the one a consumer compiles against. `full_suite.c`
+  now checks the startup result rather than discarding it.
 
 ## [0.2.0] - 2026-09-28
 

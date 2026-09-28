@@ -366,6 +366,9 @@ void       MSS_CALLBACK AIL_init_sample(HSAMPLE S, S32 cb_type, S32 cb_param);
 #else
 void       MSS_CALLBACK AIL_init_sample(HSAMPLE S);
 #endif
+/* block is not meaningful here: the call always reads a whole file image out
+ * of memory. Chunked double-buffered playback uses AIL_set_sample_type plus
+ * AIL_load_sample_buffer instead. Pass 0. */
 S32        MSS_CALLBACK AIL_set_sample_file(HSAMPLE S, void const* file_image, S32 block);
 #if MSS_AT_LEAST(50)
 S32        MSS_CALLBACK AIL_set_named_sample_file(HSAMPLE S, char const* file_type, void const* file_image, S32 size, U32 flags);

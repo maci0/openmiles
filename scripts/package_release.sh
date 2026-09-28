@@ -155,6 +155,9 @@ SUMS=${2:-}
 # archive entry name : path in the build tree, in the order they go into the zip
 entries=(
   "mss32.dll:zig-out/bin/mss32.dll"
+  # The header a consumer compiles against. Without it the archive is a DLL
+  # nobody new code can call, and every user has to pull the source tree.
+  "mss.h:zig-out/include/mss.h"
   "LICENSE:LICENSE"
   "README.md:README.md"
   "CHANGELOG.md:CHANGELOG.md"

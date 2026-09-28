@@ -287,7 +287,10 @@ release ships as a new version, never as a rebuilt archive under the old tag.
 ### Linking from your own code
 
 An unmodified game already ships its own `mss.h` and needs none of this. If
-you are calling the API from new code, `src/mss.h` declares the core surface.
+you are calling the API from new code, `mss.h` declares the core surface:
+`zig build` installs it at `zig-out/include/mss.h`, and a release archive
+carries it next to `mss32.dll`, so `-Izig-out/include` (or the directory you
+unpacked the archive into) is all the include path your program needs.
 Set `OPENMILES_MSS_VERSION` to the build you linked (default `90`, the build
 `zig build` produces); the header only declares what that build exports, so a
 mismatched version fails at compile time instead of at link time. The valid
@@ -406,6 +409,11 @@ int main(void)
     return 0;
 }
 ```
+
+`AIL_serve` is the only thing that advances the mixer, and the loop above is
+the shortest form that terminates. A real game calls it once per frame from
+its own loop rather than spinning on it, because a tight `while` here keeps a
+core busy for as long as the sound plays.
 
 The header covers playback, streaming, 3D, RIB, filters, the timers, the
 v6.5+ unified level/pan/reverb/low-pass and v7+ 3D calls on `HSAMPLE`,

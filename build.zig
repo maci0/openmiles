@@ -317,6 +317,9 @@ pub fn build(b: *std.Build) void {
     lib.root_module.addObject(c_impl);
 
     b.installArtifact(lib);
+    // The header is the only thing a consumer compiles against, so it ships
+    // with the build rather than being copied out of the source tree by hand.
+    b.installFile("src/mss.h", "include/mss.h");
 
     // Tests. The Zig test runners are real executables that link libc, so on a
     // glibc host they would pull the host crt1.o whose .sframe relocations the

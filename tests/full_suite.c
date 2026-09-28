@@ -110,7 +110,7 @@ int play_test_main(int argc, char** argv) {
     LOAD_FUNC_EX(AIL_quick_shutdown, 0);
 
     printf("1. Core System Test\n");
-    p_AIL_startup();
+    TEST_ASSERT(p_AIL_startup() != 0, "Startup");
     p_AIL_set_preference(1, 123);
     TEST_ASSERT(p_AIL_get_preference(1) == 123, "Preference set/get");
 
