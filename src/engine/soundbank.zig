@@ -11,9 +11,9 @@
 //! or truncated bank is rejected rather than over-reading.
 
 const std = @import("std");
-const fs_compat = @import("../utils/fs_compat.zig");
 const root = @import("../root.zig");
-const wide = @import("../utils/wide.zig");
+const fs_compat = root.fs_compat;
+const wide = root.wide;
 
 pub const BANK_TAG: u32 = (@as(u32, 'B') << 24) | (@as(u32, 'A') << 16) | (@as(u32, 'N') << 8) | @as(u32, 'K');
 pub const BANK_VERSION: i32 = 8;
