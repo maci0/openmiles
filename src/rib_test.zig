@@ -163,3 +163,39 @@ test "RIB_enumerate_interface on an unknown interface reports exhaustion" {
     try testing.expectEqual(0, rib.RIB_enumerate_interface(p, "no such interface", 1, &cursor, &out));
     try testing.expectEqual(@as(?*anyopaque, null), cursor);
 }
+
+test "an entry type a module wrote outside the enum is read as a function entry" {
+    // The entry array is the loaded module's memory: RIB_load_provider_library
+    // takes a game-named path and runs whatever RIB_Main is in it, so the
+    // entry_type word is a value this library never validated. Reading it
+    // through the enum and comparing it would be an operation on a value the
+    // type does not admit, and the stored entry would carry that value into
+    // every later type-filtered lookup and enumeration. The wire view re-types
+    // the field, so the value the registry holds is always one the enum has.
+    const Wire = extern struct {
+        entry_type: u32,
+        name: [*c]const u8,
+        token: usize,
+        subtype: u32,
+    };
+    const declared_function: u32 = 1; // RIB_ATTRIBUTE, the SDK's numbering
+    const out_of_range = [_]u32{ 0, 2, 7, 0xFFFFFFFF };
+    for (out_of_range) |raw| {
+        const entries = [_]Wire{
+            .{ .entry_type = raw, .name = "ASI stream open", .token = 0x10, .subtype = 0 },
+            .{ .entry_type = declared_function, .name = "ASI stream rate", .token = 0x20, .subtype = 0 },
+        };
+        const p = try openmiles.Provider.init(testing.allocator);
+        defer p.deinit();
+        _ = try p.registerInterface("ASI codec", @intCast(entries.len), @ptrCast(@constCast(&entries[0])));
+
+        const iface = p.interfaces.items[0];
+        // The function-typed lookup the RIB entry points drive still finds the
+        // entry, and the type it stored is a value the enum admits.
+        try testing.expectEqual(@as(?usize, 0x10), iface.tokenForType("ASI stream open", .RIB_FUNCTION));
+        try testing.expectEqual(@as(?usize, 0x20), iface.tokenForType("ASI stream rate", .RIB_ATTRIBUTE));
+        for (iface.order.items) |e| {
+            try testing.expect(std.enums.tagName(openmiles.RIB_ENTRY_TYPE, e.entry_type) != null);
+        }
+    }
+}

@@ -301,12 +301,12 @@ pub const Provider = struct {
         // an OOM partway through the entry loop must not leak it (or the entry
         // names duped so far).
         errdefer iface.deinit();
-        const rib_entries: [*]RIB_INTERFACE_ENTRY = if (entry_count == 0) undefined else @ptrCast(@alignCast(entries.?));
+        const rib_entries: [*]WireInterfaceEntry = if (entry_count == 0) undefined else @ptrCast(@alignCast(entries.?));
         var i: usize = 0;
         while (i < entry_count) : (i += 1) {
             const entry = rib_entries[i];
             if (entry.name != null) {
-                try iface.add(std.mem.span(entry.name), entry.token, entry.entry_type, entry.subtype);
+                try iface.add(std.mem.span(entry.name), entry.token, entryTypeFromWire(entry.entry_type), entry.subtype);
             }
         }
         // A counter that wrapped would hand out a handle an earlier interface
@@ -537,3 +537,43 @@ pub const ImageKey = struct {
 var g_image_providers: std.ArrayListUnmanaged(*Provider) = .empty;
 const image_registry_alloc = std.heap.page_allocator;
 var g_image_mutex: std.Io.Mutex = .init;
+
+/// The same record as a loaded module writes it, with the entry type as the
+/// raw U32 the mss.h field is. `RIB_INTERFACE_ENTRY.entry_type` is a Zig enum,
+/// and its two declared variants are the only valid values of that type: an
+/// array a plugin filled in holds whatever it wrote, so reading the field as
+/// the enum and then comparing it (tokenForType, RIB_enumerate_interface)
+/// operates on a value the type does not admit, which is undefined behavior
+/// and lets a module hand the whole registry a type field it never validated.
+/// The entry array crosses into the process from the module, so it is read
+/// through this view and the value is turned into an enum at the boundary.
+///
+/// Declared at the end of the file, past every line docs/THREAT_MODEL.md
+/// anchors into this one, so adding it moves no anchor.
+const WireInterfaceEntry = extern struct {
+    entry_type: u32,
+    name: [*c]const u8,
+    token: usize,
+    subtype: u32,
+};
+
+comptime {
+    // The wire view exists only to re-type one field, so it has to agree with
+    // the record it replaces in every other respect: a layout that drifted
+    // would read a plugin's token and name from the wrong offsets.
+    if (@sizeOf(WireInterfaceEntry) != @sizeOf(RIB_INTERFACE_ENTRY) or
+        @offsetOf(WireInterfaceEntry, "name") != @offsetOf(RIB_INTERFACE_ENTRY, "name") or
+        @offsetOf(WireInterfaceEntry, "token") != @offsetOf(RIB_INTERFACE_ENTRY, "token") or
+        @offsetOf(WireInterfaceEntry, "subtype") != @offsetOf(RIB_INTERFACE_ENTRY, "subtype"))
+    {
+        @compileError("WireInterfaceEntry layout drifted from RIB_INTERFACE_ENTRY");
+    }
+}
+
+/// The entry type a plugin's raw U32 names, or the SDK's function default for
+/// anything else. The same spelling the RIB_* entry points use for their
+/// `entry_type` argument, so a module that passes 1 for an attribute and a
+/// module that passes anything else for a function agree.
+fn entryTypeFromWire(value: u32) RIB_ENTRY_TYPE {
+    return if (value == @intFromEnum(RIB_ENTRY_TYPE.RIB_ATTRIBUTE)) .RIB_ATTRIBUTE else .RIB_FUNCTION;
+}
