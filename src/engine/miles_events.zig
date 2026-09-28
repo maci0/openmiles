@@ -35,6 +35,12 @@ pub const SoundInstance = struct {
     labels: [:0]u8, // owned (comma/space-separated)
     user_buffer: ?*anyopaque,
     user_buffer_len: i32,
+    // A paused instance holds its place in the lifecycle (MSS has no PAUSED
+    // status bit) but stops accruing elapsed time: pause stamps the reading and
+    // resume moves start_ms forward by the gap, so the same rule the sweep uses
+    // to expire a PLAYING instance cannot expire one that was not playing.
+    paused: bool = false,
+    paused_at_ms: u64 = 0,
     // Set while the instance is a selected eviction victim, so the compaction
     // pass tests membership by field instead of by scanning the victim list
     // once per instance.
@@ -346,6 +352,22 @@ pub fn nextId() u64 {
     const id = g_next_id;
     g_next_id += 1;
     return id;
+}
+
+// Suspend one instance's clock at `now`. The status is left alone: an
+// enumeration filtered on MILESEVENTSOUNDSTATUS_PLAYING still has to see it.
+pub fn pauseInstanceAt(inst: *SoundInstance, now: u64) void {
+    if (inst.paused) return;
+    inst.paused = true;
+    inst.paused_at_ms = now;
+}
+
+/// Resume one instance, crediting the paused span back to its start so the time
+/// it spent suspended does not count against its duration.
+pub fn resumeInstanceAt(inst: *SoundInstance, now: u64) void {
+    if (!inst.paused) return;
+    inst.paused = false;
+    if (now > inst.paused_at_ms) inst.start_ms += now - inst.paused_at_ms;
 }
 
 // Progress PLAYING instances to COMPLETE once their bank duration has elapsed.

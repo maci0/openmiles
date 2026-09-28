@@ -750,6 +750,20 @@ pub const DigitalDriver = struct {
         return self.refs.fetchSub(1, .acq_rel) == 1;
     }
 
+    /// Drop one owner's reference and report whether that was the last one. The
+    /// close path uses this rather than `release` so the teardown stays behind
+    /// the digital driver's table claim: a close that only releases must leave
+    /// the driver in the table, or the next close of the same handle finds no
+    /// entry and the device is never torn down.
+    ///
+    /// The caller has established the handle is live, so the count cannot be
+    /// zero here; a zero would be a release with no matching open.
+    pub fn dropRef(self: *DigitalDriver) bool {
+        const prev = self.refs.fetchSub(1, .acq_rel);
+        std.debug.assert(prev > 0);
+        return prev == 1;
+    }
+
     /// Unconditional teardown, ignoring outstanding opens. Shutdown uses it:
     /// the process is going away, so an open the game never closed is not a
     /// reason to leave an audio device running.

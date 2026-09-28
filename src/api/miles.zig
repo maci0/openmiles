@@ -239,7 +239,10 @@ pub fn MilesBeginEventQueueProcessing() callconv(.winapi) i32 {
     for (ev.g_instances.items) |inst| {
         if (inst.status == ev.STATUS_PENDING) {
             inst.status = ev.STATUS_PLAYING;
-            inst.start_ms = now;
+            // An instance paused before its queue turn keeps the pause: stamping
+            // start_ms here would restart its clock and let it expire while the
+            // caller still holds it suspended.
+            if (inst.paused) inst.paused_at_ms = now else inst.start_ms = now;
         }
     }
     return 0;
@@ -297,14 +300,28 @@ pub fn MilesStopSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.wi
 pub fn MilesPauseSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.winapi) u64 {
     ev.stateLock();
     defer ev.stateUnlock();
+    const now = openmiles.getMsCount64();
     var n: u64 = 0;
     for (ev.g_instances.items) |inst| {
-        if (ev.matchFilter(inst, labels, filter)) n += 1;
+        if (inst.paused) continue;
+        if (!ev.matchFilter(inst, labels, filter)) continue;
+        ev.pauseInstanceAt(inst, now);
+        n += 1;
     }
     return n;
 }
 pub fn MilesResumeSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.winapi) u64 {
-    return MilesPauseSoundInstances(labels, filter);
+    ev.stateLock();
+    defer ev.stateUnlock();
+    const now = openmiles.getMsCount64();
+    var n: u64 = 0;
+    for (ev.g_instances.items) |inst| {
+        if (!inst.paused) continue;
+        if (!ev.matchFilter(inst, labels, filter)) continue;
+        ev.resumeInstanceAt(inst, now);
+        n += 1;
+    }
+    return n;
 }
 pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque, status: i32, labels: ?[*:0]const u8, search_for_id: u64, out_info: ?*anyopaque) callconv(.winapi) i32 {
     _ = system;
