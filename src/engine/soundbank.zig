@@ -364,18 +364,31 @@ pub const Bank = struct {
         var idx: NameIndex = .{};
         errdefer idx.deinit(self.allocator);
         const count = self.countFor(which);
+        // Size the table for the whole table up front: grown one key at a time
+        // it rehashes log(count) times, each pass reallocating and reinserting
+        // every key inserted so far, so a bank with thousands of sounds pays a
+        // multiple of the insert cost at load. A reserve that fails is not an
+        // error; the loop below still inserts and the map grows as it must.
+        // Bounded by what the metadata block can actually hold entries for, so
+        // a header count far past the end of the file cannot ask for a table
+        // sized by a number no entry will ever occupy.
+        const capacity_hint: u32 = @intCast(@min(@as(usize, count), self.meta.len / asset_entry_size));
+        idx.map.ensureTotalCapacity(self.allocator, capacity_hint) catch {};
         var i: u32 = 0;
         while (i < count) : (i += 1) {
             const nm = self.entryNameAt(which, i) orelse continue;
             const key = try self.allocator.dupe(u8, nm);
             for (key) |*c| c.* = std.ascii.toLower(c.*);
-            if (idx.map.contains(key)) {
+            // One hash lookup, not the two contains+put took. A name already in
+            // the map keeps its entry: first occurrence wins, as the scan does.
+            const gop = idx.map.getOrPut(self.allocator, key) catch |err| {
+                self.allocator.free(key);
+                return err;
+            };
+            if (gop.found_existing) {
                 self.allocator.free(key);
             } else {
-                idx.map.put(self.allocator, key, i) catch |err| {
-                    self.allocator.free(key);
-                    return err;
-                };
+                gop.value_ptr.* = i;
             }
         }
         idx.complete = true;
