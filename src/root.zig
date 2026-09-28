@@ -1225,26 +1225,58 @@ pub fn liveSequenceCount() usize {
 // AIL_set_redist_directory is documented as callable more than once per
 // session, and a game may drive it from a worker thread while its main thread
 // opens a driver and reads the same path. The compare-then-copy below is one
-// read-modify-write of a 256-byte buffer, so it is serialized; the scan itself
+// read-modify-write of a fixed buffer, so it is serialized; the scan itself
 // runs outside the lock on a private copy, since loadAllAsi does directory I/O
 // and the caller holds the path for the whole scan.
-var redist_directory: [256:0]u8 = [_:0]u8{0} ** 256;
+
+/// MAX_PATH in UTF-16 units, the bound every open below this path shares: the
+/// SDK's redist-directory buffer holds a path that long and no longer.
+const redist_max_path_units: usize = 260;
+
+/// The stored directory is UTF-8, and one UTF-16 unit spells up to three UTF-8
+/// bytes, so a path MAX_PATH holds in units needs this many bytes. A buffer
+/// sized in units instead refuses a path Windows opens: 200 CJK characters are
+/// 200 units and 600 bytes, and the 256 bytes this used to allow turned that
+/// into a "path too long" report with the previous directory kept and no
+/// plugin loaded, for a path half the limit long.
+const redist_max_path_bytes: usize = redist_max_path_units * 3;
+
+var redist_directory: [redist_max_path_bytes:0]u8 = [_:0]u8{0} ** redist_max_path_bytes;
 var redist_mutex: std.Io.Mutex = .init;
+
+/// Whether `path` is one the store below can hold: inside the byte buffer, and
+/// inside MAX_PATH as Windows states it, in UTF-16 units. A path in the process
+/// ANSI code page rather than UTF-8 (a game on a CJK or Cyrillic Windows spells
+/// its directory that way) has no unit count available, so the byte capacity is
+/// all there is to measure it against, and the path is not refused for a length
+/// nothing can be measured in.
+fn redistPathFits(path: []const u8) bool {
+    if (path.len > redist_directory.len - 1) return false;
+    // toWide's own guard compares the input's byte count against the
+    // destination, so the destination is sized one unit per byte here and the
+    // unit count is what gets measured.
+    var wbuf: [redist_max_path_bytes]u16 = undefined;
+    const w = wide.toWide(path, &wbuf) catch |err| switch (err) {
+        error.NoSpaceLeft => return false,
+        else => return true,
+    };
+    return w.len < redist_max_path_units;
+}
 
 pub fn setRedistDirectory(path: []const u8) void {
     log("Setting redist directory to: {s}\n", .{path});
-    // A path too long for the buffer is refused, not cut. What is stored here
-    // is the directory the scan below loads and executes .asi/.m3d/.flt images
+    // A path too long for MAX_PATH is refused, not cut. What is stored here is
+    // the directory the scan below loads and executes .asi/.m3d/.flt images
     // from, and a byte prefix of a long path is very often a different real
     // directory, most obviously a parent of the intended one, so storing the
     // prefix would move the plugin search somewhere the game and the operator
     // never named. The refusal goes to stderr, where the OPENMILES_DEBUG and
     // TMPDIR reports go as well: a caller with a too-long path has no reason to
     // have a debug log turned on.
-    if (path.len > redist_directory.len - 1) {
+    if (!redistPathFits(path)) {
         std.debug.print(
-            "openmiles: AIL_set_redist_directory: refusing a {d}-byte path (limit {d}); the previous directory is kept and no plugins are loaded\n",
-            .{ path.len, redist_directory.len - 1 },
+            "openmiles: AIL_set_redist_directory: refusing a {d}-byte path (MAX_PATH is {d} UTF-16 units, {d} bytes of UTF-8); the previous directory is kept and no plugins are loaded\n",
+            .{ path.len, redist_max_path_units, redist_max_path_bytes },
         );
         return;
     }
@@ -1298,7 +1330,7 @@ pub fn getRedistDirectoryCopy(allocator: std.mem.Allocator) ![]u8 {
 /// own buffer), and redist_directory itself is rewritten by setRedistDirectory
 /// on whatever thread calls it, so a pointer into it would be read while
 /// another thread was mid-memcpy.
-threadlocal var redist_scratch: [256:0]u8 = [_:0]u8{0} ** 256;
+threadlocal var redist_scratch: [redist_max_path_bytes:0]u8 = [_:0]u8{0} ** redist_max_path_bytes;
 
 pub fn redistDirectoryZ() [*:0]const u8 {
     redist_mutex.lockUncancelable(io);

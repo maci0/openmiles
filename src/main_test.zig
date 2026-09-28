@@ -1027,15 +1027,17 @@ test "AIL_set_redist_directory returns the stored directory pointer (SDK char*)"
     try testing.expectEqual(@as(i32, 1), mh.AIL_MIDI_handle_release(@ptrCast(&scratch)));
 }
 
-test "setRedistDirectory refuses a path longer than the buffer" {
+test "setRedistDirectory refuses a path longer than MAX_PATH" {
     // A long path is refused, not cut. A byte prefix of it is usually a real
     // directory (a parent of the intended one), and the stored value is the
     // directory .asi/.m3d/.flt images are loaded and executed from, so cutting
     // would move the plugin search somewhere the caller never named. The
-    // previous directory survives the refusal.
+    // previous directory survives the refusal. The bound is MAX_PATH, which
+    // Windows states in UTF-16 units, so the path below is over it in bytes and
+    // the buffer holds the byte form of that many units.
     openmiles.setRedistDirectory("./test_plugins");
     defer openmiles.setRedistDirectory("");
-    const long_path = "/" ++ "a" ** 300;
+    const long_path = "/" ++ "a" ** 800;
     openmiles.setRedistDirectory(long_path);
     try testing.expectEqualStrings("./test_plugins", openmiles.getRedistDirectory());
     openmiles.setRedistDirectory("");
@@ -1277,13 +1279,26 @@ test "error and path buffers cut on a character boundary" {
     defer openmiles.clearFileError();
     try testing.expect(std.unicode.utf8ValidateSlice(std.mem.sliceTo(&openmiles.last_file_error_buf, 0)));
 
-    // A path that does not fit the redist buffer is refused rather than cut, so
-    // nothing is stored; the two error buffers above are the ones that cut, and
-    // each has to drop a partial character whole.
-    openmiles.setRedistDirectory("/games/" ++ "\u{1F600}" ** 64);
+    // The redist bound is MAX_PATH, which Windows states in UTF-16 units, so a
+    // path of 200 CJK characters is inside it (200 units, 600 UTF-8 bytes) even
+    // though its byte count is well past what a byte-for-byte reading of the
+    // limit allows. Refusing it dropped every plugin with a report nothing reads.
+    const cjk = "/" ++ "\u{00e9}" ** 199;
+    openmiles.setRedistDirectory(cjk);
     defer openmiles.setRedistDirectory("");
-    const stored = openmiles.getRedistDirectory();
-    try testing.expectEqual(@as(usize, 0), stored.len);
+    try testing.expectEqualStrings(cjk, openmiles.getRedistDirectory());
+
+    // Past MAX_PATH units, a path is refused rather than cut, so the previous
+    // directory stands. The units are what the limit counts, so 300 ASCII
+    // characters (300 units, 300 bytes) is over it while the 600-byte CJK path
+    // above is not. The two error buffers above are the ones that cut, and each
+    // has to drop a partial character whole.
+    openmiles.setRedistDirectory("/" ++ "a" ** 299);
+    try testing.expectEqualStrings(cjk, openmiles.getRedistDirectory());
+    openmiles.setRedistDirectory("/games/" ++ "\u{1F600}" ** 200);
+    try testing.expectEqualStrings(cjk, openmiles.getRedistDirectory());
+    openmiles.setRedistDirectory("");
+    try testing.expectEqual(@as(usize, 0), openmiles.getRedistDirectory().len);
 }
 
 test "xmidiToSmf returns error on invalid data" {
