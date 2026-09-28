@@ -1,9 +1,39 @@
+//! The `openmiles` module root: everything in the library except the exported
+//! C ABI hangs off this file.
+//!
+//! Layering, outermost first:
+//!
+//!   main.zig      the DLL root, owns DllMain and the PE export table only
+//!   api/*.zig     the AIL_*/Miles*/RIB_* C ABI, one module per SDK area
+//!   engine/*.zig  drivers, mixers, codecs, loaders
+//!   rib/          the RIB plugin/provider registry
+//!   utils/*.zig   leaves: logging, wide strings, fs, dynlib, pure helpers
+//!
+//! Dependencies point inward from there. `api/` reaches the engine only
+//! through the symbols re-exported here, never by importing an `engine/`
+//! file directly. `utils/` is a leaf: it imports std and its own siblings,
+//! nothing else.
+//!
+//! This file is both the public surface and the home of the process-wide
+//! state every layer shares: the allocator, the two error buffers, the custom
+//! file-I/O callbacks, and the provider, timer, driver, and sequence
+//! registries. The engine modules reach those through `@import("../root.zig")`,
+//! so root and engine reference each other at the file level. Keeping the
+//! registries in this one hub rather than in `engine/` is what lets a driver
+//! module publish to the timer and sequence registries without importing those
+//! modules back.
+//!
+//! Section order below follows that: re-exports, then constants, then the
+//! shared state, each under a `// ---` banner.
 const std = @import("std");
 const logger = @import("utils/logger.zig");
 
 pub const log = logger.log;
 pub const fs_compat = @import("utils/fs_compat.zig");
 pub const wide = @import("utils/wide.zig");
+pub const removeFirst = @import("utils/list.zig").removeFirst;
+pub const satI32 = @import("utils/saturate.zig").satI32;
+pub const satU32 = @import("utils/saturate.zig").satU32;
 
 /// Target MSS version (major*10+minor, e.g. 66 = 6.6), selected via -Dmss-version.
 pub const mss_version: u16 = @import("build_options").mss_version;
@@ -883,18 +913,6 @@ var driver_create_mutex: std.Io.Mutex = .init;
 var known_drivers: std.ArrayList(*DigitalDriver) = .empty;
 var driver_table_mutex: std.Io.Mutex = .init;
 
-/// Drop the first entry equal to `item`, if the list holds one. The registries
-/// that unlink through it hold distinct handles, so the first match is the only
-/// one, and a miss is the normal outcome of a double unregister.
-pub fn removeFirst(list: anytype, item: anytype) void {
-    for (list.items, 0..) |entry, i| {
-        if (entry == item) {
-            _ = list.swapRemove(i);
-            return;
-        }
-    }
-}
-
 /// Returns false when the handle could not be tracked. The caller must then
 /// tear the driver down instead of publishing it: an untracked handle is
 /// misclassified as a Sample3D by the 3D dispatch entry points.
@@ -1213,26 +1231,6 @@ const volume_to_gain_table: [128]f32 = blk: {
     }
     break :blk table;
 };
-
-/// Saturating float -> i32 (NaN -> 0, out-of-range -> clamped). Guards the
-/// `@intFromFloat` panic when callers feed adversarial floats -- including the
-/// i32 -> f32 -> i32 round trip where INT_MAX rounds up to 2^31 (out of range),
-/// and TML event times (u32 milliseconds) that can exceed maxInt(i32) on
-/// long/crafted sequences. f32 arguments widen losslessly.
-pub fn satI32(v: f64) i32 {
-    if (std.math.isNan(v)) return 0;
-    if (v >= 2147483647.0) return std.math.maxInt(i32);
-    if (v <= -2147483648.0) return std.math.minInt(i32);
-    return @intFromFloat(v);
-}
-
-/// Saturating float -> u32 (NaN/negative -> 0, overflow -> clamped). Accepts
-/// f32 or f64 so wide callers keep their precision.
-pub fn satU32(v: anytype) u32 {
-    if (!(v >= 0)) return 0; // false for NaN and negatives
-    if (v >= 4294967295.0) return std.math.maxInt(u32);
-    return @intFromFloat(v);
-}
 
 // --- Clock ---
 

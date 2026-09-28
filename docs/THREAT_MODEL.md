@@ -84,7 +84,7 @@ There is no `AIL_open_file`/`AIL_close_file`/`HSFILE` handle API. The file
 service surface is `src/api/file.zig`, the v9 spellings
 (`src/api/v9.zig:99 AIL_file_read_info`, `src/api/v9.zig:107 AIL_file_size_info`,
 which forward to the same uncapped-`dest` write described above), and the
-callback VFS in `src/root.zig:300 setFileCallbacks`.
+callback VFS in `src/root.zig:329 setFileCallbacks`.
 
 Callbacks are a second game-to-DLL-to-game boundary and the set is larger than
 the four named above. Stored and later invoked, several of them on the audio
@@ -341,7 +341,7 @@ Gaps:
 
 Single points of failure:
 
-- `fileCallbackReadAll` (`src/root.zig:322 fileCallbackReadAll`) is the only
+- `fileCallbackReadAll` (`src/root.zig:351 fileCallbackReadAll`) is the only
   place a VFS-reported file length becomes an allocation. It re-checks
   `max_file_load_bytes` itself (`src/root.zig:354 max_file_load_bytes`)
   rather than inheriting a cap from `readWholeFile`
