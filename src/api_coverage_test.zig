@@ -357,25 +357,37 @@ test "coverage: stream.zig exports" {
 
 test "coverage: quick.zig exports" {
     const n: ?*openmiles.Sample = null;
-    _ = qk.AIL_quick_copy(n);
+    // Every one of these is a null handle, so each must answer with the value
+    // its SDK signature promises instead of writing through the handle; a
+    // dropped guard here would read through null and take the test binary down
+    // rather than fail an assertion, so the return values are what is checked.
+    try testing.expectEqual(@as(?*openmiles.Sample, null), qk.AIL_quick_copy(n));
     qk.AIL_quick_unload(n);
-    _ = qk.AIL_quick_play(n, 1);
+    try testing.expectEqual(@as(i32, 0), qk.AIL_quick_play(n, 1));
     qk.AIL_quick_stop(n);
-    _ = qk.AIL_quick_status(n);
+    try testing.expectEqual(@as(i32, 0), qk.AIL_quick_status(n));
     qk.AIL_quick_set_volume(n, 64, 127);
     qk.AIL_quick_set_speed(n, 22050);
-    _ = qk.AIL_quick_ms_length(n);
-    _ = qk.AIL_quick_ms_position(n);
+    try testing.expectEqual(@as(i32, 0), qk.AIL_quick_ms_length(n));
+    try testing.expectEqual(@as(i32, 0), qk.AIL_quick_ms_position(n));
     qk.AIL_quick_set_ms_position(n, 0);
     qk.AIL_quick_halt(n);
     qk.AIL_quick_set_reverb(n, 1, 0.5, 0.1);
-    _ = qk.AIL_quick_type(n);
+    try testing.expectEqual(@as(i32, 0), qk.AIL_quick_type(n));
     var qs: ?*openmiles.Sample = null;
     var qd: ?*openmiles.DigitalDriver = null;
     var qm: ?*openmiles.MidiDriver = null;
     qk.AIL_quick_handles(&qs, &qd, &qm);
-    // load_mem with a too-short/garbage buffer (no driver open) -> null.
-    _ = qk.AIL_quick_load_mem(sc(), 0);
+    // The quick-sample out-param is always nulled; the two driver out-params
+    // report whatever is currently open, which this test does not set up.
+    try testing.expectEqual(@as(?*openmiles.Sample, null), qs);
+    // All-null out-params are a no-op rather than a write through null.
+    qk.AIL_quick_handles(null, null, null);
+    // load_mem with a too-short/garbage buffer (no driver open) -> null, and
+    // the same buffer with a stated length is rejected on its content rather
+    // than accepted as silence.
+    try testing.expectEqual(@as(?*openmiles.Sample, null), qk.AIL_quick_load_mem(sc(), 0));
+    try testing.expectEqual(@as(?*openmiles.Sample, null), qk.AIL_quick_load_mem(sc(), 16));
 }
 
 test "coverage: redbook.zig exports" {
@@ -395,11 +407,30 @@ test "coverage: redbook.zig exports" {
     _ = rb.AIL_redbook_id(h);
     _ = rb.AIL_redbook_position(h);
     _ = rb.AIL_redbook_track(h);
+    // Track info has no drive to read, so both out-params must be zeroed
+    // rather than left holding whatever the caller had in them.
+    u32o = 0xDEAD_BEEF;
     rb.AIL_redbook_track_info(h, 1, &u32o, &u32o);
-    _ = rb.AIL_redbook_set_volume(h, 64);
-    _ = rb.AIL_redbook_volume(h);
+    try testing.expectEqual(@as(u32, 0), u32o);
+    // set_volume reports 1 on success, and the getter reads the clamped value
+    // back: 64 stays 64, an out-of-range 200 clamps to the top of the range.
+    try testing.expectEqual(@as(i32, 1), rb.AIL_redbook_set_volume(h, 64));
+    try testing.expectEqual(@as(i32, 64), rb.AIL_redbook_volume(h));
+    try testing.expectEqual(@as(i32, 1), rb.AIL_redbook_set_volume(h, 200));
+    try testing.expectEqual(@as(i32, 127), rb.AIL_redbook_volume(h));
+    // A fresh emulated drive has no disc: no tracks, stopped, position 0.
     const h2 = rb.AIL_redbook_open(0);
-    if (h2) |hh| rb.AIL_redbook_close(hh);
+    if (h2) |hh| {
+        defer rb.AIL_redbook_close(hh);
+        try testing.expectEqual(@as(u32, 0), rb.AIL_redbook_status(hh));
+        try testing.expectEqual(@as(u32, 0), rb.AIL_redbook_tracks(hh));
+        try testing.expectEqual(@as(u32, 0), rb.AIL_redbook_position(hh));
+        // The null-handle path reports the error status and zero counts rather
+        // than dereferencing the missing drive.
+        try testing.expectEqual(openmiles.redbook_status_error, rb.AIL_redbook_status(null));
+        try testing.expectEqual(@as(u32, 0), rb.AIL_redbook_tracks(null));
+        try testing.expectEqual(@as(i32, 0), rb.AIL_redbook_set_volume(null, 64));
+    }
 }
 
 test "coverage: timer.zig exports" {
@@ -550,24 +581,30 @@ test "coverage: midi.zig exports" {
 
 test "coverage: dls.zig exports" {
     const nd: ?*openmiles.MidiDriver = null;
-    _ = dl.AIL_DLS_load_file(nd, "/nonexistent", 0);
+    // Every load takes the driver first, so a null handle is refused before the
+    // file is touched: the loader never reports a bank it cannot own.
+    try testing.expectEqual(@as(?*anyopaque, null), dl.AIL_DLS_load_file(nd, "/nonexistent", 0));
+    try testing.expectEqual(@as(?*anyopaque, null), dl.AIL_DLS_load_memory(nd, sc(), 0));
+    try testing.expectEqual(@as(?*anyopaque, null), dl.DLSLoadFile(nd, "/nonexistent", 0));
+    try testing.expectEqual(@as(?*anyopaque, null), dl.DLSLoadMemFile(nd, sc(), 0));
+    // The reverb out-params are the caller's to fill; with no driver they must
+    // be left exactly as they were rather than zeroed or written through null.
+    f32o = 2.5;
+    dl.AIL_DLS_get_reverb(nd, &f32o, &f32o, &f32o);
+    try testing.expectEqual(@as(f32, 2.5), f32o);
     dl.AIL_DLS_unload_file(nd, sc());
     dl.AIL_set_filter_DLS_preference(nd, "Cutoff", sc());
     dl.AIL_filter_DLS_attribute(nd, "Cutoff", sc());
-    _ = dl.AIL_DLS_load_memory(nd, sc(), 0);
     dl.AIL_DLS_unload(nd, sc());
     dl.AIL_DLS_compact(nd);
     dl.AIL_DLS_get_info(nd, sc(), @ptrCast(@alignCast(sc())));
-    dl.AIL_DLS_get_reverb(nd, &f32o, &f32o, &f32o);
     dl.AIL_DLS_set_reverb(nd, 1, 0.5, 0.1);
     _ = dl.AIL_DLS_open(null, null, null, 44100, 16, 2, 0);
     dl.AIL_DLS_close(nd, 0);
-    _ = dl.AIL_set_DLS_processor(nd, 0, null);
+    try testing.expectEqual(@as(?*anyopaque, null), dl.AIL_set_DLS_processor(nd, 0, null));
     dl.DLSClose(nd, sc());
     dl.DLSCompactMemory(nd);
     dl.DLSGetInfo(nd, sc(), @ptrCast(@alignCast(sc())));
-    _ = dl.DLSLoadFile(nd, "/nonexistent", 0);
-    _ = dl.DLSLoadMemFile(nd, sc(), 0);
     _ = dl.DLSMSSOpen(null, null, null, 44100, 16, 2, 0);
     _ = dl.DLSMSSGetCPU(nd);
     dl.DLSSetAttribute(nd, "Cutoff", sc());
@@ -578,7 +615,16 @@ test "coverage: dls.zig exports" {
     var a: ?*anyopaque = null;
     var b: ?*anyopaque = null;
     var c: ?*anyopaque = null;
-    _ = dl.AIL_find_DLS(sc(), 16, &a, &u32o, &b, &u32o);
+    // A buffer with no DLS or XMI in it reports failure with every out-param
+    // cleared, so a caller branching on the return cannot be handed a stale
+    // pointer or a length from a previous call.
+    a = @ptrFromInt(1);
+    b = @ptrFromInt(1);
+    u32o = 0xDEAD_BEEF;
+    try testing.expectEqual(@as(i32, 0), dl.AIL_find_DLS(sc(), 16, &a, &u32o, &b, &u32o));
+    try testing.expectEqual(@as(?*anyopaque, null), a);
+    try testing.expectEqual(@as(?*anyopaque, null), b);
+    try testing.expectEqual(@as(u32, 0), u32o);
     a = null;
     b = null;
     if (dl.AIL_extract_DLS(sc(), 16, &a, &u32o, &b, &u32o, null) != 0) {

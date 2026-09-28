@@ -4094,16 +4094,38 @@ test "Timer double start is idempotent" {
 }
 
 test "Timer double stop is safe" {
-    const dummy_cb = struct {
-        fn cb(_: u32) callconv(.winapi) void {}
-    }.cb;
+    // The risk a second stop carries is not the flag it leaves behind but the
+    // state it leaves the loop in, so the timer is started again afterwards:
+    // a stop that tore down the thread while the first was still joining it
+    // leaves a timer that reports stopped and never runs again.
+    var called = std.atomic.Value(u32).init(0);
+    const State = struct {
+        var flag: *std.atomic.Value(u32) = undefined;
+    };
+    State.flag = &called;
+    const cb = struct {
+        fn f(_: u32) callconv(.winapi) void {
+            _ = State.flag.fetchAdd(1, .monotonic);
+        }
+    }.f;
     const allocator = testing.allocator;
-    const timer = try openmiles.Timer.init(allocator, dummy_cb);
+    const timer = try openmiles.Timer.init(allocator, cb);
     defer timer.deinit();
 
     timer.stop();
     timer.stop();
     try testing.expect(!timer.is_running);
+
+    timer.setPeriodUs(1000);
+    timer.start();
+    try testing.expect(timer.is_running);
+    var waited: u32 = 0;
+    while (called.load(.monotonic) == 0 and waited < 5000) : (waited += 10) {
+        openmiles.io.sleep(std.Io.Duration.fromNanoseconds(10 * std.time.ns_per_ms), .awake) catch {};
+    }
+    timer.stop();
+    try testing.expect(!timer.is_running);
+    try testing.expect(called.load(.monotonic) > 0);
 }
 
 test "Timer concurrent start/stop never runs overlapping loops" {
@@ -7207,6 +7229,10 @@ test "Miles label limits take a repeated label once and leak no name" {
     const saved = openmiles.global_allocator;
     openmiles.global_allocator = testing.allocator;
     defer openmiles.global_allocator = saved;
+    // Registered after the allocator swap, so the instances the eviction walk
+    // allocates are freed while testing.allocator is still installed.
+    api_miles_t.MilesShutdownEventSystem();
+    defer api_miles_t.MilesShutdownEventSystem();
 
     _ = api_miles_t.MilesSetSoundLabelLimits(null, "music 2:sfx 1:MUSIC 5:music 7");
     // Resetting empties the map, and with it every name the string carried.
@@ -7214,6 +7240,39 @@ test "Miles label limits take a repeated label once and leak no name" {
     // The v8 entry point reaches the same map.
     _ = api_miles_t.MilesSetSoundLabelLimits_v8("music 3:music 3");
     _ = api_miles_t.MilesSetSoundLabelLimits_v8("");
+
+    // The one entry is observable through what the cap does at start time: a
+    // repeat is one entry with the last count winning, whether the repeat
+    // differs in case or only in spelling. "music 2:music 1" caps at 1, so the
+    // second start evicts the first; a map that kept both counts (2 and 1) or
+    // the earlier one would leave two instances alive.
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesSetSoundLabelLimits(null, "music 2:music 1"));
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("dup1"), 0, 0, cstr2("music"), null, 0, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("dup2"), 0, 0, cstr2("music"), null, 0, 0);
+    var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
+    var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var count: i32 = 0;
+    while (api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("music"), 0, @ptrCast(&info)) == 1) count += 1;
+    try testing.expectEqual(@as(i32, 1), count);
+
+    // The same repeat written in a different case collapses the same way, and a
+    // cap of 0 is a real value: it evicts every instance carrying the label
+    // before the new one is added, so the survivor is the new sound alone. A
+    // map that kept the earlier count (2) would have left dup2 alive beside it.
+    try testing.expectEqual(@as(i32, 1), api_miles_t.MilesSetSoundLabelLimits(null, "MUSIC 2:music 0"));
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("dup3"), 0, 0, cstr2("music"), null, 0, 0);
+    nx = @ptrFromInt(std.math.maxInt(usize));
+    count = 0;
+    var seen_dup2 = false;
+    while (api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("music"), 0, @ptrCast(&info)) == 1) {
+        count += 1;
+        if (std.mem.eql(u8, std.mem.span(info.UsedSound.?), "dup2")) seen_dup2 = true;
+    }
+    try testing.expectEqual(@as(i32, 1), count);
+    try testing.expect(!seen_dup2);
+    // The map is a process global the next test would inherit, so hand back an
+    // empty one rather than a live cap on a common label.
+    _ = api_miles_t.MilesSetSoundLabelLimits(null, "");
 }
 
 // bufPrint leaves the buffer unterminated; the AIL_* calls take C strings.
@@ -7296,8 +7355,12 @@ test "Miles event system frees all systems and variables (no leaks)" {
         const sys = api_miles_t.MilesAddEventSystem(null) orelse continue;
         api_miles_t.MilesSetVarI(@intFromPtr(sys), "hp", k);
     }
-    // Shutdown must free every system and its variable list; if it leaks, the
-    // test allocator flags it at test teardown.
+    // Sound instances live in a list that grows its own backing array, so
+    // starting one is what makes the list an allocation shutdown has to free.
+    // Without this the leak check below never sees the list at all.
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("leakcheck"), 0, 0, cstr2("sfx"), null, 0, 0);
+    // Shutdown must free every system, its variable list, and the instance
+    // list's storage; if it leaks, the test allocator flags it at teardown.
     api_miles_t.MilesShutdownEventSystem();
 }
 

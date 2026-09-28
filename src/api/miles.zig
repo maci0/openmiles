@@ -579,7 +579,17 @@ pub fn MilesAddEventSystem(driver: ?*anyopaque) callconv(.winapi) ?*anyopaque {
 
 pub fn MilesShutdownEventSystem() callconv(.winapi) void {
     for (g_instances.items) |inst| destroyInstance(inst);
-    g_instances.clearRetainingCapacity();
+    // The backing array is the only allocation the instance list owns, and
+    // clearRetainingCapacity would hand it to nobody: every session that
+    // started a sound leaked it at shutdown. deinit returns it to the allocator
+    // installed here, which is the one that grew it in a caller that swaps
+    // allocators around this call.
+    g_instances.deinit(openmiles.global_allocator);
+    // deinit leaves items undefined, and every walk of the list (the
+    // enumeration, the label eviction) reads it before the next append. The
+    // empty slice is what those walks need, not the undefined pointer
+    // `.empty` carries.
+    g_instances = .{ .items = &.{}, .capacity = 0 };
     cacheClear();
     persistClear();
     limitsClear();
