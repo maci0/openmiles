@@ -101,6 +101,18 @@ All notable changes to OpenMiles are recorded here. The format follows
   them ends with the ASI image unpacked into the game directory, so an operator
   with a wrong `TMPDIR` learned nothing. They now go to stderr, as a rejected
   `TMPDIR` already did.
+- `AIL_serve` integrated the process uptime into the first frame it advanced an
+  auto-updated 3D source, because the previous-frame reading started at zero
+  rather than at the driver's first serve. A host up for a day moved every
+  moving source by `velocity * 86_400_000` on the driver's first tick. The first
+  serve now only takes its reading, and the delta is carried in nanoseconds, so
+  a frame shorter than a millisecond (a 240 Hz game loop) advances the source
+  instead of truncating to no time at all.
+- `AIL_set_sample_playback_delay` scheduled the voice from a whole-millisecond
+  reading of the engine's PCM counter and converted it back to frames, which
+  rounds the start point down to a millisecond (44 frames at 44.1 kHz) and can
+  land it in the past, where the voice plays at once instead of waiting. The
+  delay is now added to the engine's frame counter directly.
 - `docs/THREAT_MODEL.md` named 48 file:line anchors that no longer sit on the
   line they point at, so `scripts/check_threat_model_refs.py` failed and
   `make lint` was red. Every reference now resolves; each was re-pointed at the

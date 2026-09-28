@@ -181,6 +181,25 @@ pub fn mixTimeMsToFrames(mix_ms: u64, sample_rate: u32) u64 {
     return @min(mix_ms, std.math.maxInt(u64) / rate) * rate / 1000;
 }
 
+/// PCM frames elapsed on the engine clock. A relative playback delay is
+/// measured from here, in frames: routing it through the whole-millisecond
+/// reading below quantizes the start point to a millisecond and can place it
+/// up to one millisecond in the past, so the voice plays at once instead of
+/// waiting out its delay.
+pub fn engineTimeFrames(self: *DigitalDriver) u64 {
+    return ma.ma_engine_get_time_in_pcm_frames(&self.engine);
+}
+
+/// The frame an AIL_set_sample_playback_delay of `delay_ms` lands on: that many
+/// milliseconds after `now_frames` on the engine clock. Converted from the
+/// frame counter directly, so the start keeps the engine's own resolution; a
+/// detour through mixTimeMsToFrames and back rounds it down to a whole
+/// millisecond, which at 44.1 kHz is up to 44 frames of the delay handed back.
+pub fn mixDelayToFrames(now_frames: u64, delay_ms: i32, sample_rate: u32) u64 {
+    const delay_ns: i96 = @as(i96, @max(delay_ms, 0)) * std.time.ns_per_ms;
+    return now_frames +| @as(u64, @intCast(@divTrunc(delay_ns * @as(i96, sample_rate), std.time.ns_per_s)));
+}
+
 /// Mixer milliseconds on the engine's own clock: the inverse of
 /// mixTimeMsToFrames, and the same clock AIL_schedule_start_sample's argument
 /// is expressed in. A delay of N ms is "now + N" on this clock, never a
@@ -188,7 +207,7 @@ pub fn mixTimeMsToFrames(mix_ms: u64, sample_rate: u32) u64 {
 pub fn engineTimeMs(self: *DigitalDriver) u64 {
     const rate = self.getSampleRate();
     if (rate == 0) return 0;
-    return ma.ma_engine_get_time_in_pcm_frames(&self.engine) *| 1000 / rate;
+    return engineTimeFrames(self) *| 1000 / rate;
 }
 
 /// A peak soft-limiter as a custom miniaudio node: passes audio below the knee
@@ -438,9 +457,15 @@ pub const DigitalDriver = struct {
     // Per-mix callback (AILMIXERCB) invoked from the engine's process hook.
     mix_callback: ?*const fn (?*DigitalDriver) callconv(.winapi) void = null,
     samples_3d: std.ArrayListUnmanaged(*Sample3D) = .empty,
-    // Monotonic reading (ms) of the last AIL_serve, so the sources that asked
-    // for automatic 3D dead reckoning advance by the time the frame took.
-    last_serve_ms: i64 = 0,
+    // Monotonic reading (ns) of the last AIL_serve, so the sources that asked
+    // for automatic 3D dead reckoning advance by the time the frame took. ns,
+    // not ms: a game serving at 240 Hz produces a 4.17 ms frame, and a ms-truncated
+    // delta drops every serve but the one that happens to cross a ms boundary.
+    last_serve_ns: i64 = 0,
+    // Whether last_serve_ns holds a reading yet. The clock origin is a valid
+    // ns value (a virtual clock installed at 0 reads 0), so the first serve is
+    // marked by a flag rather than by a sentinel reading.
+    serve_started: bool = false,
     rolloff_factor: f32 = 1.0,
     doppler_factor: f32 = 1.0,
     distance_factor: f32 = 1.0,
@@ -678,9 +703,18 @@ pub const DigitalDriver = struct {
     /// hand (AIL_update_3D_position) is not touched here, so the two ways of
     /// moving a source never both apply to it.
     pub fn serve(self: *DigitalDriver) void {
-        const now = @divTrunc(root.nowNs(), std.time.ns_per_ms);
-        const dt: f32 = @floatFromInt(@max(0, now - self.last_serve_ms));
-        self.last_serve_ms = now;
+        const now = root.nowNs();
+        // The first serve after the driver opened has no previous frame to
+        // measure against, so the process uptime that preceded it is not a
+        // frame time: integrating it would teleport every moving source by
+        // velocity * uptime on the frame the driver is first served.
+        if (!self.serve_started) {
+            self.serve_started = true;
+            self.last_serve_ns = now;
+            return;
+        }
+        const dt: f32 = @floatCast(@as(f64, @floatFromInt(@max(0, now - self.last_serve_ns))) / std.time.ns_per_ms);
+        self.last_serve_ns = now;
         for (self.samples_3d.items) |s| s.updatePosition(dt);
     }
 
@@ -1473,9 +1507,11 @@ pub const Sample = struct {
             // sample attribute, so every start honours it; AIL_schedule_start_
             // sample, called after this, overrides with its absolute point.
             if (self.v9_playback_delay > 0) {
-                const rate = self.driver.getSampleRate();
-                const start_ms = engineTimeMs(self.driver) + @as(u64, @intCast(self.v9_playback_delay));
-                self.scheduled_start_frames = mixTimeMsToFrames(start_ms, rate);
+                self.scheduled_start_frames = mixDelayToFrames(
+                    engineTimeFrames(self.driver),
+                    self.v9_playback_delay,
+                    self.driver.getSampleRate(),
+                );
                 ma.ma_sound_set_start_time_in_pcm_frames(&self.sound, self.scheduled_start_frames);
             }
             // SDK wavefile.cpp AIL_API_start_sample rewinds to the beginning
@@ -2420,6 +2456,22 @@ test "mixer milliseconds convert to engine frames at the engine rate" {
     try std.testing.expect(mixTimeMsToFrames(std.math.maxInt(u64), 44_100) > 0);
     // No output rate: nothing to schedule against.
     try std.testing.expectEqual(@as(u64, 0), mixTimeMsToFrames(1_000, 0));
+}
+
+test "a playback delay keeps the engine's frame resolution, not the millisecond one" {
+    // 250 ms at 44100 is 11025 frames. Measured from a frame counter that is not
+    // on a millisecond boundary, the delay is added to that exact frame: going
+    // through mixTimeMsToFrames and back first rounds the start down to a whole
+    // millisecond, and a start point already in the past plays the voice at once
+    // instead of holding it.
+    try std.testing.expectEqual(@as(u64, 11_025), mixDelayToFrames(0, 250, 44_100));
+    try std.testing.expectEqual(@as(u64, 11_026), mixDelayToFrames(1, 250, 44_100));
+    // 48001 frames is one past a whole millisecond at 48 kHz and 441 ms is
+    // 21168 frames, so a millisecond round trip would land on 69168 here.
+    try std.testing.expectEqual(@as(u64, 69_169), mixDelayToFrames(48_001, 441, 48_000));
+    // A zero or negative delay is the caller's "start now".
+    try std.testing.expectEqual(@as(u64, 7), mixDelayToFrames(7, 0, 44_100));
+    try std.testing.expectEqual(@as(u64, 7), mixDelayToFrames(7, -5, 44_100));
 }
 
 test "EOB/EOS callbacks fire with single HSAMPLE arg" {

@@ -5029,6 +5029,39 @@ test "AIL_update_3D_position ignores NaN/Inf dt instead of poisoning position" {
     try testing.expectEqual(@as(f32, 0.0), z);
 }
 
+test "AIL_serve advances auto-updated 3D sources by the frame, not by process uptime" {
+    openmiles.useVirtualClock(0);
+    defer openmiles.useRealClock();
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const h3 = api_3d.AIL_allocate_3D_sample_handle(drv) orelse return error.NoSample;
+    defer api_3d.AIL_release_3D_sample_handle(h3);
+    api_3d.AIL_set_3D_velocity(h3, 2, 0, 0, 1); // 2 units/ms on +x
+    api_3d.AIL_auto_update_3D_position(@constCast(h3), 1);
+    var x: f32 = 0;
+
+    // The first serve has no previous frame to measure against, so the time the
+    // clock had already run cannot be integrated: a host up for a day would
+    // otherwise jump the source by 2 * 86_400_000 on the first tick.
+    openmiles.clock.advance(10 * std.time.ns_per_s);
+    drv.serve();
+    api_3d.AIL_3D_position(@constCast(h3), &x, null, null);
+    try testing.expectEqual(@as(f32, 0.0), x);
+
+    // A 240 Hz game frame is 4.17 ms; a millisecond-truncated delta still lands
+    // here, but a sub-millisecond frame would have been dropped entirely.
+    openmiles.clock.advance(std.time.ns_per_s / 240);
+    drv.serve();
+    api_3d.AIL_3D_position(@constCast(h3), &x, null, null);
+    try testing.expectApproxEqAbs(@as(f32, 2.0 * 1000.0 / 240.0), x, 0.001);
+
+    // Half a millisecond: nothing a millisecond-truncated reading could carry.
+    openmiles.clock.advance(std.time.ns_per_ms / 2);
+    drv.serve();
+    api_3d.AIL_3D_position(@constCast(h3), &x, null, null);
+    try testing.expectApproxEqAbs(@as(f32, 2.0 * 1000.0 / 240.0 + 1.0), x, 0.001);
+}
+
 test "AIL_init_sample resets level/reverb/filter/occlusion state to defaults (SDK)" {
     // SDK wavefile.cpp AIL_init_sample restores a reused handle to its defaults:
     // volume_levels 1/1, low_pass 1.0, dry 1.0, wet 0.0, obstruction/occlusion/
