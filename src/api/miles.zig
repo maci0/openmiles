@@ -65,6 +65,41 @@ pub const MILESEVENTSOUNDINFO = extern struct {
     HasCompletionEvent: i32 = 0,
 };
 
+// The completion sweep, plus the number of instances still playing once it
+// has run. Callers that need the count take it from here rather than walking
+// g_instances a second time: a per-frame MilesGetEventSystemState over a few
+// hundred live instances otherwise sweeps the list and then reads it again,
+// and reads the clock twice per poll. Callers that do not want the count
+// discard it. `now` is passed in so a caller that is already walking the list
+// can expire entries inline instead of running a separate pass.
+fn updateInstancesAt(now: u64) u32 {
+    var playing: u32 = 0;
+    for (ev.g_instances.items) |inst| {
+        if (inst.status == ev.STATUS_PLAYING) {
+            // Not wrapping arithmetic: installing a virtual clock rebases the
+            // ms counter, so an instance started before the rebase reads as
+            // already elapsed under `-%` and completes on the first poll.
+            const elapsed: u64 = if (now > inst.start_ms) @intCast(now - inst.start_ms) else 0;
+            if (elapsed >= inst.duration_ms) {
+                inst.status = ev.STATUS_COMPLETE;
+            } else {
+                playing += 1;
+            }
+        }
+    }
+    return playing;
+}
+
+// Expire one instance against a clock reading already taken this poll. Same
+// rule as updateInstancesAt, factored out so a caller walking g_instances for
+// another reason does not have to duplicate the elapsed test to keep the
+// statuses it reads consistent.
+fn expireInstanceAt(inst: *ev.SoundInstance, now: u64) void {
+    if (inst.status != ev.STATUS_PLAYING) return;
+    const elapsed: u64 = if (now > inst.start_ms) @intCast(now - inst.start_ms) else 0;
+    if (elapsed >= inst.duration_ms) inst.status = ev.STATUS_COMPLETE;
+}
+
 // --- lifecycle ---------------------------------------------------------------
 
 pub fn MilesStartupEventSystem(driver: ?*anyopaque, command_buf_len: i32, memory_buf: ?[*]u8, memory_len: i32) callconv(.winapi) ?*anyopaque {
@@ -143,10 +178,7 @@ pub fn MilesGetEventSystemState(system: ?*anyopaque, state: ?*MILESEVENTSTATE) c
     o.LoadedBankCount = @intCast(openmiles.soundbank.loadedCount());
     o.LoadedSoundCount = @intCast(ev.g_cached.count());
     o.PersistCount = @intCast(ev.g_persists.items.len);
-    ev.updateInstances();
-    for (ev.g_instances.items) |inst| {
-        if (inst.status == ev.STATUS_PLAYING) o.PlayingSoundCount += 1;
-    }
+    o.PlayingSoundCount = @intCast(updateInstancesAt(openmiles.getMsCount64()));
     if (ev.resolveSystem(@intFromPtr(system))) |sys| {
         o.CommandBufferSize = sys.command_buffer_size;
     }
@@ -280,7 +312,12 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
     const np = io_next orelse return 0;
     ev.stateLock();
     defer ev.stateUnlock();
-    ev.updateInstances();
+    // One clock reading serves both the expiry sweep and the candidate scan
+    // below, which expires each instance inline as it visits it rather than
+    // sweeping the list in a pass of its own. A game draining the walk pays
+    // one pass per call instead of two, and a resumed walk sees the same
+    // statuses the separate sweep would have left behind.
+    const now = openmiles.getMsCount64();
     const filter: u64 = if (status == 0) 0xffffffff else @intCast(@as(u32, @bitCast(status)));
     // The cursor carries the instance_id of the last entry handed out, not its
     // position in g_instances, and the walk visits entries in id order rather
@@ -311,6 +348,7 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
     const after_id: u64 = if (cursor_raw == std.math.maxInt(usize) or cursor_raw == 0) 0 else cursor_raw;
     var found: ?*ev.SoundInstance = null;
     for (ev.g_instances.items) |inst| {
+        expireInstanceAt(inst, now);
         if (inst.instance_id <= after_id) continue;
         if ((@as(u64, @intCast(inst.status)) & filter) == 0) continue;
         if (!ev.labelMatch(inst.labels, labels)) continue;
