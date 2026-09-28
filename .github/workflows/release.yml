@@ -205,7 +205,8 @@ jobs:
       # The shipped artifact is a drop-in mss32.dll: a game that cannot resolve
       # an import it links against fails to start. Check the built DLL itself
       # (not the source table) is 32-bit PE and still exports the core entry
-      # points a game links before any of them is published.
+      # points a game links before any of them is published, and carries the
+      # ASLR and DEP bits the build gets from the linker without asking.
       - name: Smoke-test the built DLL
         run: |
           set -euo pipefail
@@ -219,6 +220,22 @@ jobs:
               echo "missing required export: $sym"; exit 1
             fi
           done
+          # DllCharacteristics is where ASLR and DEP live in a PE, and LLD sets
+          # both without being asked. Nothing in the build asks for them, so
+          # a Zig or LLD bump that stops setting them would ship a DLL loading
+          # at a fixed address with an executable stack and say nothing. Read
+          # the field rather than grepping the whole dump: DllCharacteristics
+          # and SizeOfStackReserve both sit on the same line of it.
+          chars=$(objdump -p "$dll" | sed -n 's/^[[:space:]]*DllCharacteristics[[:space:]]*\([0-9a-fA-F]*\).*/\1/p')
+          [ -n "$chars" ] || { echo "no DllCharacteristics in $dll"; exit 1; }
+          flags=$((16#$chars))
+          for bit in 0x40 0x100; do   # DYNAMIC_BASE, NX_COMPAT
+            if [ $((flags & bit)) -eq 0 ]; then
+              printf 'DllCharacteristics %s is missing bit %#x\n' "$chars" "$bit" >&2
+              exit 1
+            fi
+          done
+          echo "DllCharacteristics $chars: DYNAMIC_BASE, NX_COMPAT"
 
       # The archive check below re-packages the DLL that is already on disk, so
       # it proves zip determinism and nothing about the compile. This step is

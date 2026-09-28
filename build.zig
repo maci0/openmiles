@@ -119,6 +119,22 @@ const c_flags = [_][]const u8{
 };
 const c_flags_tsf = c_flags ++ [_][]const u8{"-Wno-null-pointer-subtraction"};
 
+/// Whether an artifact built at `optimize` gets stack canaries.
+///
+/// Zig 0.16 emits the canary itself, so the check is not a call to
+/// __security_check_cookie and a search for that symbol in the shipped image
+/// finds nothing: with this on, the x86-windows ReleaseFast DLL carries about
+/// 78 KiB more .text than without it.
+///
+/// The gate is the optimize mode, not the target. `zig -fstack-protector` only
+/// means anything in an unsafe build, and a Debug compile fails outright with
+/// "the selected target does not support stack protection" on every target,
+/// gnu and musl alike, where a safe build already has Zig's own bounds and
+/// integer checks doing the same job.
+fn stackCanariesFor(optimize: std.builtin.OptimizeMode) bool {
+    return optimize != .Debug;
+}
+
 /// Build an (anonymous) openmiles module plus its c_impl object for a given
 /// resolved target. Used to produce a musl-targeted copy for the native test
 /// executables on a glibc host (see `test_target`).
@@ -150,6 +166,7 @@ fn addOpenmilesModule(
             .optimize = optimize,
             .link_libc = true,
             .sanitize_c = sanitize_c,
+            .stack_protector = stackCanariesFor(optimize),
         }),
     });
     ci.root_module.addIncludePath(b.path("deps"));
@@ -277,6 +294,13 @@ pub fn build(b: *std.Build) void {
     mod.addImport("build_options", build_opts_mod);
 
     // Shared Library: drop-in replacement for mss32.dll (Miles Sound System)
+    //
+    // The PE hardening this image gets is the canary from stack_canaries plus
+    // what the linker sets on its own: LLD marks the image DYNAMIC_BASE and
+    // NX_COMPAT, and release.yml asserts both on the built DLL before it is
+    // published. Control Flow Guard is the third PE bit and Zig 0.16 exposes
+    // no build option to turn it on, so the DLL ships without it. Re-check all
+    // three on a Zig bump rather than assuming a newer toolchain adds them.
     const lib = b.addLibrary(.{
         .name = "mss32",
         .linkage = .dynamic,
@@ -289,12 +313,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "build_options", .module = build_opts_mod },
             },
             .link_libc = true,
-            // The DLL is the shipped artifact, so it must not ship without a
-            // stack canary. Zig 0.16 rejects -fstack-protector outright on
-            // x86_64 Linux ("the selected target does not support stack
-            // protection"), so scope it to the Windows targets that accept it
-            // rather than breaking the native build the tests run on.
-            .stack_protector = if (target.result.os.tag == .windows) true else null,
+            .stack_protector = stackCanariesFor(build_optimize),
             // ReleaseFast optimizes, but the linked image still carries a
             // CodeView directory pointing at a PDB whose GUID is derived from
             // the compile directory, so two builds of one commit at different
@@ -314,7 +333,7 @@ pub fn build(b: *std.Build) void {
             .optimize = build_optimize,
             .link_libc = true,
             .sanitize_c = sanitize_c,
-            .stack_protector = if (target.result.os.tag == .windows) true else null,
+            .stack_protector = stackCanariesFor(build_optimize),
         }),
     });
     c_impl.root_module.addIncludePath(b.path("deps"));
@@ -347,6 +366,7 @@ pub fn build(b: *std.Build) void {
             .target = test_target,
             .optimize = build_optimize,
             .link_libc = true,
+            .stack_protector = stackCanariesFor(build_optimize),
             .imports = &.{
                 .{ .name = "ma_c", .module = tb.ma },
                 .{ .name = "tsf_c", .module = tb.tsf },
@@ -376,6 +396,7 @@ pub fn build(b: *std.Build) void {
             .target = test_target,
             .optimize = build_optimize,
             .link_libc = true,
+            .stack_protector = stackCanariesFor(build_optimize),
             .sanitize_c = sanitize_c,
         }),
     });
@@ -391,6 +412,7 @@ pub fn build(b: *std.Build) void {
             .target = test_target,
             .optimize = build_optimize,
             .link_libc = true,
+            .stack_protector = stackCanariesFor(build_optimize),
             .imports = &.{
                 .{ .name = "ma_c", .module = tb.ma },
                 .{ .name = "tsf_c", .module = tb.tsf },
@@ -418,6 +440,7 @@ pub fn build(b: *std.Build) void {
                 .target = test_target,
                 .optimize = build_optimize,
                 .link_libc = true,
+                .stack_protector = stackCanariesFor(build_optimize),
                 .sanitize_c = sanitize_c,
             }),
         });
@@ -434,6 +457,7 @@ pub fn build(b: *std.Build) void {
                 .target = test_target,
                 .optimize = build_optimize,
                 .link_libc = true,
+                .stack_protector = stackCanariesFor(build_optimize),
                 .strip = strip_installed,
             }),
         });
@@ -454,6 +478,7 @@ pub fn build(b: *std.Build) void {
             .target = test_target,
             .optimize = build_optimize,
             .link_libc = true,
+            .stack_protector = stackCanariesFor(build_optimize),
             .sanitize_c = sanitize_c,
             .strip = strip_installed,
         }),
@@ -485,6 +510,7 @@ pub fn build(b: *std.Build) void {
             .target = test_target,
             .optimize = build_optimize,
             .link_libc = true,
+            .stack_protector = stackCanariesFor(build_optimize),
             .strip = strip_installed,
             .imports = &.{
                 .{ .name = "openmiles", .module = tb.mod },
