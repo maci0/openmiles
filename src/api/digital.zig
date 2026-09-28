@@ -168,7 +168,7 @@ pub fn AIL_set_sample_volume_pan(s_opt: ?*Sample, volume: f32, pan: f32) callcon
 }
 pub fn AIL_active_sample_count(driver_opt: ?*DigitalDriver) callconv(.winapi) u32 {
     const driver = driver_opt orelse return 0;
-    return driver.getActiveSampleCount();
+    return driver.getActiveSampleCount(std.math.maxInt(u32));
 }
 pub fn AIL_sample_ms_position(s_opt: ?*Sample, total_ms: ?*i32, current_ms: ?*i32) callconv(.winapi) void {
     const s = s_opt orelse return;
@@ -563,7 +563,9 @@ pub fn AIL_digital_CPU_percent(driver_opt: ?*DigitalDriver) callconv(.winapi) i3
     // miniaudio doesn't expose CPU usage directly; this approximation is
     // sufficient for games that throttle sound spawning based on this value.
     // SDK returns S32 (integer percent in EAX), not F32.
-    const active: f32 = @floatFromInt(driver.getActiveSampleCount() + driver.get3DActiveSampleCount());
+    // The nominal budget is the cap: past 32 the percent is 100 either way, so
+    // the count need not resolve the tail of two long handle lists.
+    const active: f32 = @floatFromInt(driver.getActiveSampleCount(32) + driver.get3DActiveSampleCount(32));
     const nominal_budget: f32 = 32.0;
     const pct = (active / nominal_budget) * 100.0;
     return @intFromFloat(@min(pct, 100.0));
@@ -650,6 +652,10 @@ const MixSrc = struct {
     channels: u32 = 1,
     points: usize = 0, // per-channel sample count
     rate: u32 = 0,
+    // An 8-bit source, still unsigned. widenU8Prefix converts it once the
+    // output length is known, so the conversion covers the samples the mix
+    // reaches rather than the whole source.
+    pending_u8: ?[]const u8 = null,
 };
 
 // A mixer input plus the resample cursor the mix loop advances. The source
@@ -766,6 +772,34 @@ fn decodeAdpcmSource(info: *const AILSOUNDINFO) ?MixSrc {
     };
 }
 
+/// Widen every 8-bit source in `part` to 16-bit, covering only the samples the
+/// mix can reach in `dest_points` output frames. The last source point read is
+/// floor((dest_points - 1) * rate / dest_rate) and a point spans `channels`
+/// interleaved samples, so a source longer than that is converted (and
+/// allocated) only as far as it is consumed. A failed allocation drops that
+/// source, which the mix loop does by finding it exhausted.
+fn widenU8Prefix(part: []MixCursor, dest_points: usize, dest_rate: u64) void {
+    for (part) |*c| {
+        const u8d = c.src.pending_u8 orelse continue;
+        const last_frame: u64 = @intCast(dest_points - 1);
+        // Saturating: dest_points comes from dest_size and rate from the
+        // source, so the product can pass what usize holds on the 32-bit
+        // target. The clamp to points below keeps the result in range either
+        // way, since no frame past the source's own length is ever read.
+        const last_pos: u64 = @min(last_frame *| c.src.rate / dest_rate, std.math.maxInt(usize));
+        const total = c.src.points * @as(usize, c.src.channels);
+        const needed: usize = @min(last_pos *| c.src.channels +| c.src.channels, total);
+        const buf = openmiles.global_allocator.alloc(i16, needed) catch {
+            c.src.points = 0; // exhausted: the mix loop drops it, owning nothing
+            continue;
+        };
+        for (0..needed) |k| buf[k] = (@as(i16, u8d[k]) - 128) << 8;
+        c.src.s16 = buf;
+        c.src.owned = buf;
+        c.src.points = needed / c.src.channels;
+    }
+}
+
 /// SDK cap on the `operations[]` array an AILMIXINFO mixer call may name
 /// (wavefile.cpp bounds `num_srcs` to 256 before walking it).
 pub const max_mix_operations: usize = 256;
@@ -816,12 +850,10 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
             } else if (info.bits == 8) {
                 const u8d: [*]const u8 = @ptrCast(info.data_ptr.?);
                 const total: usize = info.data_len;
-                // An allocation failure drops this source only; the remaining
-                // sources must still be mixed.
-                const buf = openmiles.global_allocator.alloc(i16, total) catch continue;
-                for (0..total) |k| buf[k] = (@as(i16, u8d[k]) - 128) << 8;
-                ms.owned = buf;
-                ms.s16 = buf;
+                // Left unsigned here: dest_points is not known until every
+                // source has been sized, and an 8-bit source routinely outruns
+                // the output. widenU8Prefix converts the reached prefix once.
+                ms.pending_u8 = u8d[0..total];
                 ms.points = total / ms.channels;
             }
         }
@@ -852,6 +884,8 @@ pub fn AIL_process_digital_audio(dest: ?*anyopaque, dest_size: i32, dest_rate: u
     var dest_points: usize = @as(usize, @intCast(dest_size)) / dps;
     if (max_points < dest_points) dest_points = @intCast(max_points);
     if (dest_points == 0) return 0;
+    widenU8Prefix(stereo[0..nstereo], dest_points, dest_rate);
+    widenU8Prefix(mono[0..nmono], dest_points, dest_rate);
 
     const out: [*]u8 = @ptrCast(dest.?);
     var o: usize = 0;

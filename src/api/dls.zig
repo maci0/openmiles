@@ -477,7 +477,7 @@ pub fn DLSMSSGetCPU(driver_opt: ?*MidiDriver) callconv(.winapi) f32 {
     _ = driver_opt;
     // Estimates CPU from active sample count on the primary digital driver.
     if (openmiles.lastDigitalDriver()) |dig| {
-        const active: f32 = @floatFromInt(dig.getActiveSampleCount());
+        const active: f32 = @floatFromInt(dig.getActiveSampleCount(32));
         return @min((active / 32.0) * 100.0, 100.0);
     }
     return 0.0;

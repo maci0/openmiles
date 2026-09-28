@@ -115,19 +115,22 @@ pub fn xmiImageSizePtr(raw: [*]const u8) usize {
 /// Returns the sub-slice (header through declared size) or null if absent.
 pub fn findDls(data: []const u8) ?[]const u8 {
     if (data.len < 12) return null;
+    // A merged image puts the bank after the whole XMIDI payload, so this scan
+    // crosses the entire sequence. indexOfPos strides over the image in wide
+    // chunks instead of testing one 4-byte compare per offset; a RIFF chunk
+    // that is not a DLS bank is skipped and the search resumes one byte past
+    // it, so the first hit that carries the DLS magic still wins.
     var i: usize = 0;
-    while (i + 12 <= data.len) : (i += 1) {
-        if (data[i] == 'R' and
-            std.mem.eql(u8, data[i .. i + 4], "RIFF") and
-            std.mem.eql(u8, data[i + 8 .. i + 12], "DLS "))
-        {
-            const body = std.mem.readInt(u32, data[i + 4 .. i + 8][0..4], .little);
+    while (std.mem.indexOfPos(u8, data, i, "RIFF")) |hit| {
+        if (hit + 12 <= data.len and std.mem.eql(u8, data[hit + 8 .. hit + 12], "DLS ")) {
+            const body = std.mem.readInt(u32, data[hit + 4 .. hit + 8][0..4], .little);
             // Saturating, like every other size field walked in this file: a
             // body of 0xFFFFFFFF wraps to 7 on the 32-bit target and yields a
             // 7-byte "DLS image" instead of the whole remainder.
-            const total = @min(8 +| @as(usize, body), data.len - i);
-            return data[i .. i + total];
+            const total = @min(8 +| @as(usize, body), data.len - hit);
+            return data[hit .. hit + total];
         }
+        i = hit + 1;
     }
     return null;
 }

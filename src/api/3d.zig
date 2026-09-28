@@ -219,7 +219,7 @@ pub fn AIL_register_3D_EOS_callback(s: ?*anyopaque, callback: ?*anyopaque) callc
 }
 pub fn AIL_active_3D_sample_count(dig_opt: ?*DigitalDriver) callconv(.winapi) u32 {
     const dig = dig_opt orelse return 0;
-    return dig.get3DActiveSampleCount();
+    return dig.get3DActiveSampleCount(std.math.maxInt(u32));
 }
 pub fn AIL_3D_user_data(s: ?*anyopaque, index: i32) callconv(.winapi) u32 {
     const p = s orelse return 0;

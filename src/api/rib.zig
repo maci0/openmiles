@@ -626,6 +626,20 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
 
     var all_pcm: std.ArrayListUnmanaged(u8) = .empty;
     defer all_pcm.deinit(openmiles.global_allocator);
+    // Reserve the decoder-reported PCM size so the append below never
+    // realloc-copies the decoded image it already holds, the same hint
+    // decodeWavToPcm uses on the in-memory decode path. The frame count is
+    // header-derived, hence spoofable, so the saturating multiply and the
+    // clamp keep the hint from overflowing or panicking the usize cast on the
+    // 32-bit target; the loop is bounded by real reads, so an inflated hint
+    // only over-reserves. Configured output is s16 stereo, four bytes a frame.
+    var length_frames: u64 = 0;
+    _ = openmiles.ma.ma_decoder_get_length_in_pcm_frames(&decoder, &length_frames);
+    if (length_frames > 0) {
+        const pcm_bytes_per_frame: u64 = 4;
+        const hint: u64 = @min(length_frames *| pcm_bytes_per_frame, std.math.maxInt(usize));
+        all_pcm.ensureTotalCapacity(openmiles.global_allocator, @intCast(hint)) catch {};
+    }
     // Heap scratch (16-byte aligned): a stack buffer trips a layout-dependent
     // misaligned ma_int16 write inside miniaudio's decoder under the UBSan build.
     const chunk_buf = openmiles.global_allocator.alignedAlloc(u8, .@"16", 4096 * 4) catch {

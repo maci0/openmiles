@@ -21,6 +21,14 @@ pub const RIB_INTERFACE_ENTRY = extern struct {
     subtype: u32,
 };
 
+/// Ceiling on the entry count one `RIB_register_interface` call may declare.
+/// The count is the loaded module's, and the array it names is the module's
+/// too, so nothing here bounds what a plugin walks; without a ceiling a single
+/// absurd count drives one name dupe and one hash insert per entry, growing
+/// the interface by that many entries before anything else can object. Real
+/// interfaces (ASI codecs, DLS providers) hold tens.
+const max_interface_entries: i32 = 65536;
+
 pub const RIB_alloc_provider_handle_ptr = *const fn (i32) callconv(.c) HPROVIDER;
 
 pub const RIB_register_interface_ptr = *const fn (HPROVIDER, [*c]const u8, i32, [*c]RIB_INTERFACE_ENTRY) callconv(.c) usize;
@@ -270,12 +278,16 @@ pub const Provider = struct {
     /// RIB_unregister_interface takes.
     pub fn registerInterface(self: *Provider, name: []const u8, count: i32, entries: ?*anyopaque) !*Interface {
         log("Provider.registerInterface called: {s}, count={d}\n", .{ name, count });
-        // A negative entry count comes from the plugin, not from us: rejecting
-        // it silently would hand back an empty interface the plugin believes
-        // it filled.
+        // A negative or absurd entry count comes from the plugin, not from us:
+        // rejecting it silently would hand back an empty interface the plugin
+        // believes it filled.
         if (count < 0) {
             log("Provider.registerInterface: '{s}' declared {d} entries\n", .{ name, count });
             return error.NegativeEntryCount;
+        }
+        if (count > max_interface_entries) {
+            log("Provider.registerInterface: '{s}' declared {d} entries, over the {d} ceiling\n", .{ name, count, max_interface_entries });
+            return error.TooManyEntries;
         }
         // A plugin may pass entries == NULL with a positive count; the cast
         // below would then walk a null array.

@@ -718,18 +718,30 @@ pub const DigitalDriver = struct {
         for (self.samples_3d.items) |s| s.updatePosition(dt);
     }
 
-    pub fn getActiveSampleCount(self: *DigitalDriver) u32 {
+    /// Count playing samples, stopping once `cap` have been seen. Pass
+    /// `std.math.maxInt(u32)` for the exact total. A caller whose result
+    /// saturates below the real total (AIL_digital_CPU_percent divides by a
+    /// nominal 32-voice budget and clamps at 100) gains nothing from the tail
+    /// of the list, and a per-frame poll of a driver holding hundreds of
+    /// stopped handles should not walk handles the answer ignores.
+    pub fn getActiveSampleCount(self: *DigitalDriver, cap: u32) u32 {
         var count: u32 = 0;
         for (self.samples.items) |s| {
-            if (s.status() == .playing) count += 1;
+            if (s.status() == .playing) {
+                count += 1;
+                if (count >= cap) return cap;
+            }
         }
         return count;
     }
 
-    pub fn get3DActiveSampleCount(self: *DigitalDriver) u32 {
+    pub fn get3DActiveSampleCount(self: *DigitalDriver, cap: u32) u32 {
         var count: u32 = 0;
         for (self.samples_3d.items) |s| {
-            if (s.status() == .playing) count += 1;
+            if (s.status() == .playing) {
+                count += 1;
+                if (count >= cap) return cap;
+            }
         }
         return count;
     }

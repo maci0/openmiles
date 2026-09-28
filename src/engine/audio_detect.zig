@@ -155,9 +155,13 @@ pub fn detectFileType(data: *anyopaque, len: u32) i32 {
     if (detectMpeg(buf[mp3_off .. mp3_off + mp3_len])) |t| return t;
 
     // 4. Last resort: scan the whole image for an 'MThd' header -> MIDI.
+    // Unbounded by design (the caller hands us the whole image), so the
+    // per-offset cost is what matters: only 'm' or 'M' can open 'MThd', and
+    // folding that byte is a single or-compare, where eqi at every offset is a
+    // four-byte ascii case fold.
     var i: usize = 0;
     while (i + 4 <= buf.len) : (i += 1) {
-        if (eqi(buf, i, "MThd")) return 5; // MIDI
+        if ((buf[i] | 0x20) == 'm' and eqi(buf, i, "MThd")) return 5; // MIDI
     }
     return 0; // AILFILETYPE_UNKNOWN
 }

@@ -1289,14 +1289,14 @@ test "DigitalDriver getActiveSampleCount" {
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
     defer driver.deinit();
 
-    try testing.expectEqual(@as(u32, 0), driver.getActiveSampleCount());
+    try testing.expectEqual(@as(u32, 0), driver.getActiveSampleCount(std.math.maxInt(u32)));
 
     const s1 = try openmiles.Sample.init(driver);
     defer s1.deinit();
     const s2 = try openmiles.Sample.init(driver);
     defer s2.deinit();
     // Uninitialized samples are stopped, not playing
-    try testing.expectEqual(@as(u32, 0), driver.getActiveSampleCount());
+    try testing.expectEqual(@as(u32, 0), driver.getActiveSampleCount(std.math.maxInt(u32)));
 
     // The counter is what AIL_digital_CPU_percent scales by, so a sample that
     // is actually playing must raise it and stopping that sample must lower it
@@ -1308,13 +1308,13 @@ test "DigitalDriver getActiveSampleCount" {
     try s2.loadFromMemory(wav, true);
     s1.start();
     try testing.expectEqual(openmiles.SampleStatus.playing, s1.status());
-    try testing.expectEqual(@as(u32, 1), driver.getActiveSampleCount());
+    try testing.expectEqual(@as(u32, 1), driver.getActiveSampleCount(std.math.maxInt(u32)));
     s2.start();
-    try testing.expectEqual(@as(u32, 2), driver.getActiveSampleCount());
+    try testing.expectEqual(@as(u32, 2), driver.getActiveSampleCount(std.math.maxInt(u32)));
     s1.stop();
-    try testing.expectEqual(@as(u32, 1), driver.getActiveSampleCount());
+    try testing.expectEqual(@as(u32, 1), driver.getActiveSampleCount(std.math.maxInt(u32)));
     s2.end(); // done, not stopped: still not playing
-    try testing.expectEqual(@as(u32, 0), driver.getActiveSampleCount());
+    try testing.expectEqual(@as(u32, 0), driver.getActiveSampleCount(std.math.maxInt(u32)));
 }
 
 test "releaseChannel ignores out-of-range channel" {
@@ -1571,6 +1571,27 @@ test "unregistering an interface name removes every registration of it" {
     // A second unregister of the same name is a no-op, not another change.
     p.unregisterInterface("filter");
     try testing.expectEqual(@as(usize, 1), p.interfaces.items.len);
+}
+
+test "registering an interface rejects a count that is negative or over the ceiling" {
+    // Both counts come from the loaded module. A negative one would index
+    // backwards; an absurd one drives a name dupe and a hash insert per
+    // declared entry, growing the interface by a number the module chose. The
+    // rejection must be loud: silently registering nothing hands the plugin an
+    // empty interface it believes it filled.
+    const p = try openmiles.Provider.init(testing.allocator);
+    defer p.deinit();
+
+    var entry = [_]openmiles.RIB_INTERFACE_ENTRY{.{
+        .entry_type = .RIB_ATTRIBUTE,
+        .name = "cutoff",
+        .token = 1,
+        .subtype = 0,
+    }};
+    try testing.expectError(error.NegativeEntryCount, p.registerInterface("neg", -1, &entry));
+    try testing.expectError(error.TooManyEntries, p.registerInterface("huge", 65537, &entry));
+    try testing.expectError(error.MissingEntryArray, p.registerInterface("empty", 1, null));
+    try testing.expectEqual(@as(usize, 0), p.interfaces.items.len);
 }
 
 test "unregistering by handle drops only the interface it names" {
@@ -1855,7 +1876,7 @@ test "DigitalDriver get3DActiveSampleCount" {
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
     defer driver.deinit();
 
-    try testing.expectEqual(@as(u32, 0), driver.get3DActiveSampleCount());
+    try testing.expectEqual(@as(u32, 0), driver.get3DActiveSampleCount(std.math.maxInt(u32)));
 
     // 3D voices live in their own list: a playing 3D sample must raise the 3D
     // count and leave the 2D count alone (AIL_digital_CPU_percent adds them).
@@ -1865,13 +1886,13 @@ test "DigitalDriver get3DActiveSampleCount" {
     const s = try openmiles.Sample3D.init(driver);
     defer s.deinit();
     try s.loadFromMemory(wav, true);
-    try testing.expectEqual(@as(u32, 0), driver.get3DActiveSampleCount());
+    try testing.expectEqual(@as(u32, 0), driver.get3DActiveSampleCount(std.math.maxInt(u32)));
     s.start();
     try testing.expectEqual(openmiles.SampleStatus.playing, s.status());
-    try testing.expectEqual(@as(u32, 1), driver.get3DActiveSampleCount());
-    try testing.expectEqual(@as(u32, 0), driver.getActiveSampleCount());
+    try testing.expectEqual(@as(u32, 1), driver.get3DActiveSampleCount(std.math.maxInt(u32)));
+    try testing.expectEqual(@as(u32, 0), driver.getActiveSampleCount(std.math.maxInt(u32)));
     s.stop();
-    try testing.expectEqual(@as(u32, 0), driver.get3DActiveSampleCount());
+    try testing.expectEqual(@as(u32, 0), driver.get3DActiveSampleCount(std.math.maxInt(u32)));
 }
 
 test "Sample setVolume and setPan land on the engine fields" {
@@ -3719,6 +3740,43 @@ test "AIL_process_digital_audio frees a decode buffer of a source that runs out 
     // is dropped partway through.
     const n = dg.AIL_process_digital_audio(@ptrCast(&dest), @intCast(dest.len * 2), 8000, 1, 2, @ptrCast(&srcs));
     try testing.expectEqual(@as(i32, 16), n);
+}
+
+test "AIL_process_digital_audio widens 8-bit sources over the prefix it reaches" {
+    // An 8-bit source is widened to (v - 128) << 8. Only the samples the mix
+    // reaches are converted, so a source longer than the output must still
+    // produce the same samples, and a resampled one must pick the same source
+    // points the cursor names.
+    const ramp = [_]u8{ 128, 129, 130, 200, 0, 255, 128, 128, 140, 150, 160, 170, 180, 190, 200, 210 };
+    var srcs = [_]openmiles.AILMIXINFO{.{}};
+    srcs[0].Info = .{ .format = 1, .bits = 8, .channels = 1, .rate = 8000, .data_len = ramp.len, .data_ptr = @ptrCast(&ramp) };
+
+    // A dest shorter than the source reaches only the leading points.
+    var short_dest: [4]i16 = undefined;
+    const short_n = dg.AIL_process_digital_audio(@ptrCast(&short_dest), @intCast(short_dest.len * 2), 8000, 1, 1, @ptrCast(&srcs));
+    try testing.expectEqual(@as(i32, 8), short_n);
+    for (short_dest, 0..) |v, k| {
+        try testing.expectEqual(@as(i16, (@as(i16, ramp[k]) - 128) << 8), v);
+    }
+
+    // The whole source, when the output reaches all of it.
+    var full_dest: [ramp.len]i16 = undefined;
+    const full_n = dg.AIL_process_digital_audio(@ptrCast(&full_dest), @intCast(full_dest.len * 2), 8000, 1, 1, @ptrCast(&srcs));
+    try testing.expectEqual(@as(i32, @as(i32, @intCast(ramp.len * 2))), full_n);
+    for (full_dest, 0..) |v, k| {
+        try testing.expectEqual(@as(i16, (@as(i16, ramp[k]) - 128) << 8), v);
+    }
+
+    // Upsampled 2:1, so output frame j reads source point 2j and the reached
+    // prefix runs past half the source.
+    var up_srcs = [_]openmiles.AILMIXINFO{.{}};
+    up_srcs[0].Info = .{ .format = 1, .bits = 8, .channels = 1, .rate = 16000, .data_len = ramp.len, .data_ptr = @ptrCast(&ramp) };
+    var up: [8]i16 = undefined;
+    const up_n = dg.AIL_process_digital_audio(@ptrCast(&up), @intCast(up.len * 2), 8000, 1, 1, @ptrCast(&up_srcs));
+    try testing.expectEqual(@as(i32, 16), up_n);
+    for (up, 0..) |v, j| {
+        try testing.expectEqual(@as(i16, (@as(i16, ramp[j * 2]) - 128) << 8), v);
+    }
 }
 
 test "AIL_process_digital_audio resamples at floor(j*src_rate/dest_rate)" {
