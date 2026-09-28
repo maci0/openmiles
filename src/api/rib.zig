@@ -167,7 +167,10 @@ fn tempDir(buf: []u8) ?[]const u8 {
         }.GetTempPathW;
         var wbuf: [max_temp_path_units]u16 = undefined;
         const len = GetTempPathW(wbuf.len, &wbuf);
-        if (len == 0 or len >= wbuf.len) return null;
+        if (len == 0 or len >= wbuf.len) {
+            reportTempDir("the platform temporary directory", "TMP, TEMP and the system profile directory are all unavailable");
+            return null;
+        }
         if (wide.utf8LenBound(wbuf[0..len]) > buf.len) return null;
         const dir = wide.toUtf8(wbuf[0..len], buf) catch return null;
         return appendSeparator(buf, dir);
@@ -187,18 +190,18 @@ fn tempDir(buf: []u8) ?[]const u8 {
 /// the process environment, which the test runner would share.
 fn configuredTempDir(dir: []const u8, buf: []u8) ?[]const u8 {
     if (dir.len == 0) {
-        reportTempDir("is empty");
+        reportTempDir("TMPDIR", "is empty");
         return null;
     }
     if (dir.len > buf.len - 2) {
-        reportTempDir("is too long to use");
+        reportTempDir("TMPDIR", "is too long to use");
         return null;
     }
     // POSIX requires TMPDIR to be absolute. A relative one resolves against the
     // process cwd, which under Wine is the game directory, so honouring it puts
     // the image exactly where the fallback would.
     if (!std.fs.path.isAbsolute(dir)) {
-        reportTempDir("is not an absolute path");
+        reportTempDir("TMPDIR", "is not an absolute path");
         return null;
     }
     @memcpy(buf[0..dir.len], dir);
@@ -207,8 +210,10 @@ fn configuredTempDir(dir: []const u8, buf: []u8) ?[]const u8 {
 
 /// stderr rather than log(): the log is off unless the operator turned it on,
 /// and a misconfigured TMPDIR is exactly what they are trying to find out about.
-fn reportTempDir(reason: []const u8) void {
-    std.debug.print("openmiles: ignoring TMPDIR ({s}); the ASI image is written to the current directory instead\n", .{reason});
+/// `source` names what was ignored, which is the environment variable on POSIX
+/// and the platform's own lookup on Windows.
+fn reportTempDir(source: []const u8, reason: []const u8) void {
+    std.debug.print("openmiles: ignoring {s} ({s}); the ASI image is written to the current directory instead\n", .{ source, reason });
 }
 
 fn appendSeparator(buf: []u8, dir: []const u8) ?[]const u8 {
@@ -255,7 +260,15 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     // both write the image next to the game.
     const use_tmp_dir = if (tmp_dir) |dir| blk: {
         const fits = tempPathFits(dir);
-        if (!fits) log("AIL_open_ASI_provider: temp directory '{s}' leaves no room for the image name under the path limit; writing it to the current directory\n", .{dir});
+        if (!fits) {
+            // stderr as well as the log: a directory the path limit cannot hold
+            // the name under is the same operator-facing misconfiguration as a
+            // TMPDIR that is rejected outright, and without this the image lands
+            // in the game directory with nothing said about why. The path itself
+            // stays in the log, which scrubs it; stderr carries the reason only.
+            reportTempDir("the resolved temporary directory", "leaves no room for the image name under the platform path limit");
+            log("AIL_open_ASI_provider: temp directory '{s}' leaves no room for the image name under the path limit; writing it to the current directory\n", .{dir});
+        }
         break :blk fits;
     } else false;
     // Cleared once the temp directory turns out to be unusable (no room for the
@@ -307,6 +320,7 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
                     // directory, no room). Retrying the same absolute path
                     // fails the same way, so drop to the game directory and
                     // rebuild the path in its process-relative form.
+                    reportTempDir("the resolved temporary directory", "cannot be written to (missing, not a directory, or read-only)");
                     log("AIL_open_ASI_provider: temp directory unusable ({any}); writing the image to the current directory\n", .{abs_err});
                     in_tmp_dir = false;
                     continue;

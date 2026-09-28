@@ -77,6 +77,13 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ### Fixed
 
+- A temporary directory that was accepted and then turned out to be unusable
+  (the platform resolves none, it leaves no room for the image name under the
+  path limit, or the image cannot be written there) was reported only through
+  the debug log, which is off unless the operator turned it on. Every one of
+  them ends with the ASI image unpacked into the game directory, so an operator
+  with a wrong `TMPDIR` learned nothing. They now go to stderr, as a rejected
+  `TMPDIR` already did.
 - `docs/THREAT_MODEL.md` named 48 file:line anchors that no longer sit on the
   line they point at, so `scripts/check_threat_model_refs.py` failed and
   `make lint` was red. Every reference now resolves; each was re-pointed at the

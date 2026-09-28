@@ -16,8 +16,10 @@ const max_log_bytes: u64 = 64 * 1024 * 1024; // 64 MiB
 /// Where the log goes when OPENMILES_LOG_PATH is unset. Relative, so it lands
 /// in the current directory.
 const default_log_name = "openmiles.log";
-/// Longest path OPENMILES_LOG_PATH may name. Longer than this is refused:
-/// the buffer that holds the path for the life of the process is this size.
+/// Size of the buffer that holds the path for the life of the process. The
+/// longest path OPENMILES_LOG_PATH may name is one byte shorter: the buffer
+/// keeps no terminator, so a path filling it leaves no room for the separator
+/// handling and the rest of the log's own framing.
 const max_log_path_bytes = 1024;
 
 // One formatted record. A record that does not fit is not written silently: see
@@ -446,6 +448,13 @@ test "OPENMILES_LOG_PATH selects the file and rejects an empty or oversized valu
     try testing.expectEqualStrings(default_log_name, logPath());
     applyLogPath("/var/tmp/openmiles.log");
     try testing.expectEqualStrings("/var/tmp/openmiles.log", logPath());
+    // The boundary is one byte under the buffer: the longest path the README
+    // documents as accepted, and the first one refused.
+    const longest = &[_]u8{'p'} ** (max_log_path_bytes - 1);
+    applyLogPath(longest);
+    try testing.expectEqual(max_log_path_bytes - 1, logPath().len);
+    applyLogPath(&[_]u8{'p'} ** max_log_path_bytes);
+    try testing.expectEqualStrings(default_log_name, logPath());
 }
 
 test "an environment read that Windows cannot decode by length alone is classified" {

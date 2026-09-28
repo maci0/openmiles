@@ -480,13 +480,18 @@ surface: nothing else in the environment changes its behaviour.
 | Variable | Values | Default | Effect |
 |----------|--------|---------|--------|
 | `OPENMILES_DEBUG` | `1`/`0`, `true`/`false`, `yes`/`no`, `on`/`off`, any case | logging on in a Debug build, off otherwise | Verbose trace to the debug log and to the debugger, capped at 64 MiB |
-| `OPENMILES_LOG_PATH` | a file path, absolute or relative to the current directory, at most 1024 bytes | `openmiles.log` in the current directory | Where the debug log is written |
+| `OPENMILES_LOG_PATH` | a file path, absolute or relative to the current directory, at most 1023 bytes | `openmiles.log` in the current directory | Where the debug log is written |
 | `TMPDIR` | an absolute directory path | `%TEMP%` on Windows, the game directory on other systems | Where the in-memory ASI plugin image is unpacked before it is loaded |
 
 An `OPENMILES_DEBUG` value outside that set (including an empty one) is
 reported on stderr and leaves the default in place, rather than silently
 meaning off. A `TMPDIR` that is empty, too long, or not absolute is reported the
-same way and the image is written to the game directory instead.
+same way and the image is written to the game directory instead. A temporary
+directory that is accepted but turns out to be unusable (the platform resolves
+none, it leaves no room for the image name under the path limit, or the image
+cannot be written there) is reported on stderr for the same reason: every one of
+them ends with the image unpacked into the game directory, and an operator whose
+`TMPDIR` is wrong would otherwise never learn why.
 
 `-Dmss-version` and `-Doptimize` are build-time options (`zig build --help`),
 not runtime configuration: the shipped DLL is the same build everywhere, and
