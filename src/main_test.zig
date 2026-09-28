@@ -352,8 +352,20 @@ test "Sequence setMsPosition clamps beat math for tiny ms_per_beat" {
     try testing.expectEqual(@mod(beats, seq.beats_per_measure) + 1, seq.current_beat_in_measure.load(.acquire));
     try testing.expectEqual(@divTrunc(beats, seq.beats_per_measure) + 1, seq.current_measure.load(.acquire));
 
-    // Extreme negative seeks clamp symmetrically without panicking.
+    // Extreme negative seeks clamp symmetrically: the ms field takes the
+    // requested value, the beat count saturates at minInt rather than wrapping,
+    // and the two counters floor the beat count, so a seek this far before the
+    // start lands on beat 1 of a negative measure instead of disagreeing about
+    // which bar it is in.
     seq.setMsPosition(std.math.minInt(i32));
+    try testing.expectEqual(@as(f64, @floatFromInt(std.math.minInt(i32))), seq.time_ms);
+    const per_measure: i64 = @max(seq.beats_per_measure, 1);
+    const neg_beats: i64 = std.math.minInt(i32);
+    try testing.expectEqual(@as(i32, @intCast(@mod(neg_beats, per_measure) + 1)), seq.current_beat_in_measure.load(.acquire));
+    try testing.expectEqual(@as(i32, @intCast(@divFloor(neg_beats, per_measure) + 1)), seq.current_measure.load(.acquire));
+    // A wrapped beat count would show up here as a near-maxInt ms for the next
+    // downbeat rather than one just past the seek target.
+    try testing.expectEqual(@as(f64, @floatFromInt(neg_beats + 1)) * seq.ms_per_beat, seq.next_beat_ms);
 }
 
 test "Provider registry allows duplicate interface names" {
@@ -1197,8 +1209,24 @@ test "preference defaults match MSS spec at version-correct indices" {
         try testing.expectEqual(@as(i32, 120), get(22)); // MDI_SERVICE_RATE
         try testing.expectEqual(@as(i32, 127), get(23)); // MDI_DEFAULT_VOLUME
         try testing.expectEqual(@as(i32, 2), get(26)); // MDI_DEFAULT_BEND_RANGE
-        // Old-layout slot must NOT carry the old default any more.
-        try testing.expectEqual(@as(i32, 16), get(1)); // not DIG_MIXER_CHANNELS=64
+        // A slot the 3.x..8.x layout numbered differently must not still carry
+        // that layout's default, so a table half-migrated to the 9.x numbering
+        // cannot pass. Each row is the old index against the value the old
+        // layout stored there.
+        const old_layout = [_]struct { number: u32, old_default: i32 }{
+            .{ .number = @intFromEnum(openmiles.Pref.DIG_MIXER_CHANNELS), .old_default = 64 },
+            .{ .number = @intFromEnum(openmiles.Pref.MDI_SERVICE_RATE), .old_default = 120 },
+            .{ .number = @intFromEnum(openmiles.Pref.MDI_SEQUENCES), .old_default = 8 },
+            .{ .number = @intFromEnum(openmiles.Pref.MDI_DEFAULT_VOLUME), .old_default = 127 },
+            .{ .number = @intFromEnum(openmiles.Pref.DIG_OUTPUT_BUFFER_SIZE), .old_default = 49152 },
+            .{ .number = @intFromEnum(openmiles.Pref.AIL_MM_PERIOD), .old_default = 5 },
+        };
+        for (old_layout) |row| {
+            testing.expect(get(row.number) != row.old_default) catch |err| {
+                std.debug.print("preference {d} still reads the 3.x..8.x default {d}\n", .{ row.number, row.old_default });
+                return err;
+            };
+        }
     } else {
         // 3.x..8.x numbering (Pref enum) + that era's DEFAULT_* values.
         const P = openmiles.Pref;
@@ -2727,10 +2755,13 @@ test "AIL_shutdown holds the engine up until the last use count is released" {
     // API inside the standard one calls them, must leave what one startup and
     // one shutdown leaves: the engine is up after the first shutdown, and the
     // teardown lands on the last. The count is process-global and other tests
-    // above have left it above zero, so drain it here and put a startup back,
-    // which is the state the suite expects to inherit.
+    // leave it at whatever they held, so this establishes the baseline it
+    // asserts against rather than inheriting one: a filtered run of this test
+    // alone has to reach the same conclusion as a full-suite run.
+    const before = api_digital.startupUseCount();
+    _ = api_digital.AIL_startup();
     const drained = api_digital.AIL_startup();
-    try testing.expect(drained >= 2);
+    try testing.expectEqual(before + 2, drained);
     api_digital.AIL_shutdown();
     // Still one use outstanding, so nothing may have been released.
     try testing.expect(openmiles.startupProvider() != null);
@@ -2982,10 +3013,16 @@ test "AIL_set/sample_speaker_scale_factors round-trip via the channel map (SDK)"
     api_v8b.AIL_sample_speaker_scale_factors(s, &idx, &out, 3);
     try testing.expect(@abs(out[0] - 0.25) < 0.0001 and @abs(out[1] - 0.75) < 0.0001);
     try testing.expectEqual(@as(f32, -1), out[2]); // BACK_LEFT unmapped -> left untouched
-    // Null/zero guards: no crash, no change.
+    // Null/zero guards: no crash, and the levels the last real call stored are
+    // still the ones the getter reports. Reading them back is the assertion; a
+    // setter that wrote speaker_levels[] on a null sample or a zero count would
+    // leave these at 0.25/0.75 otherwise unnoticed.
     api_v8b.AIL_set_sample_speaker_scale_factors(null, &idx, &set_lv, 3);
     api_v8b.AIL_set_sample_speaker_scale_factors(s, null, &set_lv, 3);
     api_v8b.AIL_set_sample_speaker_scale_factors(s, &idx, &set_lv, 0);
+    out = .{ -1, -1, -1 };
+    api_v8b.AIL_sample_speaker_scale_factors(s, &idx, &out, 3);
+    try testing.expect(@abs(out[0] - 0.25) < 0.0001 and @abs(out[1] - 0.75) < 0.0001);
 }
 
 test "AIL_set/speaker_reverb_levels round-trip; AIL_get_marker_list reports empty (SDK)" {
@@ -5591,6 +5628,7 @@ test "AIL_3D_sample_distances round-trips max/min in header param order" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
     const s3p = api_3d.AIL_allocate_3D_sample_handle(drv) orelse return error.AllocFailed;
+    defer api_3d.AIL_release_3D_sample_handle(s3p);
     const s3: *openmiles.Sample3D = @ptrCast(@alignCast(s3p));
 
     api_3d.AIL_set_3D_sample_distances(s3p, 100.0, 5.0); // max=100, min=5
@@ -5678,10 +5716,12 @@ test "Sample setLoopBlock stores frame boundaries" {
 
     try sample.loadFromMemory(wav, true);
 
+    // The fixture is a 4410-byte 8-bit mono WAV, so a frame is one byte and the
+    // byte offsets divide through unchanged. Storing the offsets unscaled, or
+    // scaling by the wrong bytes-per-frame, passes a "> 0" check.
     sample.setLoopBlock(100, 1000);
-    try testing.expect(sample.loop_start_frame > 0);
-    try testing.expect(sample.loop_end_frame > 0);
-    try testing.expect(sample.loop_end_frame > sample.loop_start_frame);
+    try testing.expectEqual(@as(u64, 100), sample.loop_start_frame);
+    try testing.expectEqual(@as(u64, 1000), sample.loop_end_frame);
 
     sample.setLoopBlock(0, -1);
     try testing.expectEqual(@as(u64, 0), sample.loop_start_frame);
@@ -5725,9 +5765,11 @@ test "Sample3D setLoopBlock stores frame boundaries" {
     try testing.expectEqual(@as(u64, 0), s.loop_start_frame);
     try testing.expectEqual(@as(u64, 0), s.loop_end_frame);
 
+    // An unloaded 3D handle has no decoder, so it falls back to 16-bit stereo:
+    // 4 bytes per frame, and the byte offsets have to divide through it.
     s.setLoopBlock(100, 1000);
-    try testing.expect(s.loop_start_frame > 0);
-    try testing.expect(s.loop_end_frame > 0);
+    try testing.expectEqual(@as(u64, 25), s.loop_start_frame);
+    try testing.expectEqual(@as(u64, 250), s.loop_end_frame);
 }
 
 test "Sample3D loadFromPcm initializes sample" {
@@ -7428,9 +7470,11 @@ const api_dls_t = @import("api/dls.zig");
 const api_timer_t = @import("api/timer.zig");
 
 test "DLS unload C-ABI variants free a loaded soundfont" {
-    // The soundfont fixture is gitignored ("provide your own"); on machines
-    // without it (e.g. CI) there is nothing to assert, so skip quietly.
-    std.Io.Dir.cwd().access(openmiles.io, "test_media/test.sf2", .{}) catch return;
+    // The soundfont fixture is gitignored ("provide your own"). A machine
+    // without it cannot run the body, and returning plainly would report this
+    // test as passed; error.SkipZigTest makes the run report it as skipped, so
+    // a green suite states that these four unload variants went untested.
+    std.Io.Dir.cwd().access(openmiles.io, "test_media/test.sf2", .{}) catch return error.SkipZigTest;
     const hm = try openmiles.MidiDriver.init(testing.allocator);
     defer hm.deinit();
     // Each unload variant frees the bank, so reload a fresh one before the next.
@@ -8521,7 +8565,11 @@ test "cache_sounds namelist handles a trailing colon without a wild slot" {
     try testing.expectEqualStrings("a", std.mem.span(@as([*:0]const u8, @ptrCast(list[0].?))));
     try testing.expectEqualStrings("b", std.mem.span(@as([*:0]const u8, @ptrCast(list[1].?))));
     // The over-counted trailing slot must be null (not uninitialized scratch).
-    if (ld.namecount >= 3) try testing.expect(list[2] == null);
+    // "a:b:" holds two names and two colons, and the count adds one for the
+    // list's own length, so the count is pinned at 3 rather than left to a
+    // guard that would drop this check if the count ever moved.
+    try testing.expectEqual(@as(i32, 3), ld.namecount);
+    try testing.expect(list[2] == null);
     cur = api_v8b.AIL_next_event_step(cur, &sp, &buf, buf.len);
     try testing.expect(cur == null);
 }
@@ -8658,6 +8706,15 @@ test "AIL_set/sample_reverb_levels round-trips dry and wet independently" {
     api_v7.AIL_sample_reverb_levels(s, &dry, &wet);
     try testing.expectApproxEqAbs(@as(f32, 0.5), dry, 0.001); // not 1-0.3
     try testing.expectApproxEqAbs(@as(f32, 0.3), wet, 0.001);
+    // Setter and getter take the pair in the same order, so a transposed pair
+    // reads back exactly what was written. The three-parameter form reads the
+    // engine's wet level from a different field, so the two orders disagree
+    // there: wet is the second argument, not the first.
+    var rev_level: f32 = -1;
+    var reflect: f32 = -1;
+    var decay: f32 = -1;
+    dg.AIL_sample_reverb(s, &rev_level, &reflect, &decay);
+    try testing.expectApproxEqAbs(@as(f32, 0.3), rev_level, 0.001);
     // The SDK stores dry/wet verbatim (no clamp); out-of-range values round-trip
     // even though the engine drives the reverb node with a clamped wet.
     api_v7.AIL_set_sample_reverb_levels(s, 1.5, 1.8);
@@ -8722,6 +8779,7 @@ test "AIL_3D_position/velocity/orientation round-trip (H3DPOBJECT: sample + list
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
     const s3 = api_3d.AIL_allocate_3D_sample_handle(drv) orelse return error.AllocFailed;
+    defer api_3d.AIL_release_3D_sample_handle(s3);
 
     var x: f32 = 0;
     var y: f32 = 0;
