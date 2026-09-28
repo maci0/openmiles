@@ -198,6 +198,37 @@ test "MidiDriver forgets the image identity of a buffer the caller frees" {
     try testing.expectEqual(@as(?*openmiles.tsf.tsf, null), driver.soundfontFromImage(image.ptr, @intCast(image.len - 1)));
 }
 
+// The callback route holds no image identity (the buffer is gone with the
+// call), so the name of the file is what a repeated load of it is matched on.
+// Without it the second AIL_DLS_load_file of one file read the bytes again,
+// closed the bank the game was still holding, and returned a second copy.
+test "MidiDriver a bank loaded over the file callbacks is found by its name" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.MidiDriver.init(allocator);
+    defer driver.deinit();
+
+    const sentinel: *openmiles.tsf.tsf = @ptrFromInt(0x4000);
+    driver.soundfont = sentinel;
+    driver.owns_soundfont = false;
+    driver.soundfont_refs = 1;
+    try driver.adoptSoundfontFilename("level2.sf2");
+
+    // The repeat hands back the bank in place, not a load of its own.
+    try testing.expectEqual(@as(?*anyopaque, @ptrCast(sentinel)), driver.retainSoundfontForFile("level2.sf2"));
+    try testing.expectEqual(sentinel, driver.soundfont.?);
+    try testing.expectEqual(@as(u32, 2), driver.soundfont_refs);
+    // A different file is not that bank, so it is loaded rather than matched.
+    try testing.expectEqual(@as(?*anyopaque, null), driver.retainSoundfontForFile("other.sf2"));
+
+    // Two loads of one bank, so the first unload only answers one of them and
+    // the second drops the bank and the record with it.
+    driver.unloadDLS(sentinel);
+    try testing.expectEqual(sentinel, driver.soundfont.?);
+    driver.unloadDLS(sentinel);
+    try testing.expectEqual(@as(?*openmiles.tsf.tsf, null), driver.soundfont);
+    try testing.expectEqual(@as(?[:0]u8, null), driver.soundfont_path);
+}
+
 test "MidiDriver ms-per-frame stays finite for any output rate" {
     const allocator = testing.allocator;
     const driver = try openmiles.MidiDriver.init(allocator);
@@ -1963,6 +1994,27 @@ test "getActiveSequenceCount follows register, play, stop and release" {
     try testing.expectEqual(before, openmiles.getActiveSequenceCount());
     s1.deinit();
     try testing.expectEqual(before, openmiles.getActiveSequenceCount());
+}
+
+// A sequence names the driver that made it, and the table it is tracked in is
+// walked by pointer. One left behind by a driver close names a driver that
+// close freed, so the next walk of the table compares against a freed address:
+// a close repeated with the handle the game kept stopped the sequences of
+// whichever driver had taken that address since.
+test "closing a MIDI driver takes its sequences out of the tracked table" {
+    const allocator = testing.allocator;
+    const before = openmiles.trackedSequenceCount();
+
+    const driver = try openmiles.MidiDriver.init(allocator);
+    const seq = try openmiles.Sequence.init(driver);
+    try testing.expectEqual(before + 1, openmiles.trackedSequenceCount());
+
+    openmiles.closeMidiDriver(driver);
+    try testing.expectEqual(before, openmiles.trackedSequenceCount());
+
+    // The handle the game holds is still its own: releasing it after the close
+    // frees the sequence, and finds nothing left to unregister.
+    seq.deinit();
 }
 
 test "Sample end sets done status" {

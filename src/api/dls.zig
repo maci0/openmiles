@@ -22,7 +22,12 @@ pub fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flag
     const driver = driver_opt orelse return null;
     log("AIL_DLS_load_file(driver={*}, filename={s}, flags={d})\n", .{ driver, filename, flags });
     openmiles.clearLastError();
+    const name = std.mem.span(filename);
     if (openmiles.currentFileCallbacks() != null) {
+        // A file the driver already has is that bank, whichever route the bytes
+        // would take: reading it again would close the bank the game is still
+        // holding and return a second copy of it.
+        if (driver.retainSoundfontForFile(name)) |existing| return existing;
         if (openmiles.fileCallbackReadAll(filename)) |b| {
             defer openmiles.global_allocator.free(b);
             // tsf_load_memory takes a C `int`; see AIL_DLS_load_memory for why a
@@ -41,6 +46,12 @@ pub fn AIL_DLS_load_file(driver_opt: ?*MidiDriver, filename: [*:0]const u8, flag
             // address the allocator hands to the next image would otherwise
             // answer that image's load with this bank.
             driver.forgetSoundfontImage(b.ptr, @intCast(b.len));
+            // The buffer the bank came from is gone with this call, so the name
+            // is the record of it. Without it the next load of this file reads
+            // the bytes again and closes the bank this load returned.
+            driver.adoptSoundfontFilename(name) catch |err| {
+                log("AIL_DLS_load_file: cannot record the source of '{s}' ({any}); a repeated load of it is a real load\n", .{ name, err });
+            };
             return @ptrCast(loaded);
         } else |err| {
             // Not fatal on its own: fall through to a direct filesystem read,

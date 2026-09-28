@@ -1086,6 +1086,15 @@ pub fn getActiveSequenceCount() u32 {
     return count;
 }
 
+/// How many sequences are tracked, playing or not. Not an SDK surface: the
+/// test suite reads it to prove a driver close left no sequence naming the
+/// driver it freed.
+pub fn trackedSequenceCount() usize {
+    global_sequences_mutex.lockUncancelable(io);
+    defer global_sequences_mutex.unlock(io);
+    return global_sequences.items.len;
+}
+
 // --- Redist directory ---
 
 // AIL_set_redist_directory is documented as callable more than once per
@@ -1671,7 +1680,11 @@ pub fn closeMidiDriver(driver: *MidiDriver) void {
         // allocates or releases a sequence handle for the duration.
         log("closeMidiDriver: cannot snapshot the sequence list; the driver's sequences are stopped under the lock\n", .{});
         for (global_sequences.items) |seq| {
-            if (seq.driver == driver) seq.stopAndUninit();
+            if (seq.driver != driver) continue;
+            seq.stopAndUninit();
+            // Dropped here as well, under the lock the table is already held:
+            // a sequence left behind names a driver this close frees.
+            removeFirst(&global_sequences, seq);
         }
         global_sequences_mutex.unlock(io);
         driver.deinit();
@@ -1680,7 +1693,16 @@ pub fn closeMidiDriver(driver: *MidiDriver) void {
     global_sequences_mutex.unlock(io);
     defer global_allocator.free(snapshot);
     for (snapshot) |seq| {
-        if (seq.driver == driver) seq.stopAndUninit();
+        if (seq.driver != driver) continue;
+        seq.stopAndUninit();
+        // The sequence goes out of the table with its driver. Left in, it
+        // names a driver that is freed by the end of this call, and the next
+        // walk of the table compares against that freed address: a close
+        // repeated with the handle the game kept, or a close after the address
+        // was handed to a new driver, stopped a live driver's sequences. The
+        // handle itself stays valid, so the game's own
+        // AIL_release_sequence_handle still frees it.
+        unregisterSequence(seq);
     }
     driver.deinit();
 }

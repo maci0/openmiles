@@ -151,6 +151,40 @@ pub const MidiDriver = struct {
         return sf;
     }
 
+    /// The bank already loaded from `filename`, resolved the way loadSoundfont
+    /// records a path, or null. A load that reaches the driver over the file
+    /// callbacks carries no image identity: the buffer it read the bytes into
+    /// is released when the call returns, and forgetSoundfontImage has already
+    /// dropped the record of it. The name is what survives that, so it is what
+    /// a repeated load of one file is matched on.
+    pub fn soundfontFromFilename(self: *const MidiDriver, filename: []const u8) ?*tsf.tsf {
+        if (self.soundfont_path == null) return null;
+        const resolved = fs_compat.dupeResolvedPathZ(self.allocator, filename) catch return null;
+        defer self.allocator.free(resolved);
+        return self.soundfontFromPath(resolved);
+    }
+
+    /// The bank `filename` names if the driver already has it, taking a
+    /// reference on it, and null when it has to be loaded. This is the check
+    /// AIL_DLS_load_file makes before it reads the file: without it a second
+    /// load of a file the driver already has read the bytes again, closed the
+    /// bank the game was still holding, and handed back a second copy of it.
+    pub fn retainSoundfontForFile(self: *MidiDriver, filename: []const u8) ?*anyopaque {
+        const sf = self.soundfontFromFilename(filename) orelse return null;
+        self.soundfont_refs += 1;
+        return @ptrCast(sf);
+    }
+
+    /// Record `filename` as the source of the bank now loaded, so a later load
+    /// of that file is a repeat of this one and not a load of its own. Called
+    /// after the bank is in place, since loadSoundfontImage clears the record
+    /// as it installs one.
+    pub fn adoptSoundfontFilename(self: *MidiDriver, filename: []const u8) !void {
+        const resolved = try fs_compat.dupeResolvedPathZ(self.allocator, filename);
+        if (self.soundfont_path) |p| self.allocator.free(p);
+        self.soundfont_path = resolved;
+    }
+
     /// The bank already loaded from the image at `data` of `size` bytes, or
     /// null.
     pub fn soundfontFromImage(self: *const MidiDriver, data: [*c]const u8, size: u32) ?*tsf.tsf {
@@ -399,6 +433,11 @@ fn satBeats(v: f64) i32 {
 
 pub const Sequence = struct {
     driver: *MidiDriver,
+    // The allocator the driver was built with, held here rather than read back
+    // through `driver`: a game releases its sequence handles after closing the
+    // driver as often as before it, and reading the driver to free the sequence
+    // then dereferenced the driver the close had already freed.
+    allocator: std.mem.Allocator,
     midi: ?*tsf.tml_message = null,
     current_msg: ?*tsf.tml_message = null,
     time_ms: f64 = 0,
@@ -631,6 +670,7 @@ pub const Sequence = struct {
         const self = try driver.allocator.create(Sequence);
         self.* = .{
             .driver = driver,
+            .allocator = driver.allocator,
             .sound = undefined,
             .data_source = undefined,
         };
@@ -666,7 +706,7 @@ pub const Sequence = struct {
         if (self.midi) |m| {
             tsf.tml_free(m);
         }
-        self.driver.allocator.destroy(self);
+        self.allocator.destroy(self);
     }
 
     fn onRead(pDataSource: ?*ma.ma_data_source, pFramesOut: ?*anyopaque, frameCount: ma.ma_uint64, pFramesRead: ?*ma.ma_uint64) callconv(.c) ma.ma_result {
@@ -916,7 +956,7 @@ pub const Sequence = struct {
     pub fn loadMidi(self: *Sequence, data: []const u8, seq_num: usize) !void {
         // Detect XMIDI (IFF FORM+XDIR or bare FORM+XMID) and convert to SMF if needed
         var converted: ?[]u8 = null;
-        const alloc = self.driver.allocator;
+        const alloc = self.allocator;
         defer if (converted) |c| alloc.free(c);
         const smf_data: []const u8 = blk: {
             if (data.len >= 12 and std.mem.eql(u8, data[0..4], "FORM")) {
