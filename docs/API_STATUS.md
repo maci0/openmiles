@@ -17,9 +17,14 @@ has known limitations, or is a compatibility stub.
 `AIL_open_ASI_provider`, `AIL_close_ASI_provider`,
 `AIL_ASI_provider_attribute`, `AIL_quick_stop`, `AIL_DLS_unload_file`) appear in
 no Miles export table, so `src/main.zig` lists them as `never_export`: they are
-implemented and unit-tested internally, but the DLL does not export them, and a
-call from your own code will not link. `src/mss.h` therefore does not declare
-them; `make check-header` enforces that. `never_export` in `src/main.zig` is the
+implemented and covered by the Zig tests, which link the module directly, but
+the DLL does not export them, and a call from your own code will not link. A C
+harness that resolves one by name through `GetProcAddress` does not find it
+either; `tests/midi_test.c`, `tests/full_suite.c`, and `tests/rib_test.c` still
+name a few of these (`AIL_open_midi_driver`, `AIL_close_midi_driver`,
+`AIL_ASI_provider_attribute`, `AIL_set_timer_user_data`) and abort at load
+against a current DLL. `src/mss.h` does not declare the never_export names;
+`make check-header` enforces that. `never_export` in `src/main.zig` is the
 complete list; the tables here cover behaviour, not linkability.
 
 `src/main.zig` is the authoritative list of what a build actually exports. The

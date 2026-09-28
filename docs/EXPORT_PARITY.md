@@ -133,11 +133,17 @@ EXTRA breaks down into two very different groups:
    real plugins export `RIB_Main`; the host exports `MIX_RIB_MAIN`),
    `DllMainCRTStartup` (a Zig/lld entry-point artifact), and 15 convenience
    wrappers the project added (`AIL_pause_sequence`, `AIL_quick_stop`,
-   `AIL_open_midi_driver`, ...). The wrappers backed the project's own C tests,
-   which still reach them. Since then they were suppressed from the PE export
-   table: `never_export` in `src/main.zig` lists every name no real release
-   ever exported, and the implementations stay callable internally and from
-   tests.
+   `AIL_open_midi_driver`, ...). The wrappers existed for the project's own C
+   harnesses in `tests/`, which resolve every entry point by name through
+   `GetProcAddress`. Since then they were suppressed from the PE export table:
+   `never_export` in `src/main.zig` lists every name no real release ever
+   exported, and the implementations stay callable from the Zig tests, which
+   link the module directly. A C harness that resolves one of these names now
+   fails at load: the `LOAD_FUNC_EX` in `tests/test_utils.h` reports the name
+   and returns 1. The harnesses that still name a `never_export` entry
+   (`AIL_open_midi_driver`, `AIL_close_midi_driver`,
+   `AIL_ASI_provider_attribute`, `AIL_set_timer_user_data`) predate the
+   suppression and no longer run against a current DLL.
 
 **EXTRA bounding (done).** Using a presence map computed over *all* 148
 reference DLLs (per-function set of major versions it appears in), every target
@@ -168,8 +174,7 @@ any change was applied.
    artifact, never a real Miles export) and the 15 convenience wrappers counted
    above. Neither is in the table any more: the CRT entry is the PE entry point
    rather than an export, and `never_export` in `src/main.zig` drops the
-   wrappers while their implementations stay callable internally and from the
-   project's own C tests.
+   wrappers while their implementations stay callable from the Zig tests.
 
 The byte-exact MISSING/MISMATCH result remains the load-bearing fidelity
 guarantee; EXTRA is now at its safe floor.
@@ -187,12 +192,13 @@ gap that the single-DLL check had masked:
   gating exported the wide v8 form for all of 6.x. Re-gated: the `_v7`
   no-channel variant covers ver 65-70, the wide form 80+, and 6.0/6.1 (which
   never had it) no longer export it.
-- **12 functions present only in 6.5/6.6** (added in 6.5, dropped in 7.0) were
-  absent: per-stream `volume_levels` / `volume_pan` getter / `reverb_levels` /
-  `low_pass_cut_off`, `AIL_set/3D_sample_exclusion`,
-  `AIL_DLS_set/get_reverb_levels`, and `AIL_set_digital_master_room_type`. All
-  added, gated ver 65-66 (a stream handle is a Sample, so the stream forms
-  mirror the sample ones).
+- **12 functions present only in the 6.5/6.6 sub-line** were absent: per-stream
+  `volume_levels` / `volume_pan` getter / `reverb_levels` / `low_pass_cut_off`,
+  `AIL_set/3D_sample_exclusion`, `AIL_DLS_set/get_reverb_levels`, and
+  `AIL_set_digital_master_room_type`. All were added, and all are gone by 7.0,
+  but they do not share one floor: the exclusion pair first appears in the
+  6.1d patch and is gated ver 61-66, the other ten ver 65-66 (a stream handle is
+  a Sample, so the stream forms mirror the sample ones).
 
 This took 6.5/6.6 from 16 discrepancies to **1**, then **0** (see below).
 

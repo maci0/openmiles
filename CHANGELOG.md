@@ -46,6 +46,19 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Three claims in `docs/` that the code contradicts. `docs/EXPORT_PARITY.md`
+  put the 6.5/6.6-only exclusion pair in the same ver 65-66 group as the ten
+  other functions added in that pass; `src/main.zig` gates
+  `AIL_set_3D_sample_exclusion` and `AIL_3D_sample_exclusion` at ver 61-66,
+  because they first appear in the 6.1d patch. Both files also said the
+  `never_export` wrappers stay reachable from the project's C harnesses; they
+  are not, since those harnesses resolve entry points by name through
+  `GetProcAddress` and `LOAD_FUNC_EX` aborts on a name the DLL does not export.
+  `tests/midi_test.c`, `tests/full_suite.c`, and `tests/rib_test.c` still name
+  four of them and cannot run against a current DLL.
+
 ## [0.2.0] - 2026-09-28
 
 CI and test fixes that landed after 0.1.0, plus the GitHub Actions bumps merged with them.
