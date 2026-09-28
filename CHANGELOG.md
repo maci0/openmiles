@@ -142,6 +142,15 @@ All notable changes to OpenMiles are recorded here. The format follows
   with it `make lint` and CI failed. Every one was re-anchored to the line its
   anchor now sits on, and `MilesAddSoundBank` (which moved without a uniform
   file shift) was re-aimed by hand.
+- The first close of a digital driver tore the device down even when a second
+  open was still outstanding. Opens are counted (`AIL_open_digital_driver` and
+  `AIL_waveOutOpen` are two names for the one process-wide device), but the
+  close path destroyed the driver instead of dropping one open, so a game
+  holding the handle through both names lost its audio device, and every
+  later call through the surviving handle ran against a freed engine. The
+  claim that guards against a repeated close now moves the open count and
+  keeps the driver in the table an open still refers to; the device goes away
+  with the last close.
 - Loading, unloading, or replacing a SoundFont could deadlock the process
   against its own audio thread. The swap published the replacement and then
   spun on the render-claim count while holding the driver lock, so a render

@@ -1809,7 +1809,9 @@ pub fn destroyDigitalDriver(driver: *DigitalDriver) void {
 /// the first close would leave the other open pointing at an uninitialised
 /// engine over freed memory. A handle the table does not name is not a close
 /// of an open driver but a close of memory that is already gone, so it is
-/// reported and dropped.
+/// reported and dropped. The driver stays in the table until the last close
+/// takes the open count to zero, so a live driver is never classified as a
+/// Sample3D by the 3D dispatch entry points.
 pub fn closeDigitalDriver(driver: *DigitalDriver) void {
     if (!isKnownDriver(driver)) {
         log("closeDigitalDriver: this handle is not an open digital driver; the close is ignored\n", .{});
