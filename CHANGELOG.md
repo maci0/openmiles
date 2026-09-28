@@ -49,6 +49,17 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ### Added
 
+- Coverage-guided fuzz targets for `AIL_decompress_ASI` and for the
+  `AIL_compress_ASI` / `AIL_decompress_ASI` pair. The decompressor was the one
+  untrusted-input surface with no harness: it takes an image of unknown
+  provenance and hands back a buffer whose length is what bounds every later
+  read, and nothing in the C ABI re-checks it. The targets plant a container
+  tag or a WAV header with sizes the bytes behind them do not honour, and
+  assert that a decode which reports success returns a PCM image whose data
+  chunk lies inside the buffer its own length describes, and that a call
+  which fails hands back no buffer at all. The round trip asserts the
+  compressor's own output: the fact-chunk frame count, the data chunk inside
+  the image, and that the decoder reads back what the encoder wrote.
 - `AIL_serve` advances the 3D sources that asked for automatic position updating, by the time since the previous serve. The flag `AIL_auto_update_3D_position` sets had no effect before, and the call was a documented no-op.
 - A `set_limits` step inside an event installs the per-label caps its text declares, the same call `MilesSetSoundLabelLimits` makes. Only the out-of-band call applied them.
 - `mss.h` is installed to `zig-out/include/mss.h` and ships in the release
@@ -153,6 +164,10 @@ All notable changes to OpenMiles are recorded here. The format follows
   The `.exe` suffix was resolved from a `findstring` that matched only the
   `MINGW` family, so Cygwin and an MSYS2 `msys` shell ran a name the build
   never installed. All four Windows families are matched now.
+- `DigitalDriver.init` assigned to a field the struct no longer has, so the
+  whole test suite stopped compiling. The first-serve baseline it was writing
+  is taken by `serve` itself, which is where the nanosecond reading and the
+  "already served" flag it belongs to now live.
 - A temporary directory that was accepted and then turned out to be unusable
   (the platform resolves none, it leaves no room for the image name under the
   path limit, or the image cannot be written there) was reported only through

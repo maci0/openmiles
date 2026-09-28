@@ -10,9 +10,12 @@
 //! and per-label caps, the MP3 image inspector and frame enumerator (ID3v2
 //! skips, the frame-sync search, and the bitrate-derived frame length a
 //! decoder is handed for each frame), the DLS container split
-//! (find / extract / list over a merged .mil image), and the plugin loader's
+//! (find / extract / list over a merged .mil image), the plugin loader's
 //! directory-entry name filter, the gate every untrusted name in a game
-//! directory passes before the loader opens it as code.
+//! directory passes before the loader opens it as code, and the ASI
+//! compress / decompress pair, whose decompressor takes an image of unknown
+//! provenance and returns a buffer whose reported length is the only bound on
+//! every read the caller makes from it.
 //!
 //! fuzz_test.zig drives these with fixed-seed PRNG bytes. These targets add
 //! what a PRNG loop cannot: the input picks the shapes (which ASCII a field may
@@ -31,6 +34,7 @@ const openmiles = @import("openmiles");
 const api_v8 = @import("api/v8.zig");
 const api_miles = @import("api/miles.zig");
 const api_dls = @import("api/dls.zig");
+const api_rib = @import("api/rib.zig");
 const api_memory = @import("api/memory.zig");
 
 const Weight = std.testing.Smith.Weight;
@@ -2375,4 +2379,223 @@ const plugin_corpus = [_][]const u8{
 test "fuzz: plugin directory-entry name filter" {
     var ctx: plugin_ctx = .{};
     try std.testing.fuzz(&ctx, fuzzPluginNameOne, .{ .corpus = &plugin_corpus });
+}
+
+// --- Target 10: the ASI compress / decompress pair -----------------------------
+
+/// AIL_decompress_ASI takes an image of unknown provenance and hands the caller
+/// a freshly malloc'd buffer through two out-parameters: the length it writes
+/// there is what bounds every later read of that buffer, and nothing in the C
+/// ABI re-checks it. Every other target here is a parser whose output a caller
+/// then trusts; this one produces the length, which is where a hostile header
+/// has the most room to lie.
+const asi_ctx = struct {
+    data: [16 * 1024]u8 = undefined,
+    pcm: [4096]u8 = undefined,
+    out: ?*anyopaque = null,
+    out_size: u32 = 0,
+};
+
+/// Bytes a compressed audio image is made of: the tags a decoder keys on, the
+/// hex ASCII some headers spell their sizes with, and zero / 0xFF for the size
+/// fields a hostile image lies with. The rest of the range carries the payload.
+const asi_byte_weights: []const Weight = &.{
+    w(0, 0, 15),
+    w(1, 0x1F, 20),
+    w('0', '9', 10),
+    w('A', 'F', 10),
+    w('a', 'f', 10),
+    w('R', 'S', 5), // RIFF / RIFX
+    w('W', 'W', 5), // WAVE
+    w('f', 'l', 5), // fLaC
+    w('m', 'm', 5), // MP3 frame sync region
+    w('I', 'I', 5), // ID3
+    w(0x80, 0xFF, 15),
+};
+
+/// Byte offset of an interior pointer from the start of the image it came from.
+fn asiOffset(base: [*]const u8, p: *const anyopaque) usize {
+    return @intCast(@intFromPtr(p) -% @intFromPtr(base));
+}
+
+/// The header a hostile image carries: a real PCM WAV whose declared sizes no
+/// longer match the bytes behind them. The payload stays decodable, so the
+/// length the decode reports has to come from the bytes, not from the header.
+fn asiLyingWavHeader(ctx: *asi_ctx, smith: *std.testing.Smith) void {
+    @memcpy(ctx.data[0..4], "RIFF");
+    @memcpy(ctx.data[8..12], "WAVE");
+    @memcpy(ctx.data[12..16], "fmt ");
+    std.mem.writeInt(u32, ctx.data[16..20], 16, .little);
+    std.mem.writeInt(u16, ctx.data[20..22], 1, .little);
+    std.mem.writeInt(u16, ctx.data[22..24], 2, .little);
+    std.mem.writeInt(u32, ctx.data[24..28], 44100, .little);
+    std.mem.writeInt(u32, ctx.data[28..32], 44100 * 4, .little);
+    std.mem.writeInt(u16, ctx.data[32..34], 4, .little);
+    std.mem.writeInt(u16, ctx.data[34..36], 16, .little);
+    @memcpy(ctx.data[36..40], "data");
+    // The two size fields a decode trusts and the image does not honour.
+    const declared: u32 = switch (smith.index(4)) {
+        0 => 0, // empty payload
+        1 => std.math.maxInt(u32), // past the end of any buffer
+        2 => smith.value(u32) & 0xFFFF, // a little more or less than there is
+        else => 1024 * 1024,
+    };
+    std.mem.writeInt(u32, ctx.data[40..44], declared, .little);
+    std.mem.writeInt(u32, ctx.data[4..8], declared +| 36, .little);
+}
+
+fn fuzzAsiOne(ctx: *asi_ctx, smith: *std.testing.Smith) anyerror!void {
+    const n: usize = @intCast(smith.sliceWeighted(
+        &ctx.data,
+        &.{.{ .min = 16, .max = ctx.data.len, .weight = 1 }},
+        asi_byte_weights,
+    ));
+    // A third of the inputs carry a container tag at offset zero, which is the
+    // only way a decoder is asked to walk a real header; the rest are noise a
+    // decoder has to reject on the first bytes.
+    if (smith.boolWeighted(1, 3)) {
+        const tags = [_][]const u8{ "RIFF", "RIFX", "FORM", "fLaC", "OggS", "ID3\x04\x00\x00\x00\x00\x00\x00" };
+        const tag = tags[smith.index(tags.len)];
+        @memcpy(ctx.data[0..tag.len], tag);
+    }
+    if (smith.boolWeighted(1, 4)) asiLyingWavHeader(ctx, smith);
+
+    ctx.out = null;
+    ctx.out_size = 0;
+    const ok = api_rib.AIL_decompress_ASI(
+        @ptrCast(ctx.data[0..n].ptr),
+        @intCast(n),
+        "asi",
+        &ctx.out,
+        &ctx.out_size,
+        null,
+    );
+    const out = ctx.out orelse {
+        // A call that reports failure owns no buffer: the caller frees through
+        // AIL_mem_free_lock, and one it never received cannot be freed at all.
+        try testing.expectEqual(@as(i32, 0), ok);
+        try testing.expectEqual(@as(u32, 0), ctx.out_size);
+        return;
+    };
+    defer api_memory.AIL_mem_free_lock(out);
+    try testing.expectEqual(@as(i32, 1), ok);
+    if (ok != 1) return;
+
+    const wav: [*]const u8 = @ptrCast(out);
+    // The reported length is the whole contract: every read the caller makes
+    // from here on is bounded by it and by nothing else.
+    try testing.expect(ctx.out_size > 44);
+    var info: openmiles.AILSOUNDINFO = .{};
+    if (openmiles.wavInfoBounded(wav, ctx.out_size, &info) == 0) return;
+    // The output is the PCM image the export documents: s16, stereo, 44.1 kHz,
+    // whatever the input was.
+    try testing.expectEqual(@as(i32, 1), info.format);
+    try testing.expectEqual(@as(u16, 16), info.bits);
+    try testing.expectEqual(@as(u16, 2), info.channels);
+    try testing.expectEqual(@as(u32, 44100), info.rate);
+    // The data chunk the header points at has to be inside the buffer the
+    // length describes, and the frame count has to be what those bytes hold.
+    const data_off = asiOffset(wav, info.data_ptr.?);
+    try testing.expect(data_off + info.data_len <= ctx.out_size);
+    try testing.expectEqual(@as(u32, 0), info.data_len % 4);
+}
+
+const asi_corpus = [_][]const u8{
+    // A decodable PCM WAV, the image a game ships as a compressed .asi.
+    "RIFF" ++ "\x44\x00\x00\x00" ++ "WAVE" ++ "fmt " ++ "\x10\x00\x00\x00" ++
+        "\x01\x00\x02\x00" ++ "\x44\xAC\x00\x00" ++ "\x10\x44\x01\x00" ++
+        "\x04\x00\x10\x00" ++ "data" ++ "\x04\x00\x00\x00" ++ "\x00\x00\x00\x00",
+    // The same image with sizes that do not match the bytes behind them.
+    "RIFF" ++ "\xFF\xFF\xFF\xFF" ++ "WAVE" ++ "fmt " ++ "\x10\x00\x00\x00" ++
+        "\x01\x00\x02\x00" ++ "\x44\xAC\x00\x00" ++ "\x10\x44\x01\x00" ++
+        "\x04\x00\x10\x00" ++ "data" ++ "\xFF\xFF\xFF\xFF" ++ "\x00\x00\x00\x00",
+    "RIFF" ++ "\x00\x00\x00\x00" ++ "WAVE" ++ "data",
+    // Other containers a decoder is handed under the same name.
+    "fLaC" ++ "\x00\x00\x00\x22" ++ "fLaC" ++ "\x00\x00\x00\x22" ++ "\x80\x00\x00\x00\x00\x00\x00\x00",
+    "OggS" ++ "\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00" ++ "\x01\x1E" ++ "vorbis",
+    "ID3\x04\x00\x00\x00\x00\x00\x0A" ++ "TIT2\x00\x00\x00\x04\x00\x00\x00\x00" ++ "\xFF\xFB\x90\x00",
+    "",
+};
+
+test "fuzz: ASI image decompression" {
+    var ctx: asi_ctx = .{};
+    try std.testing.fuzz(&ctx, fuzzAsiOne, .{ .corpus = &asi_corpus });
+}
+
+// --- Target 11: the ASI compress / decompress round trip ----------------------
+
+/// AIL_compress_ASI and AIL_decompress_ASI are the two halves of one format, so
+/// what one writes the other must read. The pair is the only place the encoder
+/// (IMA ADPCM blocks it produces itself) meets the decoder (a standard WAV
+/// reader), and it crosses the same trust boundary as target 10: the compressed
+/// image is what a later call is asked to take as untrusted.
+fn fuzzAsiRoundTripOne(ctx: *asi_ctx, smith: *std.testing.Smith) anyerror!void {
+    // A source length a real caller uses: a few samples, one block, several
+    // blocks, and a frame count that is not a multiple of the block size.
+    const frames: usize = 1 + smith.index(4096 / 4);
+    for (0..frames * 2) |i| {
+        ctx.pcm[i] = @truncate(@as(u32, @intCast(i)) * 7919 / (frames * 2));
+    }
+    const pcm = ctx.pcm[0 .. frames * 4];
+
+    var info: openmiles.AILSOUNDINFO = .{};
+    info.data_ptr = pcm.ptr;
+    info.data_len = @intCast(pcm.len);
+    info.rate = 44100;
+    info.bits = 16;
+    info.channels = 2;
+    info.format = 1;
+
+    var asi: ?*anyopaque = null;
+    var asi_size: u32 = 0;
+    try testing.expectEqual(@as(i32, 1), api_rib.AIL_compress_ASI(&info, "asi", &asi, &asi_size, null));
+    const compressed = asi orelse {
+        try testing.expect(asi_size == 0);
+        return;
+    };
+    defer api_memory.AIL_mem_free_lock(compressed);
+
+    // The compressed image is a container a decoder parses like any other, so
+    // the header it carries is held to the same rule: every field it declares
+    // has to sit inside the buffer the length describes.
+    const img: [*]const u8 = @ptrCast(compressed);
+    var cinfo: openmiles.AILSOUNDINFO = .{};
+    try testing.expectEqual(@as(i32, 1), openmiles.wavInfoBounded(img, asi_size, &cinfo));
+    const c_off = asiOffset(img, cinfo.data_ptr.?);
+    try testing.expect(c_off + cinfo.data_len <= asi_size);
+    // IMA ADPCM carries the decoded frame count in the fact chunk; a source of
+    // N frames per channel must declare N, or every consumer of the image sizes
+    // its output from the wrong number.
+    try testing.expectEqual(@as(u32, @intCast(frames)), cinfo.samples);
+    // ADPCM is lossy, so what the round trip has to preserve is the frame count
+    // and the shape of the signal, not the exact samples.
+    try testing.expect(cinfo.samples >= @as(u32, @intCast(frames)) -| cinfo.block_size);
+
+    var wav: ?*anyopaque = null;
+    var wav_size: u32 = 0;
+    const ok = api_rib.AIL_decompress_ASI(compressed, asi_size, "asi", &wav, &wav_size, null);
+    if (ok != 1) {
+        // What the encoder produced, the decoder is expected to read: a failed
+        // round trip is a defect in one of the two halves, not in the input.
+        std.debug.print("round trip failed: compressor produced {d} bytes, decoder returned 0\n", .{asi_size});
+        return error.RoundTripFailed;
+    }
+    const out = wav orelse return error.RoundTripFailed;
+    defer api_memory.AIL_mem_free_lock(out);
+    try testing.expect(wav_size > 44);
+    var dinfo: openmiles.AILSOUNDINFO = .{};
+    try testing.expectEqual(@as(i32, 1), openmiles.wavInfoBounded(@ptrCast(out), wav_size, &dinfo));
+    try testing.expectEqual(@as(i32, 1), dinfo.format);
+    try testing.expectEqual(@as(u16, 2), dinfo.channels);
+    try testing.expectEqual(@as(u16, 16), dinfo.bits);
+    // The decoded image holds the frames the source had, to within the block
+    // the ADPCM encoder rounds the last one up to.
+    const d_off = asiOffset(@ptrCast(out), dinfo.data_ptr.?);
+    try testing.expect(dinfo.data_len <= wav_size - d_off);
+    try testing.expect(dinfo.data_len / 4 >= @as(u32, @intCast(frames)));
+}
+
+test "fuzz: ASI compress/decompress round trip" {
+    var ctx: asi_ctx = .{};
+    try std.testing.fuzz(&ctx, fuzzAsiRoundTripOne, .{ .corpus = &asi_corpus });
 }

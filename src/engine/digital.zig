@@ -506,10 +506,6 @@ pub const DigitalDriver = struct {
         // the volume an earlier level saved. Reserving up front makes every push
         // inside the cap infallible, so the count and the saved values cannot
         // come apart.
-        // The first AIL_serve measures its frame from here, not from the epoch:
-        // with a zero baseline the opening frame advances every auto-updating 3D
-        // source by the whole process uptime.
-        self.last_serve_ms = @divTrunc(root.nowNs(), std.time.ns_per_ms);
         self.system_state_stack.ensureTotalCapacity(allocator, max_system_state_level) catch {
             log("DigitalDriver.init: system-state stack reservation failed\n", .{});
             allocator.destroy(self);
