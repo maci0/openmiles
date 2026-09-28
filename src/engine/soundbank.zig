@@ -447,7 +447,7 @@ pub const Bank = struct {
 
     /// Resolve a sound asset's source filename into `out` as the SDK formats it:
     /// "*" + bank filename + the sound's own filename. Returns the sound's
-    /// DataLen (MILESBANKSOUNDINFO.DataLen) on success, or -1 if not found.
+    /// DataLen (MILESBANKSOUNDINFO.DataLen) on success, -1 if not found, or 0 if truncated.
     /// `out` must be large enough for the result (the C API takes no size, matching
     /// the SDK).
     pub fn soundAssetFilename(self: *const Bank, sound_name: []const u8, out: [*]u8) i32 {
@@ -468,9 +468,9 @@ pub const Bank = struct {
         return self.rdI32(found.data_off + 24);
     }
 
-    // MILESBANKSOUNDINFO (mss.h) — the compiled-bank sound record, copied verbatim
-    // into AIL_sound_asset_info's out_info. The SDK warns this layout is bank-
-    // format-critical, so define it and lock its size at comptime.
+    // MILESBANKSOUNDINFO (the SDK's mss.h) — the compiled-bank sound record,
+    // copied verbatim into AIL_sound_asset_info's out_info. The SDK warns this
+    // layout is bank-format-critical, so define it and lock its size at comptime.
     pub const MILESBANKSOUNDINFO = extern struct {
         ChannelCount: i32,
         ChannelMask: u32,

@@ -1,14 +1,14 @@
 //! MSS event constructor + step decoder — a faithful port of the Miles event
 //! system (MSS 9.x SDK mssevent.cpp). An event is a semicolon-delimited *text*
 //! string: a "<VER>;<version>;" header then "<TYPE>;<field>;..." per step, where
-//! <VER>/<TYPE> are the EVENT_STEPTYPE enum value biased by '0'. The constructor
+//! <VER>/<TYPE> are the SDK step-type enum value biased by '0'. The constructor
 //! emits exactly those bytes; AIL_next_event_step decodes one step into an
 //! EVENT_STEP_INFO laid out byte-for-byte like the SDK struct, copying string
 //! fields into the caller's scratch buffer (after the struct) as the SDK does.
 
 const std = @import("std");
 
-/// Step-type enum (values from mss.h); the on-wire char is value + '0'.
+/// Step-type enum (values as the SDK's mss.h defines them); the on-wire char is value + '0'.
 pub const StepType = enum(i32) {
     start_sound = 1,
     control_sounds = 2,

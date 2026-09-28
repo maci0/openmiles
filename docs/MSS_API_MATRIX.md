@@ -42,8 +42,8 @@ This matrix tracks the availability of major API groups across different histori
 ## 3. 3D Positional Audio
 | Function Group | Intro | AIL v2 | MSS v3 | MSS 6.6 | OpenMiles | Notes |
 |:---|:---:|:---:|:---:|:---:|:---:|:---|
-| 3D Sample Handle Mgmt | v6 | 🔴 | 🔴 | 🟢 | 🟢 Full | Allocates Sample3D; file loading via miniaudio |
-| Object Position/Velocity | v6 | 🔴 | 🔴 | 🟢 | 🟢 Full | Sample3D and listener position/velocity/orientation via miniaudio |
+| 3D Sample Handle Mgmt | v5 | 🔴 | 🔴 | 🟢 | 🟢 Full | Allocates Sample3D; file loading via miniaudio |
+| Object Position/Velocity | v5 | 🔴 | 🔴 | 🟢 | 🟢 Full | Sample3D and listener position/velocity/orientation via miniaudio |
 | 3D Providers (EAX, A3D) | v5 | 🔴 | 🔴 | 🟢 | 🟢 Full | Returns built-in OpenMiles Software 3D provider |
 
 ## 4. MIDI & XMIDI

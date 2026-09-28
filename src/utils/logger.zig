@@ -16,10 +16,8 @@ const max_log_bytes: u64 = 64 * 1024 * 1024; // 64 MiB
 /// Where the log goes when OPENMILES_LOG_PATH is unset. Relative, so it lands
 /// in the current directory.
 const default_log_name = "openmiles.log";
-/// Size of the buffer that holds the path for the life of the process. The
-/// longest path OPENMILES_LOG_PATH may name is one byte shorter: the buffer
-/// keeps no terminator, so a path filling it leaves no room for the separator
-/// handling and the rest of the log's own framing.
+/// Size of the buffer that holds the path for the life of the process. A path
+/// is accepted only while strictly shorter, so the longest one is one byte less.
 const max_log_path_bytes = 1024;
 
 // One formatted record. A record that does not fit is not written silently: see
@@ -340,9 +338,9 @@ fn neutralizeCodepoint(cp: u21) bool {
     return false;
 }
 
-/// Write one record when logging is enabled. Self-initializes: a call before
-/// init() opens the log even when debug logging is off, and a call after
-/// deinit() reopens it, so a first call never has to know the lifecycle.
+/// Write one record when logging is enabled. Self-initializing: a call before
+/// init() reads the environment, so a constructor's record still honours
+/// OPENMILES_DEBUG and OPENMILES_LOG_PATH, and a call after deinit() reopens it.
 pub fn log(comptime fmt: []const u8, args: anytype) void {
     if (!debug_enabled and @atomicLoad(bool, &initialized, .acquire)) return;
     init();

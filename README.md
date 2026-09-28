@@ -134,7 +134,7 @@ which fires every registered timer once and advances the clock by the sum of
 their periods. Replaying the same step sequence replays the same run, which is
 what makes a failing sequence reproducible.
 
-A run that also invents names (today, the temporary file an ASI provider image
+A run that also invents names (today, the one temporary file an ASI provider image
 is written under) needs a seed as well as a clock. `openmiles.startSimulation(seed)`
 installs both, and logs the seed so a failing run can be replayed from it;
 `endSimulation()` returns to the platform clock and to secure entropy. Unseeded,

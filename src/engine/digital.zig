@@ -13,11 +13,11 @@ const buildWavFromPcm = root.buildWavFromPcm;
 const mss_speed_of_sound: f32 = 0.355;
 const StreamSource = @import("stream_buffer.zig").StreamSource;
 
-/// MSS S3D falloff graph point (MSSGRAPHPOINT in mss.h): a distance/value point
-/// plus in/out tangents. Layout must stay identical to the SDK struct so a
-/// caller's `MSSGRAPHPOINT*` can be `@memcpy`'d in verbatim.
+/// MSS S3D falloff graph point (MSSGRAPHPOINT in the SDK's mss.h): a
+/// distance/value point plus in/out tangents. Layout must stay identical to the
+/// SDK struct so a caller's `MSSGRAPHPOINT*` can be `@memcpy`'d in verbatim.
 pub const FalloffGraphPoint = extern struct { x: f32, y: f32, itx: f32, ity: f32, otx: f32, oty: f32, itype: i32, otype: i32 };
-/// MILES_MAX_FALLOFF_GRAPH_POINTS (mss.h). A pointcount above this is rejected.
+/// MILES_MAX_FALLOFF_GRAPH_POINTS (the SDK's mss.h). A pointcount above this is rejected.
 pub const max_falloff_points: usize = 5;
 /// The four S3D falloff graphs a sample carries: volume, exclusion, lowpass, spread.
 pub const FalloffKind = enum(usize) { volume = 0, exclusion = 1, lowpass = 2, spread = 3 };
@@ -1420,14 +1420,14 @@ pub const Sample = struct {
         self.sob_callback.store(0, .release);
         self.pcm_format = null;
         self.channel_mask = ~@as(u32, 0);
-        self.n_buffers = 2; // AIL_init_sample sets the ring count to 2 (mssdig.cpp)
+        self.n_buffers = 2; // AIL_init_sample sets the ring count to 2 (wavefile.cpp)
         self.stream_head = 0;
         self.speaker_levels = [_]f32{1.0} ** 9;
         self.user_channel_levels_set = false;
         self.falloff_count = [_]u8{0} ** falloff_kind_count;
         self.s3d_face = .{ 1, 0, 0 };
         self.s3d_up = .{ 0, 1, 0 };
-        self.is_3D = 0; // AIL_init_sample clears 3D state (mssdig.cpp)
+        self.is_3D = 0; // AIL_init_sample clears 3D state (wavefile.cpp)
         self.s3d_auto_atten = 0;
         self.s3d_max_dist = 200.0; // wavefile.cpp AIL_init_sample defaults
         self.s3d_min_dist = 1.0;

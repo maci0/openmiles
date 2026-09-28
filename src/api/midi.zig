@@ -295,12 +295,12 @@ pub fn AIL_send_channel_voice_message(mdi_opt: ?*MidiDriver, seq_opt: ?*Sequence
     const channel = status & 0x0F;
     // A channel voice message carries two 7-bit data bytes, but the SDK takes
     // them as S32 and the caller supplies them unchecked. Every handler below
-    // scales or indexes the raw value, so an out-of-range byte is not rejected
-    // but lands in the soundfont as a value the format cannot hold: d2 = 256
-    // reaches tsf as note-on velocity 2.0 (a gain above unity), and the
-    // 14-bit pitch bend assembled as (b2 << 7) | b1 overflows its own field for
-    // any d2 above 0x3F, which tsf then stores as a bend past full deflection.
-    // Reduce both to the byte the format defines.
+    // scales or indexes the raw value, so an unmasked d2 = 256 would reach tsf
+    // as note-on velocity 2.0 (a gain above unity), and a 14-bit pitch bend
+    // assembled as (b2 << 7) | b1 would overflow its own field for any d2
+    // above 0x3F, which tsf then stores as a bend past full deflection. Mask
+    // both to the byte the format defines, so the value a handler sees is
+    // always one the soundfont can hold.
     const b1: i32 = d1 & 0x7F;
     const b2: i32 = d2 & 0x7F;
     switch (msg_type) {

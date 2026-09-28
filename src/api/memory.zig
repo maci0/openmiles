@@ -16,7 +16,7 @@ pub fn AIL_mem_alloc_lock(size: u32) callconv(.winapi) ?*anyopaque {
 }
 // MSS_alloc_info/MSS_free_info are the file/line-tracked allocation hooks the SDK
 // routes debug builds through. We ignore the tracking metadata (user/filename/
-// line) and use the same malloc/free as the rest of the MSS heap.
+// line) and allocate through std.c.malloc, like AIL_mem_alloc_lock above, not the engine allocator.
 pub fn MSS_alloc_info(size: usize, user: usize, filename: ?[*:0]const u8, line: u32) callconv(.winapi) ?*anyopaque {
     _ = user;
     _ = filename;

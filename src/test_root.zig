@@ -16,8 +16,8 @@ comptime {
     _ = @import("fuzz_all_test.zig");
     _ = @import("rib_test.zig");
 
-    // C-ABI surface — mirrors src/main.zig so the exports are part of the test
-    // binary and their logic is exercised.
+    // C-ABI surface — the same module list src/main.zig exports, so every
+    // export is part of the test binary and its logic is exercised.
     _ = @import("api/3d.zig");
     _ = @import("api/dls.zig");
     _ = @import("api/midi.zig");
@@ -28,6 +28,7 @@ comptime {
     _ = @import("api/digital.zig");
     _ = @import("api/filter.zig");
     _ = @import("api/memory.zig");
+    _ = @import("api/miles.zig");
     _ = @import("api/v7.zig");
     _ = @import("api/v8.zig");
     _ = @import("api/v9.zig");

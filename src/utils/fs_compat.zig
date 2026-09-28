@@ -156,12 +156,12 @@ fn retryPath(path: []const u8, buf: []u8) ?[]const u8 {
     return resolved;
 }
 
-/// Fault injection at the library's file-I/O seam. The opens, creates, and
-/// whole-file reads and writes the engine performs go through this module's
-/// `openFile`, `openDir`, `createFile`, `readLength`, and `writeAll`, so a
-/// schedule installed here is what a simulation replays to produce a failing
-/// open or a read that comes up short. Null in production: one load of a
-/// global per call.
+/// Fault injection at the library's file-I/O seam. The opens, creates, deletes,
+/// and whole-file reads and writes the engine performs go through this module's
+/// `openFile`, `openDir`, `createFile`, `createFileAbsolute`, `deleteFile`,
+/// `readLength`, and `writeAll`, so a schedule installed here is what a
+/// simulation replays to produce a failing open, a read that comes up short, or
+/// a delete that cannot land. Null in production: one load of a global per call.
 pub const Fault = struct {
     /// Fails the open of `path` with the error returned. Null lets it pass.
     open: ?*const fn (path: []const u8) ?anyerror = null,

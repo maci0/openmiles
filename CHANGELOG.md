@@ -183,7 +183,7 @@ All notable changes to OpenMiles are recorded here. The format follows
   the ABI disagreed with the one a consumer compiles against. `full_suite.c`
   now checks the startup result rather than discarding it.
 - A soundfont loaded through the file callbacks is no longer keyed to the buffer the callback read it into. That buffer is released when `AIL_DLS_load_file` returns, so the next image the allocator handed out at the same address, with a size its header matched, was answered with the earlier bank instead of being loaded.
-- `AIL_DLS_unload_all` reports no size for a bank it has released. `AIL_DLS_get_info` answers with the size unconditionally, so a released bank kept reporting the length of an image it no longer held.
+- `DLSUnloadAll` reports no size for a bank it has released. `AIL_DLS_get_info` answers with the size unconditionally, so a released bank kept reporting the length of an image it no longer held.
 - A bank name that does not fit `SoundBankName[4]` keeps whole characters. The 4-byte field cut a name like `café` mid-character, and `AIL_open_soundbank` matches the result against the name the game asked for.
 - The log neutralizes the C1 controls, the bidi embedding and override characters, the isolates, and the zero-width and BOM characters in a path, VFS name, or error string. A name carrying U+009B moved the cursor as one carrying ESC does, and U+202E rendered reversed in whatever reads the log.
 - A GM/GS/XG reset SysEx names the channel and the controller of a reset control the soundfont could not apply. A rejected one leaves that channel half reset, with voices still sounding and the old volume and pan in place.
@@ -517,12 +517,7 @@ contract.
   freed a sequence that had locked a channel, permanently spent one of the 15
   lockable channels until `AIL_lock_channel` answered -1 for the rest of the
   process.
-- `openmiles.copyLastError(out)` and `openmiles.copyFileError(out)` copy a
-  stored message into a caller-supplied buffer under the lock the writers take,
-  and return the slice written. `AIL_last_error` and `AIL_file_error` hand back
-  a raw pointer into a buffer any other thread may be rewriting, so a reader on
-  the game thread could see a half-written or spliced message; these are the
-  race-free way in from Zig.
+- `AIL_last_error` and `AIL_file_error` hand back a raw pointer into a buffer any other thread may be rewriting. The writers are now serialized under `error_buf_mutex`, so two threads can no longer splice their messages together or leave one unterminated, but the pointer a caller holds is still into the live buffer and is not stable across a later `setLastError`.
 - `make lint` runs yamllint over `.github/workflows`, with the rule set in
   `.yamllint` and the version pinned by `YAMLLINT_VERSION` the same way ruff
   is. `make check-pins` now fails when the Makefile and `ci.yml` disagree on
@@ -620,10 +615,10 @@ contract.
   and `openmiles.shutdown()` is reached only at zero; a repeated shutdown past
   zero stays harmless.
 - `AIL_last_error` and `AIL_file_error` name a process-wide buffer that every
-  entry point writes from whichever thread called, with no lock. A reader could
-  see a body with no terminator, or two threads' messages spliced. The writes
-  are serialized now, and `copyLastError` / `copyFileError` are the locked way
-  in (see Added).
+  entry point writes from whichever thread called, with no lock. Two writers
+  could interleave and splice their messages, or leave one unterminated. The
+  writes are serialized now; both accessors still hand back a pointer into the
+  live buffer, so a caller that must keep the text copies it out.
 - `AIL_set_redist_directory` returned a pointer into the library's live path
   buffer, which another thread's call rewrites under the reader. It returns a
   per-thread snapshot of the same string now, so the pointer is as stable as

@@ -159,7 +159,7 @@ pub fn AIL_quick_status(s_opt: ?*Sample) callconv(.winapi) i32 {
         .free, .stopped => 2, // QSTAT_LOADED (loaded, ready to (re)play)
     };
 }
-// v3-v6: S32 volume/extravol on the legacy 0..127 scale.
+// v3 through 6.1: S32 volume/extravol on the legacy 0..127 scale.
 pub fn AIL_quick_set_volume(s_opt: ?*Sample, volume: i32, extravol: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_quick_set_volume(s={*}, volume={d}, extravol={d})\n", .{ s, volume, extravol });
@@ -168,7 +168,8 @@ pub fn AIL_quick_set_volume(s_opt: ?*Sample, volume: i32, extravol: i32) callcon
     const scaled: i32 = @intCast(@divTrunc(@as(i64, std.math.clamp(volume, 0, 127)) * ev, 127));
     s.setVolume(scaled);
 }
-// v7+: the Miles-7 float API uses F32 volume/extravol on the 0.0..1.0 scale.
+// 6.2 and later (6.5h, 7.0k): the float API uses F32 volume/extravol on the
+// 0.0..1.0 scale. See the version split at the export table in src/main.zig.
 pub fn AIL_quick_set_volume_f32(s_opt: ?*Sample, volume: f32, extravol: f32) callconv(.winapi) void {
     const s = s_opt orelse return;
     log("AIL_quick_set_volume_f32(s={*}, volume={d}, extravol={d})\n", .{ s, volume, extravol });

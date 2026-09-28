@@ -4386,8 +4386,8 @@ test "real clock restored after a virtual-clock run" {
 
 test "simulation seed replays invented names, and production entropy does not" {
     // The seed is the second half of a replayable run: the virtual clock fixes
-    // the time, this fixes every name the run invents (today, the temporary
-    // file an ASI provider image is written under). Same seed, same names.
+    // the time, this fixes the one name the run invents (the temporary file an
+    // ASI provider image is written under). Same seed, same name.
     const Names = struct {
         fn draw() [3][8]u8 {
             var out: [3][8]u8 = undefined;

@@ -25,12 +25,13 @@ different DLL was diffed against.
 
 **v6 MISSING: 0 / v7 MISSING: 0**. Every function in the real 6.1 and
 7.x export tables is reproduced with matching stdcall decoration: version floors
-lowered to each symbol's true first appearance, v6-specific entries added for the
-version-split functions, and the six 6.x-only exports that had no implementation
-at all (`AIL_open_library`, `AIL_close_library`, `AIL_library_resource_filename`,
+lowered to each symbol's true first appearance, and v6-specific entries added for
+the version-split functions. The 6.x-only exports that have no implementation at
+all (`AIL_open_library`, `AIL_close_library`, `AIL_library_resource_filename`,
 `AIL_load_sample_attributes`, `AIL_save_sample_attributes`,
-`AIL_quick_load_named_mem`) added as ABI-faithful stubs with safe defaults, fuzzed
-in `fuzz_all_test.zig`.
+`AIL_quick_load_named_mem`) are in `never_export`, so no build emits them; their
+implementations stay callable from the Zig tests and are fuzzed in
+`fuzz_all_test.zig`.
 
 ## Calling-convention split (resolved)
 
@@ -70,13 +71,14 @@ Some functions oscillate arity across point releases, so one `-Dmss-version`
 build cannot match every sub-release. We target the **dominant family** per
 major version and stay internally consistent:
 
-- `AIL_init_sample`: @4 (v3-6.0) → @8 (6.1) → @12 (v7) → @8 (v8).
-- `AIL_sample_buffer_info`: @20 (v5, 6.0, v7) → @24 (6.1).
-- `AIL_request_EOB_ASI_reset`: @8 (6.0) → @12 (6.1) → @8 (7.0b-d) → @12 (7.0h+).
+- `AIL_init_sample`: @4 (v3 through 6.6) → @12 (v7) → @8 (v8).
+- `AIL_sample_buffer_info`: @20 (v5 through v7) → @24 (v8).
+- `AIL_request_EOB_ASI_reset`: @8 (6.0 through 6.6) → @12 (v7 onward).
 
 For v6 we pick the **6.0 mainline** (the ~12-release 6.0a-6.0m family): @4 / @20
 / @8 respectively. This means v6 differs from the rarer 6.1 point release on
-those three symbols — an unavoidable trade-off, documented here.
+`AIL_init_sample` and `AIL_sample_buffer_info` — an unavoidable trade-off,
+documented here.
 
 > Note: `MSS-5.x/nolf-sdk-plugins/mss32.dll` is an atypical build (it reports
 > the v6-style `@12`/`AIL_open_input` shapes); use `5.0m`/`5.0r` as the v5
@@ -87,7 +89,7 @@ those three symbols — an unavoidable trade-off, documented here.
 > The per-version "ours" counts in the tables below are from the sweep runs
 > recorded here, which predate the current export table: the default v9 build
 > now emits 394 distinct exports (`objdump -p` on
-> `zig build -Dtarget=x86-windows`), not the 635/514 those tables carry. Treat
+> `zig build -Dtarget=x86-windows`), not the 635 those tables carry. Treat
 > them as the record of a past run, not the current count. The live count comes
 > from the built DLL or from `scripts/check_all_versions.sh`; the load-bearing
 > claim is the MISSING/DECORATION diff, not the export total. The v6 row's
@@ -128,12 +130,12 @@ EXTRA breaks down into two very different groups:
    `GetProcAddress`. Since then they were suppressed from the PE export table:
    `never_export` in `src/main.zig` lists every name no real release ever
    exported, and the implementations stay callable from the Zig tests, which
-   link the module directly. A C harness that resolves one of these names now
-   fails at load: the `LOAD_FUNC_EX` in `tests/test_utils.h` reports the name
-   and returns 1. The harnesses that still name a `never_export` entry
-   (`AIL_open_midi_driver`, `AIL_close_midi_driver`,
-   `AIL_ASI_provider_attribute`, `AIL_set_timer_user_data`) predate the
-   suppression and no longer run against a current DLL.
+   link the module directly. A C harness that resolves one of these names by
+   name through `GetProcAddress` no longer finds it. The harnesses that still
+   name a `never_export` entry (`AIL_open_midi_driver`, `AIL_close_midi_driver`,
+   `AIL_ASI_provider_attribute`, `AIL_set_timer_user_data`) load them with
+   `LOAD_FUNC_OPT` in `tests/test_utils.h` and skip the section when the symbol
+   is absent, so they still run against a current DLL.
 
 **EXTRA bounding.** Using a presence map computed over *all* 148
 reference DLLs (per-function set of major versions it appears in), every target
@@ -198,7 +200,8 @@ inconsistent decoration confirms it is an accidental export, not an API — no
 SDK header declares it and no game links it by name. Rather than leave it as a
 gap, it is reproduced exactly: a no-op C stub (`mss_stream_background_stub`)
 backs a version-gated `/EXPORT:` drectve that emits the reference's exact export
-name (`@stream_background@0` for ver 61/65, `stream_background` for ver 66). The
+name (`@stream_background@0` for ver 61, the undecorated `stream_background`
+for ver 65 and 66). The
 export *name* is just a string in the table, so a single cdecl stub serves both
 forms. **Every version in `scripts/check_all_versions.sh` is now 0 MISSING /
 0 DECORATION MISMATCH against its canonical reference DLL.** The 6.5/6.6 audit

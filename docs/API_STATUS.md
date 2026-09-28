@@ -22,10 +22,12 @@ the DLL does not export them, and a call from your own code will not link. A C
 harness that resolves one by name through `GetProcAddress` does not find it
 either; `tests/midi_test.c`, `tests/full_suite.c`, and `tests/rib_test.c` still
 name a few of these (`AIL_open_midi_driver`, `AIL_close_midi_driver`,
-`AIL_ASI_provider_attribute`, `AIL_set_timer_user_data`) and abort at load
-against a current DLL. `src/mss.h` does not declare the never_export names;
-`make check-header` enforces that. `never_export` in `src/main.zig` is the
-complete list; the tables here cover behaviour, not linkability.
+`AIL_ASI_provider_attribute`, `AIL_set_timer_user_data`), but they load them
+with `LOAD_FUNC_OPT` from `tests/test_utils.h` and skip the section when the
+symbol is missing, so they still run against a current DLL. `src/mss.h` does not
+declare the never_export names; `make check-header` enforces that.
+`never_export` in `src/main.zig` is the complete list; the tables here cover
+behaviour, not linkability.
 
 `src/main.zig` is the authoritative list of what a build actually exports. The
 `ver` / `ver_max` on each entry says which `-Dmss-version` values provide it.
@@ -459,7 +461,8 @@ complete list; the tables here cover behaviour, not linkability.
 | `MilesGetEventSystemState` | 🟢 Implemented | Reports live command-buffer size, loaded-bank / loaded-sound / playing-sound / persist counts (memory stats remain 0) |
 | `AIL_open_soundbank` / `MilesAddSoundBank` / `*ReleaseSoundBank` | 🟢 Implemented | Loads the `BANK` format; registers in the global container in load order (a name defined by two banks resolves to the one loaded first); enumerates event/sound/preset/env assets. One bank per file: reopening a loaded file returns the bank already in the container and takes a second reference, and each open needs its own close |
 | `MilesFindEvent` / `AIL_get_event_contents` | 🟢 Implemented | Resolves a named event's step bytecode (`hlbank.cpp`) |
-| `AIL_sound_asset_filename` / `AIL_sound_asset_info` | 🟢 Implemented | Formats `*<bank><sound>` path and fills `MILESBANKSOUNDINFO` from the `Sound` struct |
+| `AIL_sound_asset_filename` | 🟢 Implemented | Formats `*<bank><sound>` path and returns the sound's DataLen. Exported for v8 only (`src/main.zig` gates it ver 80..80); no v9 target carries the name, so a v9 build does not export it |
+| `AIL_sound_asset_info` | 🟢 Implemented | Fills `MILESBANKSOUNDINFO` from the `Sound` struct (v9 export) |
 | `MilesEnqueueEvent*` / `MilesEnqueueEventByName` / `MilesStartSoundInstance` | 🟢 Implemented | Parse the event bytecode and create tracked sound instances per start_sound step (durations resolved via the bank container) |
 | `Miles*SoundInstances` (Enumerate/Stop/Pause/Resume) | 🟢 Implemented | Full instance lifecycle (PENDING→PLAYING→COMPLETE, duration-driven) with status-bitmask + label-query (token/glob) filtering and per-label concurrent caps |
 | `MilesBegin/CompleteEventQueueProcessing` / `MilesClearEventQueue` | 🟢 Implemented | Process-cycle state transitions and reaping |
@@ -532,8 +535,8 @@ A systematic pass cross-checking each implementation against the MSS 9.x SDK
 source (`wavefile.cpp`, `m3d.cpp`, `genericdig.cpp`, `mssstrm.cpp`,
 `genericmss.cpp`) corrected a batch of decoration-invisible divergences — bugs
 the export `@N` check cannot see (return values, defaults, state transitions,
-field reads). Each fix landed with a regression test; all 7 versions stay at
-0 MISSING / 0 DECORATION.
+field reads). Each fix landed with a regression test; all 8 swept versions stay
+at 0 MISSING / 0 DECORATION.
 
 - **Verbatim-store getters** — `set_sample_volume_pan`, the 3D
   obstruction/occlusion/exclusion, the F32 master volume level, and the sample

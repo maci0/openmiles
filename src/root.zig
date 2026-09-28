@@ -897,7 +897,7 @@ pub fn clearLastMidiDriver(driver: *MidiDriver) void {
 // so two threads calling AIL_open_digital_driver at once cannot both pass the
 // "already open" check and build two engines (the loser would be orphaned with
 // a live audio thread). Only ever held around create/publish; never around
-// deinit, and never while driver_table_mutex is held.
+// deinit. Lock order is this one first, then driver_table_mutex, which driver creation takes both of.
 var driver_create_mutex: std.Io.Mutex = .init;
 
 /// Handles of every live digital driver. `isKnownDriver` uses this table to
@@ -1426,7 +1426,7 @@ pub fn getUsCount64() u64 {
 // These encapsulate the startup/shutdown and driver open/close sequences so that
 // both the standard API (AIL_startup, AIL_open_digital_driver, …) and the Quick
 // API (AIL_quick_startup, AIL_quick_shutdown) share the same code path without
-// lateral dependencies between api/ modules.
+// lateral dependencies between api/ modules. AIL_quick_shutdown only closes the two drivers; shutdown() also releases the timers, providers, and logger.
 
 pub fn startup() void {
     if (startup_provider.load(.acquire) != null) return;

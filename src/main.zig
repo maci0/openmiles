@@ -42,11 +42,14 @@ comptime {
             // renamed export sharing another function's implementation).
             symbol: ?[]const u8 = null,
             // The real DLL exports the public RIB-interface and DLS APIs under
-            // __cdecl (undecorated: no leading `_`, no `@N`). The AIL_* surface
-            // is __stdcall apart from the v8 AIL_debug/indent/printf/sys_debug
-            // helpers, and every RIB call below 8.0 is __cdecl (the `_std`
-            // entries are the 8.0 changeover). When set, emit the bare name and
-            // the backing fn must be callconv(.c).
+            // __cdecl (undecorated: no leading `_`, no `@N`) up to v7; v8 is the
+            // changeover, so the 8.0+ `_std` entries below are stdcall. The
+            // AIL_* surface is __stdcall apart from the v8 AIL_debug/
+            // debug_log/indent/mem_printf/sys_debug helpers (and the v9
+            // MilesEventSetAuditionFunctions). The RIB provider-management
+            // calls stay stdcall in every version, so `cdecl` is set per
+            // target rather than derived from the name. When set, emit the bare
+            // name and the backing fn must be callconv(.c).
             cdecl: bool = false,
         };
         const targets = [_]Target{
@@ -685,8 +688,8 @@ comptime {
             .{ .name = "AIL_sample_playback_delay", .stack_size = 4, .ver = 80 },
             .{ .name = "AIL_sample_playback_rate_factor", .stack_size = 4, .ver = 80 },
             .{ .name = "AIL_sample_speaker_scale_factors", .stack_size = 16, .ver = 80 },
-            // Arity dips in v7: 6.x and 8.x+ take the 7-arg @28 form; v7 takes a
-            // 6-arg @24 form.
+            // Arity dips in v7: 8.x+ take the 7-arg @28 form; v7 takes a 6-arg
+            // @24 form. 6.x does not export this name at all.
             .{ .name = "AIL_sample_stage_property", .stack_size = 24, .ver = 70, .ver_max = 79, .symbol = "AIL_sample_stage_property_v7" },
             .{ .name = "AIL_sample_stage_property", .stack_size = 28, .ver = 80 },
             .{ .name = "AIL_set_sample_51_volume_levels", .stack_size = 28, .ver = 80 },

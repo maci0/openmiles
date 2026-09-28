@@ -108,7 +108,7 @@ pub const StreamSource = struct {
         if (index >= self.slot_count) return false;
         const held = self.slots[index];
         if (held.data != null or held.eof) {
-            root.log("StreamSource.loadBuffer: slot {d} still holds an unsubmitted buffer; the repeat is ignored\n", .{index});
+            root.log("StreamSource.loadBuffer: slot {d} still holds a submitted buffer that has not drained; the repeat is ignored\n", .{index});
             return false;
         }
         if (len == 0 or data == null) {
@@ -161,8 +161,9 @@ pub const StreamSource = struct {
         len1.* = @intCast(self.slots[1].len);
     }
 
-    /// Play position and length held in one ring slot. Slots past the ring
-    /// depth never held data and report zeros.
+    /// Play position and length held in one ring slot. A slot past the current
+    /// ring depth reports zeros, even when it held a submitted buffer before
+    /// the depth was lowered.
     pub fn slotInfo(self: *StreamSource, index: usize, pos: *u32, len: *u32) void {
         self.mutex.lockUncancelable(io);
         defer self.mutex.unlock(io);

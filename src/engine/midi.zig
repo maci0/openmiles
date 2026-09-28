@@ -551,7 +551,7 @@ pub const Sequence = struct {
 
     /// Clamp a raw user/file BPM ratio into the range every consumer can
     /// divide by: games request extreme values, and onRead needs a non-zero
-    /// divisor. Single source of truth for the [0.01, 100] bound.
+    /// divisor. onRead guards the same lower bound inline on its render path.
     fn clampedTempoRatio(raw: f64) f64 {
         return @max(0.01, @min(raw, 100.0));
     }

@@ -72,6 +72,6 @@ Shifted from a "Programmer's API" to an "Artist's API" with data-driven event sy
 ---
 
 ## Implementation Guidance for OpenMiles
-When implementing a specific game's `mss32.dll`, check the **Version String** in the original DLL's metadata, then build with the matching `-Dmss-version` (every value v3–v9 already reproduces that release's export table with zero missing exports).
+When implementing a specific game's `mss32.dll`, check the **Version String** in the original DLL's metadata, then build with the matching `-Dmss-version` (every swept value from v3 to v9 reproduces that release's export table with zero missing exports; `6`, `6.0`, and `6.6` have no reference DLL, so `scripts/check_all_versions.sh` lists them under `UNSWEPT` and only `src/mss.h` is checked against them).
 - If it's **v6.x**, the filter and sample-management path is fully implemented.
 - If it's **v8.x/v9.x**, the event-text constructor/decoder and soundbank query API are implemented, and the event *execution* VM parses enqueued events into tracked sound instances (lifecycle, durations, label filtering/caps, state counts). Routing those instances through the mixer for audio output is the remaining work: they are tracked and queryable but silent.

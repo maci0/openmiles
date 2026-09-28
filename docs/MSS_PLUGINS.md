@@ -128,7 +128,7 @@ External `.asi` files in the game directory are **also** scanned and loaded as a
 | Environmental Reverb | `Mssreverb.flt` | Not implemented as a `.flt` plugin | Per-sample reverb available via `AIL_set_sample_reverb` (ma_delay_node) |
 | General DSP | `Mssdsp.flt` | Not implemented | Falls back to external `.flt` if present |
 
-The built-in low-pass filter supports real-time cutoff frequency (20 Hz up to the driver rate's Nyquist) and order (1-4) control via `AIL_set_filter_attribute`. Samples are routed through the filter node via `AIL_set_sample_filter`.
+The built-in low-pass filter supports real-time cutoff frequency (20 Hz up to the driver rate's Nyquist) and order (1-4) control via `AIL_filter_attribute`, on a filter opened with `AIL_open_filter`. A sample is attached to it through the DSP-property calls (`AIL_set_sample_stage_property` and the `AIL_sample_*_property` family). The `AIL_set_filter_attribute` and `AIL_set_sample_filter` spellings are in `never_export`, since no Miles release exported them; `src/mss.h` says the same where it declares the filter API.
 
 Per-sample reverb (via `AIL_set_sample_reverb`/`AIL_set_stream_reverb`/`AIL_quick_set_reverb`) uses a `ma_delay_node` that maps `room_type`→decay, `level`→wet/dry mix, `reflect_time`→delay frames. This is independent of the Filter API.
 
