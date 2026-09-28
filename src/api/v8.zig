@@ -547,11 +547,19 @@ pub fn AIL_open_soundbank(filename: ?*anyopaque, name: ?*anyopaque) callconv(.wi
         openmiles.setLastError("Failed to open sound bank");
         return null;
     };
-    // Optional name check (4-char bank name).
+    // Optional name check. The header's SoundBankName field is a fixed four
+    // bytes, so the caller's name is compared over the bytes that field holds
+    // rather than over the caller's own length: a name the field can store but
+    // the bank's own read-back is shorter than (bank.name() drops a character
+    // the four-byte field cut in half) is not a mismatch, and a caller string
+    // reaching past the end of the field is a mismatch in the byte where the
+    // two first differ.
     if (name) |np| {
         const want: [*:0]const u8 = @ptrCast(np);
-        const have = bank.name();
-        if (!std.ascii.eqlIgnoreCase(std.mem.span(want), std.mem.span(have))) {
+        const want_s = std.mem.span(want);
+        const have_s = std.mem.span(bank.name());
+        const n = @min(@min(want_s.len, have_s.len), openmiles.soundbank.bank_name_field_bytes);
+        if (have_s.len == 0 or n != have_s.len or !std.ascii.eqlIgnoreCase(have_s[0..n], want_s[0..n])) {
             bank.deinit();
             openmiles.setLastError("Bank name mismatch");
             return null;

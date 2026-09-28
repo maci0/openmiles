@@ -30,7 +30,7 @@ to set both.
 | 3 | `RIB_load_provider_library` loads a game-named path as code, skipping every check the directory scans apply | game to DLL | Code execution as the game user, from any extension and any path | Unmitigated: reaches the same `Provider.load` with no extension allowlist, no filename check, and no already-loaded dedup (`src/api/rib.zig:431 RIB_load_provider_library`) |
 | 4 | A plugin image parsed by the ELF fixup on a Linux build with no libc, or with static musl (`src/utils/dynlib.zig:28 needs_elf_fixup`, `src/utils/dynlib.zig:84 applyElfFixups`) | file to process | Crash, in-process memory corruption | Partial: program header table, dynamic-section walk, and `DT_RELA` slots bounded in `u64`/image space (`src/utils/dynlib.zig:71 programHeaderTableFits`, `src/utils/dynlib.zig:119 dyn_entries`) |
 | 5 | `AIL_WAV_file_write` creates or truncates a game-named path | game to DLL, DLL to disk | Overwrite of any file the game user can write | Unmitigated by ABI necessity (`src/api/digital.zig:1037 AIL_WAV_file_write`) |
-| 6 | Malformed soundbank / event bytecode (`.BANK`) | file to process | Crash, in-process memory corruption, audio DoS | Partial: bounds chokepoint in `src/engine/soundbank.zig:257 rdU32`, step decode bounded in `src/engine/event.zig:495 copyString`) |
+| 6 | Malformed soundbank / event bytecode (`.BANK`) | file to process | Crash, in-process memory corruption, audio DoS | Partial: bounds chokepoint in `src/engine/soundbank.zig:265 rdU32`, step decode bounded in `src/engine/event.zig:495 copyString`) |
 | 7 | Malformed XMIDI / MIDI sequence | file to process | Crash, memory exhaustion | Partial: saturating cursor arithmetic, fixed loop stack (`src/engine/xmidi.zig:383 xmidiToSmf`, `src/engine/midi.zig:452 xmidi_loop_stack`), and a per-buffer jump budget (`src/engine/midi.zig:378 max_xmidi_jumps_per_buffer`) |
 | 8 | Malformed or oversized audio file (MP3/OGG/WAV/FLAC) | file to process | Crash, memory exhaustion | Partial: declared-size caps in `src/engine/audio_detect.zig:15 max_declared_image_size`, whole-file cap in `src/engine/digital.zig:1304 root.max_file_load_bytes`; the decode itself is delegated to miniaudio and TinySoundFont (`src/engine/digital.zig:1292 loadFromFile`) |
 | 9 | App VFS callback reports an arbitrary file size | game to DLL | Heap exhaustion in the game process | Mitigated: same 256 MiB cap as the direct path (`src/root.zig:400 max_file_load_bytes`) |
@@ -116,9 +116,9 @@ hostile file, download, or mod pack reaches.
 | Audio file | `AIL_open_stream` / `AIL_quick_load` / `AIL_quick_load_and_play` -> `Sample.loadFromFile` (`src/engine/digital.zig:1292 loadFromFile`) | Rejects a zero length and anything above the shared 256 MiB cap (`src/engine/digital.zig:1304 root.max_file_load_bytes`), then allocates the whole file. That check is the direct-filesystem branch only: with a VFS installed the same three entry points read through `fileCallbackReadAll` (`src/root.zig:368 fileCallbackReadAll`) and are capped by the shared cap there (`src/root.zig:400 max_file_load_bytes`) instead. |
 | Audio in memory | `Sample.load` (`src/engine/digital.zig:1319 load`) | A positive caller length is used as a slice length with no cap; a zero or negative length falls to `loadFromUnownedMemoryUnknownSize`, which derives a bounded image from the header. The uncapped case is the in-process ABI, not a file input. |
 | XMIDI / MIDI | `AIL_init_sequence` -> `xmidiToSmf` (`src/engine/xmidi.zig:383 xmidiToSmf`) | Declared extents clamped to the buffer with saturating arithmetic; VLQ continuation capped at 4 bytes (`src/engine/xmidi.zig:85 bytes_read`); FOR/NEXT loop stack fixed at 8 with a depth check (`src/engine/midi.zig:451 xmidi_loop_depth`). |
-| BANK soundbank | `AIL_open_soundbank` (`src/api/v8.zig:534 AIL_open_soundbank`), `AIL_open_soundbank_v8` (`src/api/v8.zig:946 AIL_open_soundbank_v8`), `MilesAddSoundBank` (`src/api/miles.zig:802 MilesAddSoundBank`) -> `loadFromMemory` (`src/engine/soundbank.zig:610 loadFromMemory`) | Tag and version are validated before any allocation; every offset read passes through the bounds-checked `rdU32` (`src/engine/soundbank.zig:257 rdU32`); metadata is NUL-terminated by an allocated sentinel. `meta_size` is checked after a path dupe and a registry reserve (`src/engine/soundbank.zig:620 dupeResolvedPathZ`, `src/engine/soundbank.zig:626 registryReserve`), so it is not validated before the first allocation; both of those are sized by the caller's path, not by file content. |
-| Bank asset path | `AIL_sound_asset_info` (`src/api/v9.zig:201 AIL_sound_asset_info`) -> `soundAssetInfo` (`src/engine/soundbank.zig:550 soundAssetInfo`) | Writes `*<bank file name><sound file name>` into a caller buffer that the ABI passes no size for, from two names that come out of the bank file. Bounded by the module instead: a pair over `max_asset_path_bytes` is reported unresolved and nothing is written (`src/engine/soundbank.zig:203 max_asset_path_bytes`). `AIL_sound_asset_filename` (`src/api/v8.zig:871 AIL_sound_asset_filename`) is a no-op stub. |
-| Event bytecode | `AIL_next_event_step` (`src/api/v8.zig:518 AIL_next_event_step`) -> `nextStep` (`src/engine/event.zig:662 nextStep`) | Step type is range-checked before the enum conversion, the header chain is depth-limited, and string copies refuse to pass `wlimit` (`src/engine/event.zig:501 copyString`). |
+| BANK soundbank | `AIL_open_soundbank` (`src/api/v8.zig:534 AIL_open_soundbank`), `AIL_open_soundbank_v8` (`src/api/v8.zig:954 AIL_open_soundbank_v8`), `MilesAddSoundBank` (`src/api/miles.zig:806 MilesAddSoundBank`) -> `loadFromMemory` (`src/engine/soundbank.zig:618 loadFromMemory`) | Tag and version are validated before any allocation; every offset read passes through the bounds-checked `rdU32` (`src/engine/soundbank.zig:265 rdU32`); metadata is NUL-terminated by an allocated sentinel. `meta_size` is checked after a path dupe and a registry reserve (`src/engine/soundbank.zig:628 dupeResolvedPathZ`, `src/engine/soundbank.zig:46 registryReserve`), so it is not validated before the first allocation; both of those are sized by the caller's path, not by file content. |
+| Bank asset path | `AIL_sound_asset_info` (`src/api/v9.zig:201 AIL_sound_asset_info`) -> `soundAssetInfo` (`src/engine/soundbank.zig:558 soundAssetInfo`) | Writes `*<bank file name><sound file name>` into a caller buffer that the ABI passes no size for, from two names that come out of the bank file. Bounded by the module instead: a pair over `max_asset_path_bytes` is reported unresolved and nothing is written (`src/engine/soundbank.zig:211 max_asset_path_bytes`). `AIL_sound_asset_filename` (`src/api/v8.zig:879 AIL_sound_asset_filename`) is a no-op stub. |
+| Event bytecode | `AIL_next_event_step` (`src/api/v8.zig:518 AIL_next_event_step`) -> `nextStep` (`src/engine/event.zig:662 nextStep`) | Step type is range-checked before the enum conversion, the header chain is depth-limited, and string copies refuse to pass `wlimit` (`src/engine/event.zig:495 copyString`). |
 | DLS container | `AIL_extract_DLS` / `AIL_find_DLS` / `AIL_list_DLS` / `AIL_merge_DLS_with_XMI` / `AIL_filter_DLS_with_XMI` (`src/api/dls.zig:96 AIL_filter_DLS_with_XMI`) | Pointer images capped at 256 MiB (`src/engine/dls_container.zig:74 max_ptr_image_size`); merged image size checked with `std.math.add`. `AIL_list_DLS` takes a pointer with no length and derives one from the header, so a lying RIFF size would otherwise drive a scan past the caller's buffer; only a 64 KiB prefix of the declared image is dereferenced (`src/api/dls.zig:380 list_dls_scan_limit`, `src/api/dls.zig:385 AIL_list_DLS`). The `cmemdup` paths read up to the declared 256 MiB from a bare pointer. |
 | DLS / SF2 soundfont load | `AIL_DLS_load_file` (`src/api/dls.zig:21 AIL_DLS_load_file`), `AIL_DLS_load_memory` (`src/api/dls.zig:116 AIL_DLS_load_memory`) | The VFS read is capped by the shared 256 MiB cap; the memory form takes a declared size and rejects only what exceeds `maxInt(c_int)`. The SF2 parse itself is delegated to TinySoundFont, so the container bounds here are the only ones the module applies. |
 | WAV cue markers | `AIL_WAV_marker_count` (`src/api/v8.zig:143 AIL_WAV_marker_count`), `AIL_WAV_marker_by_index` (`src/api/v8.zig:150 AIL_WAV_marker_by_index`), `AIL_WAV_marker_by_name` (`src/api/v8.zig:161 AIL_WAV_marker_by_name`) | A full RIFF chunk walk over a length-less image, bounded by the same 256 MiB declared-size cap rather than by the caller's buffer. |
@@ -184,12 +184,12 @@ Three entry points load plugin code, and all three end at the same
 
 1. `AIL_startup` (`src/api/digital.zig:18 AIL_startup`) reaches `startup()`,
    which scans the current working directory: `loadApplicationProviders(".")`
-   (`src/root.zig:705 loadApplicationProviders`).
+   (`src/root.zig:725 loadApplicationProviders`).
 2. `AIL_set_redist_directory` (`src/api/digital.zig:76 AIL_set_redist_directory`)
    records a game-supplied directory, and `loadAllAsi` scans it
    (`src/engine/digital.zig:647 loadAllAsi`), called on a directory change
-   (`src/root.zig:1049 loadAllAsi`) and again when a digital driver opens
-   (`src/root.zig:1545 loadAllAsi`). The directory is not restricted to the game
+   (`src/root.zig:1069 loadAllAsi`) and again when a digital driver opens
+   (`src/root.zig:1565 loadAllAsi`). The directory is not restricted to the game
    directory: the game names any path, so a redist directory pointing at a
    download or per-user shared folder extends plugin execution to every plugin
    extension found there.
@@ -206,11 +206,13 @@ Controls present, on both scans:
 - Filename rejection of `..`, `/`, `\`, a trailing dot or space, `:` (an NTFS
   named stream), and the DOS device names `CON`, `PRN`, `AUX`, `NUL`, `CLOCK$`,
   `COM1`-`COM9`, `LPT1`-`LPT9`, so a directory entry cannot escape the scan
-  directory and cannot name a device the loader resolves instead of a file
-  (`src/root.zig:621 isSafePluginFilename`).
+  directory and cannot name a device the loader resolves instead of a file.
+  The device name is matched after the path parser's own trailing-space strip,
+  so `con .asi` is rejected as `CON` and not read as a file called `con `
+  (`src/root.zig:629 isSafePluginFilename`).
 - A rescan that finds an already-loaded module skips it, so one module is
-  loaded once per process: `src/root.zig:797 isPluginAlreadyLoaded` for the
-  application list, and `src/root.zig:810 isPluginLoadedAnywhere` for the
+  loaded once per process: `src/root.zig:817 isPluginAlreadyLoaded` for the
+  application list, and `src/root.zig:830 isPluginLoadedAnywhere` for the
   redist scan, which also skips modules the application list already holds.
 - The loaded module runs in-process with the game's full authority. This is the
   original MSS design, and plugins are unsigned.
@@ -241,8 +243,8 @@ performs no scan:
 | Control | Applies to a scan | Applies to `RIB_load_provider_library` |
 |---------|-------------------|-------------------------------------------|
 | Extension allowlist `.asi`/`.m3d`/`.flt` | `src/root.zig:615 isPluginExtension` | No: the extension is never inspected, so any file the OS loader accepts is loaded |
-| Filename safety: `..`, separators, NTFS streams, DOS device names | `src/root.zig:621 isSafePluginFilename` | No: a path with `..` segments, a named stream, or a device name reaches the loader |
-| Already-loaded dedup, one module per process | `src/root.zig:797 isPluginAlreadyLoaded`, `src/root.zig:810 isPluginLoadedAnywhere` | No: the same module can be loaded repeatedly, and a module the application list already holds is loaded again |
+| Filename safety: `..`, separators, NTFS streams, DOS device names | `src/root.zig:629 isSafePluginFilename` | No: a path with `..` segments, a named stream, or a device name reaches the loader |
+| Already-loaded dedup, one module per process | `src/root.zig:817 isPluginAlreadyLoaded`, `src/root.zig:830 isPluginLoadedAnywhere` | No: the same module can be loaded repeatedly, and a module the application list already holds is loaded again |
 | Random exclusive temp file | `src/api/rib.zig:309 exclusive` | No: it never takes the in-memory image path at all |
 
 `Provider.load` itself performs no path validation. It takes the basename as the
@@ -270,7 +272,7 @@ Controls present:
   `openmiles.randomNameBytes`, which draws from the run's seeded PRNG under a
   simulation and otherwise from `io.randomSecure`; failure to obtain entropy
   fails closed rather than falling back to a guessable name
-  (`src/root.zig:1372 randomNameBytes`, called from
+  (`src/root.zig:1392 randomNameBytes`, called from
   `src/api/rib.zig:290 randomNameBytes`).
 - The file is created with `.exclusive = true` (`src/api/rib.zig:309 exclusive`),
   so a planted name cannot be opened for overwrite and a race replacement loses.
@@ -326,8 +328,8 @@ Gaps:
 | Whole-file read cap on the sample loader | `src/engine/digital.zig:1304 root.max_file_load_bytes` | Oversized audio file through `AIL_open_stream` / `AIL_quick_load` on the direct-filesystem branch; the VFS branch is covered by the shared cap above |
 | Declared container size cap, 256 MiB | `src/engine/audio_detect.zig:15 max_declared_image_size` | Lying RIFF/FORM headers |
 | Pointer image cap, 256 MiB | `src/engine/dls_container.zig:74 max_ptr_image_size` | Lying DLS container sizes over bare pointers |
-| Bounds-checked offset read | `src/engine/soundbank.zig:257 rdU32` | Every BANK offset and count |
-| Bank asset-path cap, MAX_PATH | `src/engine/soundbank.zig:203 max_asset_path_bytes` | A bank naming a sound with an arbitrarily long file name writing past a game buffer sized from the requirement `AIL_sound_asset_info` returned |
+| Bounds-checked offset read | `src/engine/soundbank.zig:265 rdU32` | Every BANK offset and count |
+| Bank asset-path cap, MAX_PATH | `src/engine/soundbank.zig:211 max_asset_path_bytes` | A bank naming a sound with an arbitrarily long file name writing past a game buffer sized from the requirement `AIL_sound_asset_info` returned |
 | ELF dynamic-section walk bounded by the image | `src/utils/dynlib.zig:119 dyn_entries` | A plugin image with no `DT_NULL` inside its mapping driving the relocation scan past the end of the map |
 | Bounded `AIL_list_DLS` scan, 64 KiB | `src/api/dls.zig:380 list_dls_scan_limit` | A lying DLS header size driving a scan past a length-less caller pointer |
 | Saturating cursor arithmetic and clamped chunk ends | `src/engine/xmidi.zig:383 xmidiToSmf` | Lying XMIDI chunk sizes |
@@ -335,7 +337,7 @@ Gaps:
 | Fixed loop stack with depth check | `src/engine/midi.zig:452 xmidi_loop_stack` | XMIDI FOR/NEXT recursion |
 | Per-buffer XMIDI jump budget, 256 | `src/engine/midi.zig:378 max_xmidi_jumps_per_buffer` | A zero-frame FOR/NEXT body spinning the audio thread; a full loop stack degrades to a log line rather than an out-of-bounds write |
 | Unpredictable exclusive temp file | `src/api/rib.zig:309 exclusive` | Temp-file pre-planting and name race |
-| Redist rescan only on an actual path change | `src/root.zig:1035 unchanged` | Repeated directory walks and double plugin loads from a game that re-sets the same redist path |
+| Redist rescan only on an actual path change | `src/root.zig:1055 unchanged` | Repeated directory walks and double plugin loads from a game that re-sets the same redist path |
 | Bank registry returns the loaded bank for a repeated path | `src/engine/soundbank.zig:84 registryAcquireBySource` | Duplicate copies of one bank accumulating on reload |
 | Stream ring depth clamped to the SDK range | `src/engine/stream_buffer.zig:129 clamped` | Caller-supplied buffer count turning into an oversized ring |
 | Plugin extension allowlist and separator rejection | `src/root.zig:615 isPluginExtension` | Directory traversal in the CWD plugin scan |
@@ -376,7 +378,7 @@ something other than a control in this tree.
   (`src/engine/soundbank.zig:46 registryReserve`) reserves a slot with no count
   limit. A game, or a mod pack driving one, that opens many distinct `.BANK`
   files and keeps the handles retains every parsed metadata block
-  (`src/engine/soundbank.zig:223 meta`). Repeating the *same* file does not
+  (`src/engine/soundbank.zig:231 meta`). Repeating the *same* file does not
   accumulate: a second load of one path returns the already-loaded bank
   (`src/engine/soundbank.zig:84 registryAcquireBySource`), so the abuse needs
   distinct paths, which a download folder supplies.
@@ -386,7 +388,7 @@ something other than a control in this tree.
   extension it finds there. The game is not restricted to its own directory, so
   a game that honours a per-user or downloaded content path is a plugin
   execution path the user did not install. The rescan-on-change check
-  (`src/root.zig:1035 unchanged`) bounds the work to a directory that actually
+  (`src/root.zig:1055 unchanged`) bounds the work to a directory that actually
   changed, so a game that re-sets the same path each time does not re-walk it,
   but a game that alternates between two paths re-walks both.
 - **Write-path abuse through `AIL_WAV_file_write`.** The export creates or
@@ -428,7 +430,7 @@ something other than a control in this tree.
 
 ## Unmitigated threats, ranked
 
-1. Unsigned plugin execution from the game directory (`src/root.zig:705 loadApplicationProviders`),
+1. Unsigned plugin execution from the game directory (`src/root.zig:725 loadApplicationProviders`),
    and from any directory the game hands to `AIL_set_redist_directory`
    (`src/engine/digital.zig:647 loadAllAsi`). Inherent to the compatibility
    target; a documented deployment note is the available mitigation.

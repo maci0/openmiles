@@ -71,8 +71,26 @@ pub fn utf8Prefix(s: []const u8, max: usize) []const u8 {
     return s[0..n];
 }
 
-const testing = std.testing;
+/// Longest prefix of `s` that is at most `max` bytes and is valid UTF-8 from
+/// the first byte: the same character-boundary cut `utf8Prefix` makes, and
+/// additionally the end of the last character before the first byte that is
+/// not one. For a caller that must hand the text to an API with no encoding
+/// fallback (OutputDebugStringW), where a single byte from a legacy code page
+/// would otherwise cost the whole string. Text after the cut is lost, so this
+/// belongs to a sink that can state the loss, not to one that stores the text.
+pub fn utf8PrefixValid(s: []const u8, max: usize) []const u8 {
+    const limit = @min(s.len, max);
+    var n: usize = 0;
+    while (n < limit) {
+        const width = std.unicode.utf8ByteSequenceLength(s[n]) catch break;
+        if (n + width > limit) break;
+        _ = std.unicode.utf8Decode(s[n..][0..width]) catch break;
+        n += width;
+    }
+    return s[0..n];
+}
 
+const testing = std.testing;
 test "utf8Prefix never cuts a character in half" {
     // Two-byte 'é' repeated: an odd cut lands mid-character, and a cut at the
     // boundary of a four-byte one is a third of the way into it.
@@ -91,6 +109,24 @@ test "utf8Prefix never cuts a character in half" {
 test "utf8Prefix keeps ascii whole" {
     try testing.expectEqualStrings("abc", utf8Prefix("abcdef", 3));
     try testing.expectEqualStrings("", utf8Prefix("abcdef", 0));
+}
+
+test "utf8PrefixValid ends at the first byte that is not a character" {
+    // The record the log exists for: a path spelled in a legacy code page, so
+    // the byte after the ASCII prefix is 0xE9 and no UTF-8 decoder accepts it.
+    try testing.expectEqualStrings("B", utf8PrefixValid("B\xF6se.asi", 32));
+    try testing.expectEqualStrings("Bose ", utf8PrefixValid("Bose \xF6.asi", 32));
+    try testing.expectEqualStrings("", utf8PrefixValid("\xF6se", 32));
+    // A character that starts inside the limit but ends past it is cut before
+    // it, not half, and a well-formed string is returned whole up to the limit.
+    try testing.expectEqualStrings("ab", utf8PrefixValid("ab\u{00e9}c", 3));
+    try testing.expectEqualStrings("ab\u{00e9}", utf8PrefixValid("ab\u{00e9}", 32));
+    try testing.expectEqualStrings("Juegos/", utf8PrefixValid("Juegos/\u{00e9}.asi", 8));
+    try testing.expectEqualStrings("", utf8PrefixValid("abc", 0));
+    try testing.expectEqualStrings("abc", utf8PrefixValid("abc", 99));
+    for (0..8) |max| {
+        try testing.expect(std.unicode.utf8ValidateSlice(utf8PrefixValid("a\u{00e9}\u{1F600}b", max)));
+    }
 }
 
 test "ascii round trip" {

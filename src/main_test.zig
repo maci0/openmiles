@@ -752,6 +752,12 @@ test "isSafePluginFilename rejects names that do not name a file" {
         "COM1.asi",
         "lpt9.flt",
         "NUL",
+        // A space before the extension is stripped by the path parser before
+        // the name is resolved, so these are the same devices, not files.
+        "NUL .asi",
+        "con .asi",
+        "COM1 .m3d",
+        "CLOCK$ .flt",
     }) |name| {
         testing.expect(!openmiles.isSafePluginFilename(name)) catch |err| {
             std.debug.print("expected '{s}' to be rejected\n", .{name});
@@ -7615,6 +7621,46 @@ test "MilesGetEventSystemState reports the live loaded-bank count" {
     b2.deinit();
     api_miles_t.MilesGetEventSystemState(null, &state);
     try testing.expectEqual(base, state.LoadedBankCount);
+}
+
+test "the bank name check compares over the field, not the caller's length" {
+    // SoundBankName[4] is a fixed four-byte field, and "café" is five bytes: the
+    // field holds the first three and the lead byte of the é, and the bank's
+    // own read-back drops the partial character. Comparing the caller's whole
+    // string against that three-byte result rejects the name the field does
+    // spell, so the bank never opens.
+    var img: [128]u8 = undefined;
+    const n = buildEventBank(&img);
+    @memcpy(img[56..60], "caf\xC3"[0..4]);
+
+    const write = struct {
+        fn go(bytes: []const u8) !void {
+            var tmp = testing.tmpDir(.{});
+            defer tmp.cleanup();
+            const f = try tmp.dir.createFile(openmiles.io, "n.mbnk", .{});
+            try f.writeStreamingAll(openmiles.io, bytes);
+            f.close(openmiles.io);
+            var path_buf: [256]u8 = undefined;
+            const path = try std.fmt.bufPrint(&path_buf, ".zig-cache/tmp/{s}/n.mbnk", .{&tmp.sub_path});
+            const path_z: [:0]u8 = try openmiles.global_allocator.dupeZ(u8, path);
+            defer openmiles.global_allocator.free(path_z);
+
+            const before = openmiles.soundbank.loadedCount();
+            // The name the field spells, in a spelling the field is one byte
+            // too short for, opens the bank.
+            const want: [:0]const u8 = "caf\u{00e9}";
+            const bank = api_v8b.AIL_open_soundbank(@ptrCast(path_z.ptr), @ptrCast(@constCast(want.ptr))) orelse return error.OpenFailed;
+            try testing.expectEqual(before + 1, openmiles.soundbank.loadedCount());
+            api_v8b.AIL_close_soundbank(bank);
+
+            // A name the field cannot spell is still a mismatch, in the byte
+            // where the two first differ.
+            const other: [:0]const u8 = "musi";
+            try testing.expect(api_v8b.AIL_open_soundbank(@ptrCast(path_z.ptr), @ptrCast(@constCast(other.ptr))) == null);
+            try testing.expectEqual(before, openmiles.soundbank.loadedCount());
+        }
+    };
+    try write.go(img[0..n]);
 }
 
 test "opening the same soundbank file twice loads one bank" {

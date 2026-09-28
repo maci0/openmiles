@@ -417,6 +417,12 @@ fn formatRecord(rec: []u8, comptime fmt: []const u8, args: anytype) []const u8 {
     return rec[0 .. stamp.len + sanitizeText(msg)];
 }
 
+// The record's UTF-16 form, in units, for the debug stream. A character
+// outside ASCII is one unit for up to three bytes, so a record never takes
+// more units than it has bytes, and the terminator toWide writes needs one of
+// its own.
+const wide_record_units = max_log_record_bytes + 1;
+
 /// Write one record to every enabled sink. The caller has already formatted and
 /// sanitized it, so this is the only place that knows about the console, the
 /// debug stream, and the on-disk log.
@@ -425,10 +431,31 @@ fn emit(out: []const u8) void {
     defer mutex.unlock(io);
 
     if (builtin.os.tag == .windows) {
-        var w_buf: [max_log_record_bytes]u16 = undefined;
+        var w_buf: [wide_record_units]u16 = undefined;
+        // A record that is not valid UTF-8 still has to reach the debug stream,
+        // so what the wide call cannot spell is cut from the record rather than
+        // the record being dropped: the text the log exists for is a
+        // caller-supplied path, a plugin-registered RIB name, a bank asset name,
+        // and the ones spelled in a legacy code page are exactly the records an
+        // operator needs. The file sink below still receives the whole record,
+        // so a record the debug stream drops while the file keeps it is a
+        // record the two sinks disagree about. OutputDebugStringW takes a UTF-16
+        // string with no encoding fallback, so the cut is at the first byte that
+        // is not a character, and a record that opens with one is all that is
+        // left.
         if (wide.toWide(out, &w_buf)) |w| {
             OutputDebugStringW(w.ptr);
-        } else |_| {}
+        } else |_| {
+            const cut = wide.utf8PrefixValid(out, wide_record_units - 2);
+            if (cut.len > 0) {
+                var lossy: [wide_record_units]u8 = undefined;
+                @memcpy(lossy[0..cut.len], cut);
+                lossy[cut.len] = '\n';
+                if (wide.toWide(lossy[0 .. cut.len + 1], &w_buf)) |w| {
+                    OutputDebugStringW(w.ptr);
+                } else |_| {}
+            }
+        }
     } else {
         std.debug.print("{s}", .{out});
     }

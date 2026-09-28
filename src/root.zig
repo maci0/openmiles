@@ -645,9 +645,21 @@ pub fn isSafePluginFilename(name: []const u8) bool {
     return true;
 }
 
+/// Longest prefix of `stem` that carries no trailing space. The path parser
+/// strips trailing spaces and dots from the last component before it decides
+/// what the name is, so "con .asi" is opened as the CON device and not as a
+/// file called "con ". The stem ends at the first dot, so a dot is not the
+/// issue here; the space is.
+fn trimStemSpaces(stem: []const u8) []const u8 {
+    var end = stem.len;
+    while (end > 0 and stem[end - 1] == ' ') end -= 1;
+    return stem[0..end];
+}
+
 /// Whether `stem`, the part of a filename before its first dot, is one of the
 /// device names DOS and Windows resolve without a file behind them.
-fn isDosDeviceName(stem: []const u8) bool {
+fn isDosDeviceName(raw_stem: []const u8) bool {
+    const stem = trimStemSpaces(raw_stem);
     const fixed = [_][]const u8{ "CON", "PRN", "AUX", "NUL", "CLOCK$" };
     for (fixed) |d| {
         if (std.ascii.eqlIgnoreCase(stem, d)) return true;

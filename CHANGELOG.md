@@ -118,6 +118,22 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ### Fixed
 
+- `AIL_open_soundbank`'s optional name check compared the caller's whole string
+  against the bank's four-byte `SoundBankName` field. A name the field spells
+  but that is longer than the field, or that the field's own read-back is
+  shorter than because a character was cut in half (`"café"` stored as `caf`
+  plus a lead byte), reported "Bank name mismatch" and refused a bank that was
+  the one asked for. The compare now runs over the field's width.
+- A plugin file whose stem ended in a space (`con .asi`, `com1 .m3d`) passed
+  the plugin filename check, because the device name was matched against the
+  untrimmed stem. The path parser strips the space before it resolves the name,
+  so the entry the scan listed resolved to the device, not to a file. The stem
+  is trimmed the same way before the device name is matched.
+- A log record that was not valid UTF-8 (a caller-supplied path, a plugin RIB
+  name, or a bank asset name spelled in a legacy code page) reached the file
+  sink and was dropped whole by `OutputDebugStringW`, so the two sinks
+  disagreed about what was logged. The debug stream now gets the record up to
+  the first byte that is not a character.
 - A temporary directory that was accepted and then turned out to be unusable
   (the platform resolves none, it leaves no room for the image name under the
   path limit, or the image cannot be written there) was reported only through

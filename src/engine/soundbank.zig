@@ -195,6 +195,14 @@ const off_name = 56; // char SoundBankName[4]
 const header_size = 60;
 const asset_entry_size = 8; // { U32 NameOffset; U32 DataOffset; }
 
+/// Width of the header's SoundBankName field, in bytes. The field is fixed
+/// width in the file format, so it is also the width a caller-supplied bank
+/// name is compared over: the name that comes back out of a bank can be
+/// shorter than this (see the character cut at load), and comparing the
+/// caller's whole string against a shorter result rejects a name the field
+/// does hold.
+pub const bank_name_field_bytes: usize = 4;
+
 /// Longest "*<bank file name><sound file name>" asset path the loader reports.
 /// Both names come out of the bank file and neither C entry point carries a
 /// buffer size, so the write is bounded here rather than by a buffer the
@@ -672,10 +680,12 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
     // name outside ASCII is cut mid-character: "café" is 5 bytes, and the
     // field holds "caf" plus the lead byte of the é. name() hands this buffer
     // to the C surface as a string, and the callers match it against the name
-    // the game asked for, so drop the partial character. The scratch carries a
-    // NUL past the field because utf8Prefix only trims a string longer than its
-    // limit, and 4 bytes is exactly the field.
-    const nlen = @min(msz - off_name, 4);
+    // the game asked for, so drop the partial character; AIL_open_soundbank
+    // compares the caller's name over bank_name_field_bytes for the same
+    // reason, so the cut character does not turn into a name mismatch. The
+    // scratch carries a NUL past the field because utf8Prefix only trims a
+    // string longer than its limit, and 4 bytes is exactly the field.
+    const nlen = @min(msz - off_name, bank_name_field_bytes);
     var name_field: [5]u8 = [_]u8{0} ** 5;
     @memcpy(name_field[0..nlen], image[off_name..][0..nlen]);
     const cut_name = wide.utf8Prefix(&name_field, nlen);
