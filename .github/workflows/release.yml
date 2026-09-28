@@ -19,12 +19,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
-# Read-only for the whole workflow. Only the release-creation step needs
-# write, and it asks for it below: a credential every other step in the job can
-# reach is a credential a vendored header, a build script, or a stray test
-# artifact can use.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -316,10 +312,6 @@ jobs:
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
-        # The one step in the job that writes to the repository. Every step
-        # above it runs with the workflow's read-only token.
-        permissions:
-          contents: write
         with:
           # Named explicitly: on a manual re-run github.ref is the branch the
           # workflow was dispatched from, not the tag being released.

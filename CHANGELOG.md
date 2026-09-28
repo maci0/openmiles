@@ -47,6 +47,10 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-28
+
+Digital driver lifecycle counting, SoundFont thread safety, Miles event-system hardening, ASI codec fuzzing, reproducible release packaging, and comprehensive stability and documentation fixes.
+
 ### Added
 
 - Coverage-guided fuzz targets for `AIL_decompress_ASI` and for the

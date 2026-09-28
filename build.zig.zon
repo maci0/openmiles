@@ -1,6 +1,6 @@
 .{
     .name = .openmiles,
-    .version = "0.2.0",
+    .version = "0.3.0",
     .fingerprint = 0x9534407657751f71, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{},

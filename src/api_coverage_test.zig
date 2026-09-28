@@ -43,7 +43,7 @@ const alloc = std.heap.page_allocator;
 // this is deterministic, not racy, but a cursor left over from an earlier test
 // makes a test's first enumerate call start mid-list. resetEnumerators() gives
 // every test the same starting enumeration state.
-var scratch: [512]u8 = [_]u8{0} ** 512;
+var scratch: [512]u8 align(64) = [_]u8{0} ** 512;
 var u32o: u32 = 0;
 var i32o: i32 = 0;
 var f32o: f32 = 0;
