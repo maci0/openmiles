@@ -28,10 +28,11 @@ different DLL was diffed against.
 lowered to each symbol's true first appearance, and v6-specific entries added for
 the version-split functions. The 6.x-only exports that have no implementation at
 all (`AIL_open_library`, `AIL_close_library`, `AIL_library_resource_filename`,
-`AIL_load_sample_attributes`, `AIL_save_sample_attributes`,
-`AIL_quick_load_named_mem`) are in `never_export`, so no build emits them; their
-implementations stay callable from the Zig tests and are fuzzed in
-`fuzz_all_test.zig`.
+`AIL_load_sample_attributes`, `AIL_save_sample_attributes`) are in
+`never_export`, so no build emits them; their implementations stay callable
+from the Zig tests and are fuzzed in `fuzz_all_test.zig`.
+`AIL_quick_load_named_mem` is a real v7 export (no build other than v7 emits
+it), not a `never_export` entry.
 
 ## Calling-convention split (resolved)
 
@@ -72,7 +73,7 @@ build cannot match every sub-release. We target the **dominant family** per
 major version and stay internally consistent:
 
 - `AIL_init_sample`: @4 (v3 through 6.6) → @12 (v7) → @8 (v8).
-- `AIL_sample_buffer_info`: @20 (v5 through v7) → @24 (v8).
+- `AIL_sample_buffer_info`: @20 (v3 through v7) → @24 (v8).
 - `AIL_request_EOB_ASI_reset`: @8 (6.0 through 6.6) → @12 (v7 onward).
 
 For v6 we pick the **6.0 mainline** (the ~12-release 6.0a-6.0m family): @4 / @20

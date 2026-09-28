@@ -623,7 +623,8 @@ pub fn AIL_sample_51_volume_pan(s_opt: ?*Sample, volume: ?*f32, pan: ?*f32, fb_p
 }
 pub fn AIL_sample_buffer_available(s_opt: ?*Sample) callconv(.winapi) i32 {
     const s = s_opt orelse return -1; // SDK (wavefile.cpp) returns -1 on null, not 0
-    return if (s.stream_active) 1 else 0; // at least one slot free to refill
+    if (!s.stream_active) return 0;
+    return if (s.stream_src.bufferReady() >= 0) 1 else 0;
 }
 pub fn AIL_sample_buffer_count(s_opt: ?*Sample) callconv(.winapi) i32 {
     // SDK (wavefile.cpp): return S->n_buffers verbatim, 0 for a null handle.
@@ -689,7 +690,8 @@ pub fn AIL_sample_stage_property(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque, a3: 
     _ = a6;
     return 0;
 }
-// v7 uses a 6-argument @24 form (the 7-arg @28 form is 6.x and 8.x+).
+// v7 uses a 6-argument @24 form; 8.x and later take the 7-arg @28 form. 6.x
+// does not export this name at all.
 pub fn AIL_sample_stage_property_v7(a0: ?*anyopaque, a1: i32, a2: ?*anyopaque, a3: i32, a4: ?*anyopaque, a5: ?*anyopaque) callconv(.winapi) i32 {
     _ = a0;
     _ = a1;

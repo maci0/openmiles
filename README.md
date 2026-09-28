@@ -16,7 +16,7 @@
 
 OpenMiles is a clean-room reimplementation of the **Miles Sound System (MSS)** in [Zig](https://ziglang.org/), designed as a drop-in `mss32.dll` replacement for legacy Windows games running on modern systems and under [Wine](https://www.winehq.org/).
 
-One `-Dmss-version` flag selects which historical MSS release the export table mimics. Every selectable version (**v3 through v9**) reproduces its reference `mss32.dll`'s decorated stdcall export table with **zero missing exports** — verified by diffing against the real DLLs with `winedump`.
+One `-Dmss-version` flag selects which historical MSS release the export table mimics. Every selectable version (**v3 through v9**) reproduces its reference `mss32.dll`'s decorated stdcall export table with **zero missing exports** — verified by `scripts/check_all_versions.sh`, which parses each PE export table and diffs the decorated names.
 
 It replaces the proprietary MSS audio stack with [miniaudio](https://miniaud.io/) for audio output, [TinySoundFont](https://github.com/schellingb/TinySoundFont) for MIDI synthesis, and native decoders for MP3, OGG, and WAV (replacing MSS's proprietary ASI plugins), plus FLAC as a bonus format not in the original MSS.
 
@@ -66,8 +66,8 @@ sanitizer on, which is the only gate that sees UB in the bindings and in the
 vendored headers `translate-C` pulls in.
 
 `make check` runs every check CI runs, in CI's order: `make lint`, `make build`,
-`make test`, `make sanitize`, and the Windows cross-compile. Run it before
-pushing.
+`make test`, `make sanitize`, `make harnesses`, and the Windows cross-compile.
+Run it before pushing.
 
 `make lint` needs `shellcheck`, a Python 3 interpreter (the gates run under
 `python3`, or `python` where that is the name on PATH),
@@ -477,8 +477,10 @@ the `Miles*` calls they feed.
 names the slots as `DIG_*`, `MDI_*` and `AIL_*` constants. The names are
 version-specific: MSS 9.0 renumbered the table, so the header defines one number
 per name for the `OPENMILES_MSS_VERSION` in the build, and
-`scripts/check_header.py` holds that against the engine's table. A slot this
-build does not name reads as 0 and is not stored.
+`scripts/check_header.py` holds that against the engine's table. The engine
+stores any slot index below the table length, so a slot this build does not
+name round-trips through `AIL_set_preference` and `AIL_get_preference` like any
+other; only an index past the last slot is dropped and logged.
 
 `make check-header` re-checks every declaration in `mss.h` against that export
 table, and the `AILSOUNDINFO` layout against `src/root.zig`, for all ten distinct

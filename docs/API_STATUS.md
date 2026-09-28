@@ -47,7 +47,7 @@ behaviour, not linkability.
 | `AIL_unlock` | ⚪ Stub | No-op; miniaudio manages its own synchronization |
 | `AIL_unlock_mutex` | ⚪ Stub | No-op; miniaudio manages its own synchronization |
 | `AIL_us_count` | 🟢 Implemented | |
-| `AIL_debug_printf` | 🟢 Implemented | |
+| `AIL_debug_printf` | ⚪ Stub | Discards its arguments in every build; debug logging goes through the Zig logger |
 | `AIL_sprintf` | 🟢 Implemented | |
 | `AIL_get_DirectSound_info` | ⚪ Stub | No-op; zeroes both out-params. DirectSound not used |
 | `AIL_set_DirectSound_HWND` | ⚪ Stub | No-op; DirectSound not used |
@@ -93,7 +93,7 @@ behaviour, not linkability.
 | `RIB_register_interface` | 🟢 Implemented | Registers interface entries on a provider |
 | `RIB_unregister_interface` | 🟢 Implemented | Removes interface by name from provider |
 | `RIB_provider_library_handle` | 🟢 Implemented | Returns current loading provider or startup provider |
-| `RIB_load_application_providers` | 🟢 Implemented | Scans directory for .asi/.m3d/.flt plugins; returns 1 on success |
+| `RIB_load_application_providers` | 🟢 Implemented | Scans directory for .asi/.m3d/.flt plugins; returns the number of providers registered, 0 when none were |
 | `RIB_enumerate_providers` | 🟢 Implemented | Iterates all registered providers matching requested interface |
 | `RIB_request_interface` | 🟢 Implemented | Copies built-in ASI interface entries |
 | `RIB_find_files_provider` | 🟢 Implemented | Delegates to RIB_enumerate_providers |
@@ -505,7 +505,7 @@ Verified end-to-end with **Europa 1400 Gold: The Guild** (TL edition) under Wine
 
 ## Export-ABI parity (2026-05-31)
 Every `-Dmss-version` build diffs to **zero missing exports** against its
-reference `mss32.dll` (decorated stdcall names, via `winedump -j export`):
+reference `mss32.dll` (decorated stdcall names, via `scripts/check_exports.py`):
 
 | Build | Reference | Missing |
 |-------|-----------|---------|

@@ -35,7 +35,7 @@ int openmiles_tsf_channel_note_count(tsf* f, int channel) {
 #define AIL_SPRINTF_MAX 4096
 
 void AIL_debug_printf(const char* fmt, ...) {
-    (void)fmt; // no-op in release; debug logging handled by Zig logger
+    (void)fmt; // no-op in every build, Debug included; the Zig logger is the debug path
 }
 
 char* AIL_sprintf(char* buf, const char* fmt, ...) {

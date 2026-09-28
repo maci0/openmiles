@@ -24,7 +24,7 @@ This matrix tracks the availability of major API groups across different histori
 | Redist Handling (`redist_dir`) | v6 | 🔴 | 🔴 | 🟢 | 🟢 Full | Stores path and scans for .asi/.m3d/.flt plugins |
 | Timer API | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | Background timer threads |
 | Quick API | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | High-level sound engine helpers |
-| Memory API | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | Basic memory allocators and locking |
+| Memory API | v3 | 🔴 | 🟢 | 🟢 | 🟡 Partial | Allocators and `AIL_mem*` work; `AIL_lock`/`AIL_unlock`/`AIL_lock_mutex`/`AIL_unlock_mutex` are no-ops (miniaudio owns synchronization) |
 
 ## 2. Digital Audio (Samples & Streams)
 | Function Group | Intro | AIL v2 | MSS v3 | MSS 6.6 | OpenMiles | Notes |

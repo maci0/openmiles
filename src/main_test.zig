@@ -3647,6 +3647,35 @@ test "AIL_stream_filled_percent is 1.0 for a loaded (preloaded) stream" {
     try testing.expectEqual(@as(f32, 0.0), api_v9.AIL_stream_filled_percent(null));
 }
 
+test "v8 AIL_sample_buffer_available follows the ring, not just an active stream" {
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+
+    // A sample with no stream behind it has no ring to offer, and a null
+    // handle is the SDK's -1 sentinel.
+    try testing.expectEqual(@as(i32, 0), api_v8b.AIL_sample_buffer_available(s));
+
+    // An active stream is not on its own the answer: mss.h says 1 only when a
+    // slot is actually free to refill, so an active-but-full ring must read 0.
+    try s.stream_src.init(16, 1, 22050, null, null);
+    s.stream_active = true;
+    defer {
+        s.stream_src.deinit();
+        s.stream_active = false;
+    }
+    try testing.expectEqual(@as(i32, 1), api_v8b.AIL_sample_buffer_available(s));
+
+    const chunk = [_]u8{ 0, 0 }; // 1 frame, 16-bit mono
+    for (0..2) |_| {
+        const slot = s.streamBufferReady();
+        try testing.expect(slot >= 0);
+        try testing.expect(s.stream_src.loadBuffer(@intCast(slot), &chunk, chunk.len));
+    }
+    try testing.expectEqual(@as(i32, 0), api_v8b.AIL_sample_buffer_available(s));
+}
+
 test "AIL_file_type_named delegates to file_type, special-cases voice suffixes" {
     const allocator = testing.allocator;
     const pcm = [_]u8{0} ** 16;
@@ -6188,9 +6217,10 @@ const api_3d = @import("api/3d.zig");
 const api_dls = @import("api/dls.zig");
 const api_midi = @import("api/midi.zig");
 
-test "AIL_open_stream_by_sample (6.1a leaked internal) is a safe null stub" {
-    // Undocumented, never in any header; no behavior to reproduce. The contract
-    // we hold is that it links and returns a defined failure (null) for any args.
+test "AIL_open_stream_by_sample (never_export internal) is a safe null stub" {
+    // Undocumented, never in any header or reference DLL; no behavior to
+    // reproduce. The contract we hold is that it links and returns a defined
+    // failure (null) for any args.
     try testing.expectEqual(@as(?*openmiles.Sample, null), api_stream.AIL_open_stream_by_sample(null, null, null, 0));
     var scratch: [4]u8 = .{ 1, 2, 3, 4 };
     const p: *anyopaque = @ptrCast(&scratch);

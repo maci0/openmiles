@@ -11,14 +11,13 @@ pub fn AIL_open_stream_ex(driver_opt: ?*DigitalDriver, filename_opt: ?[*:0]const
     _ = flags;
     return AIL_open_stream(driver_opt, filename_opt, stream_mem);
 }
-// `_AIL_open_stream_by_sample@16`: an undocumented internal that leaked into
-// the 6.1a export table only (gone again by 6.1c, never in any header). Like
-// `stream_background`, it is an accidental export, not a public API, so there
-// is no documented signature or behavior to reproduce. We export the exact
-// decorated name (@16 = four stdcall args) backed by a safe stub that reports
-// failure (null HSTREAM). It is in `never_export` (see src/main.zig): no real
-// release emitted it, so it stays callable internally and from tests but is
-// never emitted as a PE export.
+// `_AIL_open_stream_by_sample@16`: an undocumented internal, absent from every
+// reference DLL (3.6a..9.1d) and from every SDK header, so there is no
+// documented signature or behavior to reproduce. It is in `never_export` (see
+// src/main.zig), which also files it under the wrong-name duplicates. The
+// @16 arity is kept so internal and test callers resolve the symbol, backed by
+// a stub that reports failure (null HSTREAM); the entry is never emitted as a
+// PE export.
 pub fn AIL_open_stream_by_sample(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?*anyopaque, a3: i32) callconv(.winapi) ?*Sample {
     _ = a0;
     _ = a1;

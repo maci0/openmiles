@@ -525,6 +525,10 @@ pub fn MilesRequeueAsyncs() callconv(.winapi) void {}
 // sound-instance ID was U32 (widened to U64 in v9), and StartupEventSystem
 // carried an extra trailing slot. These variants match the v8 decorations and
 // forward to the v9 implementations.
+//
+// MilesStartupEventSystem_v8 below is the exception: no export table entry
+// routes to it, because a v8 build emits the @16 form, so it stays callable
+// internally and from tests without becoming a PE export.
 pub fn MilesStartupEventSystem_v8(driver: ?*anyopaque, command_buf_len: i32, memory_buf: ?[*]u8, memory_len: i32, extra: i32) callconv(.winapi) ?*anyopaque {
     _ = extra;
     return MilesStartupEventSystem(driver, command_buf_len, memory_buf, memory_len);

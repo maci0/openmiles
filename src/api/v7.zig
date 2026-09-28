@@ -859,9 +859,12 @@ pub fn RIB_MAIN(self: ?*anyopaque, dll_name: [*:0]const u8) callconv(.winapi) i3
 
 // v7/v8 ABI: the master-reverb, room-type and low-pass-cutoff calls predate the
 // v9 bus mixer, so they lack the bus_index/channel parameter that v9 inserted as
-// the second argument. These narrower variants (ver 70..80) forward to the v9
+// the second argument. These narrower variants forward to the v9
 // implementations targeting the default bus/channel 0; the v9 build exports the
-// wider forms above.
+// wider forms above. The exported range differs per call, so follow the export
+// table entry rather than assuming v7..v8: master-reverb spans 6.5..8.x
+// (ver 65..80), room-type v7..8.x (ver 70..80), and the low-pass cutoff
+// 6.5..7.0 (ver 65..70), where 8.0 renamed the call to the v9 wide form.
 pub fn AIL_room_type_v7(dig_opt: ?*DigitalDriver) callconv(.winapi) i32 {
     return AIL_room_type(dig_opt, 0);
 }
