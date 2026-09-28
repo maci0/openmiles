@@ -279,6 +279,23 @@ pub fn AIL_compress_DLS(dls: ?*const anyopaque, compression_extension: [*:0]cons
     return 0;
 }
 
+/// Sub-images of a merged XMI+DLS image, as slices of the input. Either may be
+/// absent; both are present when the image is a merge.
+const DlsSubImages = struct { xmi: ?[]const u8 = null, dls: ?[]const u8 = null };
+
+fn splitDlsImage(data: []const u8) DlsSubImages {
+    if (dls_container.findDls(data)) |dls_img| {
+        // The XMI image, when present, is everything preceding the DLS bank.
+        const off = @intFromPtr(dls_img.ptr) - @intFromPtr(data.ptr);
+        return .{
+            .xmi = if (off > 0 and dls_container.findXmi(data[0..off]) != null) data[0..off] else null,
+            .dls = dls_img,
+        };
+    }
+    if (dls_container.findXmi(data)) |xmi_img| return .{ .xmi = xmi_img };
+    return .{};
+}
+
 /// AIL_extract_DLS(source, source_size, xmi_out, xmi_size, dls_out, dls_size, callback)
 /// Split a merged XMI+DLS image into freshly allocated XMI and DLS copies.
 /// Outputs are allocated with the C allocator; free each with AIL_mem_free_lock.
@@ -291,28 +308,22 @@ pub fn AIL_extract_DLS(src: ?*const anyopaque, src_len: u32, xmi_out: ?*?*anyopa
     if (dls_len) |p| p.* = 0;
     const sp = src orelse return 0;
     const raw: [*]const u8 = @ptrCast(sp);
-    const data = raw[0..@as(usize, src_len)];
+    const parts = splitDlsImage(raw[0..@as(usize, src_len)]);
     var found: i32 = 0;
 
-    if (dls_container.findDls(data)) |dls_img| {
-        if (cmemdup(dls_img)) |c| {
+    if (parts.dls) |img| {
+        if (cmemdup(img)) |c| {
             if (dls_out) |pp| pp.* = c;
-            if (dls_len) |p| p.* = @intCast(dls_img.len);
+            if (dls_len) |p| p.* = @intCast(img.len);
             found = 1;
         }
-        // The XMI image, when present, is everything preceding the DLS bank.
-        const off = @intFromPtr(dls_img.ptr) - @intFromPtr(data.ptr);
-        if (off > 0 and dls_container.findXmi(data[0..off]) != null) {
-            if (cmemdup(data[0..off])) |c| {
-                if (xmi_out) |pp| pp.* = c;
-                if (xmi_len) |p| p.* = @intCast(off);
-            }
-        }
-    } else if (dls_container.findXmi(data)) |xmi_img| {
-        if (cmemdup(xmi_img)) |c| {
+    }
+    if (parts.xmi) |img| {
+        if (cmemdup(img)) |c| {
             if (xmi_out) |pp| pp.* = c;
-            if (xmi_len) |p| p.* = @intCast(xmi_img.len);
-            found = 1;
+            if (xmi_len) |p| p.* = @intCast(img.len);
+            // A merged image reports success on its DLS copy alone, as the SDK does.
+            if (parts.dls == null) found = 1;
         }
     }
     return found;
@@ -329,21 +340,17 @@ pub fn AIL_find_DLS(data_ptr: ?*const anyopaque, size: u32, xmi_out: ?*?*anyopaq
     if (dls_len) |p| p.* = 0;
     const dp = data_ptr orelse return 0;
     const raw: [*]const u8 = @ptrCast(dp);
-    const data = raw[0..@as(usize, size)];
+    const parts = splitDlsImage(raw[0..@as(usize, size)]);
     var ok: i32 = 0;
 
-    if (dls_container.findDls(data)) |dls_img| {
-        if (dls_out) |pp| pp.* = @ptrCast(@constCast(dls_img.ptr));
-        if (dls_len) |p| p.* = @intCast(dls_img.len);
+    if (parts.dls) |img| {
+        if (dls_out) |pp| pp.* = @ptrCast(@constCast(img.ptr));
+        if (dls_len) |p| p.* = @intCast(img.len);
         ok = 1;
-        const off = @intFromPtr(dls_img.ptr) - @intFromPtr(data.ptr);
-        if (off > 0 and dls_container.findXmi(data[0..off]) != null) {
-            if (xmi_out) |pp| pp.* = @ptrCast(@constCast(data.ptr));
-            if (xmi_len) |p| p.* = @intCast(off);
-        }
-    } else if (dls_container.findXmi(data)) |xmi_img| {
-        if (xmi_out) |pp| pp.* = @ptrCast(@constCast(xmi_img.ptr));
-        if (xmi_len) |p| p.* = @intCast(xmi_img.len);
+    }
+    if (parts.xmi) |img| {
+        if (xmi_out) |pp| pp.* = @ptrCast(@constCast(img.ptr));
+        if (xmi_len) |p| p.* = @intCast(img.len);
     }
     return ok;
 }

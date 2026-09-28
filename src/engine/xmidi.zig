@@ -46,7 +46,6 @@ pub fn parseSmfTimeSigNumerator(smf: []const u8) i32 {
             // SysEx: VLQ length then data
             i +|= readVlq(smf[0..trk_end], &i);
         } else {
-            // Channel event: 1 or 2 data bytes depending on message type
             const etype = status & 0xF0;
             const data_bytes: usize = switch (etype) {
                 0xC0, 0xD0 => 1,
@@ -145,7 +144,6 @@ fn findEvntChunk(data: []const u8, seq_num: usize) ![]const u8 {
                     std.mem.eql(u8, data[ipos + 8 .. ipos + 12], "XMID"))
                 {
                     if (count == seq_num) {
-                        // Found target sequence — find its EVNT chunk
                         var epos: usize = ipos + 12;
                         while (epos + 8 <= iend) {
                             const eid = data[epos .. epos + 4];
@@ -290,7 +288,6 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
                 // XMIDI always has a duration VLQ after Note On, even for vel=0
                 const dur = readVlq(evnt, &pos);
                 if (vel > 0) {
-                    // Schedule synthetic note-off
                     var off: SmfEvent = undefined;
                     off.abs_time = abs_time +| dur;
                     off.len = 3;
@@ -344,7 +341,6 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
         }
     }.lt);
 
-    // Build MTrk data
     var track: std.ArrayListUnmanaged(u8) = .empty;
     defer track.deinit(allocator);
     // Pre-allocate: each event contributes ~4-8 bytes (VLQ delta + data), plus header/footer
@@ -367,14 +363,12 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
     var smf: std.ArrayListUnmanaged(u8) = .empty;
     try smf.ensureTotalCapacity(allocator, 22 + track.items.len);
     errdefer smf.deinit(allocator); // toOwnedSlice takes over on success only
-    // MThd
     try smf.appendSlice(allocator, "MThd");
     try smf.appendSlice(allocator, &[_]u8{ 0x00, 0x00, 0x00, 0x06 }); // chunk size = 6
     try smf.appendSlice(allocator, &[_]u8{ 0x00, 0x00 }); // format 0
     try smf.appendSlice(allocator, &[_]u8{ 0x00, 0x01 }); // 1 track
     try smf.appendSlice(allocator, &[_]u8{ 0x00, 0x78 }); // PPQ = 120
 
-    // MTrk
     try smf.appendSlice(allocator, "MTrk");
     const tlen: u32 = @intCast(track.items.len);
     try smf.append(allocator, @truncate(tlen >> 24));

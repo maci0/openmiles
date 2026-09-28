@@ -637,7 +637,7 @@ pub fn MilesEnqueueEventByName(name: ?[*:0]const u8) callconv(.winapi) u64 {
     defer found.bank.deinit();
     return enqueueParse(found.data, null, 0, 0);
 }
-// Processing moves new (pending) instances to playing and starts their clock.
+// Pending instances become playing and start their clock here.
 pub fn MilesBeginEventQueueProcessing() callconv(.winapi) i32 {
     const now = openmiles.getMsCount64();
     for (g_instances.items) |inst| {
@@ -648,7 +648,6 @@ pub fn MilesBeginEventQueueProcessing() callconv(.winapi) i32 {
     }
     return 0;
 }
-// Completion reaps finished instances.
 pub fn MilesCompleteEventQueueProcessing() callconv(.winapi) i32 {
     updateInstances();
     var i: usize = 0;

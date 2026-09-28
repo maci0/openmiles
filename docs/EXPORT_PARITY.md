@@ -24,23 +24,13 @@ different DLL was diffed against.
 ## Status
 
 **v6 MISSING: 0 / v7 MISSING: 0**. Every function in the real 6.1 and
-7.x export tables is now reproduced with matching stdcall decoration. Resolved
-across several passes:
-
-1. 79 spatial/sample/filter functions were implemented with correct decoration
-   but over-gated to `.ver=70/80`; floors lowered to `.ver=60`.
-2. Reverb/room-type/MIX_RIB_MAIN no-bus variants extended down to v6.
-3. 7 version-split functions (arity dips in v7) given v6-specific `.ver=60
-   .ver_max=69` entries reusing the large default impl.
-4. 4 already-implemented functions (`AIL_ftoa`, `AIL_register_trace_callback`,
-   `MSSDisableThreadLibraryCalls`, `AIL_quick_set_low_pass_cut_off`) re-gated to
-   their true version ranges (verified against the v5/v6/v7 DLLs).
-5. 6 genuinely-missing functions implemented in `src/api/legacy.zig` +
-   `AIL_quick_load_named_mem` in `quick.zig`: the 6.x-only embedded-library and
-   sample-attribute exports (`AIL_open_library`, `AIL_close_library`,
-   `AIL_library_resource_filename`, `AIL_load_sample_attributes`,
-   `AIL_save_sample_attributes`). All ABI-faithful stubs with safe defaults,
-   fuzzed in `fuzz_all_test.zig`.
+7.x export tables is reproduced with matching stdcall decoration: version floors
+lowered to each symbol's true first appearance, v6-specific entries added for the
+version-split functions, and the six 6.x-only exports that had no implementation
+at all (`AIL_open_library`, `AIL_close_library`, `AIL_library_resource_filename`,
+`AIL_load_sample_attributes`, `AIL_save_sample_attributes`,
+`AIL_quick_load_named_mem`) added as ABI-faithful stubs with safe defaults, fuzzed
+in `fuzz_all_test.zig`.
 
 ## Calling-convention split (resolved)
 
@@ -145,7 +135,7 @@ EXTRA breaks down into two very different groups:
    `AIL_ASI_provider_attribute`, `AIL_set_timer_user_data`) predate the
    suppression and no longer run against a current DLL.
 
-**EXTRA bounding (done).** Using a presence map computed over *all* 148
+**EXTRA bounding.** Using a presence map computed over *all* 148
 reference DLLs (per-function set of major versions it appears in), every target
 was bounded to `[first_appearance, last_appearance]`:
 
@@ -159,9 +149,7 @@ was bounded to `[first_appearance, last_appearance]`:
 Each change was applied only where provably safe (no reference outside the new
 range exports the symbol) and re-verified: **all of v4-v9 stay byte-exact (0
 missing, 0 mismatch)**. This dropped EXTRA sharply (v7 148→46, v8 243→128,
-v9 280→159). The map's scale bug (`major` vs `major*10`) that made an early
-attempt compute *last*-appearance instead of first was found and fixed before
-any change was applied.
+v9 280→159).
 
 **Remaining EXTRA is sub-version variance, plus a group since eliminated:**
 

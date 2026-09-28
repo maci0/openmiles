@@ -389,9 +389,6 @@ pub fn AIL_get_soundbank_mem_usage(bank: ?*anyopaque) callconv(.winapi) i32 {
 pub fn AIL_indent(a0: i32) callconv(.c) void {
     _ = a0;
 }
-// Real MSS: AIL_mem_close(mem, void** data, U32* size) @12 — close a write
-// stream, optionally handing the accumulated buffer (C-malloc'd, caller frees
-// via AIL_mem_free_lock) back through data/size.
 // SDK (miscutil.cpp): S32 AIL_mem_close(HMEMDUMP, void** buf, U32* size). Returns
 // 1 on success, 0 only if the output allocation fails; a NULL handle returns 1
 // and writes nothing (the body is guarded by `if (m)`). `size` is written

@@ -280,7 +280,7 @@ pub const EventConstruct = struct {
     }
     // A float field, C "%f" (six decimals) + ';' (decoder copyFloat: parse to ';').
     // A non-finite value would print as "nan"/"inf", text no decoder can use as
-    // a step field, so emit the 0 copyFloat falls back to instead.
+    // a step field, so emit the 0 that copyFloat falls back to.
     fn fieldFloat(self: *EventConstruct, v: f32) void {
         self.print("{d:.6};", .{if (std.math.isFinite(v)) v else 0.0});
     }

@@ -154,8 +154,6 @@ pub const Input = struct {
     pub fn getInfo(self: *Input) InputInfo {
         self.mutex.lockUncancelable(io);
         // Swap buffer and snapshot under the lock — O(1) instead of copying.
-        // The old buffer becomes the snapshot (caller reads it); the old
-        // snapshot (cleared) becomes the new capture target.
         const tmp = self.snapshot;
         self.snapshot = self.buffer;
         self.buffer = tmp;

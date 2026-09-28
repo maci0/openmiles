@@ -1,6 +1,6 @@
 # Miles Sound System (MSS) Standard Plugins & Codecs
 
-Miles Sound System is highly modular, using external providers for 3D audio, DSP filters, and compressed audio decoders. These files are typically found in the application directory or a `redist` folder.
+MSS uses external providers for 3D audio, DSP filters, and compressed audio decoders. These files are typically found in the application directory or a `redist` folder.
 
 ## 1. 3D Audio Providers (`.m3d`)
 These plugins implement the 3D spatialization logic. MSS typically ships with software fallbacks and hardware-specific wrappers.
@@ -30,7 +30,7 @@ Filters are applied to samples or streams via the `AIL_open_filter` API.
 
 ASI providers are decoders for compressed formats. They register with the RIB (RAD Interface Broker) system during `AIL_startup()` and are queried by the game via `RIB_enumerate_providers("ASI stream", ...)` before calling `AIL_open_stream`.
 
-### Complete Known ASI Plugins
+### Known ASI Plugins
 
 | File(s) | Codec | Introduced | Handled Formats | Proprietary? |
 |---------|-------|-----------|-----------------|--------------|
@@ -79,7 +79,7 @@ Real MSS plugins register additional codec-specific entries (10-23 total per int
 | `Name` | `RIB_ATTRIBUTE` | Human-readable codec name (e.g. `"Miles MP3 Decoder"`). |
 | `Version` | `RIB_ATTRIBUTE` | Version string. |
 
-OpenMiles registers a **7-entry simplified interface** covering the 5 core functions + 2 file-type attributes. This is sufficient for all games tested to date, since games only call the core 5 functions.
+OpenMiles registers a **7-entry simplified interface** covering the 5 core functions + 2 file-type attributes. Games only call the core 5 functions.
 
 ### Stream Attribute Names
 
@@ -114,7 +114,7 @@ External `.asi` files in the game directory are **also** scanned and loaded as a
 | MP3 | `Mp3dec.asi` / `Mssmp3.asi` | miniaudio `ma_decoder` | **Fully replaced** |
 | Ogg Vorbis | `Mssogg.asi` / `Ogg.asi` | miniaudio `ma_decoder` | **Fully replaced** |
 | WAV / PCM | (native in MSS) | miniaudio `ma_decoder` | **Fully replaced** |
-| FLAC | (not in original MSS) | miniaudio `ma_decoder` | **Bonus — exceeds original** |
+| FLAC | (not in original MSS) | miniaudio `ma_decoder` | **Exceeds original MSS** |
 | Voxware VR12 | `Mssv12.asi` | Not implemented | Falls back to external `.asi` if present |
 | Voxware RT24 | `Mssv24.asi` | Not implemented | Falls back to external `.asi` if present |
 | Voxware RT29 | `Mssv29.asi` | Not implemented | Falls back to external `.asi` if present |

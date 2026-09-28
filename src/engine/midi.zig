@@ -608,11 +608,9 @@ pub const Sequence = struct {
         if (!self.tempo_fade_active) return;
         self.tempo_fade_elapsed_ms += real_ms;
         if (self.tempo_fade_duration_ms <= 0 or self.tempo_fade_elapsed_ms >= self.tempo_fade_duration_ms) {
-            // Fade complete
             self.tempo_ratio = self.tempo_fade_target_ratio;
             self.tempo_fade_active = false;
         } else {
-            // Linear interpolation
             const t = self.tempo_fade_elapsed_ms / self.tempo_fade_duration_ms;
             self.tempo_ratio = self.tempo_fade_start_ratio + (self.tempo_fade_target_ratio - self.tempo_fade_start_ratio) * t;
         }
@@ -1081,7 +1079,6 @@ pub const Sequence = struct {
         self.volume = new_vol;
         if (self.is_initialized) {
             if (ms > 0) {
-                // Fade from current volume to target over ms milliseconds
                 ma.ma_sound_set_fade_in_milliseconds(&self.sound, -1, new_vol, @intCast(ms));
             } else {
                 ma.ma_sound_set_volume(&self.sound, new_vol);

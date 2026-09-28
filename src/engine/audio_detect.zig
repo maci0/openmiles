@@ -222,8 +222,8 @@ pub fn wavInfoBounded(raw: [*]const u8, max_len: usize, info: *anyopaque) i32 {
             // length that runs past the caller's buffer, so cap it at the bytes
             // actually present.
             data_len = @min(chunk_size, @as(u32, @intCast(file_end - offset)));
-            // Keep walking for a fact chunk only if we haven't seen one (data is
-            // usually last, so break here matches the SDK's data-found exit).
+            // Data is usually last; stopping here matches the SDK's
+            // data-found exit.
             break;
         }
         const next = offset +| chunk_size +| (chunk_size & 1); // pad to even (saturating)

@@ -429,7 +429,6 @@ pub fn AIL_allocate_file_sample(driver_opt: ?*DigitalDriver, data: *anyopaque, f
     };
     return s;
 }
-// AIL_load_sample_buffer(HSAMPLE S, U32 buff_num, void const *buffer, U32 len)
 /// The SDK's MSS_BUFFER_HEAD (-1): pass as buff_num for the ring's head slot.
 const MSS_BUFFER_HEAD: i32 = -1;
 pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: i32, data: ?*anyopaque, len: u32) callconv(.winapi) i32 {
@@ -597,9 +596,7 @@ pub fn AIL_digital_configuration(driver_opt: ?*DigitalDriver, rate: ?*i32, forma
     if (rate) |p| p.* = @intCast(driver.getSampleRate());
     if (format) |p| p.* = if (driver.getChannels() >= 2) 3 else 1; // 16-bit: 1=mono,3=stereo
     if (string) |buf| {
-        // The SDK call carries no buffer size, so the write is what it has always
-        // been; named here so the assumption is visible at the call site rather
-        // than only in the header's signature.
+        // The SDK call carries no buffer size, so the write is unbounded.
         const name = "OpenMiles (miniaudio)";
         for (name, 0..) |c, i| buf[i] = c;
         buf[name.len] = 0;

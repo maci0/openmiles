@@ -75,6 +75,22 @@ fn applyLoopCount(sound: *ma.ma_sound, count: i32) void {
     ma.ma_sound_set_looping(sound, if (count == 0) ma.MA_TRUE else ma.MA_FALSE);
 }
 
+/// Loop restart for the end-of-sound bridge, shared by Sample and Sample3D.
+/// Atomic because the audio thread runs the bridge while a game thread may
+/// restart the sample, and a plain read-modify-write would drop one of the two
+/// updates. `loops_remaining` at or below zero means infinite (0 = documented
+/// infinite, negative = treated the same) and is never decremented. Returns
+/// false when the count reached zero, i.e. this was the last iteration and the
+/// caller must fire its end callbacks.
+fn restartLoopOnEnd(self: anytype) bool {
+    const remaining = self.loops_remaining.load(.acquire);
+    if (remaining == 1) return false;
+    if (remaining > 1) _ = self.loops_remaining.fetchSub(1, .acq_rel);
+    _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
+    _ = ma.ma_sound_start(&self.sound);
+    return true;
+}
+
 /// Translate an MSS byte-offset loop block into miniaudio frame ranges. Works on
 /// any sample type exposing `bytesPerFrame`, `loop_start_frame`, `loop_end_frame`
 /// and `decoder` (Sample and Sample3D share the exact same logic).
@@ -684,10 +700,7 @@ pub const DigitalDriver = struct {
         return count;
     }
 
-    // MSS is left-handed (forward=+Z); miniaudio is right-handed (forward=-Z).
-    // We negate Z crossing the miniaudio boundary so the spatializer reproduces
-    // MSS geometry, while stored/returned values stay in MSS space. See the note
-    // at Sample3D.setPosition.
+    // Z is negated on the miniaudio boundary; see Sample3D.setPosition.
     pub fn setListenerPosition(self: *DigitalDriver, x: f32, y: f32, z: f32) void {
         ma.ma_engine_listener_set_position(&self.engine, 0, x, y, -z);
     }
@@ -710,8 +723,7 @@ pub const DigitalDriver = struct {
         ma.ma_engine_listener_set_world_up(&self.engine, 0, v[0], v[1], -v[2]);
     }
 
-    // miniaudio is left-handed on Z, the MSS surface is right-handed, so every
-    // listener getter undoes the negation the matching setter applied.
+    // Every listener getter undoes the negation its setter applied.
     fn fromMSS(v: ma.ma_vec3f) ma.ma_vec3f {
         return .{ .x = v.x, .y = v.y, .z = -v.z };
     }
@@ -958,23 +970,7 @@ pub const Sample = struct {
         _ = pSound;
         const self: *Sample = @ptrCast(@alignCast(pUserData.?));
         // All looping is handled manually here (miniaudio looping is disabled).
-        // Atomic: the audio thread runs this bridge while a game thread may
-        // restart the sample, and a plain read-modify-write would drop one of
-        // the two updates.
-        // loops_remaining <= 0: infinite (0 = documented infinite, negative = treated same).
-        const remaining = self.loops_remaining.load(.acquire);
-        if (remaining <= 0) {
-            // Infinite loop - restart from loop start
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
-            _ = ma.ma_sound_start(&self.sound);
-            return;
-        } else if (remaining > 1) {
-            _ = self.loops_remaining.fetchSub(1, .acq_rel);
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
-            _ = ma.ma_sound_start(&self.sound);
-            return;
-        }
-        // loops_remaining == 1: last iteration done
+        if (restartLoopOnEnd(self)) return;
         self.is_done.store(true, .release);
         self.fireEobThenEosCallbacks();
     }
@@ -1948,18 +1944,7 @@ pub const Sample3D = struct {
     fn eosCallbackBridge(pUserData: ?*anyopaque, pSound: ?*ma.ma_sound) callconv(.c) void {
         _ = pSound;
         const self: *Sample3D = @ptrCast(@alignCast(pUserData.?));
-        // loops_remaining <= 0: infinite (0 = documented, negative = treated same).
-        const remaining = self.loops_remaining.load(.acquire);
-        if (remaining <= 0) {
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
-            _ = ma.ma_sound_start(&self.sound);
-            return;
-        } else if (remaining > 1) {
-            _ = self.loops_remaining.fetchSub(1, .acq_rel);
-            _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
-            _ = ma.ma_sound_start(&self.sound);
-            return;
-        }
+        if (restartLoopOnEnd(self)) return;
         self.is_done.store(true, .release);
         fireSampleCallback(&self.eos_callback, self);
     }
@@ -2337,18 +2322,10 @@ pub const Sample3D = struct {
     /// position by velocity over `dt_ms` milliseconds, unconditionally (unlike
     /// the auto-tick updatePosition, which is gated on the auto_update flag).
     pub fn updatePositionExplicit(self: *Sample3D, dt_ms: f32) void {
-        if (!(dt_ms == dt_ms) or std.math.isInf(dt_ms)) return; // NaN/Inf guard
-        // SDK m3d.cpp: velocity is per-millisecond, so position advances by
-        // velocity * dt_ms directly (NOT dt/1000); early-out when velocity is
-        // ~0, mirroring AIL_API_update_listener_3D_position.
+        // early-out when velocity is ~0, mirroring AIL_API_update_listener_3D_position.
         const eps: f32 = 0.0001; // MSS_EPSILON
         if (@abs(self.velocity_x) < eps and @abs(self.velocity_y) < eps and @abs(self.velocity_z) < eps) return;
-        self.pos_x += self.velocity_x * dt_ms;
-        self.pos_y += self.velocity_y * dt_ms;
-        self.pos_z += self.velocity_z * dt_ms;
-        if (self.is_initialized) {
-            ma.ma_sound_set_position(&self.sound, self.pos_x, self.pos_y, -self.pos_z);
-        }
+        self.advancePosition(dt_ms);
     }
     pub fn setVelocity(self: *Sample3D, x: f32, y: f32, z: f32) void {
         // AIL_set_3D_velocity multiplies each axis by an app-supplied factor, so
@@ -2368,12 +2345,17 @@ pub const Sample3D = struct {
 
     pub fn updatePosition(self: *Sample3D, dt_ms: f32) void {
         if (!self.auto_update) return;
-        if (!(dt_ms == dt_ms) or std.math.isInf(dt_ms)) return; // NaN/Inf guard
-        // SDK m3d.cpp: velocity is per-millisecond, advance by velocity * dt_ms.
-        // Dead reckoning is a geometric op on the object (like
-        // updatePositionExplicit): the stored position moves even before a
-        // sound is loaded; only the ma_sound push waits for initialization.
         if (self.velocity_x == 0 and self.velocity_y == 0 and self.velocity_z == 0) return;
+        self.advancePosition(dt_ms);
+    }
+
+    /// One dead-reckoning step shared by the explicit and auto-tick updates.
+    /// SDK m3d.cpp: velocity is per-millisecond, so position advances by
+    /// velocity * dt_ms directly (NOT dt/1000). This is a geometric op on the
+    /// object: the stored position moves even before a sound is loaded, and
+    /// only the ma_sound push waits for initialization.
+    fn advancePosition(self: *Sample3D, dt_ms: f32) void {
+        if (!(dt_ms == dt_ms) or std.math.isInf(dt_ms)) return; // NaN/Inf guard
         self.pos_x += self.velocity_x * dt_ms;
         self.pos_y += self.velocity_y * dt_ms;
         self.pos_z += self.velocity_z * dt_ms;

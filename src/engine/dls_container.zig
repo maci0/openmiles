@@ -75,9 +75,7 @@ const max_ptr_image_size: usize = 256 * 1024 * 1024;
 
 /// Pointer-based XMI/SMF image sizing for callers that lack an explicit length
 /// (e.g. `AIL_merge_DLS_with_XMI`). Every offset is bounded by
-/// max_ptr_image_size, so a lying 32-bit size field can only make this read up
-/// to that far past the caller's buffer; beyond it (or for unrecognized data)
-/// returns 0.
+/// max_ptr_image_size; beyond it (or for unrecognized data) returns 0.
 pub fn xmiImageSizePtr(raw: [*]const u8) usize {
     if (std.mem.eql(u8, raw[0..4], "MThd")) {
         const hdr_len = std.mem.readInt(u32, raw[4..8], .big);
