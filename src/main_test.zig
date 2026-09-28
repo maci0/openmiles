@@ -4733,13 +4733,13 @@ test "injected file faults reach the whole-file read path" {
     defer openmiles.fs_compat.fault = null;
 
     openmiles.fs_compat.fault = &open_fault;
-    // The seam itself reports the injected error verbatim; readWholeFile maps
-    // every open failure to FileNotFound, which is what its callers see.
+    // The seam reports the injected error verbatim; readWholeFile narrows it
+    // to absence or "the open did not happen", never folding a denial into
+    // absence, which is what its callers log.
     try testing.expectError(error.AccessDenied, openmiles.fs_compat.openFile(io, path, .{}));
-    try testing.expectError(error.FileNotFound, openmiles.readWholeFile(path));
-    // A sample load names the same failure apart from a missing file: a
-    // denied or malformed name reported as FileNotFound sends an operator
-    // looking for a file that was there all along.
+    try testing.expectError(error.FileOpenFailed, openmiles.readWholeFile(path));
+    // A sample load and the sound bank readers report the same denial the same
+    // way, so one open cannot read differently depending on which asked.
     {
         const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
         defer drv.deinit();
@@ -4813,6 +4813,39 @@ test "injected short reads reach AIL_file_read and the sample load" {
     openmiles.fs_compat.fault = null;
     try testing.expectEqual(@intFromPtr(&dst), @intFromPtr(api_file.AIL_file_read(path_z.ptr, &dst)));
     try testing.expectEqualStrings(body, dst[0..body.len]);
+}
+
+test "a denied open is not reported as a missing file" {
+    // The only signal AIL_file_read and AIL_file_size give a game is
+    // AIL_file_error, and the whole-file reader's callers log the error it
+    // returns. An open denied for any reason other than absence used to arrive
+    // as "File not found", pointing an operator at a file that was there.
+    const missing = ".zig-cache/tmp/no_such_bank_here.mbnk";
+    var path_z_buf: [256:0]u8 = undefined;
+    const path_z = try std.fmt.bufPrintZ(&path_z_buf, "{s}", .{missing});
+
+    // Absence keeps the name it has always had.
+    try testing.expectError(error.FileNotFound, openmiles.readWholeFile(missing));
+    try testing.expect(@intFromPtr(api_file.AIL_file_read(path_z.ptr, null)) == 0);
+    try testing.expectEqualStrings("File not found", std.mem.span(api_file.AIL_file_error()));
+    try testing.expectEqual(@as(u32, 0), api_file.AIL_file_size(path_z.ptr));
+    try testing.expectEqualStrings("File not found", std.mem.span(api_file.AIL_file_error()));
+
+    const Faults = struct {
+        fn open(p: []const u8) ?anyerror {
+            if (std.mem.endsWith(u8, p, "no_such_bank_here.mbnk")) return error.AccessDenied;
+            return null;
+        }
+    };
+    const fault: openmiles.fs_compat.Fault = .{ .open = Faults.open };
+    defer openmiles.fs_compat.fault = null;
+    openmiles.fs_compat.fault = &fault;
+
+    try testing.expectError(error.FileOpenFailed, openmiles.readWholeFile(missing));
+    try testing.expect(@intFromPtr(api_file.AIL_file_read(path_z.ptr, null)) == 0);
+    try testing.expectEqualStrings("File access denied", std.mem.span(api_file.AIL_file_error()));
+    try testing.expectEqual(@as(u32, 0), api_file.AIL_file_size(path_z.ptr));
+    try testing.expectEqualStrings("File access denied", std.mem.span(api_file.AIL_file_error()));
 }
 
 test "injected short writes store only the named prefix" {

@@ -400,7 +400,19 @@ pub const MixBus = struct {
             self.driver.allocator.destroy(node);
             return;
         }
-        _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, @ptrCast(node), 0);
+        // The group's own attach is the one that decides whether the bus is
+        // heard at all. Left unchecked, a failure here silences the bus and
+        // still records the effect in the slot, so every later query reports a
+        // filtered bus that is producing nothing. Undo and leave the slot
+        // empty, which the queries already read as "effect off".
+        const attach_group = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, @ptrCast(node), 0);
+        if (attach_group != ma.MA_SUCCESS) {
+            log("MixBus: {s} node could not take the bus's output ({d}); the effect is removed\n", .{ @typeName(Node), attach_group });
+            _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, ma.ma_engine_get_endpoint(eng), 0);
+            ma.ma_node_uninit(@ptrCast(node), null);
+            self.driver.allocator.destroy(node);
+            return;
+        }
         slot.* = node;
     }
 
@@ -1934,10 +1946,27 @@ pub const Sample = struct {
                 self.driver.allocator.destroy(node);
                 return;
             }
-            // Wire: sound → delay_node → endpoint
+            // Wire: sound → delay_node → endpoint. Both attaches report: a
+            // sound left with no output bus goes silent, and a node that never
+            // reached the endpoint feeds nothing, so either one left unwired
+            // would leave AIL_sample_reverb reporting a reverb that no audio
+            // passes through. A failed attach puts the sound back on the
+            // endpoint and drops the node, so the sample is dry and honest.
             const endpoint = ma.ma_engine_get_endpoint(&self.driver.engine);
-            _ = ma.ma_node_attach_output_bus(@ptrCast(node), 0, endpoint, 0);
-            _ = ma.ma_node_attach_output_bus(@ptrCast(&self.sound), 0, @ptrCast(node), 0);
+            const attach_node = ma.ma_node_attach_output_bus(@ptrCast(node), 0, endpoint, 0);
+            const attach_sound = if (attach_node == ma.MA_SUCCESS)
+                ma.ma_node_attach_output_bus(@ptrCast(&self.sound), 0, @ptrCast(node), 0)
+            else
+                attach_node;
+            if (attach_sound != ma.MA_SUCCESS) {
+                log("Sample.setReverb: wiring the delay node failed: {d} ({s}); the sample stays dry\n", .{ attach_sound, root.maResultDescription(attach_sound) });
+                if (self.is_initialized) {
+                    _ = ma.ma_node_attach_output_bus(@ptrCast(&self.sound), 0, endpoint, 0);
+                }
+                ma.ma_node_uninit(@ptrCast(node), null);
+                self.driver.allocator.destroy(node);
+                return;
+            }
             ma.ma_delay_node_set_wet(node, wet);
             ma.ma_delay_node_set_dry(node, std.math.clamp(self.reverb_dry_level, 0.0, 1.0));
             self.reverb_node = node;

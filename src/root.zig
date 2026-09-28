@@ -341,6 +341,31 @@ fn writeErrorLocked(buf: *[256:0]u8, msg: []const u8) void {
     buf[len] = 0;
 }
 
+/// The error `readWholeFile` reports for a failed open. Absence is the one
+/// case a caller can act on by naming a different file; everything else is an
+/// open that did not happen.
+pub fn openFailureError(err: anyerror) error{ FileNotFound, FileOpenFailed } {
+    return if (err == error.FileNotFound) error.FileNotFound else error.FileOpenFailed;
+}
+
+/// Name a failed open of `path` for `AIL_file_error`.
+///
+/// Every open failure used to answer "File not found", which sent an operator
+/// hunting for a file that was there all along: a permission denial, a name
+/// the host rejects, and a path that is a directory all reported absence. The
+/// cases a caller can act on are split out; anything unrecognised carries its
+/// own name rather than being folded into absence.
+pub fn setOpenFileError(err: anyerror, path: []const u8) void {
+    switch (err) {
+        error.FileNotFound => setFileError("File not found"),
+        error.AccessDenied => setFileError("File access denied"),
+        error.OutOfMemory => setFileError("Out of memory"),
+        error.NameTooLong => setFileErrorFmt("File name too long: '{s}'", .{path}),
+        error.IsDir => setFileErrorFmt("Path is a directory, not a file: '{s}'", .{path}),
+        else => setFileErrorFmt("Cannot open '{s}': {s}", .{ path, @errorName(err) }),
+    }
+}
+
 pub fn clearFileError() void {
     error_buf_mutex.lockUncancelable(io);
     defer error_buf_mutex.unlock(io);
@@ -452,7 +477,7 @@ pub fn readWholeFile(path: []const u8) ![]u8 {
         zbuf[path.len] = 0;
         return fileCallbackReadAll(global_allocator, @ptrCast(&zbuf));
     }
-    const f = fs_compat.openFile(io, path, .{}) catch return error.FileNotFound;
+    const f = fs_compat.openFile(io, path, .{}) catch |err| return openFailureError(err);
     defer f.close(io);
     const sz = f.length(io) catch return error.UnknownSize;
     if (sz == 0 or sz > max_file_load_bytes) return error.BadSize;
@@ -498,8 +523,8 @@ pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
         return out;
     }
     const path = std.mem.span(filename);
-    const file = fs_compat.openFile(io, path, .{}) catch {
-        setFileError("File not found");
+    const file = fs_compat.openFile(io, path, .{}) catch |err| {
+        setOpenFileError(err, path);
         return null;
     };
     defer file.close(io);
@@ -574,8 +599,8 @@ pub fn ailFileSize(filename: [*:0]const u8) u32 {
         return size;
     }
     const path = std.mem.span(filename);
-    const file = fs_compat.openFile(io, path, .{}) catch {
-        setFileError("File not found");
+    const file = fs_compat.openFile(io, path, .{}) catch |err| {
+        setOpenFileError(err, path);
         return 0;
     };
     defer file.close(io);

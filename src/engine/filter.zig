@@ -168,14 +168,22 @@ pub const Filter = struct {
             DEFAULT_CUTOFF_HZ;
         const clamped = if (std.math.isNan(frequency)) 1000.0 else @max(20.0, @min(frequency, nyquist));
         if (clamped == self.cutoff_frequency) return;
+        const previous = self.cutoff_frequency;
         self.cutoff_frequency = clamped;
-        self.reinitLpf();
+        if (self.reinitLpf()) |result| {
+            log("Filter.setCutoff: the LPF node rejected {d} Hz ({d}); the filter keeps {d} Hz\n", .{ clamped, result, previous });
+            self.cutoff_frequency = previous;
+        }
     }
 
     /// Rebuild the LPF node from the current cutoff and order. Both setters go
-    /// through here so changing either one takes effect.
-    fn reinitLpf(self: *Filter) void {
-        if (!self.lpf_initialized) return;
+    /// through here so changing either one takes effect. A node that refuses
+    /// the new config is left as it was and its result returned, because the
+    /// setters above report what the filter is doing and cannot say so for a
+    /// rewire that did not happen. Null when the node took the config, or when
+    /// there is no node yet to take it.
+    fn reinitLpf(self: *Filter) ?ma.ma_result {
+        if (!self.lpf_initialized) return null;
         const engine_rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
         const channels = ma.ma_engine_get_channels(&self.driver.engine);
         const config = ma.ma_lpf_config_init(
@@ -185,7 +193,8 @@ pub const Filter = struct {
             self.cutoff_frequency,
             self.order,
         );
-        _ = ma.ma_lpf_node_reinit(&config, &self.lpf_node);
+        const result = ma.ma_lpf_node_reinit(&config, &self.lpf_node);
+        return if (result == ma.MA_SUCCESS) null else result;
     }
 
     /// Set a named attribute. Supported: "Cutoff" (Hz), "Order" (1-4).
@@ -197,8 +206,12 @@ pub const Filter = struct {
             const v: f32 = if (std.math.isNan(value)) 1.0 else @max(1.0, @min(value, 4.0));
             const new_order: u32 = @intFromFloat(v);
             if (new_order != self.order) {
+                const previous = self.order;
                 self.order = new_order;
-                self.reinitLpf();
+                if (self.reinitLpf()) |result| {
+                    log("Filter.setAttribute: the LPF node rejected order {d} ({d}); the filter keeps order {d}\n", .{ new_order, result, previous });
+                    self.order = previous;
+                }
             }
         } else {
             log("Filter.setAttribute: unknown attribute '{s}'\n", .{name});
