@@ -49,7 +49,10 @@ fn isPathSeparator(ch: u8) bool {
     return ch == '\\' or ch == '/';
 }
 
-fn maybeResolveCaseInsensitiveWindowsPath(path: []const u8, out_buf: []u8) ?[]const u8 {
+/// The name as it is spelled on disk, component by component, or null when
+/// there is nothing to resolve it to: a non-Windows target, an empty or
+/// oversized name, a wildcard, or a component the directory walk cannot find.
+pub fn maybeResolveCaseInsensitivePath(path: []const u8, out_buf: []u8) ?[]const u8 {
     if (!is_windows or path.len == 0 or path.len >= out_buf.len) return null;
     if (std.mem.indexOfAny(u8, path, "*?") != null) return null;
 
@@ -136,15 +139,21 @@ fn maybeResolveCaseInsensitiveWindowsPath(path: []const u8, out_buf: []u8) ?[]co
     return out_buf[0..out_len];
 }
 
-pub fn maybeResolveCaseInsensitivePath(path: []const u8, out_buf: []u8) ?[]const u8 {
-    if (!is_windows) return null;
-    return maybeResolveCaseInsensitiveWindowsPath(path, out_buf);
-}
-
 fn logResolvedPath(original: []const u8, resolved: []const u8) void {
     if (!std.mem.eql(u8, original, resolved)) {
         log("fs_compat: resolved '{s}' -> '{s}'\n", .{ original, resolved });
     }
+}
+
+/// The name to retry `path` under after an open failed, or null when there is
+/// nothing to retry: the resolver found nothing (a non-Windows target, a
+/// wildcard, a name longer than the buffer), or it resolved to the name
+/// already tried. `buf` holds the result and must outlive the call.
+fn retryPath(path: []const u8, buf: []u8) ?[]const u8 {
+    const resolved = maybeResolveCaseInsensitivePath(path, buf) orelse return null;
+    if (std.mem.eql(u8, resolved, path)) return null;
+    logResolvedPath(path, resolved);
+    return resolved;
 }
 
 /// Fault injection at the library's file-I/O seam. The opens, creates, and
@@ -225,18 +234,14 @@ pub fn openFile(io: std.Io, path: []const u8, options: std.Io.File.OpenFlags) !s
     if (std.fs.path.isAbsolute(path)) {
         return std.Io.Dir.openFileAbsolute(io, path, options) catch |err| {
             var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const resolved = maybeResolveCaseInsensitivePath(path, &resolved_buf) orelse return err;
-            if (std.mem.eql(u8, resolved, path)) return err;
-            logResolvedPath(path, resolved);
+            const resolved = retryPath(path, &resolved_buf) orelse return err;
             return std.Io.Dir.openFileAbsolute(io, resolved, options);
         };
     }
 
     return cwd.openFile(io, path, options) catch |err| {
         var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const resolved = maybeResolveCaseInsensitivePath(path, &resolved_buf) orelse return err;
-        if (std.mem.eql(u8, resolved, path)) return err;
-        logResolvedPath(path, resolved);
+        const resolved = retryPath(path, &resolved_buf) orelse return err;
         return cwd.openFile(io, resolved, options);
     };
 }
@@ -247,18 +252,14 @@ pub fn openDir(io: std.Io, path: []const u8, options: std.Io.Dir.OpenOptions) !s
     if (std.fs.path.isAbsolute(path)) {
         return std.Io.Dir.openDirAbsolute(io, path, options) catch |err| {
             var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const resolved = maybeResolveCaseInsensitivePath(path, &resolved_buf) orelse return err;
-            if (std.mem.eql(u8, resolved, path)) return err;
-            logResolvedPath(path, resolved);
+            const resolved = retryPath(path, &resolved_buf) orelse return err;
             return std.Io.Dir.openDirAbsolute(io, resolved, options);
         };
     }
 
     return cwd.openDir(io, path, options) catch |err| {
         var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
-        const resolved = maybeResolveCaseInsensitivePath(path, &resolved_buf) orelse return err;
-        if (std.mem.eql(u8, resolved, path)) return err;
-        logResolvedPath(path, resolved);
+        const resolved = retryPath(path, &resolved_buf) orelse return err;
         return cwd.openDir(io, resolved, options);
     };
 }
