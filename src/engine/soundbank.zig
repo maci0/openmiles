@@ -195,6 +195,13 @@ const off_name = 56; // char SoundBankName[4]
 const header_size = 60;
 const asset_entry_size = 8; // { U32 NameOffset; U32 DataOffset; }
 
+/// Longest "*<bank file name><sound file name>" asset path the loader reports.
+/// Both names come out of the bank file and neither C entry point carries a
+/// buffer size, so the write is bounded here rather than by a buffer the
+/// library never learns the size of. MAX_PATH, the bound on the file open that
+/// consumes such a path.
+pub const max_asset_path_bytes: usize = 260;
+
 /// Case-insensitive asset-name index for one table: lowercased name -> entry
 /// index. Keys are owned lowercase copies (freed with the Bank); values are
 /// table entry indices so all offset validation stays with the callers.
@@ -448,6 +455,13 @@ pub const Bank = struct {
             out[0] = 0;
             return -1;
         };
+        // A path over the cap is not one the loader can have opened, so it
+        // reports as unresolved rather than writing a truncated string the
+        // caller would then open.
+        if (self.soundAssetPathBytes(found.sfn) == 0) {
+            out[0] = 0;
+            return -1;
+        }
         _ = self.writeSoundAssetPath(found.sfn, out);
         // MILESBANKSOUNDINFO.DataLen is at Sound+12 (Info) +12.
         if (!self.inBounds(found.data_off, 28)) return 0;
@@ -490,12 +504,19 @@ pub const Bank = struct {
 
     /// Write `*<bank file name><sound file name>` (MSS's DOS-style relative
     /// asset path) into `out`, NUL-terminated. Returns the bytes the caller must
-    /// provide: 1 for the `*`, both names, and 1 for the terminator.
+    /// provide: 1 for the `*`, both names, and 1 for the terminator. An asset
+    /// path over `max_asset_path_bytes` is not written at all (see
+    /// `soundAssetPathBytes`).
     ///
     /// No size parameter exists on the SDK call, so `out` must be at least this
     /// many bytes; AIL_sound_asset_info returns the requirement for exactly this
     /// reason.
     fn writeSoundAssetPath(self: *const Bank, sfn: []const u8, out: [*]u8) i32 {
+        const need = self.soundAssetPathBytes(sfn);
+        if (need == 0) {
+            out[0] = 0;
+            return 0;
+        }
         var w: usize = 0;
         out[w] = '*';
         w += 1;
@@ -504,15 +525,22 @@ pub const Bank = struct {
         @memcpy(out[w .. w + sfn.len], sfn);
         w += sfn.len;
         out[w] = 0;
-        return self.soundAssetPathBytes(sfn);
+        return need;
     }
 
-    /// The buffer writeSoundAssetPath needs for `sfn`.
+    /// The buffer writeSoundAssetPath needs for `sfn`, or 0 when the pair is
+    /// over `max_asset_path_bytes`.
+    ///
+    /// Both lengths come from the bank file, and neither C entry point takes a
+    /// buffer size, so a bank naming a sound with a megabyte of file name would
+    /// otherwise write megabytes into a buffer the game sized for the path the
+    /// real Miles loader would have produced. The cap is the same MAX_PATH the
+    /// loader's own file opens are bound by, so a rejected path is one no
+    /// consumer of it could have opened anyway.
     fn soundAssetPathBytes(self: *const Bank, sfn: []const u8) i32 {
-        // Saturating: both lengths come from the bank file, so a crafted pair
-        // could otherwise wrap the requirement to a small positive size and let
-        // the caller size its buffer from the wrapped value.
-        return root.satI32(@floatFromInt(1 + self.filename.len + sfn.len + 1));
+        const need: usize = 1 + self.filename.len + sfn.len + 1;
+        if (need > max_asset_path_bytes) return 0;
+        return @intCast(need);
     }
 
     /// AIL_sound_asset_info: optionally copy the sound's MILESBANKSOUNDINFO into
@@ -524,6 +552,13 @@ pub const Bank = struct {
             if (out_filename) |o| o[0] = 0;
             return 0;
         };
+        // Over the cap: the sound resolves, but no path this library is willing
+        // to write into an unsized buffer describes it, so the call reports
+        // unresolved and writes nothing past the terminator.
+        if (self.soundAssetPathBytes(found.sfn) == 0) {
+            if (out_filename) |o| o[0] = 0;
+            return 0;
+        }
         if (out_info) |oi| {
             if (self.inBounds(found.data_off, 12 + sound_info_size)) {
                 @memcpy(oi[0..sound_info_size], self.meta[found.data_off + 12 ..][0..sound_info_size]);
@@ -922,4 +957,67 @@ test "a bank name that does not fit SoundBankName[4] keeps whole characters" {
     const name = std.mem.span(bank.name());
     try testing.expect(std.unicode.utf8ValidateSlice(name));
     try testing.expectEqualStrings("caf", name);
+}
+
+/// A bank image with one sound whose file name is `sfn_len` bytes long, so the
+/// "*<bank file><sound file>" path the accessors write is 10 + sfn_len bytes
+/// with the bank named "big.mbnk".
+fn bankWithSoundFileName(sfn_len: usize) struct { img: [1024]u8, len: usize } {
+    var img: [1024]u8 = undefined;
+    @memset(&img, 0);
+    const snd_off: u32 = header_size;
+    const rec_off: usize = header_size + asset_entry_size;
+    const name_off: u32 = @intCast(rec_off + 64);
+    @memcpy(img[name_off..][0..5], "kick\x00");
+    const sfn_off: u32 = @intCast(name_off + 5);
+    @memset(img[sfn_off..][0..sfn_len], 's');
+    img[sfn_off + sfn_len] = 0;
+
+    writeU32(&img, off_tag, BANK_TAG);
+    writeU32(&img, off_version, @bitCast(BANK_VERSION));
+    writeU32(&img, off_sounds, snd_off);
+    writeU32(&img, off_sound_count, 1);
+    writeU32(&img, snd_off, name_off);
+    writeU32(&img, snd_off + 4, @intCast(rec_off));
+    // Sound record: NameOffset, FileNameOffset (relative to the record), and
+    // the MILESBANKSOUNDINFO Info block at +12.
+    writeU32(&img, rec_off, name_off);
+    writeU32(&img, rec_off + 4, sfn_off -| @as(u32, @intCast(rec_off)));
+    const len = sfn_off + sfn_len + 1;
+    writeU32(&img, off_meta_size, @intCast(len));
+    return .{ .img = img, .len = len };
+}
+
+test "an asset path longer than the cap is refused, not written" {
+    const testing = std.testing;
+
+    // One byte over the cap: "*" + "big.mbnk" + the name + terminator. The C
+    // entry points take no buffer size, so a name this long would run as far
+    // past a game-sized buffer as the bank file cared to say.
+    const over = bankWithSoundFileName(max_asset_path_bytes - 9);
+    const bank = try loadFromMemory(testing.allocator, "big.mbnk", over.img[0..over.len]);
+    defer bank.deinit();
+
+    var out: [512]u8 = undefined;
+    @memset(&out, 0xAA);
+    try testing.expectEqual(@as(i32, -1), bank.soundAssetFilename("kick", &out));
+    try testing.expectEqual(@as(u8, 0), out[0]);
+    @memset(&out, 0xAA);
+    try testing.expectEqual(@as(i32, 0), bank.soundAssetInfo("kick", &out, null));
+    try testing.expectEqual(@as(u8, 0), out[0]);
+    // The record itself is in bounds, so the rest of the sound still answers.
+    try testing.expect(bank.soundDurationMs("kick") != null);
+
+    // Exactly at the cap still resolves, and reports the exact requirement.
+    const at = bankWithSoundFileName(max_asset_path_bytes - 10);
+    const exact = try loadFromMemory(testing.allocator, "yes.mbnk", at.img[0..at.len]);
+    defer exact.deinit();
+    const req = exact.soundAssetInfo("kick", null, null);
+    try testing.expectEqual(@as(i32, @intCast(max_asset_path_bytes)), req);
+    const sized = try testing.allocator.alloc(u8, @intCast(req));
+    defer testing.allocator.free(sized);
+    @memset(sized, 0xAA);
+    try testing.expectEqual(req, exact.soundAssetInfo("kick", sized.ptr, null));
+    try testing.expectEqual(@as(usize, max_asset_path_bytes - 1), std.mem.span(@as([*:0]u8, @ptrCast(sized.ptr))).len);
+    try testing.expect(sized[0] == '*');
 }
