@@ -190,7 +190,8 @@ optional checksum file from `sha256sum` or, where that is not the name
 (GNU vs BSD), from `shasum -a 256`. `--help` prints the same usage.
 The optional second argument writes
 a `SHA256SUMS` naming exactly the archive entries, so `sha256sum -c` passes on
-an unpacked download. The archive is reproducible: entry order is fixed, every
+an unpacked download; the script creates the directory it lands in, while the
+directory the archive itself goes into has to exist. The archive is reproducible: entry order is fixed, every
 entry takes one timestamp (`SOURCE_DATE_EPOCH`, defaulting to the HEAD commit
 time) pinned to UTC, and no host metadata is stored. Packaging it twice yields
 byte-identical files, on any host timezone and locale, which the release

@@ -141,24 +141,34 @@ jobs:
       # commit the CI gate refused, or re-run after one of the linters moved,
       # would otherwise publish a tree the merge gate says is not shippable.
       # shellcheck is on the runner image, as it is for the CI job.
+      # The runner image ships pipx, not uv, and ~/.local/bin is not on its
+      # PATH. Installing uv and running it has to be two steps, exactly as in
+      # ci.yml: GITHUB_PATH only reaches the steps after the one that writes
+      # it, so a single step that pipx-installs uv and then calls `uv tool
+      # install` in the same shell fails with exit 127 on a runner image that
+      # does not already list ~/.local/bin. This job is the one that publishes,
+      # so it cannot be the one that discovers the difference on a release day.
+      - name: Install uv
+        run: |
+          set -euo pipefail
+          pipx install "uv==$(sed -n 's/^UV_VERSION := //p' Makefile)"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Install the pinned linters
         run: |
           set -euo pipefail
-          # Read all three pins from the Makefile rather than repeating them, so
-          # the only copy is the one check-pins already watches. uv is in the
-          # same set: this workflow and ci.yml each install it, so a version
-          # typed into one of them is a version the other never sees.
-          uv_version=$(sed -n 's/^UV_VERSION := //p' Makefile)
+          # Read both analyzer pins from the Makefile rather than repeating
+          # them, so the only copy is the one check-pins already watches. uv
+          # is in the same set: this workflow and ci.yml each install it, so a
+          # version typed into one of them is a version the other never sees.
           ruff_version=$(sed -n 's/^RUFF_VERSION := //p' Makefile)
           yamllint_version=$(sed -n 's/^YAMLLINT_VERSION := //p' Makefile)
-          [ -n "$uv_version" ] && [ -n "$ruff_version" ] && [ -n "$yamllint_version" ] || {
-            echo "no UV_VERSION, RUFF_VERSION or YAMLLINT_VERSION in the Makefile" >&2
+          [ -n "$ruff_version" ] && [ -n "$yamllint_version" ] || {
+            echo "no RUFF_VERSION or YAMLLINT_VERSION in the Makefile" >&2
             exit 1
           }
-          pipx install "uv==${uv_version}"
           uv tool install "ruff==${ruff_version}"
           uv tool install "yamllint==${yamllint_version}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Lint (zig fmt, ruff, shellcheck, yamllint, gate parity, pins)
         run: make lint

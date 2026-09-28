@@ -152,24 +152,20 @@ stamp_mtime() {
 OUT=$1
 SUMS=${2:-}
 
-# Both destinations are resolved to an absolute path below, which needs the
-# parent directory to exist: `cd "$(dirname ...)" && pwd` under `set -e` dies
-# with cd's own message, which names a directory and not the argument that
-# pointed at it. Checking here, before anything is staged or written, also
-# keeps a typo'd path from leaving a checksums file describing an archive that
-# was never produced. 1, not 2: the invocation was well formed, the packaging
-# could not run.
-for pair in "output archive:$OUT" "checksums file:$SUMS"; do
-  what=${pair%%:*}
-  path=${pair#*:}
-  [ -n "$path" ] || continue
-  dir=$(dirname "$path")
-  if [ ! -d "$dir" ]; then
-    echo "error: $what directory does not exist: $dir" >&2
-    echo "  create it, or pass a path under an existing directory" >&2
-    exit 1
-  fi
-done
+# The archive path is the caller's to place, so its directory has to exist
+# already: `cd "$(dirname ...)" && pwd` under `set -e` dies with cd's own
+# message, which names a directory and not the argument that pointed at it.
+# Checking here, before anything is staged, also keeps a typo'd archive path
+# from leaving a checksums file describing an archive that was never produced.
+# The checksums path is not checked: the script creates that directory itself
+# (below), so `release/SHA256SUMS` is usable in a tree that has no release/
+# yet, which is what the release workflow does on a fresh checkout.
+# 1, not 2: the invocation was well formed, the packaging could not run.
+if [ ! -d "$(dirname "$OUT")" ]; then
+  echo "error: output archive directory does not exist: $(dirname "$OUT")" >&2
+  echo "  create it, or pass a path under an existing directory" >&2
+  exit 1
+fi
 
 # archive entry name : path in the build tree, in the order they go into the zip
 entries=(
