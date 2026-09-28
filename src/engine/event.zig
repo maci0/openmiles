@@ -599,20 +599,26 @@ const Decoder = struct {
     fn parseNameList(self: *Decoder, load: *LoadStep) void {
         const start = self.p;
         var pp = self.p;
-        var count: i32 = 0;
+        // The field is a NUL-terminated event string with no length of its own
+        // (a bank's step text, or whatever MilesEnqueueEvent was handed), so the
+        // entry count is a number the file chose. It is a usize and every
+        // operation on it saturates: an i32 counter overflowed past 2^31 colons,
+        // and the pointer-array size it produced was a plain multiply that
+        // wrapped on the 32-bit target, so the bound below compared a small
+        // value against wlimit and passed for a write that lands past it.
+        var ncount: usize = 0;
         while (pp[0] != ';' and pp[0] != 0) : (pp += 1) {
-            if (pp[0] == ':') count += 1;
+            if (pp[0] == ':') ncount +|= 1;
         }
-        if (@intFromPtr(pp) != @intFromPtr(start)) count += 1;
+        if (@intFromPtr(pp) != @intFromPtr(start)) ncount +|= 1;
         const str_len: usize = @intFromPtr(pp) - @intFromPtr(start);
-        const ncount: usize = @intCast(@max(count, 0));
         const ptr_size = @sizeOf(usize);
         const w = (@intFromPtr(self.wp) + ptr_size - 1) & ~@as(usize, ptr_size - 1);
-        const list_bytes = ncount * ptr_size;
         // Saturating throughout: ncount and str_len both come out of a
         // bank-supplied string, so on the 32-bit target a large enough field
         // wraps the sum below and the bound would pass for a write that lands
         // past wlimit.
+        const list_bytes = ncount *| ptr_size;
         if (w +| list_bytes +| str_len + 1 >= @intFromPtr(self.wlimit)) {
             self.overflow = true;
             self.p = pp;
@@ -624,7 +630,10 @@ const Decoder = struct {
         // one more entry than it writes, so the last slot would otherwise hold
         // uninitialized scratch memory that a consumer could deref as a wild pointer.
         for (0..ncount) |z| namelist[z] = null;
-        load.namecount = count;
+        // The bound above reserves ncount pointers inside the scratch buffer, so
+        // reaching here caps ncount at the buffer's own size and the i32 the
+        // LoadStep carries cannot be the narrower of the two.
+        load.namecount = @intCast(ncount);
         load.namelist = @ptrCast(namelist);
         const str_dst: [*]u8 = @ptrFromInt(w + list_bytes);
         if (str_len > 0) @memcpy(str_dst[0..str_len], start[0..str_len]);
@@ -893,5 +902,41 @@ test "nextStep refuses every step type whose body is cut off after the type byte
     };
     for (truncated) |s| {
         try testing.expectEqual(@as(?[*:0]const u8, null), nextStep(s, &step, &scratch));
+    }
+}
+
+test "a cache_sounds namelist that cannot fit the scratch buffer is refused" {
+    const testing = std.testing;
+    var step: EVENT_STEP_INFO = undefined;
+    var scratch: [256]u8 align(8) = undefined;
+
+    // A list of names the scratch buffer cannot hold the pointer array for. The
+    // count comes out of the step string, which carries no length of its own, so
+    // it is a number the file chose: one entry's worth per colon. A count that
+    // reached the bound having wrapped would let the fill that follows write
+    // past `scratch`, so the step has to be refused whole instead.
+    var text: [4096]u8 = undefined;
+    text[0] = '5'; // cache_sounds
+    text[1] = ';';
+    text[2] = ';'; // empty lib field
+    for (text[3..4095]) |*b| b.* = ':';
+    text[4095] = 0;
+
+    try testing.expectEqual(@as(?[*:0]const u8, null), nextStep(@ptrCast(&text), &step, &scratch));
+
+    // A list that does fit still decodes, with the pointer array and the name
+    // text written after the step record.
+    const ok = try testing.allocator.dupeZ(u8, "5;;a:b:c;");
+    defer testing.allocator.free(ok);
+    const after = nextStep(ok, &step, &scratch) orelse return error.StepRefused;
+    try testing.expectEqual(@as(i32, 3), step.u.load.namecount);
+    try testing.expect(after[0] == 0);
+    // Every slot is filled and NUL-terminated: a consumer derefs these directly.
+    const expected = [_][]const u8{ "a", "b", "c" };
+    const list = step.u.load.namelist.?;
+    for (list[0..3]) |p| try testing.expect(p != null);
+    for (list[0..3], 0..) |p, i| {
+        const s = std.mem.span(@as([*:0]const u8, @ptrCast(p.?)));
+        try testing.expectEqualStrings(expected[i], s);
     }
 }
