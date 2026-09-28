@@ -4,13 +4,36 @@
     .fingerprint = 0x9534407657751f71, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{},
+    // What a consumer gets from `zig fetch`. The license travels with the
+    // source: this package is GPL-3.0-only, and a fetched tree carrying
+    // deps/ (MIT, MIT-0, Zlib) with no LICENSE is a redistribution with no
+    // grant attached to it. The rest is what the shipped docs point at:
+    // deps/README.md names scripts/check_vendored.py, gen_sbom.py and
+    // `make check-vendored`, and README.md links docs/, CHANGELOG.md and
+    // SECURITY.md, so a package that omitted them would ship dangling
+    // references to files it does not contain.
+    //
+    // test_media/ is deliberately absent. It is gitignored ("provide your
+    // own") and never present in a clean checkout, while `zig fetch` of a
+    // local directory copies the working tree rather than the index: listing
+    // it swept whatever fixtures a developer had locally into the package.
+    // build.zig probes for it at build time and installs it when present, so
+    // a package without it builds and tests the same as a checkout without it.
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
         "deps",
         "tests",
-        "test_media",
+        "scripts",
+        "docs",
+        "Makefile",
+        "ruff.toml",
+        "LICENSE",
+        "README.md",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
         "SBOM.cdx.json",
     },
 }

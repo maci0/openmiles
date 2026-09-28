@@ -184,9 +184,11 @@ on each install.
 
 `scripts/package_release.sh <out.zip> [sha256sums]` packages
 `zig-out/bin/mss32.dll` with the header a consumer compiles against
-(`mss.h`), the license, this README, the changelog, the third-party inventory
-(`SBOM.cdx.json`), and the vendored-dependency attribution (`VENDORED.md`,
-`DEPS-SHA256SUMS`). It needs `zip` on PATH and says so if it is missing, and
+(`mss.h`), the license, this README, the changelog, the security policy, the
+contributor guide, the vendored-dependency attribution (`deps/README.md`,
+`deps/SHA256SUMS`), the `docs/` this README links, so every relative link
+in it resolves in an unpacked archive, and the third-party inventory
+(`SBOM.cdx.json`). It needs `zip` on PATH and says so if it is missing, and
 takes the digests for the optional checksum file from `sha256sum` or, where
 that is not the name
 (GNU vs BSD), from `shasum -a 256`. `--help` prints the same usage.

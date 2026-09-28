@@ -262,9 +262,9 @@ jobs:
           cmp "$mirror/zig-out/bin/mss32.dll" "$GITHUB_WORKSPACE/zig-out/bin/mss32.dll"
           echo "mss32.dll is byte-identical from a second path, timezone and locale"
 
-      # VENDORED.md, DEPS-SHA256SUMS, and SBOM.cdx.json travel with the DLL: the
-      # project license covers redistribution of the vendored headers under their
-      # own terms, and a consumer who wants to trace that grant back to an
+      # deps/README.md, deps/SHA256SUMS, and SBOM.cdx.json travel with the DLL:
+      # the project license covers redistribution of the vendored headers under
+      # their own terms, and a consumer who wants to trace that grant back to an
       # upstream release needs the attribution and the digests, not just this
       # repository's URL. The checksums are written from the packaging script's
       # own entry list, so they name exactly the files the archive holds.

@@ -93,6 +93,16 @@ All notable changes to OpenMiles are recorded here. The format follows
   invocation `make test` uses. Without the summary a green run ends on the
   `failed command: ... --listen=-` line zig prints after a test artifact writes
   to stderr, and the `N/N tests passed` line that settles it never appears.
+- A release archive carries the security policy, the contributor guide, and the
+  `docs/` its own README links, and the vendored attribution and digests keep
+  the `deps/` paths the README links them by instead of a flat `VENDORED.md`
+  and `DEPS-SHA256SUMS`. Every relative link in the shipped tree resolved to a
+  file the archive did not hold.
+- The `zig fetch` package carries `LICENSE`, the docs, and the scripts the
+  vendored-dependency records name, and no longer lists `test_media/`.
+  `zig fetch` of a local directory copies the working tree rather than the
+  index, so listing a gitignored fixtures directory swept whatever media a
+  developer had locally into the package.
 - The release job runs the same analysis gate as `make lint` before it builds
   anything. A tag is published with no merge gate in between, so a release cut
   from a commit the CI gate refused, or re-run after a linter moved, could

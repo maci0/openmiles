@@ -176,14 +176,35 @@ entries=(
   "LICENSE:LICENSE"
   "README.md:README.md"
   "CHANGELOG.md:CHANGELOG.md"
+  # The security contact travels with the binary: a consumer who finds a
+  # problem in the DLL needs the address to report it to, and it is one of
+  # the links the shipped README already carries.
+  "SECURITY.md:SECURITY.md"
+  # Contributor setup, for the same reason: the README links it twice, and a
+  # link that 404s in an unpacked archive is a link that names a file the
+  # archive does not hold.
+  "CONTRIBUTING.md:CONTRIBUTING.md"
   # The vendored headers are compiled into the DLL, not shipped as source, but
   # the project license covers redistributing them under their own terms, so
-  # the attribution and the reviewed digests travel with the binary.
-  "VENDORED.md:deps/README.md"
-  "DEPS-SHA256SUMS:deps/SHA256SUMS"
+  # the attribution and the reviewed digests travel with the binary. They keep
+  # the paths the README links them by: renamed to a flat VENDORED.md, every
+  # one of those links is dead in an unpacked archive.
+  "deps/README.md:deps/README.md"
+  "deps/SHA256SUMS:deps/SHA256SUMS"
+  # The docs the shipped README links: the API status matrix, the support and
+  # version tables, the plugin coverage list, the threat model, and the logo
+  # its first line renders. Every one of those links is in the README a
+  # consumer reads, so an archive without them documents a tree that is not
+  # there.
+  "docs/logo.svg:docs/logo.svg"
+  "docs/API_STATUS.md:docs/API_STATUS.md"
+  "docs/MSS_API_MATRIX.md:docs/MSS_API_MATRIX.md"
+  "docs/MSS_PLUGINS.md:docs/MSS_PLUGINS.md"
+  "docs/MSS_VERSION_HISTORY.md:docs/MSS_VERSION_HISTORY.md"
+  "docs/THREAT_MODEL.md:docs/THREAT_MODEL.md"
   # The CycloneDX inventory, so a consumer or a vulnerability scanner can read
   # what third-party code the DLL carries without unpacking this repository. It
-  # is generated from the same records VENDORED.md carries and checked by
+  # is generated from the same records deps/README.md carries and checked by
   # `make check-sbom`, so it cannot describe a tree it was not built from.
   "SBOM.cdx.json:SBOM.cdx.json"
 )
@@ -208,6 +229,10 @@ trap 'rm -rf "$stage"' EXIT
 names=()
 for e in "${entries[@]}"; do
   name=${e%%:*}
+  # An entry name may carry a directory (deps/, docs/), so the parent has to
+  # exist before the copy. mkdir -p on a flat name is a no-op on the parent,
+  # which is the staging root itself.
+  mkdir -p "$(dirname "$stage/$name")"
   cp "${e#*:}" "$stage/$name"
   # zip records the mode in the central directory, and a build output is
   # usually 0755 while a checked-in file is 0644, so the staging umask would

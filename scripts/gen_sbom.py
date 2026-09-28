@@ -209,7 +209,7 @@ def vendored_components(sums):
     """One CycloneDX component per third-party header in deps/, README order.
 
     The first-party files (tsf_tml.h, windows_stub.h) are not dependencies, so
-    they are not components; their digests travel in DEPS-SHA256SUMS inside the
+    they are not components; their digests travel in deps/SHA256SUMS inside the
     release archive.
     """
     components = []
