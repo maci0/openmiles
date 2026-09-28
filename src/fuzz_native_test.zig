@@ -9,8 +9,10 @@
 //! parsed event string into sound instances, cached names, persisted presets
 //! and per-label caps, the MP3 image inspector and frame enumerator (ID3v2
 //! skips, the frame-sync search, and the bitrate-derived frame length a
-//! decoder is handed for each frame), and the DLS container split
-//! (find / extract / list over a merged .mil image).
+//! decoder is handed for each frame), the DLS container split
+//! (find / extract / list over a merged .mil image), and the plugin loader's
+//! directory-entry name filter, the gate every untrusted name in a game
+//! directory passes before the loader opens it as code.
 //!
 //! fuzz_test.zig drives these with fixed-seed PRNG bytes. These targets add
 //! what a PRNG loop cannot: the input picks the shapes (which ASCII a field may
@@ -2230,4 +2232,147 @@ const dls_corpus = [_][]const u8{
 test "fuzz: DLS container split, extract, and listing" {
     var ctx: dls_ctx = .{};
     try std.testing.fuzz(&ctx, fuzzDlsSplitOne, .{ .corpus = &dls_corpus });
+}
+
+// --- Target 9: the plugin directory-entry name filter -----------------------
+//
+// The plugin loader reads a directory, and every name that scan hands it is
+// untrusted: the game directory is where a user, an installer, or an archive
+// unpack drops files, and the name is then joined to a path and loaded as code.
+// `isPluginExtension` and `isSafePluginFilename` are the whole gate, so this
+// target asserts the properties the loader relies on rather than only that the
+// two predicates return without trapping: a name either accepts carries no
+// traversal, no separator, no NTFS stream colon, no stripped trailing dot or
+// space, and no DOS device stem; and both verdicts are unchanged when ASCII
+// case is folded, since the device and extension checks are case-insensitive
+// and a case-sensitive slip there would let "NUL.asi" or "decoder.ASI" past.
+
+const plugin_name_weights: []const Weight = &.{
+    w('a', 'z', 24), // stems, and the letters of the device names
+    w('A', 'Z', 24),
+    w('0', '9', 10), // COM1..COM9 / LPT1..LPT9
+    w('.', '.', 24), // the extension dot, and the stem terminator
+    w(' ', ' ', 8), // stripped off a Windows name before it is stored
+    w('/', '/', 5),
+    w('\\', '\\', 5),
+    w(':', ':', 5), // NTFS named stream
+    w('$', '$', 2), // CLOCK$
+    w(0x01, 0x7F, 6),
+    w(0x80, 0xFF, 4), // a non-ASCII game directory
+};
+
+const plugin_ctx = struct {
+    name: [256]u8 = undefined,
+    upper: [256]u8 = undefined,
+};
+
+fn asciiUpper(s: []const u8, buf: []u8) []const u8 {
+    for (s, buf[0..s.len]) |c, *d| d.* = std.ascii.toUpper(c);
+    return buf[0..s.len];
+}
+
+/// A DOS device name, spelled the way the resolver reads it: the part of the
+/// name before its first dot, compared without regard to case.
+fn namesDosDevice(name: []const u8) bool {
+    const stem = name[0 .. std.mem.indexOfScalar(u8, name, '.') orelse name.len];
+    const fixed = [_][]const u8{ "con", "prn", "aux", "nul", "clock$" };
+    for (fixed) |d| {
+        if (std.ascii.eqlIgnoreCase(stem, d)) return true;
+    }
+    if (stem.len != 4) return false;
+    if (!std.ascii.startsWithIgnoreCase(stem, "com") and !std.ascii.startsWithIgnoreCase(stem, "lpt")) return false;
+    return stem[3] >= '1' and stem[3] <= '9';
+}
+
+fn fuzzPluginNameOne(ctx: *plugin_ctx, smith: *std.testing.Smith) anyerror!void {
+    const n: usize = @intCast(smith.sliceWeighted(
+        &ctx.name,
+        &.{.{ .min = 1, .max = ctx.name.len, .weight = 1 }},
+        plugin_name_weights,
+    ));
+    var name = ctx.name[0..n];
+    // Half the time the name carries a real extension, so the accept branch is
+    // the one a game directory actually produces rather than a name the loader
+    // drops on the extension check before it reads the stem.
+    if (smith.boolWeighted(1, 2)) {
+        const exts = [_][]const u8{ ".asi", ".m3d", ".flt", ".ASI", ".Asi" };
+        const ext = exts[smith.index(exts.len)];
+        if (n + ext.len <= ctx.name.len) {
+            @memcpy(ctx.name[n..][0..ext.len], ext);
+            name = ctx.name[0 .. n + ext.len];
+        }
+    }
+
+    const safe = openmiles.isSafePluginFilename(name);
+    if (safe) {
+        // Everything the loader opens is a file inside the scanned directory
+        // under the name the scan listed. A name carrying any of these opens
+        // something else.
+        try testing.expect(std.mem.indexOf(u8, name, "..") == null);
+        try testing.expect(std.mem.indexOfScalar(u8, name, '/') == null);
+        try testing.expect(std.mem.indexOfScalar(u8, name, '\\') == null);
+        try testing.expect(std.mem.indexOfScalar(u8, name, ':') == null);
+        try testing.expect(name.len == 0 or (name[name.len - 1] != '.' and name[name.len - 1] != ' '));
+        try testing.expect(!namesDosDevice(name));
+        // Wrapping the accepted name in a directory component names a
+        // different file, so the filter has to reject the wrapped form too;
+        // a fix that only checked the head of the name would let this through.
+        var wrapped: [ctx.name.len + 4]u8 = undefined;
+        @memcpy(wrapped[0..4], "sub/");
+        @memcpy(wrapped[4..][0..name.len], name);
+        try testing.expect(!openmiles.isSafePluginFilename(wrapped[0 .. name.len + 4]));
+        @memcpy(wrapped[0..2], "..");
+        @memcpy(wrapped[2..][0..name.len], name);
+        try testing.expect(!openmiles.isSafePluginFilename(wrapped[0 .. name.len + 2]));
+    }
+
+    // Case folding must not move either verdict: a name the loader opens in a
+    // game directory is opened the same way whatever case the filesystem
+    // hands the entry back in.
+    const upper = asciiUpper(name, &ctx.upper);
+    try testing.expectEqual(safe, openmiles.isSafePluginFilename(upper));
+    const ext_ok = openmiles.isPluginExtension(name);
+    try testing.expectEqual(ext_ok, openmiles.isPluginExtension(upper));
+    if (ext_ok) {
+        try testing.expect(name.len >= 4);
+        const tail = name[name.len - 4 ..];
+        try testing.expect(std.ascii.eqlIgnoreCase(tail, ".asi") or
+            std.ascii.eqlIgnoreCase(tail, ".m3d") or
+            std.ascii.eqlIgnoreCase(tail, ".flt"));
+    }
+}
+
+const plugin_corpus = [_][]const u8{
+    // What a game directory holds: the providers, and the files beside them.
+    "mss32.asi",
+    "Miles Decoder.asi",
+    "adpcm.flt",
+    "a3d.m3d",
+    "readme.txt",
+    "",
+    // Names the Windows filesystem resolves away from the file the entry named.
+    "nul.asi",
+    "CON.m3d",
+    "com1.asi",
+    "lpt9.flt",
+    "clock$.asi",
+    "com0.asi",
+    // Traversal, separators, and a stream: a name an archive or a sync client
+    // can plant, and each of which opens something the scan did not list.
+    "..\\evil.asi",
+    "../evil.asi",
+    "sub/evil.asi",
+    "evil.asi:payload",
+    "decoder.asi ",
+    "decoder.asi.",
+    "..",
+    ".",
+    // Non-ASCII stems, the case a game directory with a localized path has.
+    "Aventura \xC3\x89pica.asi",
+    "\xE3\x83\x86\xE3\x82\xB9\xE3\x83\x88.m3d",
+};
+
+test "fuzz: plugin directory-entry name filter" {
+    var ctx: plugin_ctx = .{};
+    try std.testing.fuzz(&ctx, fuzzPluginNameOne, .{ .corpus = &plugin_corpus });
 }
