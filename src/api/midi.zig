@@ -352,13 +352,27 @@ pub fn AIL_send_sysex_message(mdi_opt: ?*MidiDriver, data: *anyopaque) callconv(
         body[3] == 0x00 and body[4] == 0x00 and body[5] == 0x7E;
     if (is_gm or is_gs or is_xg) {
         log("AIL_send_sysex_message: recognized GM/GS/XG reset — resetting all channels\n", .{});
+        // A reset is four controllers per channel, and a rejected one leaves
+        // that channel half reset: voices still sounding, the old volume and
+        // pan in place. Nothing downstream of the SysEx would show it, so a
+        // rejected control names the channel and the controller.
         var ch: i32 = 0;
         while (ch < 16) : (ch += 1) {
-            _ = openmiles.tsf.tsf_channel_midi_control(sf, ch, 123, 0);
-            _ = openmiles.tsf.tsf_channel_midi_control(sf, ch, 121, 0);
-            _ = openmiles.tsf.tsf_channel_midi_control(sf, ch, 7, 100);
-            _ = openmiles.tsf.tsf_channel_midi_control(sf, ch, 10, 64);
+            resetControl(sf, ch, 123, 0);
+            resetControl(sf, ch, 121, 0);
+            resetControl(sf, ch, 7, 100);
+            resetControl(sf, ch, 10, 64);
         }
+    }
+}
+
+/// One controller of a GM/GS/XG channel reset. tsf answers 0 when it could not
+/// apply the write (a channel it had to allocate for and could not), and the
+/// caller gets no other signal that the channel did not come back to its
+/// default state, so name the channel and the controller.
+fn resetControl(sf: *openmiles.tsf.tsf, channel: i32, controller: i32, value: i32) void {
+    if (openmiles.tsf.tsf_channel_midi_control(sf, channel, controller, value) == 0) {
+        log("AIL_send_sysex_message: controller {d} on channel {d} was not applied; that channel is only partly reset\n", .{ controller, channel });
     }
 }
 // SDK: AIL_lock_channel(HMDIDRIVER mdi) / AIL_release_channel(HMDIDRIVER, S32).

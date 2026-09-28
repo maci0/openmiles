@@ -4302,6 +4302,16 @@ test "injected file faults reach the whole-file read path" {
     // every open failure to FileNotFound, which is what its callers see.
     try testing.expectError(error.AccessDenied, openmiles.fs_compat.openFile(io, path, .{}));
     try testing.expectError(error.FileNotFound, openmiles.readWholeFile(path));
+    // A sample load names the same failure apart from a missing file: a
+    // denied or malformed name reported as FileNotFound sends an operator
+    // looking for a file that was there all along.
+    {
+        const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+        defer drv.deinit();
+        const s = try openmiles.Sample.init(drv);
+        defer s.deinit();
+        try testing.expectError(error.FileOpenFailed, s.loadFromFile(path));
+    }
     // Other paths are untouched by a schedule that names this one.
     Faults.fail_open = false;
     Faults.keep = 4;
@@ -6354,6 +6364,17 @@ test "AIL_DLS_get_info writes AILDLSINFO to param 2 and PercentCPU to param 3 (S
     // Null out-params and null driver are safe no-ops.
     api_dls.AIL_DLS_get_info(md, null, null);
     api_dls.AIL_DLS_get_info(null, &info, &cpu);
+}
+
+test "clearing the soundfont source drops the size AIL_DLS_get_info reports" {
+    const md = try openmiles.MidiDriver.init(testing.allocator);
+    defer md.deinit();
+    // Stand in for a bank whose size was captured on load; forgetting the
+    // source has to forget it, or get_info answers with the length of a bank
+    // that is no longer loaded.
+    md.soundfont_size_bytes = 4096;
+    md.clearSoundfontSource();
+    try testing.expectEqual(@as(u32, 0), md.soundfont_size_bytes);
 }
 
 test "v7 set_sample_3D_distances orders the min/max pair (SDK swap)" {

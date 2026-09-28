@@ -166,6 +166,13 @@ pub const Provider = struct {
             if (self.interfaces.items.len == 0) {
                 log("Provider.load: '{s}' registered no interfaces\n", .{name});
             }
+        } else {
+            // A module that opened but exports no RIB_Main cannot register
+            // anything, and the load reports success: the scan counts it, the
+            // provider is adopted, and every interface query answers "absent"
+            // with nothing anywhere saying why. Name the module, since the
+            // operator is looking at a plugin that "loaded" and does nothing.
+            log("Provider.load: '{s}' exports no RIB_Main; it is loaded but registers no interface\n", .{name});
         }
 
         return self;

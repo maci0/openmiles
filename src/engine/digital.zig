@@ -320,12 +320,25 @@ pub const MixBus = struct {
         cfg.outputBusCount = 1;
         cfg.pInputChannels = &chans;
         cfg.pOutputChannels = &chans;
-        if (ma.ma_node_init(ma.ma_engine_get_node_graph(eng), &cfg, null, @ptrCast(node)) != ma.MA_SUCCESS) {
+        const init_result = ma.ma_node_init(ma.ma_engine_get_node_graph(eng), &cfg, null, @ptrCast(node));
+        if (init_result != ma.MA_SUCCESS) {
+            // Same reasoning as the allocation failure above: the slot stays
+            // empty, so a later query reports the effect as off with no reason
+            // anywhere for the operator to find.
+            log("MixBus: {s} node init failed with {d}\n", .{ @typeName(Node), init_result });
             self.driver.allocator.destroy(node);
             return;
         }
         Node.postInit(node); // ma_node_init zeroed the allocation
-        _ = ma.ma_node_attach_output_bus(@ptrCast(node), 0, ma.ma_engine_get_endpoint(eng), 0);
+        // A bus that never reaches the endpoint is silent, so a failed attach
+        // says so rather than leaving the node initialized and unwired.
+        const attach_endpoint = ma.ma_node_attach_output_bus(@ptrCast(node), 0, ma.ma_engine_get_endpoint(eng), 0);
+        if (attach_endpoint != ma.MA_SUCCESS) {
+            log("MixBus: {s} node could not attach to the endpoint ({d}); the effect is removed\n", .{ @typeName(Node), attach_endpoint });
+            ma.ma_node_uninit(@ptrCast(node), null);
+            self.driver.allocator.destroy(node);
+            return;
+        }
         _ = ma.ma_node_attach_output_bus(@ptrCast(&self.group.engineNode), 0, @ptrCast(node), 0);
         slot.* = node;
     }
@@ -1232,10 +1245,17 @@ pub const Sample = struct {
 
     pub fn loadFromFile(self: *Sample, path: []const u8) !void {
         // Read file into memory so owned_buffer is set (required for AIL_quick_copy)
-        const file = fs_compat.openFile(io, path, .{}) catch return error.FileNotFound;
+        // Each failure reports what actually happened: a denied or malformed
+        // name, a stat that would not answer, and a length this loader refuses
+        // all collapsed into FileNotFound, which sends an operator hunting for
+        // a file that was there all along.
+        const file = fs_compat.openFile(io, path, .{}) catch |err| switch (err) {
+            error.FileNotFound => return error.FileNotFound,
+            else => return error.FileOpenFailed,
+        };
         defer file.close(io);
-        const file_len = file.length(io) catch return error.FileNotFound;
-        if (file_len == 0 or file_len > root.max_file_load_bytes) return error.FileNotFound;
+        const file_len = file.length(io) catch return error.UnknownSize;
+        if (file_len == 0 or file_len > root.max_file_load_bytes) return error.BadSize;
         const size: usize = @intCast(file_len);
         const buf = try self.driver.allocator.alloc(u8, size);
         errdefer self.driver.allocator.free(buf);

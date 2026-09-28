@@ -127,12 +127,16 @@ pub const MidiDriver = struct {
     }
 
     /// Forget which source the loaded soundfont came from, so the next load of
-    /// that source is a real load rather than a repeat of this one.
+    /// that source is a real load rather than a repeat of this one. The reported
+    /// size goes with it: AIL_DLS_get_info answers with it unconditionally, so
+    /// leaving the previous bank's length in place reports the size of a bank
+    /// that is no longer loaded whenever the new one's size cannot be read.
     pub fn clearSoundfontSource(self: *MidiDriver) void {
         if (self.soundfont_path) |p| self.allocator.free(p);
         self.soundfont_path = null;
         self.soundfont_image_ptr = 0;
         self.soundfont_image_size = 0;
+        self.soundfont_size_bytes = 0;
         self.soundfont_refs = 0;
     }
 
@@ -236,13 +240,22 @@ pub const MidiDriver = struct {
         return bank;
     }
 
+    /// Record the on-disk size of the bank just loaded, for AIL_DLS_get_info.
+    /// A file that cannot be opened or sized leaves the reported size at 0;
+    /// that is what the game sees, so the reason is named rather than left for
+    /// the operator to compare against a value of 0 that looks like an empty
+    /// bank.
     fn captureSoundfontSize(self: *MidiDriver, filename: []const u8) void {
-        if (fs_compat.openFile(io, filename, .{})) |f| {
-            defer f.close(io);
-            if (f.length(io)) |len| {
-                self.soundfont_size_bytes = @intCast(@min(len, std.math.maxInt(u32)));
-            } else |_| {}
-        } else |_| {}
+        const f = fs_compat.openFile(io, filename, .{}) catch |err| {
+            log("captureSoundfontSize: cannot open '{s}' ({any}); AIL_DLS_get_info reports 0 for it\n", .{ filename, err });
+            return;
+        };
+        defer f.close(io);
+        const len = f.length(io) catch |err| {
+            log("captureSoundfontSize: cannot size '{s}' ({any}); AIL_DLS_get_info reports 0 for it\n", .{ filename, err });
+            return;
+        };
+        self.soundfont_size_bytes = @intCast(@min(len, std.math.maxInt(u32)));
     }
 
     /// Take the output rate from the open playback device, if it has one. An

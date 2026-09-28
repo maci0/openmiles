@@ -460,10 +460,9 @@ pub fn DLSSetAttribute(driver_opt: ?*MidiDriver, name: [*:0]const u8, val: *anyo
 pub fn DLSUnloadAll(driver_opt: ?*MidiDriver) callconv(.c) void {
     const driver = driver_opt orelse return;
     driver.swapSoundfont(null, true);
+    // Also drops the reported size: AIL_DLS_get_info answers with it
+    // unconditionally, so a released bank must not keep reporting its length.
     driver.clearSoundfontSource();
-    // AIL_DLS_get_info reports the size unconditionally, so a released bank
-    // must not keep reporting its length.
-    driver.soundfont_size_bytes = 0;
 }
 pub fn DLSUnloadFile(driver_opt: ?*MidiDriver, bank: *anyopaque) callconv(.c) void {
     AIL_DLS_unload(driver_opt, bank);
