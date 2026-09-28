@@ -851,6 +851,27 @@ pub fn isPluginLoadedAnywhere(owned: []const *Provider, path: []const u8) bool {
     return isProviderPathLoaded(path);
 }
 
+/// Forget `p` before it is freed outside shutdown, which is the state
+/// RIB_free_provider_handle leaves: the module is unloaded, so nothing may
+/// hand the handle out again. A provider freed that way stayed in the
+/// application list and in the published startup slot, so the next
+/// RIB_enumerate_providers or RIB_provider_library_handle returned a pointer
+/// into freed memory. orderedRemove, not swapRemove: enumeration answers with
+/// the first provider holding an interface name, so a free must not reorder
+/// the providers around it. shutdown() holds provider_mutex and frees the same
+/// providers itself, so it unpublishes them where it stands rather than here.
+pub fn unpublishProvider(p: *Provider) void {
+    _ = startup_provider.cmpxchgStrong(p, null, .acq_rel, .acquire);
+    provider_mutex.lockUncancelable(io);
+    defer provider_mutex.unlock(io);
+    for (global_providers.items, 0..) |q, i| {
+        if (q == p) {
+            _ = global_providers.orderedRemove(i);
+            break;
+        }
+    }
+}
+
 // --- Timer state ---
 
 pub var global_timers: std.ArrayList(*Timer) = .empty;

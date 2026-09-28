@@ -18,6 +18,26 @@ extern fn openmiles_tml_get_control_value(m: *tsf.tml_message) u8;
 extern fn openmiles_tml_get_program(m: *tsf.tml_message) u8;
 extern fn openmiles_tml_get_pitch_bend(m: *tsf.tml_message) u16;
 
+/// Content identity of a soundfont image: two independently seeded Wyhash
+/// passes over its bytes. Enough to tell one image from another; the bytes
+/// themselves are never kept, and an image is read only while the caller that
+/// passed it in still holds it.
+const ImageHash = struct {
+    lo: u64 = 0,
+    hi: u64 = 0,
+
+    fn of(image: []const u8) ImageHash {
+        return .{
+            .lo = std.hash.Wyhash.hash(0, image),
+            .hi = std.hash.Wyhash.hash(0x9e3779b97f4a7c15, image),
+        };
+    }
+
+    fn eql(a: ImageHash, b: ImageHash) bool {
+        return a.lo == b.lo and a.hi == b.hi;
+    }
+};
+
 pub const MidiDriver = struct {
     allocator: std.mem.Allocator,
     // The audio thread renders from this pointer while the game thread can
@@ -54,12 +74,17 @@ pub const MidiDriver = struct {
     // (AIL_create_wave_synthesizer) records neither, so a borrow never answers
     // a load of its own.
     soundfont_path: ?[:0]u8 = null,
-    // Address and length of the image the bank was loaded from, so a retry
-    // that hands the same buffer back is recognised. Keyed on the address
-    // rather than the bytes: the length comes from a header the caller
-    // controls, so hashing it would read memory the image does not own.
+    // Address, length, and content hash of the image the bank was loaded from,
+    // so a retry that hands the same buffer back is recognised. The hash is
+    // taken at load time, while the caller still owns the bytes: an address and
+    // a length alone are not an identity, since the caller owns this buffer and
+    // may free it, so the next image the allocator placed at the same address
+    // with a header of the same size was answered with this bank instead of
+    // being loaded. Both lookups hash only the image the caller just passed in,
+    // never the one recorded, which may be gone.
     soundfont_image_ptr: usize = 0,
     soundfont_image_size: u32 = 0,
+    soundfont_image_hash: ImageHash = .{},
     // Loads of the bank in `soundfont` that no unload has answered yet. A
     // repeated load of the same source takes one, so N loads of one bank need
     // N unloads before it closes: the state after load/load/unload/unload is
@@ -151,6 +176,7 @@ pub const MidiDriver = struct {
         self.soundfont_path = null;
         self.soundfont_image_ptr = 0;
         self.soundfont_image_size = 0;
+        self.soundfont_image_hash = .{};
         self.soundfont_size_bytes = 0;
         self.soundfont_refs = 0;
     }
@@ -198,11 +224,23 @@ pub const MidiDriver = struct {
         self.soundfont_path = resolved;
     }
 
+    /// Record `data` of `size` bytes as the source of the bank now loaded, so
+    /// a later load of the same buffer is a repeat of this one. Called after
+    /// the bank is in place, since a load clears the record as it installs one.
+    /// The hash is taken here, while the caller still owns the bytes.
+    pub fn adoptSoundfontImage(self: *MidiDriver, data: [*c]const u8, size: u32) void {
+        self.soundfont_image_ptr = @intFromPtr(data);
+        self.soundfont_image_size = size;
+        self.soundfont_image_hash = ImageHash.of(data[0..size]);
+    }
+
     /// The bank already loaded from the image at `data` of `size` bytes, or
-    /// null.
+    /// null. The bytes are hashed, so an address the allocator handed to a
+    /// different image is not read as the same image.
     pub fn soundfontFromImage(self: *const MidiDriver, data: [*c]const u8, size: u32) ?*tsf.tsf {
         if (self.soundfont_image_ptr != @intFromPtr(data)) return null;
         if (self.soundfont_image_size != size) return null;
+        if (!ImageHash.eql(self.soundfont_image_hash, ImageHash.of(data[0..size]))) return null;
         const sf = self.soundfont orelse return null;
         return sf;
     }
@@ -211,15 +249,17 @@ pub const MidiDriver = struct {
     /// about to free, keeping the bank itself. AIL_DLS_load_file's VFS path
     /// reads an image into a buffer it releases when it returns, so leaving
     /// that address recorded keyed a live bank to memory that no longer
-    /// existed: the next image the allocator handed out at the same address,
-    /// with a size its header matched, was answered with this bank instead of
-    /// being loaded. The refs the loads took are untouched, so the bank still
-    /// closes on the unload that answers the last of them.
+    /// existed. A load of a different image is told apart by the content hash
+    /// (see `soundfont_image_hash`); this still drops the record rather than
+    /// leaving an address that names a buffer the process no longer owns. The
+    /// refs the loads took are untouched, so the bank still closes on the
+    /// unload that answers the last of them.
     pub fn forgetSoundfontImage(self: *MidiDriver, data: [*c]const u8, size: u32) void {
         if (self.soundfont_image_ptr != @intFromPtr(data)) return;
         if (self.soundfont_image_size != size) return;
         self.soundfont_image_ptr = 0;
         self.soundfont_image_size = 0;
+        self.soundfont_image_hash = .{};
     }
 
     /// Milliseconds of MIDI time one output frame carries. A driver with no
@@ -277,8 +317,7 @@ pub const MidiDriver = struct {
         const bank = loaded.?;
         self.swapSoundfont(bank, true);
         self.clearSoundfontSource();
-        self.soundfont_image_ptr = @intFromPtr(data);
-        self.soundfont_image_size = size;
+        self.adoptSoundfontImage(data, size);
         self.soundfont_refs = 1;
         self.soundfont_size_bytes = @intCast(@min(size, std.math.maxInt(u32)));
         // Same rate the file path adopts: the data source hands the engine

@@ -157,8 +157,7 @@ test "MidiDriver loading the same soundfont image twice keeps one bank" {
     const image = "RIFF\x24\x00\x00\x00sfbkLIST";
     driver.soundfont = sentinel;
     driver.owns_soundfont = false;
-    driver.soundfont_image_ptr = @intFromPtr(image.ptr);
-    driver.soundfont_image_size = @intCast(image.len);
+    driver.adoptSoundfontImage(image.ptr, @intCast(image.len));
     driver.soundfont_refs = 1;
 
     const first = try driver.loadSoundfontImage(image.ptr, @intCast(image.len));
@@ -166,6 +165,36 @@ test "MidiDriver loading the same soundfont image twice keeps one bank" {
     try testing.expectEqual(sentinel, driver.soundfont.?);
     // The same buffer, so the second load is the bank already in place.
     try testing.expectEqual(sentinel, try driver.loadSoundfontImage(image.ptr, @intCast(image.len)));
+}
+
+// An address is not an identity: the caller owns an image it loaded from
+// memory and may free it, so the next image the allocator hands out at the same
+// address with a header of the same size is a different soundfont and has to be
+// loaded rather than answered with the bank the first one left behind.
+test "MidiDriver a different image at the same address and size is a real load" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.MidiDriver.init(allocator);
+    defer driver.deinit();
+
+    const sentinel: *openmiles.tsf.tsf = @ptrFromInt(0x2800);
+    var image = try allocator.alloc(u8, 16);
+    defer allocator.free(image);
+    @memset(image, 'A');
+    driver.soundfont = sentinel;
+    driver.owns_soundfont = false;
+    driver.adoptSoundfontImage(image.ptr, @intCast(image.len));
+    driver.soundfont_refs = 1;
+
+    // The first image is the bank in place, so it is matched.
+    try testing.expectEqual(sentinel, driver.soundfontFromImage(image.ptr, @intCast(image.len)));
+
+    // The same address and the same length, different bytes: a bank the game
+    // never loaded, so the lookup misses and the load is a real one (and fails
+    // on these bytes, which are not a soundfont).
+    image[0] = 'B';
+    try testing.expectEqual(@as(?*openmiles.tsf.tsf, null), driver.soundfontFromImage(image.ptr, @intCast(image.len)));
+    try testing.expectError(error.SoundFontLoadFailed, driver.loadSoundfontImage(image.ptr, @intCast(image.len)));
+    try testing.expectEqual(sentinel, driver.soundfont.?);
 }
 
 // AIL_DLS_load_file reads through the file callbacks into a buffer it releases
@@ -182,8 +211,7 @@ test "MidiDriver forgets the image identity of a buffer the caller frees" {
     const image = "RIFF\x24\x00\x00\x00sfbkLIST";
     driver.soundfont = sentinel;
     driver.owns_soundfont = false;
-    driver.soundfont_image_ptr = @intFromPtr(image.ptr);
-    driver.soundfont_image_size = @intCast(image.len);
+    driver.adoptSoundfontImage(image.ptr, @intCast(image.len));
     driver.soundfont_refs = 1;
 
     driver.forgetSoundfontImage(image.ptr, @intCast(image.len));
@@ -193,8 +221,7 @@ test "MidiDriver forgets the image identity of a buffer the caller frees" {
     try testing.expectEqual(sentinel, driver.soundfont.?);
     try testing.expectEqual(@as(u32, 1), driver.soundfont_refs);
     // A different size at the same address is a different image too.
-    driver.soundfont_image_ptr = @intFromPtr(image.ptr);
-    driver.soundfont_image_size = @intCast(image.len);
+    driver.adoptSoundfontImage(image.ptr, @intCast(image.len));
     try testing.expectEqual(@as(?*openmiles.tsf.tsf, null), driver.soundfontFromImage(image.ptr, @intCast(image.len - 1)));
 }
 
@@ -1939,6 +1966,37 @@ test "RIB plugin loading registers the mock provider's interface end to end" {
         try testing.expectEqual(@as(usize, 0x1234), token);
     }
     try testing.expect(found_engine);
+}
+
+test "a freed provider handle is not handed out again" {
+    // A provider a game frees with RIB_free_provider_handle is unloaded, so
+    // leaving it in the application list made the next enumeration (and
+    // RIB_provider_library_handle) return a handle into freed memory.
+    const api_rib = @import("api/rib.zig");
+    const img_path = "zig-out/bin/plugins/mock.asi";
+    std.Io.Dir.cwd().access(openmiles.io, img_path, .{}) catch return error.MissingMockPlugin;
+    // A copy under a path of its own, so this provider is one no other test in
+    // the binary registered; adopting the shared one is refused as a duplicate.
+    const dir_name = "om_free_handle_test";
+    const cwd = std.Io.Dir.cwd();
+    cwd.createDir(openmiles.io, dir_name, .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+    defer cwd.deleteTree(openmiles.io, dir_name) catch {};
+    const copy_path = dir_name ++ "/mock.asi";
+    try cwd.copyFile(img_path, cwd, copy_path, openmiles.io, .{});
+
+    const p = try openmiles.Provider.load(testing.allocator, copy_path);
+    try testing.expect(openmiles.adoptPlugin(p, null));
+    const before = openmiles.getProviderCount();
+
+    api_rib.RIB_free_provider_handle(p);
+    try testing.expectEqual(before - 1, openmiles.getProviderCount());
+    var n: usize = 0;
+    while (n < openmiles.getProviderCount()) : (n += 1) {
+        try testing.expect(openmiles.getProviderAt(n) != p);
+    }
 }
 
 test "DigitalDriver setMasterVolume and getMasterVolume" {

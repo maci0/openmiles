@@ -19,6 +19,10 @@ pub fn RIB_alloc_provider_handle(module: *anyopaque) callconv(.c) ?*Provider {
 pub fn RIB_free_provider_handle(provider_opt: ?*Provider) callconv(.c) void {
     const provider = provider_opt orelse return;
     log("RIB_free_provider_handle(provider={*})\n", .{provider});
+    // The handle leaves the lists that publish it first: a provider freed here
+    // is unloaded, and an enumeration or RIB_provider_library_handle after it
+    // must not hand the caller a handle to a module that is gone.
+    openmiles.unpublishProvider(provider);
     provider.deinit();
 }
 pub fn RIB_register_interface(provider_opt: ?*Provider, name: [*:0]const u8, count: i32, entries: ?*anyopaque) callconv(.c) void {
