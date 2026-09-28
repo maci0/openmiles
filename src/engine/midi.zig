@@ -87,7 +87,16 @@ pub const MidiDriver = struct {
             .allocator = allocator,
             .soundfont = null,
         };
-        root.registerMidiDriver(self);
+        // The table is what a close claims, so a device that could not be
+        // tracked could not be closed at all: handing it back would leave the
+        // game holding a handle whose close is refused as already-closed, with
+        // the driver and its soundfont alive for the life of the process. The
+        // open fails instead, as a digital driver whose table append failed
+        // already does.
+        if (!root.registerMidiDriver(self)) {
+            self.deinit();
+            return error.MidiDriverUntrackable;
+        }
         root.setLastMidiDriver(self);
         return self;
     }
@@ -442,6 +451,13 @@ pub const Sequence = struct {
     // driver as often as before it, and reading the driver to free the sequence
     // then dereferenced the driver the close had already freed.
     allocator: std.mem.Allocator,
+    // Set by a driver close, which stops the sequence and leaves its handle
+    // alive for the game to release. The sequence stays in the tracked table
+    // until then: the table is what tells a repeated release that the handle is
+    // gone, and a flag inside the struct is read from memory the first release
+    // already freed. An orphaned entry is skipped by every walk, so its stale
+    // driver address is never compared against a live one.
+    orphaned: bool = false,
     midi: ?*tsf.tml_message = null,
     current_msg: ?*tsf.tml_message = null,
     time_ms: f64 = 0,
@@ -700,8 +716,17 @@ pub const Sequence = struct {
         return self;
     }
 
+    /// Release the handle. A second release of it, and a release from two
+    /// threads, frees the sequence once: the tracked-table entry is the claim
+    /// token, taken under the lock that guards the table, and a handle the table
+    /// does not name is one that is already gone. The free behind it is not
+    /// idempotent, so a repeat uninitializes a sound and a data source over
+    /// freed memory and hands the allocator an address it has released.
     pub fn deinit(self: *Sequence) void {
-        root.unregisterSequence(self);
+        if (!root.claimSequenceRelease(self)) {
+            log("Sequence.deinit: this handle has already been released; the release is ignored\n", .{});
+            return;
+        }
         releaseAllChannels(@ptrCast(self));
         if (self.is_initialized) {
             ma.ma_sound_uninit(&self.sound);

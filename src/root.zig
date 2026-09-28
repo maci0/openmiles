@@ -995,14 +995,48 @@ pub fn unregisterDriver(driver: *DigitalDriver) void {
     removeFirst(&known_drivers, driver);
 }
 
-pub fn registerMidiDriver(driver: *MidiDriver) void {
+/// Take `driver` out of the digital table and report whether it was in it.
+/// The table entry is the claim token a close needs: it is removed under the
+/// same lock that guards the table, so of two closes of one handle only the
+/// first finds it. A close of a handle the table does not name is a close of a
+/// driver that is already gone, and tearing it down a second time uninitializes
+/// an engine and frees a struct the first close released.
+pub fn claimDigitalDriverClose(driver: *DigitalDriver) bool {
+    driver_table_mutex.lockUncancelable(io);
+    defer driver_table_mutex.unlock(io);
+    for (known_drivers.items, 0..) |d, i| {
+        if (d == driver) {
+            _ = known_drivers.swapRemove(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+/// The MIDI counterpart of claimDigitalDriverClose.
+pub fn claimMidiDriverClose(driver: *MidiDriver) bool {
+    driver_table_mutex.lockUncancelable(io);
+    defer driver_table_mutex.unlock(io);
+    for (known_midi_drivers.items, 0..) |d, i| {
+        if (d == driver) {
+            _ = known_midi_drivers.swapRemove(i);
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Returns false when the handle could not be tracked. The caller must then
+/// tear the driver down rather than hand it back: the table is what a close
+/// claims, so a device missing from it cannot be closed at all, not even once.
+pub fn registerMidiDriver(driver: *MidiDriver) bool {
     driver_table_mutex.lockUncancelable(io);
     defer driver_table_mutex.unlock(io);
     known_midi_drivers.append(global_allocator, driver) catch {
-        // Unlike a digital driver, an untracked MIDI one is still usable: it
-        // answers its own handle. What is lost is the teardown at shutdown.
-        log("registerMidiDriver: driver table allocation failed; this device will not be closed at shutdown\n", .{});
+        log("registerMidiDriver: driver table allocation failed; this handle cannot be tracked\n", .{});
+        return false;
     };
+    return true;
 }
 
 pub fn unregisterMidiDriver(driver: *MidiDriver) void {
@@ -1037,9 +1071,11 @@ pub fn closeAllDrivers() void {
     known_drivers = .empty;
     driver_table_mutex.unlock(io);
     // MIDI first: a sequence's voices are attached to the digital engine and
-    // have to be stopped before it is torn down.
-    for (midi_drivers.items) |m| closeMidiDriver(m);
-    for (digital_drivers.items) |d| closeDigitalDriver(d);
+    // have to be stopped before it is torn down. The tables were drained above,
+    // so these go through the teardown directly: a claim would find nothing
+    // there and read every one of them as a handle that is already closed.
+    for (midi_drivers.items) |m| destroyMidiDriver(m);
+    for (digital_drivers.items) |d| destroyDigitalDriver(d);
     midi_drivers.deinit(global_allocator);
     digital_drivers.deinit(global_allocator);
 }
@@ -1078,7 +1114,7 @@ var global_sequences_mutex: std.Io.Mutex = .init;
 /// Returns false when the sequence could not be tracked. The caller must then
 /// tear the sequence down instead of handing it back: an untracked sequence is
 /// skipped by closeMidiDriver, so its sound stays attached to an engine that is
-/// about to be uninitialized.
+/// about to be uninitialized, and its handle cannot be released at all.
 pub fn registerSequence(seq: *Sequence) bool {
     global_sequences_mutex.lockUncancelable(io);
     defer global_sequences_mutex.unlock(io);
@@ -1089,10 +1125,21 @@ pub fn registerSequence(seq: *Sequence) bool {
     return true;
 }
 
-pub fn unregisterSequence(seq: *Sequence) void {
+/// Take `seq` out of the tracked table and report whether it was in it. The
+/// table entry is the ledger of handles that have not been released yet: a
+/// release claims the entry under the lock, so two releases of one handle, from
+/// one thread or from two, free it once, and a handle the table does not name
+/// is one whose memory is already gone.
+pub fn claimSequenceRelease(seq: *Sequence) bool {
     global_sequences_mutex.lockUncancelable(io);
     defer global_sequences_mutex.unlock(io);
-    removeFirst(&global_sequences, seq);
+    for (global_sequences.items, 0..) |s, i| {
+        if (s == seq) {
+            _ = global_sequences.swapRemove(i);
+            return true;
+        }
+    }
+    return false;
 }
 
 pub fn getActiveSequenceCount() u32 {
@@ -1105,13 +1152,25 @@ pub fn getActiveSequenceCount() u32 {
     return count;
 }
 
-/// How many sequences are tracked, playing or not. Not an SDK surface: the
-/// test suite reads it to prove a driver close left no sequence naming the
-/// driver it freed.
+/// How many sequences are tracked, playing or not, and how many of those name a
+/// live driver. Not an SDK surface: the test suite reads them to prove a driver
+/// close orphaned its sequences rather than dropping the entries its releases
+/// are matched against. An orphaned handle stays tracked until the game releases
+/// it, so `total` counts a handle the game still holds.
 pub fn trackedSequenceCount() usize {
     global_sequences_mutex.lockUncancelable(io);
     defer global_sequences_mutex.unlock(io);
     return global_sequences.items.len;
+}
+
+pub fn liveSequenceCount() usize {
+    global_sequences_mutex.lockUncancelable(io);
+    defer global_sequences_mutex.unlock(io);
+    var count: usize = 0;
+    for (global_sequences.items) |s| {
+        if (!s.orphaned) count += 1;
+    }
+    return count;
 }
 
 // --- Redist directory ---
@@ -1665,9 +1724,25 @@ pub fn openDigitalDriver(frequency: u32, bits: i32, channels: i32) ?*DigitalDriv
     return driver;
 }
 
-pub fn closeDigitalDriver(driver: *DigitalDriver) void {
+/// Tear a digital driver down. The unconditional body; every caller has
+/// already established that the handle is live.
+pub fn destroyDigitalDriver(driver: *DigitalDriver) void {
     clearLastDigitalDriver(driver);
     driver.deinit();
+}
+
+/// Close the digital driver, once. A second close of the same handle is a
+/// close of memory the first one released: DigitalDriver.deinit would uninit
+/// an engine struct over freed memory and destroy the allocation again. The
+/// table entry is claimed first, so a close repeated from two threads, or
+/// from a game that closes on two exit paths, closes the driver once and
+/// reports the repeat.
+pub fn closeDigitalDriver(driver: *DigitalDriver) void {
+    if (!claimDigitalDriverClose(driver)) {
+        log("closeDigitalDriver: this handle is not an open digital driver; the close is ignored\n", .{});
+        return;
+    }
+    destroyDigitalDriver(driver);
 }
 
 pub fn openMidiDriver() ?*MidiDriver {
@@ -1686,11 +1761,38 @@ pub fn openMidiDriver() ?*MidiDriver {
     };
 }
 
+/// Close the MIDI driver, once. A second close of the same handle frees the
+/// struct, the soundfont and the driver table entry the first close already
+/// released, and reads the sequences it stopped through a freed driver. The
+/// table entry is claimed first, so a close repeated from two threads, or from
+/// a game that closes the device on both a driver close and a DLS close, tears
+/// the driver down once and reports the repeat.
 pub fn closeMidiDriver(driver: *MidiDriver) void {
+    if (!claimMidiDriverClose(driver)) {
+        log("closeMidiDriver: this handle is not an open MIDI driver; the close is ignored\n", .{});
+        return;
+    }
+    destroyMidiDriver(driver);
+}
+
+/// Tear a MIDI driver down. The unconditional body, for the callers that hold
+/// a driver the table no longer names.
+pub fn destroyMidiDriver(driver: *MidiDriver) void {
     clearLastMidiDriver(driver);
-    // Snapshot sequences to stop, then release mutex before the potentially
-    // blocking stopAndUninit calls to avoid holding the lock during audio
-    // thread synchronization.
+    // The driver's sequences keep their table entries and are marked orphaned
+    // here, because that entry is the ledger a release is matched against:
+    // dropping it would leave a handle the game still holds unclaimable, and
+    // its release would then free the sequence a second time. Every walk skips
+    // an orphan, so the driver address the sequence keeps is never compared
+    // against a live one and cannot stop a new driver's sequences after this
+    // address is reused. The handle itself stays valid, so the game's own
+    // AIL_release_sequence_handle still frees it.
+    //
+    // The marking happens under the lock the table is guarded by, so a release
+    // racing this close either claims the entry and frees the sequence before
+    // the stop below touches it, or sees the orphan and is left alone. The stop
+    // itself runs with the lock released: it synchronizes with the audio
+    // thread, and holding the table across that blocks every handle operation.
     global_sequences_mutex.lockUncancelable(io);
     const snapshot = global_allocator.dupe(*Sequence, global_sequences.items) catch {
         // Fallback: stop sequences while holding the lock (less ideal but correct).
@@ -1700,28 +1802,21 @@ pub fn closeMidiDriver(driver: *MidiDriver) void {
         log("closeMidiDriver: cannot snapshot the sequence list; the driver's sequences are stopped under the lock\n", .{});
         for (global_sequences.items) |seq| {
             if (seq.driver != driver) continue;
+            seq.orphaned = true;
             seq.stopAndUninit();
-            // Dropped here as well, under the lock the table is already held:
-            // a sequence left behind names a driver this close frees.
-            removeFirst(&global_sequences, seq);
         }
         global_sequences_mutex.unlock(io);
         driver.deinit();
         return;
     };
+    for (global_sequences.items) |seq| {
+        if (seq.driver == driver) seq.orphaned = true;
+    }
     global_sequences_mutex.unlock(io);
     defer global_allocator.free(snapshot);
     for (snapshot) |seq| {
         if (seq.driver != driver) continue;
         seq.stopAndUninit();
-        // The sequence goes out of the table with its driver. Left in, it
-        // names a driver that is freed by the end of this call, and the next
-        // walk of the table compares against that freed address: a close
-        // repeated with the handle the game kept, or a close after the address
-        // was handed to a new driver, stopped a live driver's sequences. The
-        // handle itself stays valid, so the game's own
-        // AIL_release_sequence_handle still frees it.
-        unregisterSequence(seq);
     }
     driver.deinit();
 }

@@ -1810,6 +1810,31 @@ test "teardown closes every MIDI device, not only the current one" {
     try testing.expect(openmiles.lastMidiDriver() == null);
 }
 
+// A driver close frees the driver, its engine and its soundfont. A game that
+// reaches its close from two paths (a DLS close and a MIDI close on the same
+// device, a shutdown path that also runs the game's own teardown) hands the
+// same handle to the close twice, and the second one uninitializes an engine
+// over freed memory and destroys the allocation again. The test allocator is
+// the leak checker, so that second free fails the test rather than passing
+// quietly.
+test "closing a driver twice closes it once" {
+    const allocator = testing.allocator;
+
+    const dig = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    openmiles.closeDigitalDriver(dig);
+    try testing.expect(openmiles.lastDigitalDriver() == null);
+    // The repeat finds no live handle to claim and changes nothing.
+    openmiles.closeDigitalDriver(dig);
+
+    const midi = try openmiles.MidiDriver.init(allocator);
+    openmiles.closeMidiDriver(midi);
+    try testing.expectEqual(@as(usize, 0), openmiles.liveMidiDriverCount());
+    try testing.expect(openmiles.lastMidiDriver() == null);
+    openmiles.closeMidiDriver(midi);
+    try testing.expectEqual(@as(usize, 0), openmiles.liveMidiDriverCount());
+    try testing.expect(openmiles.lastMidiDriver() == null);
+}
+
 test "setRedistDirectory with the same path does not rescan it" {
     // AIL_set_redist_directory is called more than once per session by several
     // games; an identical path must not push a second copy of every .asi into
@@ -1997,24 +2022,52 @@ test "getActiveSequenceCount follows register, play, stop and release" {
 }
 
 // A sequence names the driver that made it, and the table it is tracked in is
-// walked by pointer. One left behind by a driver close names a driver that
-// close freed, so the next walk of the table compares against a freed address:
-// a close repeated with the handle the game kept stopped the sequences of
-// whichever driver had taken that address since.
-test "closing a MIDI driver takes its sequences out of the tracked table" {
+// walked by pointer. A driver close marks its sequences orphaned rather than
+// dropping them: the entry is what a release is matched against, and dropping
+// it would leave a handle the game still holding unclaimable. An orphan is
+// skipped by every walk, so the freed driver address it keeps is never compared
+// against a live one.
+test "closing a MIDI driver orphans its sequences until they are released" {
     const allocator = testing.allocator;
     const before = openmiles.trackedSequenceCount();
+    const live_before = openmiles.liveSequenceCount();
 
     const driver = try openmiles.MidiDriver.init(allocator);
     const seq = try openmiles.Sequence.init(driver);
     try testing.expectEqual(before + 1, openmiles.trackedSequenceCount());
+    try testing.expectEqual(live_before + 1, openmiles.liveSequenceCount());
 
     openmiles.closeMidiDriver(driver);
-    try testing.expectEqual(before, openmiles.trackedSequenceCount());
+    // Tracked, so the game's release is still claimable, but no longer live.
+    try testing.expectEqual(before + 1, openmiles.trackedSequenceCount());
+    try testing.expectEqual(live_before, openmiles.liveSequenceCount());
 
     // The handle the game holds is still its own: releasing it after the close
-    // frees the sequence, and finds nothing left to unregister.
+    // frees the sequence and takes it out of the table.
     seq.deinit();
+    try testing.expectEqual(before, openmiles.trackedSequenceCount());
+}
+
+// The free behind a release is not idempotent: a second one uninitializes a
+// sound and a data source over freed memory and hands the allocator an address
+// it has already released. A game that releases a handle from two paths (its
+// own teardown and a sequence-closing driver) reaches it twice, and the state
+// after that has to be the state one release left.
+test "releasing a sequence handle twice releases it once" {
+    const allocator = testing.allocator;
+    const before = openmiles.trackedSequenceCount();
+    const driver = try openmiles.MidiDriver.init(allocator);
+    const seq = try openmiles.Sequence.init(driver);
+    try testing.expectEqual(before + 1, openmiles.trackedSequenceCount());
+
+    seq.deinit();
+    try testing.expectEqual(before, openmiles.trackedSequenceCount());
+    // The allocator is the leak checker, so a second free of the same handle
+    // fails this test rather than passing quietly.
+    seq.deinit();
+    try testing.expectEqual(before, openmiles.trackedSequenceCount());
+
+    driver.deinit();
 }
 
 test "Sample end sets done status" {
