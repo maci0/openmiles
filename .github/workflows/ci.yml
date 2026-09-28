@@ -72,10 +72,16 @@ jobs:
       # Nothing installed it before: the runner image ships pipx, not uv, so
       # the first `uv tool install` failed the whole ubuntu leg with exit 127
       # before any gate ran. The binary lands in ~/.local/bin, the same
-      # directory the two install steps below put their tools in.
+      # directory the two install steps below put their tools in, and that
+      # directory is put on PATH here rather than relied on from the image: an
+      # entry appended to GITHUB_PATH applies to the steps after this one, so
+      # `uv` resolves in both install steps whether or not the runner image
+      # happens to ship that path.
       - name: Install uv
         if: matrix.os == 'ubuntu-latest'
-        run: pipx install uv==0.12.19
+        run: |
+          pipx install uv==0.12.19
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install ruff
         if: matrix.os == 'ubuntu-latest'

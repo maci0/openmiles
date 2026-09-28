@@ -21,10 +21,10 @@ All notable changes to OpenMiles are recorded here. The format follows
   empty section fails the publish rather than shipping a release whose notes
   say nothing.
 - A published version is immutable. A `workflow_dispatch` re-run of a tag is the
-  retry for a run that failed before it published, and the workflow refuses one
-  for a tag that already has a release, so a retry cannot replace the archive a
-  consumer has already fetched and recorded against `SHA256SUMS`. A fix to a
-  published release ships as a new version.
+  retry for a run that failed before it published. Either trigger refuses a tag
+  that already has a release, so neither a retry nor a re-pushed tag can
+  replace the archive a consumer has already fetched and recorded against
+  `SHA256SUMS`. A fix to a published release ships as a new version.
 - Compatibility is per `-Dmss-version`, not per OpenMiles release. Each value
   swept by `scripts/check_all_versions.sh` (`3`, `4`, `5`, `6.1`, `6.5`, `7`,
   `8`, `9`) reproduces its reference `mss32.dll` export table with zero missing
@@ -62,6 +62,16 @@ All notable changes to OpenMiles are recorded here. The format follows
 - Four `file:line` references in `docs/THREAT_MODEL.md` pointed two lines above
   the code they claim, so `make lint` failed on a clean tree and the mitigation
   claims behind them were no longer checkable.
+- The release workflow held a write token for every step in the job, and
+  refused to overwrite a published release only on a manual re-run. The
+  workflow token is now read-only for the job and granted write to the
+  release-creation step alone, and the immutability check runs on a tag push
+  too, so a re-pushed tag cannot replace the archive and `SHA256SUMS` a
+  consumer already fetched.
+- Sixteen `file:line` anchors in `docs/THREAT_MODEL.md` that no longer
+  resolved, which failed `make check-threat-model` and with it `make lint` and
+  the CI lint step. The anchors are refreshed to the lines the named code now
+  sits on.
 - Three claims in `docs/` that the code contradicts. `docs/EXPORT_PARITY.md`
   put the 6.5/6.6-only exclusion pair in the same ver 65-66 group as the ten
   other functions added in that pass; `src/main.zig` gates

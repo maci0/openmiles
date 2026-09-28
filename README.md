@@ -75,9 +75,11 @@ pushing.
 [yamllint](https://github.com/adrienverge/yamllint) 1.38.0 (the pinned
 versions, checked before they run) besides Zig, since the `scripts/` gate and
 the workflows are linted too; `make lint` names any of the four that is
-missing, and CI installs them through the runner image. It checks `zig fmt`,
-shellchecks `scripts/*.sh`, lints `.github`, and asserts that every
-declaration in `src/mss.h` agrees with the export table for each
+missing. CI brings in the same four at the same pins: Zig through `setup-zig`
+at the version in `build.zig.zon`, ruff and yamllint through `uv tool install`
+at the versions in the `Makefile`, and shellcheck from the runner image. It
+checks `zig fmt`, shellchecks `scripts/*.sh`, lints `.github`, and asserts that
+every declaration in `src/mss.h` agrees with the export table for each
 `-Dmss-version` (return type, argument count, calling convention, version
 range, struct layout). `src/mss.h` is a documented core subset, so symbols it
 does not declare are reported as a coverage count, not a failure; the per-symbol
@@ -189,8 +191,8 @@ Publishing is a tag push: set `.version` in `build.zig.zon`, push `v<version>`,
 and the workflow builds, smoke-tests the DLL, verifies the archive is
 reproducible, and creates the GitHub release. The workflow refuses a tag whose
 version does not match `build.zig.zon`. A failed run is retried with a manual
-dispatch of the same tag from the Actions tab. That re-run is refused once the
-release for the tag exists: a published version is not republished, because a
+dispatch of the same tag from the Actions tab. Both triggers refuse a tag whose
+release already exists: a published version is not republished, because a
 consumer may have pinned the archive and its recorded checksum. A fix to a
 published release ships as a new version.
 

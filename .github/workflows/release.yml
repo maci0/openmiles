@@ -19,8 +19,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
+# Read-only for the whole workflow. Only the release-creation step needs
+# write, and it asks for it below: a credential every other step in the job can
+# reach is a credential a vendored header, a build script, or a stray test
+# artifact can use.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -83,13 +87,15 @@ jobs:
           echo "releasing ${declared}"
 
       # A published version is immutable: the tag, the archive under it, and
-      # the checksum beside it are what a consumer has already pinned. A
-      # workflow_dispatch re-run exists for a run that failed before it
-      # published; if a release for this tag exists, the run is not that case,
-      # and re-uploading would replace bytes a consumer may have fetched and
-      # recorded against SHA256SUMS. Publish the fix as a new version instead.
+      # the checksum beside it are what a consumer has already pinned. This
+      # check runs on both triggers, not only the manual re-run. A
+      # workflow_dispatch exists for a run that failed before it published, and
+      # a re-pushed tag reaches the same state, so either one finds a release
+      # for the tag and stops. Publishing over it would replace bytes a
+      # consumer may have fetched and recorded against SHA256SUMS, and
+      # action-gh-release updates an existing release without complaint.
+      # Publish the fix as a new version instead.
       - name: Refuse to overwrite a published release
-        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -275,6 +281,10 @@ jobs:
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
+        # The one step in the job that writes to the repository. Every step
+        # above it runs with the workflow's read-only token.
+        permissions:
+          contents: write
         with:
           # Named explicitly: on a manual re-run github.ref is the branch the
           # workflow was dispatched from, not the tag being released.
