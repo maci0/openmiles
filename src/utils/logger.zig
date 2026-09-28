@@ -39,7 +39,9 @@ var log_file: ?std.Io.File = null;
 var log_offset: u64 = 0;
 var initialized = false;
 var config_logged = false;
+var config_echoed = false;
 var debug_enabled = false;
+var debug_from_env = false;
 var debug_source: []const u8 = "the build default";
 var log_path_buf: [max_log_path_bytes]u8 = undefined;
 var log_path_len: usize = default_log_name.len;
@@ -131,6 +133,7 @@ fn applyDebugEnvValue(value: []const u8) void {
         // that says "off" is readable as "the environment asked for off" and
         // not as "nothing asked for anything".
         debug_source = "OPENMILES_DEBUG";
+        debug_from_env = true;
         return;
     }
     // stderr, not log(): the log is what the operator was trying to turn on,
@@ -248,6 +251,11 @@ pub fn init() void {
         }
     }
     @atomicStore(bool, &initialized, true, .release);
+    // The log records the effective configuration, but only the runs that turned
+    // it on have a log. An operator who exported the variables asks what the
+    // library resolved them to, and the answer has to survive the answer being
+    // "logging off", which is the case where there is no file to read it from.
+    if (debug_from_env) echoConfigOnce();
 }
 
 pub fn deinit() void {
@@ -259,7 +267,31 @@ pub fn deinit() void {
     }
     @atomicStore(bool, &initialized, false, .release);
     @atomicStore(bool, &config_logged, false, .release);
+    @atomicStore(bool, &config_echoed, false, .release);
     @atomicStore(bool, &write_error_reported, false, .release);
+}
+
+/// The effective configuration, as one line: whether the debug log is on, what
+/// decided it, the build it was compiled in, the mss_version, the file it
+/// appends to, and the cap on that file.
+///
+/// One formatter for both sinks. The log record and the stderr echo have to
+/// agree, and two copies of this argument list are two claims that drift.
+const config_line_fmt = "openmiles: debug log {s}, enabled by {s} ({s} build, default {s}), mss_version {d}, appending to '{s}', cap {d} bytes, stamps are UTC ISO 8601 with milliseconds\n";
+
+/// Render config_line_fmt into `buf`, scrubbed: the log path comes from the
+/// environment, so it carries whatever control characters it was given.
+fn writeConfigLine(buf: []u8) []const u8 {
+    const line = std.fmt.bufPrint(buf, config_line_fmt, .{
+        if (debug_enabled) "on" else "off",
+        debug_source,
+        @tagName(builtin.mode),
+        if (build_options.log_by_default) "on" else "off",
+        build_options.mss_version,
+        logPath(),
+        max_log_bytes,
+    }) catch return "";
+    return buf[0..sanitizeText(line)];
 }
 
 /// Record the effective configuration once per init, so a log that opens can be
@@ -275,15 +307,26 @@ pub fn deinit() void {
 fn logConfigOnce() void {
     if (@atomicLoad(bool, &config_logged, .acquire)) return;
     @atomicStore(bool, &config_logged, true, .release);
-    log("openmiles: debug log {s}, enabled by {s} ({s} build, default {s}), mss_version {d}, appending to '{s}', cap {d} bytes, stamps are UTC ISO 8601 with milliseconds\n", .{
-        if (debug_enabled) "on" else "off",
-        debug_source,
-        @tagName(builtin.mode),
-        if (build_options.log_by_default) "on" else "off",
-        build_options.mss_version,
-        logPath(),
-        max_log_bytes,
-    });
+    var line_buf: [max_log_record_bytes]u8 = undefined;
+    const line = writeConfigLine(&line_buf);
+    if (line.len == 0) return;
+    var rec: [max_log_record_bytes]u8 = undefined;
+    const stamp = writeStamp(&rec);
+    @memcpy(rec[stamp.len..][0..line.len], line);
+    emit(rec[0 .. stamp.len + line.len]);
+}
+
+/// Print the effective configuration on stderr once per init, for the runs
+/// where the environment asked for it. The log carries the same line, but a
+/// configuration of "logging off, because OPENMILES_DEBUG=0" is exactly the
+/// one whose answer has nowhere else to be read.
+fn echoConfigOnce() void {
+    if (@atomicLoad(bool, &config_echoed, .acquire)) return;
+    @atomicStore(bool, &config_echoed, true, .release);
+    var line_buf: [max_log_record_bytes]u8 = undefined;
+    const line = writeConfigLine(&line_buf);
+    if (line.len == 0) return;
+    std.debug.print("{s}", .{line});
 }
 
 /// Neutralize control and invisible characters in an untrusted substring (a
@@ -559,6 +602,65 @@ test "a rejected OPENMILES_DEBUG leaves the build default in place" {
     try testing.expectEqualStrings("OPENMILES_DEBUG", debug_source);
     applyDebugEnvValue("0");
     try testing.expectEqual(false, debug_enabled);
+}
+
+test "the effective configuration names the source, the version and the file" {
+    const enabled_before = debug_enabled;
+    const source_before = debug_source;
+    const from_env_before = debug_from_env;
+    defer {
+        debug_enabled = enabled_before;
+        debug_source = source_before;
+        debug_from_env = from_env_before;
+    }
+
+    applyLogPath("traces/config.log");
+    defer setDefaultLogPath();
+    // An earlier test leaves the globals holding whatever it last applied, so
+    // the build-default case is set up here rather than inherited.
+    debug_enabled = false;
+    debug_source = "the build default";
+    debug_from_env = false;
+    var buf: [max_log_record_bytes]u8 = undefined;
+    const line = writeConfigLine(&buf);
+    // One line, newline included: a second line would print as a second
+    // configuration, and a missing one leaves the reader with the build mode to
+    // infer everything else from.
+    try testing.expect(std.mem.endsWith(u8, line, "\n"));
+    try testing.expectEqual(@as(usize, 1), std.mem.count(u8, line, "\n"));
+    try testing.expect(std.mem.indexOf(u8, line, "enabled by the build default") != null);
+    try testing.expect(std.mem.indexOf(u8, line, "mss_version") != null);
+    try testing.expect(std.mem.indexOf(u8, line, "traces/config.log") != null);
+
+    // Asked for on the environment, the line says so rather than leaving the
+    // reader to work out whether the export or the build default decided.
+    applyDebugEnvValue("1");
+    const asked = writeConfigLine(&buf);
+    try testing.expect(std.mem.indexOf(u8, asked, "debug log on, enabled by OPENMILES_DEBUG") != null);
+    try testing.expect(debug_from_env);
+
+    // Asked for off is the answer with nowhere else to be read, so it is named
+    // the same way.
+    applyDebugEnvValue("0");
+    const declined = writeConfigLine(&buf);
+    try testing.expect(std.mem.indexOf(u8, declined, "debug log off, enabled by OPENMILES_DEBUG") != null);
+
+    // A value that was never a candidate setting left the build default in
+    // place, so the echo that init emits is not owed: nothing asked.
+    debug_from_env = false;
+    applyDebugEnvValue("enabled-ish");
+    try testing.expect(!debug_from_env);
+}
+
+test "the configuration line scrubs a log path that carries control characters" {
+    var buf: [max_log_record_bytes]u8 = undefined;
+    applyLogPath("traces/a\x1b[2Kb.log");
+    defer setDefaultLogPath();
+    const line = writeConfigLine(&buf);
+    // The path reaches the line from the environment, so it reaches a terminal
+    // and a log reader that way; the escape is neutralized rather than replayed.
+    try testing.expect(std.mem.indexOf(u8, line, "traces/a.[2Kb.log") != null);
+    try testing.expect(std.mem.indexOfScalar(u8, line, 0x1b) == null);
 }
 
 test "an oversized record is replaced by a marker, not dropped silently" {

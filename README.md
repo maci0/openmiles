@@ -506,7 +506,7 @@ surface: nothing else in the environment changes its behaviour.
 |----------|--------|---------|--------|
 | `OPENMILES_DEBUG` | `1`/`0`, `true`/`false`, `yes`/`no`, `on`/`off`, any case | logging on in a Debug build, off otherwise | Verbose trace to the debug log and to the debugger, capped at 64 MiB |
 | `OPENMILES_LOG_PATH` | a file path, absolute or relative to the current directory, at most 1023 bytes | `openmiles.log` in the current directory | Where the debug log is written |
-| `TMPDIR` | an absolute directory path | `%TEMP%` on Windows, the game directory on other systems | Where the in-memory ASI plugin image is unpacked before it is loaded |
+| `TMPDIR` | an absolute directory path of at most 778 bytes | `%TEMP%` on Windows, the game directory on other systems | Where the in-memory ASI plugin image is unpacked before it is loaded |
 
 An `OPENMILES_DEBUG` value outside that set (including an empty one) is
 reported on stderr and leaves the default in place, rather than silently
@@ -534,6 +534,11 @@ The log's first line is the effective configuration, naming whether
 which `-Dmss-version` the loaded DLL was built for, so a log that never appears
 reads back as a configuration answer and a game compiled against a different
 `OPENMILES_MSS_VERSION` than the DLL it loads is visible in the first line.
+
+A run that exports `OPENMILES_DEBUG` also gets that line on stderr, once,
+whether the value asked for logging on or off. The `off` case is the one that
+has no log to read it from, and an operator who exported the variables is asking
+what the library resolved them to.
 
 Every record opens with a fixed-width UTC timestamp, so a log can be sorted by
 time and a window cut out of a capped one:
