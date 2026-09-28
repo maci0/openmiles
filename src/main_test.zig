@@ -1664,6 +1664,52 @@ test "loading the same plugin path twice is recognised as one provider" {
     try testing.expect(!openmiles.isPluginAlreadyLoaded(&.{bare}, resolved));
 }
 
+test "opening the same in-memory plugin image twice keeps one module" {
+    // AIL_open_ASI_provider is the one load path that had no identity to dedup
+    // on: a second open of the same bytes wrote a second temp image and loaded
+    // a second copy of the module, and both stayed up until the process ended.
+    // The key is the image content, so the same bytes reached through another
+    // buffer are the same module, and a different image is a different one.
+    const image = "MZ\x90\x00 the same plugin, opened twice";
+    const key = openmiles.Provider.imageKeyOf(image);
+    const copy = try testing.allocator.dupe(u8, image);
+    defer testing.allocator.free(copy);
+    try testing.expectEqual(key, openmiles.Provider.imageKeyOf(copy));
+    const other_key = openmiles.Provider.imageKeyOf("MZ\x90\x00 a different plugin");
+    try testing.expect(!std.meta.eql(key, other_key));
+
+    const first = try openmiles.Provider.init(testing.allocator);
+    try testing.expectEqual(first, first.publishImage(key));
+    try testing.expectEqual(@as(usize, 1), openmiles.Provider.openImageCount());
+
+    // The second open is answered from the registry: one module, and one more
+    // close owed for the open that took the reference.
+    const second = try openmiles.Provider.init(testing.allocator);
+    try testing.expectEqual(first, second.publishImage(key));
+    try testing.expectEqual(@as(usize, 1), openmiles.Provider.openImageCount());
+    // The copy the second open built is not published, and dropping it leaves
+    // the live one and its registry entry alone.
+    second.deinit();
+    try testing.expectEqual(@as(usize, 1), openmiles.Provider.openImageCount());
+
+    // Different bytes are a different module, tracked alongside.
+    const other = try openmiles.Provider.init(testing.allocator);
+    try testing.expectEqual(other, other.publishImage(other_key));
+    try testing.expectEqual(@as(usize, 2), openmiles.Provider.openImageCount());
+
+    // Two opens, two closes: the first leaves the module loaded, the second
+    // takes it down and empties the registry, so a repeated open cannot leave
+    // the count (or the modules) growing.
+    try testing.expect(!first.releaseImage());
+    try testing.expectEqual(@as(usize, 2), openmiles.Provider.openImageCount());
+    try testing.expect(first.releaseImage());
+    first.deinit();
+    try testing.expectEqual(@as(usize, 1), openmiles.Provider.openImageCount());
+    try testing.expect(other.releaseImage());
+    other.deinit();
+    try testing.expectEqual(@as(usize, 0), openmiles.Provider.openImageCount());
+}
+
 test "AIL_open_digital_driver twice returns the driver already open" {
     // The second open must be the first driver: a second miniaudio engine would
     // keep playing past the close the caller makes on the handle it holds.

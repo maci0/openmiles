@@ -27,7 +27,7 @@ to set both.
 |---|--------|----------|--------|--------|
 | 1 | Untrusted plugin image written to the temp directory and `LoadLibrary`'d | file/env to process | Code execution as the game user | Mitigated: unpredictable name, exclusive create (`src/api/rib.zig:273 randomNameBytes`, `src/api/rib.zig:291 exclusive`) |
 | 2 | `.asi`/`.m3d`/`.flt` files in the game directory, or in a game-named redist directory, loaded and executed at startup | file to process | Code execution as the game user | Unmitigated by design: the host game's own directory is trusted. Listed in [Deployment](#4-deployment-artifact-boundary) |
-| 3 | `RIB_load_provider_library` loads a game-named path as code, skipping every check the directory scans apply | game to DLL | Code execution as the game user, from any extension and any path | Unmitigated: reaches the same `Provider.load` with no extension allowlist, no filename check, and no already-loaded dedup (`src/api/rib.zig:385 RIB_load_provider_library`) |
+| 3 | `RIB_load_provider_library` loads a game-named path as code, skipping every check the directory scans apply | game to DLL | Code execution as the game user, from any extension and any path | Unmitigated: reaches the same `Provider.load` with no extension allowlist, no filename check, and no already-loaded dedup (`src/api/rib.zig:404 RIB_load_provider_library`) |
 | 4 | A plugin image parsed by the ELF fixup on a static-musl Linux build (`applyElfFixups`) | file to process | Crash, in-process memory corruption | Partial: program header table and `DT_RELA` slots bounded in `u64`/image space (`src/utils/dynlib.zig:58 programHeaderTableFits`) |
 | 5 | `AIL_WAV_file_write` creates or truncates a game-named path | game to DLL, DLL to disk | Overwrite of any file the game user can write | Unmitigated by ABI necessity (`src/api/digital.zig:961 AIL_WAV_file_write`) |
 | 6 | Malformed soundbank / event bytecode (`.BANK`) | file to process | Crash, in-process memory corruption, audio DoS | Partial: bounds chokepoint in `src/engine/soundbank.zig:249 rdU32`, step decode bounded in `src/engine/event.zig:495 copyString`) |
@@ -188,10 +188,10 @@ Three entry points load plugin code, and all three end at the same
    directory: the game names any path, so a redist directory pointing at a
    download or per-user shared folder extends plugin execution to every plugin
    extension found there.
-3. `RIB_load_provider_library` (`src/api/rib.zig:385 RIB_load_provider_library`,
-   and its stdcall alias `src/api/rib.zig:652 RIB_load_provider_library_std`)
+3. `RIB_load_provider_library` (`src/api/rib.zig:404 RIB_load_provider_library`,
+   and its stdcall alias `src/api/rib.zig:671 RIB_load_provider_library_std`)
    calls `Provider.load` directly on a game-supplied path
-   (`src/api/rib.zig:386 std.mem.span`). This path is exported from v4 through
+   (`src/api/rib.zig:406 std.mem.span`). This path is exported from v4 through
    v9 and is reachable from a stock game with no scan, no `AIL_startup`, and no
    redist directory configured. See [Plugin load without a scan](#4a-plugin-load-without-a-scan).
 
@@ -216,7 +216,7 @@ Gaps:
   plugin extension in the game directory, or in a directory the game points the
   redist search at, executes with game privileges.
 - `Provider.load` resolves the path case-insensitively before loading
-  (`src/rib/provider.zig:133 maybeResolveCaseInsensitivePath`), so a symlink or
+  (`src/rib/provider.zig:138 maybeResolveCaseInsensitivePath`), so a symlink or
   alternate-case name reaches whatever the resolver finds.
 - Windows DLL search order applies to a relative path, so a plugin name that
   also exists in the system directory can resolve elsewhere than the scanned
@@ -242,7 +242,7 @@ performs no scan:
 
 `Provider.load` itself performs no path validation. It takes the basename as the
 display name, resolves the path case-insensitively, and opens it
-(`src/rib/provider.zig:125 load`). So the two scans are the only place any path
+(`src/rib/provider.zig:130 load`). So the two scans are the only place any path
 check exists in the module.
 
 Assessment: the caller is inside the process and is trusted for memory safety
@@ -269,7 +269,7 @@ Controls present:
   `src/api/rib.zig:273 randomNameBytes`).
 - The file is created with `.exclusive = true` (`src/api/rib.zig:291 exclusive`),
   so a planted name cannot be opened for overwrite and a race replacement loses.
-- The file is deleted after the module is unloaded (`src/rib/provider.zig:174 deinit`).
+- The file is deleted after the module is unloaded (`src/rib/provider.zig:179 deinit`).
   The removal goes through the same fault seam as the rest of the file I/O
   (`src/utils/fs_compat.zig:290 deleteFile`), so the locked-image case, where
   the file stays on disk for the life of the process, is a step a replay can
@@ -287,6 +287,13 @@ Gaps:
 - The image is only checked for an `MZ` signature before being written and loaded
   (`src/api/rib.zig:240 raw`); no further validation is possible, since
   the caller wants arbitrary code to run.
+- A repeated open of the same image is answered from the open-image registry
+  (`src/rib/provider.zig:339 publishImage`) with the module already loaded, and
+  the copy built for the repeat is unloaded before the open returns, so a retry
+  leaves one module and one temp image rather than one of each per attempt. The
+  key is the image's content, so it holds whatever the caller supplies; the
+  registry is process state, not a trust decision, and the image behind an
+  entry has been through the same checks as the first one.
 
 ## 6. Assets and impact
 
@@ -344,7 +351,7 @@ Single points of failure:
   deliberate but is the thing to re-verify: a cap added to `readWholeFile`
   alone would leave the VFS boundary open, and a new whole-file read path that
   skips this function inherits no cap.
-- `Provider.load` (`src/rib/provider.zig:125 load`) is the single choke point for
+- `Provider.load` (`src/rib/provider.zig:130 load`) is the single choke point for
   every code-execution path, whether the module came from disk or from the temp
   file.
 - The C ABI shape itself: several exports take `(pointer, length)` with no way to
@@ -420,7 +427,7 @@ something other than a control in this tree.
    target; a documented deployment note is the available mitigation.
 2. `RIB_load_provider_library` loads a game-named path as code with no extension
    allowlist, no filename safety check, and no already-loaded dedup
-   (`src/api/rib.zig:385 RIB_load_provider_library`), so it is a code-execution
+   (`src/api/rib.zig:404 RIB_load_provider_library`), so it is a code-execution
    path with fewer controls than either directory scan. See
    [Plugin load without a scan](#4a-plugin-load-without-a-scan).
 3. `AIL_WAV_file_write` truncates and overwrites a caller-named path

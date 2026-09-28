@@ -95,8 +95,8 @@ complete list; the tables here cover behaviour, not linkability.
 | `RIB_enumerate_providers` | 🟢 Implemented | Iterates all registered providers matching requested interface |
 | `RIB_request_interface` | 🟢 Implemented | Copies built-in ASI interface entries |
 | `RIB_find_files_provider` | 🟢 Implemented | Delegates to RIB_enumerate_providers |
-| `AIL_open_ASI_provider` | 🟢 Implemented | Writes buffer to a temp file (%TEMP% via GetTempPathW, $TMPDIR elsewhere, cwd as last resort) and loads it via Provider.load |
-| `AIL_close_ASI_provider` | 🟢 Implemented | |
+| `AIL_open_ASI_provider` | 🟢 Implemented | Writes buffer to a temp file (%TEMP% via GetTempPathW, $TMPDIR elsewhere, cwd as last resort) and loads it via Provider.load. An image already open is not loaded again: the same bytes (matched by content) return the module already loaded, and each open of it owes a close |
+| `AIL_close_ASI_provider` | 🟢 Implemented | Unloads the module and deletes its temp image when the close answers the last open of that image |
 | `AIL_ASI_provider_attribute` | 🟢 Implemented | Searches registered interfaces |
 
 ## Digital Audio Driver

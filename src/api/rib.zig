@@ -372,11 +372,30 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
         openmiles.setLastError("Failed to record temp path for ASI provider");
         return null;
     };
-    return p;
+    // The same image opened twice is one module. A retried open (a game that
+    // re-opens to check what it has, a wrapper that opens twice) would
+    // otherwise write a second temp image, load a second copy of the same
+    // module, and answer every provider query through it twice, with both
+    // copies held until the process exits. The copy built above is dropped and
+    // the live provider is handed back with a reference taken for this open, so
+    // the second close is still owed a close of its own (see
+    // Provider.releaseImage). The key is the image content, so the same bytes
+    // reached through a different buffer match.
+    const live = p.publishImage(openmiles.Provider.imageKeyOf(raw));
+    if (live != p) {
+        // This provider was never published, so freeing it drops its module and
+        // deletes the temp image written for it, leaving the live one untouched.
+        p.deinit();
+    }
+    return live;
 }
 pub fn AIL_close_ASI_provider(provider_opt: ?*Provider) callconv(.winapi) void {
     const provider = provider_opt orelse return;
     log("AIL_close_ASI_provider(provider={*})\n", .{provider});
+    // N opens of one image are N closes: only the last unloads the module and
+    // deletes its temp image, exactly as the open handed back the same handle
+    // each time.
+    if (!provider.releaseImage()) return;
     provider.deinit();
 }
 pub fn AIL_ASI_provider_attribute(provider_opt: ?*Provider, name: [*:0]const u8) callconv(.winapi) ?*anyopaque {

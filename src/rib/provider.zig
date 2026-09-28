@@ -96,6 +96,11 @@ pub const Provider = struct {
     // the same plugin is matched against, so a rescan of a directory cannot
     // register one module twice.
     source_path: ?[:0]u8 = null,
+    // The image this provider was opened from (AIL_open_ASI_provider), and the
+    // opens of it that no close has answered yet. Null for a provider loaded
+    // from a file on disk. See publishImage / releaseImage.
+    image_key: ?ImageKey = null,
+    image_refs: u32 = 0,
     user_data: [8]usize = [_]usize{0} ** 8,
     system_data: [8]usize = [_]usize{0} ** 8,
     // Source of the interface handles handed to the plugin. Monotonic and
@@ -179,6 +184,14 @@ pub const Provider = struct {
     }
 
     pub fn deinit(self: *Provider) void {
+        // Out of the open-image registry before anything else: whatever frees
+        // this provider, a later open of the same bytes must not be answered
+        // with it. The close path (AIL_close_ASI_provider) has already taken the
+        // last reference by the time it gets here, and this covers every other
+        // route, including one that frees it while an open is still out.
+        g_image_mutex.lockUncancelable(root.io);
+        self.unlinkFromImageRegistryLocked();
+        g_image_mutex.unlock(root.io);
         if (self.lib) |*lib| {
             if (lib.lookup(RIB_Main_ptr, "RIB_Main")) |rib_main| {
                 // The unload RIB_Main gets the same "which provider am I"
@@ -293,6 +306,23 @@ pub const Provider = struct {
         return iface;
     }
 
+    /// How many images are open right now. Not an SDK surface: the test suite
+    /// reads it to prove a second open of one image left one module behind, and
+    /// that a close of every open empties the registry.
+    pub fn openImageCount() usize {
+        g_image_mutex.lockUncancelable(root.io);
+        defer g_image_mutex.unlock(root.io);
+        return g_image_providers.items.len;
+    }
+
+    /// The identity an in-memory plugin image is opened under, from its bytes.
+    pub fn imageKeyOf(image: []const u8) ImageKey {
+        return .{
+            .lo = std.hash.Wyhash.hash(0, image),
+            .hi = std.hash.Wyhash.hash(0x9e3779b97f4a7c15, image),
+        };
+    }
+
     /// True when `path` names a module this provider was already loaded from.
     /// The comparison is exact, so callers pass the resolved form (see
     /// fs_compat.maybeResolveCaseInsensitivePath) and a differently cased name
@@ -300,6 +330,72 @@ pub const Provider = struct {
     pub fn matchesSourcePath(self: *const Provider, path: []const u8) bool {
         const sp = self.source_path orelse return false;
         return std.mem.eql(u8, sp, path);
+    }
+
+    /// Publish this provider as the one for the image `key` names, or hand
+    /// back the provider already loaded from those bytes with a reference
+    /// taken for this open. The caller unloads the copy it built and returns
+    /// the one this returns.
+    ///
+    /// The whole check-then-act pair runs under one lock, which is what makes
+    /// two opens of one image one module: writing the temp image and running
+    /// the plugin's RIB_Main takes arbitrarily long, so two threads opening
+    /// the same image both get past any check made before it. A registry that
+    /// could not be consulted until after the module was loaded would have
+    /// already paid for the second copy, which is what this answers for.
+    pub fn publishImage(self: *Provider, key: ImageKey) *Provider {
+        g_image_mutex.lockUncancelable(root.io);
+        defer g_image_mutex.unlock(root.io);
+        for (g_image_providers.items) |p| {
+            if (p.image_key) |k| {
+                if (std.meta.eql(k, key)) {
+                    p.image_refs += 1;
+                    return p;
+                }
+            }
+        }
+        self.image_key = key;
+        self.image_refs = 1;
+        g_image_providers.append(image_registry_alloc, self) catch {
+            // Untracked, but still answerable by the handle the caller holds:
+            // this open is a real provider, and the only thing lost is that a
+            // later open of the same image builds a second copy. Say so rather
+            // than fail an open that succeeded.
+            root.log("Provider.publishImage: cannot track the image provider; a repeated open of these bytes will load the module again\n", .{});
+        };
+        return self;
+    }
+
+    /// Drop one open of an in-memory image and report whether that was the
+    /// last one, which is when the module is unloaded and its temp image
+    /// deleted. A provider with no image (loaded from a file, or never
+    /// published) reports true straight away, so the close of one is the close
+    /// of the other.
+    pub fn releaseImage(self: *Provider) bool {
+        g_image_mutex.lockUncancelable(root.io);
+        defer g_image_mutex.unlock(root.io);
+        if (self.image_key == null) return true;
+        if (self.image_refs > 1) {
+            self.image_refs -= 1;
+            return false;
+        }
+        self.unlinkFromImageRegistryLocked();
+        return true;
+    }
+
+    /// Take this provider out of the open-image registry, whether that was the
+    /// last close or a teardown freeing it outright. Leaving a freed provider
+    /// in the list would let the next open of those bytes be handed the freed
+    /// one. The caller holds g_image_mutex.
+    fn unlinkFromImageRegistryLocked(self: *Provider) void {
+        for (g_image_providers.items, 0..) |p, i| {
+            if (p == self) {
+                _ = g_image_providers.swapRemove(i);
+                break;
+            }
+        }
+        self.image_key = null;
+        self.image_refs = 0;
     }
 };
 
@@ -402,3 +498,30 @@ pub const Interface = struct {
 };
 
 pub const HPROVIDER = ?*anyopaque;
+
+/// Identity of an in-memory plugin image, and the key the open registry dedups
+/// on. Two 64-bit hashes over the whole image: the same bytes are the same
+/// module however they were reached, and a different image that happened to
+/// land on the address an earlier one used is not the same module, so the key
+/// is the content and not the caller's buffer pointer. A hash is used rather
+/// than a byte compare so the registry holds no copy of every image it has
+/// seen; two independent hashes is what makes a collision, which would hand
+/// back the wrong module, out of reach.
+pub const ImageKey = struct {
+    lo: u64,
+    hi: u64,
+};
+
+// Providers currently open from an in-memory image. One entry per live open
+// group, not per open: a retried open of one image (a game that re-opens after
+// a failed query, a wrapper that opens to check and opens again) is answered
+// from here with the module already loaded, where every other load path in
+// this engine dedups on identity (a resolved plugin path, a soundbank file, a
+// soundfont). Bounded by the live providers, since the entry goes when the
+// last close answers it. The backing store uses a process-stable allocator,
+// independent of the provider's own (which in tests is the leak-checked test
+// allocator), for the reason soundbank's registry does: the list outlives any
+// one provider, and the test allocator would report its capacity as a leak.
+var g_image_providers: std.ArrayListUnmanaged(*Provider) = .empty;
+const image_registry_alloc = std.heap.page_allocator;
+var g_image_mutex: std.Io.Mutex = .init;

@@ -77,6 +77,14 @@ All notable changes to OpenMiles are recorded here. The format follows
   resolved, which failed `make check-threat-model` and with it `make lint` and
   the CI lint step. The anchors are refreshed to the lines the named code now
   sits on.
+- `AIL_open_ASI_provider` loading a second copy of a module already open from
+  the same image. Every other load path dedups on identity (a resolved plugin
+  path, a soundbank file, a soundfont); this one had none, so a retried open
+  wrote a second temp image, loaded a second copy, and answered provider
+  queries through both until the process ended. The image's content is now the
+  identity, a repeat open is answered with the module already loaded, and N
+  opens need N closes: the module is unloaded and its temp image deleted by the
+  last `AIL_close_ASI_provider`.
 - Three claims in `docs/` that the code contradicts. `docs/EXPORT_PARITY.md`
   put the 6.5/6.6-only exclusion pair in the same ver 65-66 group as the ten
   other functions added in that pass; `src/main.zig` gates
