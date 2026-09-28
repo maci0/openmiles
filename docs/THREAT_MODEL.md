@@ -25,9 +25,9 @@ to set both.
 
 | # | Threat | Boundary | Impact | Status |
 |---|--------|----------|--------|--------|
-| 1 | Untrusted plugin image written to the temp directory and `LoadLibrary`'d | file/env to process | Code execution as the game user | Mitigated: unpredictable name, exclusive create (`src/api/rib.zig:290 randomNameBytes`, `src/api/rib.zig:309 exclusive`) |
+| 1 | Untrusted plugin image written to the temp directory and `LoadLibrary`'d | file/env to process | Code execution as the game user | Mitigated: unpredictable name, exclusive create (`src/api/rib.zig:290 randomNameBytes`, `src/api/rib.zig:314 exclusive`) |
 | 2 | `.asi`/`.m3d`/`.flt` files in the game directory, or in a game-named redist directory, loaded and executed at startup | file to process | Code execution as the game user | Unmitigated by design: the host game's own directory is trusted. Listed in [Deployment](#4-deployment-artifact-boundary) |
-| 3 | `RIB_load_provider_library` loads a game-named path as code, skipping every check the directory scans apply | game to DLL | Code execution as the game user, from any extension and any path | Unmitigated: reaches the same `Provider.load` with no extension allowlist, no filename check, and no already-loaded dedup (`src/api/rib.zig:431 RIB_load_provider_library`) |
+| 3 | `RIB_load_provider_library` loads a game-named path as code, skipping every check the directory scans apply | game to DLL | Code execution as the game user, from any extension and any path | Unmitigated: reaches the same `Provider.load` with no extension allowlist, no filename check, and no already-loaded dedup (`src/api/rib.zig:446 RIB_load_provider_library`) |
 | 4 | A plugin image parsed by the ELF fixup on a Linux build with no libc, or with static musl (`src/utils/dynlib.zig:28 needs_elf_fixup`, `src/utils/dynlib.zig:84 applyElfFixups`) | file to process | Crash, in-process memory corruption | Partial: program header table, dynamic-section walk, and `DT_RELA` slots bounded in `u64`/image space (`src/utils/dynlib.zig:71 programHeaderTableFits`, `src/utils/dynlib.zig:119 dyn_entries`) |
 | 5 | `AIL_WAV_file_write` creates or truncates a game-named path | game to DLL, DLL to disk | Overwrite of any file the game user can write | Unmitigated by ABI necessity (`src/api/digital.zig:1037 AIL_WAV_file_write`) |
 | 6 | Malformed soundbank / event bytecode (`.BANK`) | file to process | Crash, in-process memory corruption, audio DoS | Partial: bounds chokepoint in `src/engine/soundbank.zig:265 rdU32`, step decode bounded in `src/engine/event.zig:495 copyString`) |
@@ -163,7 +163,7 @@ rejected one is reported on stderr with the reason.
   A `TMPDIR` that is empty, too long, or relative is refused
   (`src/api/rib.zig:215 reportTempDir`), and a set one that does not exist falls
   through to the cwd-relative `./om_asi_*.dll` form
-  (`src/api/rib.zig:303 om_asi_`), which lands in the game directory instead.
+  (`src/api/rib.zig:304 om_asi_`), which lands in the game directory instead.
   Unmitigated.
 - `GetTempPathW` (`src/api/rib.zig:165 GetTempPathW`): on Windows, `TEMP` is
   per-user, so the write is confined to the user's own profile. A directory that
@@ -196,7 +196,7 @@ Three entry points load plugin code, and all three end at the same
 3. `RIB_load_provider_library` (`src/api/rib.zig:431 RIB_load_provider_library`,
    and its stdcall alias `src/api/rib.zig:720 RIB_load_provider_library_std`)
    calls `Provider.load` directly on a game-supplied path
-   (`src/api/rib.zig:418 std.mem.span`). This path is exported from v4 through
+   (`src/api/rib.zig:433 std.mem.span`). This path is exported from v4 through
    v9 and is reachable from a stock game with no scan, no `AIL_startup`, and no
    redist directory configured. See [Plugin load without a scan](#4a-plugin-load-without-a-scan).
 
@@ -274,7 +274,7 @@ Controls present:
   fails closed rather than falling back to a guessable name
   (`src/root.zig:1392 randomNameBytes`, called from
   `src/api/rib.zig:290 randomNameBytes`).
-- The file is created with `.exclusive = true` (`src/api/rib.zig:309 exclusive`),
+- The file is created with `.exclusive = true` (`src/api/rib.zig:314 exclusive`),
   so a planted name cannot be opened for overwrite and a race replacement loses.
 - The file is deleted after the module is unloaded (`src/rib/provider.zig:194 deinit`).
   The removal goes through the same fault seam as the rest of the file I/O
@@ -289,7 +289,7 @@ Gaps:
   `LOCKFILE_EXCLUSIVE` handle kept open across the load to close this.
 - The `TMPDIR` environment input above chooses the directory.
 - The non-Windows fallback writes `./om_asi_*.dll` into the current directory
-  (`src/api/rib.zig:303 om_asi_`), which is the game directory and therefore a
+  (`src/api/rib.zig:304 om_asi_`), which is the game directory and therefore a
   more visible location than a temp directory.
 - The image is only checked for an `MZ` signature before being written and loaded
   (`src/api/rib.zig:245 raw`); no further validation is possible, since
@@ -436,7 +436,7 @@ something other than a control in this tree.
    target; a documented deployment note is the available mitigation.
 2. `RIB_load_provider_library` loads a game-named path as code with no extension
    allowlist, no filename safety check, and no already-loaded dedup
-   (`src/api/rib.zig:431 RIB_load_provider_library`), so it is a code-execution
+   (`src/api/rib.zig:446 RIB_load_provider_library`), so it is a code-execution
    path with fewer controls than either directory scan. See
    [Plugin load without a scan](#4a-plugin-load-without-a-scan).
 3. `AIL_WAV_file_write` truncates and overwrites a caller-named path

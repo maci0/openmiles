@@ -299,6 +299,11 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     var id = std.mem.readInt(u64, &id_bytes, .little);
     const name_attempts = 4;
     for (0..name_attempts) |_| {
+        // Bounded, unlike the loop this replaced: an occupied name drew a fresh
+        // id and retried forever, so a temp directory where every candidate is
+        // taken (a pre-created file per name, a stub filesystem) spun here and
+        // the "no free temp name" report below could never be reached.
+        var occupied: u32 = 0;
         while (true) {
             path = if (in_tmp_dir) std.fmt.bufPrintZ(&path_buf, "{s}om_asi_{x:016}.dll", .{ tmp_dir.?, id }) catch |err| {
                 log("AIL_open_ASI_provider: cannot format temp path: {any}\n", .{err});
@@ -314,8 +319,18 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
                 created = f;
                 break;
             } else |abs_err| switch (abs_err) {
-                // An occupied name retries with a fresh id.
+                // An occupied name retries with a fresh id, and the retry stops
+                // at name_attempts: the fallback create below is process-relative,
+                // so the temp path left in `path` has to be rebuilt against the
+                // game directory first, exactly as the unusable-directory arm
+                // does.
                 error.PathAlreadyExists => {
+                    occupied += 1;
+                    if (occupied >= name_attempts) {
+                        log("AIL_open_ASI_provider: {d} temp names in '{s}' are all occupied; writing the image to the current directory\n", .{ occupied, tmp_dir.? });
+                        in_tmp_dir = false;
+                        break;
+                    }
                     id +%= 1;
                     continue;
                 },

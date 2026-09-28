@@ -302,7 +302,13 @@ fn evictOldestWithLabel(label: []const u8, lim: u32) void {
     matches.ensureTotalCapacity(openmiles.global_allocator, g_instances.items.len) catch {};
     for (g_instances.items) |inst| {
         if (!instanceHasLabel(inst, label)) continue;
-        matches.append(openmiles.global_allocator, inst) catch return;
+        // A scan that cannot finish leaves the cap unenforced and the new sound
+        // pushes the instance count past it, so say the limit was not applied
+        // rather than let the caller read a bounded count as a true one.
+        matches.append(openmiles.global_allocator, inst) catch {
+            openmiles.setLastErrorFmt("Cannot enforce the concurrent-sound limit for label '{s}'", .{label});
+            return;
+        };
     }
     // Already under the cap: nothing to evict.
     const cap: usize = lim;

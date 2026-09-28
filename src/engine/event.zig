@@ -7,6 +7,9 @@
 //! fields into the caller's scratch buffer (after the struct) as the SDK does.
 
 const std = @import("std");
+// The logger directly, not through root: root imports this file, so a root
+// import here would be a cycle. The logger is a leaf.
+const log = @import("../utils/logger.zig").log;
 
 /// Step-type enum (values as the SDK's mss.h defines them); the on-wire char is value + '0'.
 pub const StepType = enum(i32) {
@@ -193,7 +196,7 @@ pub const EventConstruct = struct {
     }
     fn printType(self: *EventConstruct, t: StepType) void {
         self.bytes.append(self.allocator, @intCast(@as(i32, @intFromEnum(t)) + '0')) catch {
-            self.failed = true;
+            self.markFailed();
         };
     }
     fn print(self: *EventConstruct, comptime fmt: []const u8, args: anytype) void {
@@ -201,17 +204,25 @@ pub const EventConstruct = struct {
         // An overflow of the scratch buffer is a construction failure like any
         // other: a field silently dropped would decode as garbage downstream.
         const s = std.fmt.bufPrint(&buf, fmt, args) catch {
-            self.failed = true;
+            self.markFailed();
             return;
         };
         self.bytes.appendSlice(self.allocator, s) catch {
-            self.failed = true;
+            self.markFailed();
         };
     }
     fn raw(self: *EventConstruct, s: []const u8) void {
         self.bytes.appendSlice(self.allocator, s) catch {
-            self.failed = true;
+            self.markFailed();
         };
+    }
+    /// Record that the build cannot be completed and say why, once: the flag
+    /// alone left the operator with a step builder that returned 0 and a
+    /// close() that returned null, with no statement of the cause.
+    fn markFailed(self: *EventConstruct) void {
+        if (self.failed) return;
+        self.failed = true;
+        log("EventConstruct: cannot append to the event string ({d} bytes so far); the step is dropped and close() will refuse the truncated build\n", .{self.bytes.items.len});
     }
     pub fn addComment(self: *EventConstruct, text: []const u8) bool {
         return self.addOneString(.comment, text);
@@ -219,14 +230,18 @@ pub const EventConstruct = struct {
     pub fn addClearState(self: *EventConstruct) bool {
         self.printType(.clear_state);
         self.raw(";");
-        return true;
+        // A step that could not be appended is not a step: reporting success
+        // would hand the caller a 1 for a step the build never took.
+        return !self.failed;
     }
     pub fn addOneString(self: *EventConstruct, t: StepType, s: []const u8) bool {
         self.printType(t);
         self.raw(";");
         self.raw(s);
         self.raw(";");
-        return true;
+        // A step that could not be appended is not a step: reporting success
+        // would hand the caller a 1 for a step the build never took.
+        return !self.failed;
     }
     // --- field encoders (mirror the SDK AIL_mem_print* calls and the decoder) ---
     // A string field: content followed by the ';' separator (AIL_mem_prints + ';').
@@ -291,7 +306,9 @@ pub const EventConstruct = struct {
         self.raw(";");
         self.fieldCStr(lib);
         self.fieldCStr(sounds);
-        return true;
+        // A step that could not be appended is not a step: reporting success
+        // would hand the caller a 1 for a step the build never took.
+        return !self.failed;
     }
     pub fn addApplyEnv(self: *EventConstruct, name: ?*const anyopaque, is_dynamic: i32) bool {
         if (name == null) return false;
@@ -299,7 +316,9 @@ pub const EventConstruct = struct {
         self.raw(";");
         self.fieldCStr(name);
         self.fieldDigit(@as(i32, if (is_dynamic != 0) 1 else 0));
-        return true;
+        // A step that could not be appended is not a step: reporting success
+        // would hand the caller a 1 for a step the build never took.
+        return !self.failed;
     }
     pub fn addSoundLimit(self: *EventConstruct, name: ?*const anyopaque, limits: ?*const anyopaque) bool {
         if (name == null) return false;
@@ -307,7 +326,9 @@ pub const EventConstruct = struct {
         self.raw(";");
         self.fieldCStr(name);
         self.fieldCStr(limits);
-        return true;
+        // A step that could not be appended is not a step: reporting success
+        // would hand the caller a 1 for a step the build never took.
+        return !self.failed;
     }
     pub fn addPersist(self: *EventConstruct, preset: ?*const anyopaque, name: ?*const anyopaque, labels: ?*const anyopaque, is_dynamic: i32) bool {
         if (preset == null) return false;
@@ -317,7 +338,9 @@ pub const EventConstruct = struct {
         self.fieldCStr(name);
         self.fieldCStr(labels);
         self.fieldDigit(is_dynamic);
-        return true;
+        // A step that could not be appended is not a step: reporting success
+        // would hand the caller a 1 for a step the build never took.
+        return !self.failed;
     }
     pub fn addRamp(self: *EventConstruct, name: ?*const anyopaque, labels: ?*const anyopaque, time: f32, target: ?*const anyopaque, type_: i32, apply_to_new: i32, interp: i32) bool {
         if (name == null) return false;
@@ -330,7 +353,9 @@ pub const EventConstruct = struct {
         self.fieldDigit(type_);
         self.fieldDigit(apply_to_new);
         self.fieldDigit(interp);
-        return true;
+        // A step that could not be appended is not a step: reporting success
+        // would hand the caller a 1 for a step the build never took.
+        return !self.failed;
     }
     pub fn addControlSounds(self: *EventConstruct, labels: ?*const anyopaque, marker_start: ?*const anyopaque, marker_end: ?*const anyopaque, position: ?*const anyopaque, preset: ?*const anyopaque, loop_count: u8, type_: i32, fade_out: f32, preset_apply: i32) bool {
         self.printType(.control_sounds);
@@ -344,7 +369,9 @@ pub const EventConstruct = struct {
         self.fieldDigit(type_);
         self.fieldFloat(fade_out);
         self.fieldDigit(preset_apply);
-        return true;
+        // A step that could not be appended is not a step: reporting success
+        // would hand the caller a 1 for a step the build never took.
+        return !self.failed;
     }
     pub fn addSetLfo(self: *EventConstruct, name: ?*const anyopaque, base: ?*const anyopaque, amplitude: ?*const anyopaque, freq: ?*const anyopaque, invert: i32, polarity: i32, waveform: i32, duty_cycle: i32, is_lfo: i32) bool {
         if (name == null) return false;
@@ -361,7 +388,9 @@ pub const EventConstruct = struct {
         self.fieldDigit(waveform & 3);
         self.fieldUChar(@truncate(@as(u32, @bitCast(duty_cycle))));
         self.fieldDigit(@as(i32, if (is_lfo != 0) 1 else 0));
-        return true;
+        // A step that could not be appended is not a step: reporting success
+        // would hand the caller a 1 for a step the build never took.
+        return !self.failed;
     }
     pub fn addMoveVar(self: *EventConstruct, name: ?*const anyopaque, times: ?[*]const f32, interp_types: ?[*]const i32, values: ?[*]const f32) bool {
         // Validate before emitting: a rejected step must leave the stream
@@ -380,7 +409,9 @@ pub const EventConstruct = struct {
         self.fieldFloat(v[0]);
         self.fieldFloat(v[1]);
         self.fieldFloat(v[2]);
-        return true;
+        // A step that could not be appended is not a step: reporting success
+        // would hand the caller a 1 for a step the build never took.
+        return !self.failed;
     }
     pub fn addSetBlend(self: *EventConstruct, name: ?*const anyopaque, sound_count: i32, in_min: ?[*]const f32, in_max: ?[*]const f32, out_min: ?[*]const f32, out_max: ?[*]const f32, min_p: ?[*]const f32, max_p: ?[*]const f32) bool {
         const imin = in_min orelse return false;
@@ -403,7 +434,9 @@ pub const EventConstruct = struct {
             self.fieldFloat(mnp[i]);
             self.fieldFloat(mxp[i]);
         }
-        return true;
+        // A step that could not be appended is not a step: reporting success
+        // would hand the caller a 1 for a step the build never took.
+        return !self.failed;
     }
     pub fn addStartSound(self: *EventConstruct, args: StartSoundArgs) bool {
         if (args.soundname == null) return false;
@@ -432,7 +465,9 @@ pub const EventConstruct = struct {
         self.fieldFloat(args.fadeintime);
         self.fieldDigit(args.evictiontype);
         self.fieldDigit(args.selecttype);
-        return true;
+        // A step that could not be appended is not a step: reporting success
+        // would hand the caller a 1 for a step the build never took.
+        return !self.failed;
     }
     pub fn close(self: *EventConstruct) ?[*]u8 {
         // A build that hit an allocation failure is structurally truncated;
@@ -958,4 +993,77 @@ test "a cache_sounds namelist that cannot fit the scratch buffer is refused" {
         const s = std.mem.span(@as([*:0]const u8, @ptrCast(p.?)));
         try testing.expectEqualStrings(expected[i], s);
     }
+}
+
+/// Hands out memory until `budget` allocations have succeeded, then fails every
+/// one. Sized so a real EventConstruct can be created and built a step or two
+/// before it runs out, which is the state a builder has to report.
+const BudgetAllocator = struct {
+    const State = struct {
+        var remaining: usize = 0;
+        var live: usize = 0;
+    };
+
+    const VTable = std.mem.Allocator.VTable{
+        .alloc = struct {
+            fn f(_: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+                if (State.remaining == 0) return null;
+                State.remaining -= 1;
+                const p = std.heap.page_allocator.rawAlloc(len, alignment, ret_addr) orelse return null;
+                State.live += 1;
+                return p;
+            }
+        }.f,
+        .resize = struct {
+            fn f(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) bool {
+                return false;
+            }
+        }.f,
+        .remap = struct {
+            fn f(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
+                return null;
+            }
+        }.f,
+        .free = struct {
+            fn f(_: *anyopaque, memory: []u8, alignment: std.mem.Alignment, ret_addr: usize) void {
+                State.live -= 1;
+                std.heap.page_allocator.rawFree(memory, alignment, ret_addr);
+            }
+        }.f,
+    };
+
+    fn allocator(budget: usize) std.mem.Allocator {
+        State.remaining = budget;
+        State.live = 0;
+        return .{ .ptr = undefined, .vtable = &VTable };
+    }
+};
+
+test "a step builder reports the failure when the build cannot hold the step" {
+    const testing = std.testing;
+    const alloc = BudgetAllocator.allocator(2);
+    // Budget covers the construct and its buffer; the buffer is then released
+    // so the next append has to allocate, and cannot. That is the state a
+    // builder has to report rather than a success for a step the build never
+    // took, and it is what close() then has to refuse instead of handing back
+    // a truncated event string for the VM to decode as garbage.
+    const e = EventConstruct.create(alloc) orelse return error.ConstructUnexpectedlySucceeded;
+    e.bytes.clearAndFree(alloc);
+    BudgetAllocator.State.remaining = 0;
+    try testing.expect(!e.addClearState());
+    try testing.expect(!e.addComment("hello"));
+    try testing.expect(!e.addOneString(.exec_event, "boom"));
+    try testing.expect(!e.addCacheSounds(.cache_sounds, "lib", "a:b"));
+    try testing.expectEqual(@as(?[*]u8, null), e.close());
+    try testing.expectEqual(@as(usize, 0), BudgetAllocator.State.live);
+}
+
+test "a step builder reports success on a build that can hold the step" {
+    const testing = std.testing;
+    const e = EventConstruct.create(testing.allocator) orelse return error.ConstructRefused;
+    defer e.deinit();
+    try testing.expect(e.addClearState());
+    try testing.expect(e.addComment("hello"));
+    try testing.expect(e.addOneString(.exec_event, "boom"));
+    try testing.expectEqual(false, e.failed);
 }

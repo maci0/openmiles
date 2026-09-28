@@ -642,7 +642,15 @@ pub const Sequence = struct {
             return error.DataSourceInitFailed;
         }
 
-        root.registerSequence(self);
+        // Track the handle before handing it back: closeMidiDriver stops the
+        // sequences it holds before uninitializing the engine, so a sequence
+        // missing from that table would leave its sound attached to an engine
+        // that is being torn down under it.
+        if (!root.registerSequence(self)) {
+            ma.ma_data_source_uninit(&self.data_source);
+            driver.allocator.destroy(self);
+            return error.SequenceUntrackable;
+        }
         return self;
     }
 

@@ -999,12 +999,18 @@ pub fn isKnownDriver(ptr: *anyopaque) bool {
 var global_sequences: std.ArrayList(*Sequence) = .empty;
 var global_sequences_mutex: std.Io.Mutex = .init;
 
-pub fn registerSequence(seq: *Sequence) void {
+/// Returns false when the sequence could not be tracked. The caller must then
+/// tear the sequence down instead of handing it back: an untracked sequence is
+/// skipped by closeMidiDriver, so its sound stays attached to an engine that is
+/// about to be uninitialized.
+pub fn registerSequence(seq: *Sequence) bool {
     global_sequences_mutex.lockUncancelable(io);
     defer global_sequences_mutex.unlock(io);
     global_sequences.append(global_allocator, seq) catch {
-        log("registerSequence: allocation failed, sequence will not be tracked\n", .{});
+        log("registerSequence: sequence table allocation failed; this handle cannot be tracked\n", .{});
+        return false;
     };
+    return true;
 }
 
 pub fn unregisterSequence(seq: *Sequence) void {
@@ -1465,6 +1471,7 @@ pub fn getUsCount64() u64 {
 // lateral dependencies between api/ modules. AIL_quick_shutdown only closes the two drivers; shutdown() also releases the timers, providers, and logger.
 
 pub fn startup() void {
+    clearLastError();
     if (startup_provider.load(.acquire) != null) return;
     // Second execution of the same startup, whether it is a retry on the same
     // thread or a second thread racing the first: the check above runs again
@@ -1478,6 +1485,11 @@ pub fn startup() void {
     log("startup: Provider.init\n", .{});
     const p = Provider.init(global_allocator) catch {
         log("startup: Provider.init FAILED\n", .{});
+        // AIL_startup returns a use count whatever this did, so a bring-up that
+        // never happened would look like a success and every later provider
+        // query would answer "absent" with nothing saying why. AIL_last_error is
+        // the one channel both startup entry points share.
+        setLastError("Failed to initialize the startup provider");
         return;
     };
     log("startup: get_ASI_INTERFACE\n", .{});
@@ -1487,15 +1499,18 @@ pub fn startup() void {
     _ = p.registerInterface("ASI codec", @intCast(src.len), &src) catch {
         log("startup: registerInterface FAILED\n", .{});
         p.deinit();
+        setLastError("Failed to register the built-in ASI codec interface");
         return;
     };
     // Also register the same built-in decoder under "ASI stream" — games
     // query RIB_enumerate_providers("ASI stream", ...) to decide whether
     // MP3/OGG streaming is available.  The built-in miniaudio decoder
     // handles MP3, OGG, WAV and FLAC natively, so no external .asi plugins
-    // are required.
+    // are required. Not fatal: streaming is a subset of what the codec
+    // interface above already serves, so the provider is published either way.
     _ = p.registerInterface("ASI stream", @intCast(src.len), &src) catch {
-        log("startup: registerInterface ASI stream FAILED\n", .{});
+        log("startup: registerInterface ASI stream FAILED; streaming formats are unavailable\n", .{});
+        setLastError("Streaming ASI interface unavailable");
     };
     startup_provider.store(p, .release);
     // Scan for external plugins (.asi, .m3d, .flt) — games may ship
@@ -1595,6 +1610,10 @@ pub fn closeMidiDriver(driver: *MidiDriver) void {
     global_sequences_mutex.lockUncancelable(io);
     const snapshot = global_allocator.dupe(*Sequence, global_sequences.items) catch {
         // Fallback: stop sequences while holding the lock (less ideal but correct).
+        // The sequences are still stopped, so the engine teardown below is safe;
+        // what changes is that the driver close now blocks any thread that
+        // allocates or releases a sequence handle for the duration.
+        log("closeMidiDriver: cannot snapshot the sequence list; the driver's sequences are stopped under the lock\n", .{});
         for (global_sequences.items) |seq| {
             if (seq.driver == driver) seq.stopAndUninit();
         }

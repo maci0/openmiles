@@ -790,6 +790,11 @@ fn widenU8Prefix(part: []MixCursor, dest_points: usize, dest_rate: u64) void {
         const total = c.src.points * @as(usize, c.src.channels);
         const needed: usize = @min(last_pos *| c.src.channels +| c.src.channels, total);
         const buf = openmiles.global_allocator.alloc(i16, needed) catch {
+            // Dropping the source is the only option left (the mix reads
+            // 16-bit), but a source that vanishes from a mix with nothing said
+            // reads as a source that was never queued, so name the sample count
+            // the allocation was for.
+            log("AILMIXINFO mixer: cannot allocate {d} bytes to widen an 8-bit source; that source is omitted from this mix\n", .{needed * @sizeOf(i16)});
             c.src.points = 0; // exhausted: the mix loop drops it, owning nothing
             continue;
         };
