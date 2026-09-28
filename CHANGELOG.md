@@ -129,6 +129,15 @@ All notable changes to OpenMiles are recorded here. The format follows
   versions are read from the Makefile rather than repeated in the workflow.
 - `make lint` lints `.github` rather than `.github/workflows`, so the dependabot
   config is checked beside the workflows it steers.
+- The event-system completion sweep is a single pass over the live instances.
+  `MilesGetEventSystemState` took the count of still-playing instances from
+  the sweep rather than walking the list a second time, and
+  `MilesEnumerateSoundInstances` expires each instance as it visits it against
+  one clock reading rather than sweeping in a pass of its own, so a game
+  polling state per frame over a few hundred live instances no longer reads the
+  clock twice and sweeps the list twice per poll. Every instance is still
+  visited and expired on every call, so a walk handed out in one call and
+  resumed in the next sees the same statuses the separate sweep left behind.
 - uv, which installs the two linters, is pinned to a `UV_VERSION` in the
   Makefile. `ci.yml` repeated a version of its own and `release.yml` repeated
   it a second time, and nothing compared the two, so a bump in one left the
@@ -340,6 +349,68 @@ All notable changes to OpenMiles are recorded here. The format follows
   also carried `mss.h` and `SBOM.cdx.json` since the header started shipping, so
   a reader had no way to learn from it that the archive holds the header they
   compile against.
+- The Miles event-system registries were unguarded. The instance list, the id
+  counter, the sound cache, the persists, the label limits and the system list
+  are all process-global and all reachable from a Miles entry point, which a game
+  may call from any thread, and none of the containers was safe under that
+  split: an `ArrayListUnmanaged` append and a `StringHashMap` put each write a
+  length and a capacity beside the storage they point at, so two threads in one
+  list corrupt the heap rather than merely losing an entry; the id counter is a
+  read-modify-write, so two instances took the same id and the resumable
+  enumerate walk skipped and repeated entries; the system list walk read a
+  half-linked list and handed back a freed system. One lock covers all of it,
+  held outermost, since the leaf bank lookups take soundbank's registry lock and
+  that file never calls back here. `MilesStartupEventSystem` now publishes
+  under it, so two threads starting a system cannot both install one and strand
+  the loser's handle where the shutdown walk cannot reach it.
+- `RIB_type_string` and the v8 `AIL_ftoa` returned a pointer to a process-global
+  buffer, so a game reading the string on one thread while another formatted a
+  value had its characters rewritten mid-read. Both buffers are per-thread now,
+  which keeps the SDK's own last-call-wins contract and stops the two threads
+  from sharing it.
+- `AIL_shutdown` closed one MIDI driver. Every `MidiDriver.init` took the same
+  "current driver" slot, so the second device a game opened (`AIL_DLS_open`, a
+  wave synthesizer) displaced the one it opened first and only the slot was
+  reachable at teardown. The displaced driver kept its allocation, its soundfont
+  and its sequences for the life of the process. Every live MIDI driver is
+  tracked and closed at shutdown, as the digital table already was.
+- `MilesShutdownEventSystem` cleared the instance list retaining its capacity,
+  which handed the backing array to nobody: every session that started a sound
+  leaked it. The list is returned to the allocator that grew it, and left as the
+  empty slice the enumeration and the label eviction need rather than the
+  undefined pointer `deinit` leaves.
+- Every open failure reported "File not found", so an operator hunting a
+  permission denial, a host-rejected name, or a path that is a directory was
+  sent after a file that was there all along. `AIL_file_error` now names the
+  cases a caller can act on, and carries the error name for the rest rather than
+  folding them into absence.
+- A failed audio-node attach was ignored, so the bus was silenced or the sample
+  left dry while every later query reported the effect as installed and running.
+  A `MixBus` slot whose node cannot take the bus's output is unlinked, the node
+  destroyed and the slot left empty, and a `Sample.setReverb` whose delay node
+  cannot be wired puts the sound back on the endpoint and drops the node. The
+  queries read an empty slot as "effect off", which is now the truth.
+- `Filter.setCutoff` and the "Order" attribute recorded the new value and left
+  the LPF node on the old configuration when the rewire failed, so every later
+  read reported a filter that was not in effect. Both keep the previous value and
+  name the refusal in the log.
+- `AIL_set_redist_directory` measured its path against a byte budget of 256 and
+  refused anything longer. The SDK's buffer holds MAX_PATH, and one UTF-16 unit
+  spells up to three UTF-8 bytes, so 200 CJK characters is 200 units and 600
+  bytes: a path half the Windows limit long was reported as too long, the
+  previous directory was kept, and no plugin was loaded. The bound is now
+  MAX_PATH in UTF-16 units, with the store sized to hold it.
+- `AIL_set_sample_playback_delay` scheduled the voice from the miniaudio engine
+  counter, which the audio thread advances on wall time. Under a virtual clock
+  that is the one playback deadline a step sequence cannot reproduce, since the
+  same steps placed the voice at a different point on every run. The stepped
+  library clock is read instead, counted from the first reading, so the frames
+  a delay is added to are a function of the steps alone.
+- Thirty-two `file:line` anchors in `docs/THREAT_MODEL.md` were stale again,
+  and the threat-model check was failing `make lint` and with it the release
+  job's gate. The shift that accounts for each file's references is re-applied
+  and the remaining `MilesAddSoundBank` anchor, which the shift did not account
+  for, points at the definition rather than at a call site that names it.
 
 ## [0.2.0] - 2026-09-28
 

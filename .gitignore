@@ -20,6 +20,7 @@ release/
 
 # Debug/temp artifacts
 .scratch/
+.scratch_*
 # Python bytecode: the scripts/*.py gates are run in place, and an interpreter
 # writes a cache next to each of them the first time it imports one.
 __pycache__/
