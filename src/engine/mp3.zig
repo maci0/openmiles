@@ -213,11 +213,11 @@ pub fn enumerateFrames(es: *MP3_INFO) i32 {
             es.ptr = ptr;
         }
 
-        // Find an 11-bit frame-sync via a sliding 4-byte window.
+        // Find an 11-bit frame-sync via a sliding 4-byte window. Every
+        // iteration consumes a byte, so the loop ends on the sync match or on
+        // the last byte of the image, whichever comes first.
         var window = [4]u8{ 0, 0, 0, 0 };
-        var found = false;
-        while (true) {
-            if (es.bytes_left <= 0) return 0;
+        while (es.bytes_left > 0) {
             window[0] = window[1];
             window[1] = window[2];
             window[2] = window[3];
@@ -225,12 +225,8 @@ pub fn enumerateFrames(es: *MP3_INFO) i32 {
             ptr += 1;
             es.bytes_left -= 1;
             es.ptr = ptr;
-            if (window[0] == 0xFF and (window[1] & 0xE0) == 0xE0) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) return 0;
+            if (window[0] == 0xFF and (window[1] & 0xE0) == 0xE0) break;
+        } else return 0;
 
         es.byte_offset = @as(i32, @intCast(@intFromPtr(ptr) - @intFromPtr(start))) - 4;
 
