@@ -32,6 +32,39 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
+usage() {
+  cat <<EOF
+Usage: scripts/check_all_versions.sh [--strict]
+
+Builds every supported -Dmss-version and diffs its export table against the
+canonical reference mss32.dll for that release.
+
+Options:
+  --strict    fail on EXTRA (symbols we export that the reference lacks)
+  -h, --help  show this help
+
+Exit status: 0 every version matched, 1 a build/diff failed or a version had
+no reference DLL, 2 bad invocation.
+EOF
+}
+
+# Parsed before the toolchain preflight below, so --help and a bad flag answer
+# the same way on a host with no zig or no interpreter as on one that has both:
+# the argument is what was asked about, and a host missing a build tool is not
+# an argument error.
+STRICT=""
+for arg in "$@"; do
+  case "$arg" in
+    --strict) STRICT="--strict" ;;
+    -h | --help) usage; exit 0 ;;
+    *)
+      printf '%s: unknown argument: %s\n' "${0##*/}" "$arg" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
 command -v zig >/dev/null || { echo "error: zig not found on PATH" >&2; exit 1; }
 
 # The parity gate's interpreter is resolved, not assumed, for the reason the
@@ -48,32 +81,6 @@ zig_version=$(sed -n 's/^[[:space:]]*\.minimum_zig_version[[:space:]]*=[[:space:
 [ -n "$zig_version" ] || { echo "error: no .minimum_zig_version in build.zig.zon" >&2; exit 1; }
 have=$(zig version)
 [ "$have" = "$zig_version" ] || { echo "error: zig $zig_version required, found $have" >&2; exit 1; }
-
-usage() {
-  cat <<EOF
-Usage: scripts/check_all_versions.sh [--strict]
-
-Builds every supported -Dmss-version and diffs its export table against the
-canonical reference mss32.dll for that release.
-
-Options:
-  --strict    fail on EXTRA (symbols we export that the reference lacks)
-  -h, --help  show this help
-EOF
-}
-
-STRICT=""
-for arg in "$@"; do
-  case "$arg" in
-    --strict) STRICT="--strict" ;;
-    -h | --help) usage; exit 0 ;;
-    *)
-      printf '%s: unknown argument: %s\n' "${0##*/}" "$arg" >&2
-      usage >&2
-      exit 2
-      ;;
-  esac
-done
 
 # version -> canonical reference DLL
 declare -A REF=(
