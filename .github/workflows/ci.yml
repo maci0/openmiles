@@ -66,13 +66,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-zig-${{ steps.zig.outputs.version }}-
 
-      # uv installs the two pinned linters below; it is not itself a tool the
-      # tree pins (the Makefile holds the ruff and yamllint versions), so it is
-      # named here at a fixed version rather than read out of build.zig.zon.
-      # Nothing installed it before: the runner image ships pipx, not uv, so
-      # the first `uv tool install` failed the whole ubuntu leg with exit 127
-      # before any gate ran. The binary lands in ~/.local/bin, the same
-      # directory the two install steps below put their tools in, and that
+      # uv installs the two pinned linters below, and is pinned to the
+      # UV_VERSION in the Makefile for the same reason they are, so
+      # scripts/check_toolchain_pins.py fails when this and the Makefile
+      # disagree. Nothing installed it before: the runner image ships pipx, not
+      # uv, so the first `uv tool install` failed the whole ubuntu leg with
+      # exit 127 before any gate ran. The binary lands in ~/.local/bin, the
+      # same directory the two install steps below put their tools in, and that
       # directory is put on PATH here rather than relied on from the image: an
       # entry appended to GITHUB_PATH applies to the steps after this one, so
       # `uv` resolves in both install steps whether or not the runner image

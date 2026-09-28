@@ -69,9 +69,18 @@ All notable changes to OpenMiles are recorded here. The format follows
   versions are read from the Makefile rather than repeated in the workflow.
 - `make lint` lints `.github` rather than `.github/workflows`, so the dependabot
   config is checked beside the workflows it steers.
+- uv, which installs the two linters, is pinned to a `UV_VERSION` in the
+  Makefile. `ci.yml` repeated a version of its own and `release.yml` repeated
+  it a second time, and nothing compared the two, so a bump in one left the
+  other installing a different installer. `scripts/check_toolchain_pins.py`
+  now holds `ci.yml` to the Makefile and holds `release.yml` to reading it.
 
 ### Fixed
 
+- `docs/THREAT_MODEL.md` named 48 file:line anchors that no longer sit on the
+  line they point at, so `scripts/check_threat_model_refs.py` failed and
+  `make lint` was red. Every reference now resolves; each was re-pointed at the
+  code it describes rather than at the nearest line carrying the same name.
 - On Windows, an `OPENMILES_DEBUG` set to the empty string, longer than the
   value buffer, or not valid UTF-8 was ignored without a word, where the other
   systems report it. `GetEnvironmentVariableW` returns 0 both for a variable

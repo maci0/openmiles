@@ -5,10 +5,13 @@
 ruff or yamllint other than the one the tree declares, so a developer's green
 run and CI's green run only mean the same thing if the pins agree.
 build.zig.zon names the zig version once, and the Makefile and the CI workflow
-read it from there; the ruff and yamllint versions are Makefile literals that CI
-repeats. Nothing otherwise keeps them in step, and a stale CI pin is invisible:
-CI installs the old tool, the old tool is happy with the old tree, and the merge
-goes green.
+read it from there; the uv, ruff, and yamllint versions are Makefile literals
+that ci.yml repeats and release.yml reads. Nothing otherwise keeps them in step,
+and a stale pin is invisible: CI installs the old tool, the old tool is happy
+with the old tree, and the merge goes green. A release cut from a tag with no
+merge gate in front of it is the case that hides longest, so the release
+workflow is held to reading the Makefile rather than typing a version of its
+own.
 
 The same drift applies to the C warning set, which build.zig declares once and
 the two gates that compile C on their own repeat: check_header.py for mss.h,
@@ -46,7 +49,13 @@ RUFF_TOML = ROOT / "ruff.toml"
 PINS = {
     "RUFF_VERSION": (CI_YML, r"uv tool install ruff=={v}"),
     "YAMLLINT_VERSION": (CI_YML, r"uv tool install yamllint=={v}"),
+    "UV_VERSION": (CI_YML, r"pipx install uv=={v}"),
 }
+
+# The release workflow runs the same three linters from a tag, with no merge
+# gate between the commit and the cut, so it reads each pin out of the Makefile
+# instead of repeating it. A literal here is a version nothing compares.
+DERIVED_PINS = (RELEASE_YML, ("UV_VERSION", "RUFF_VERSION", "YAMLLINT_VERSION"))
 
 # Workflows that build the tree, so each has to take its zig from build.zig.zon
 # rather than repeating it.
@@ -137,6 +146,25 @@ def zig_workflow_problems(path, text):
     elif re.search(r"zig-\d+\.\d+", text):
         print(f"{label} DRIFT     a literal zig version sits outside build.zig.zon")
         bad.append("ZIG_VERSION literal")
+    return bad
+
+
+def derived_pin_problems(path, text, names):
+    """Report a release workflow that repeats a pin the Makefile already owns.
+
+    A literal in this workflow is invisible in the way that matters: a tag is
+    cut with no merge gate in front of it, so the analyzer set that ships can
+    be one no other run has ever used. Reading the Makefile leaves a single
+    copy, and a pin the gate does not compare is a pin that drifts.
+    """
+    bad = []
+    for name in names:
+        if f"s/^{name} := " not in text:
+            print(f"{path.relative_to(ROOT)} UNPINNED  does not read {name} from the Makefile")
+            bad.append(name)
+    if re.search(r"(?:uv tool install|pipx install) [\"']?[a-z-]+==\d", text):
+        print(f"{path.relative_to(ROOT)} DRIFT     a tool version is a literal, not the pinned one")
+        bad.append("tool literals")
     return bad
 
 
@@ -253,18 +281,25 @@ def main():
             continue
         problems.extend(zig_workflow_problems(path, text))
 
+    path, names = DERIVED_PINS
+    text = read(path)
+    if text is None:
+        problems.append(f"{path.name} missing")
+    else:
+        problems.extend(derived_pin_problems(path, text, names))
+
     problems.extend(c_flag_problems())
     problems.extend(interpreter_problems())
 
     if problems:
         print(f"{len(problems)} toolchain pin(s) disagree: {', '.join(problems)}")
-        print("build.zig.zon pins zig; the Makefile literals pin ruff and yamllint. Match them.")
+        print("build.zig.zon pins zig; the Makefile literals pin uv, ruff, and yamllint.")
         print("ruff.toml pins the Python floor; run the gates on an interpreter that meets it.")
         return 1
 
     print(
-        f"toolchain pins agree: zig {zig}, ruff {pins['RUFF_VERSION']}, "
-        f"yamllint {pins['YAMLLINT_VERSION']}"
+        f"toolchain pins agree: zig {zig}, uv {pins['UV_VERSION']}, "
+        f"ruff {pins['RUFF_VERSION']}, yamllint {pins['YAMLLINT_VERSION']}"
     )
     return 0
 

@@ -144,15 +144,18 @@ jobs:
       - name: Install the pinned linters
         run: |
           set -euo pipefail
-          # Read both pins from the Makefile rather than repeating them, so the
-          # only copy is the one check-pins already watches.
+          # Read all three pins from the Makefile rather than repeating them, so
+          # the only copy is the one check-pins already watches. uv is in the
+          # same set: this workflow and ci.yml each install it, so a version
+          # typed into one of them is a version the other never sees.
+          uv_version=$(sed -n 's/^UV_VERSION := //p' Makefile)
           ruff_version=$(sed -n 's/^RUFF_VERSION := //p' Makefile)
           yamllint_version=$(sed -n 's/^YAMLLINT_VERSION := //p' Makefile)
-          [ -n "$ruff_version" ] && [ -n "$yamllint_version" ] || {
-            echo "no RUFF_VERSION or YAMLLINT_VERSION in the Makefile" >&2
+          [ -n "$uv_version" ] && [ -n "$ruff_version" ] && [ -n "$yamllint_version" ] || {
+            echo "no UV_VERSION, RUFF_VERSION or YAMLLINT_VERSION in the Makefile" >&2
             exit 1
           }
-          pipx install uv==0.12.19
+          pipx install "uv==${uv_version}"
           uv tool install "ruff==${ruff_version}"
           uv tool install "yamllint==${yamllint_version}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"

@@ -129,7 +129,14 @@ RUFF_VERSION := 0.16.4
 # the workflows rather than left out of a directory-scoped run.
 YAMLLINT_VERSION := 1.38.0
 
-# The Zig, ruff, and yamllint pins live in the Makefile, ci.yml, and
+# uv is the third-party installer the two linters above arrive through, and it
+# is a dependency like any other: a uv that resolves or builds a wheel
+# differently is a different tree than the one the gate was reviewed against.
+# ci.yml and release.yml each install it, so the version is declared here and
+# both workflows read it, the way release.yml already reads the two linters.
+UV_VERSION := 0.12.19
+
+# The Zig, ruff, yamllint, and uv pins live in the Makefile, ci.yml, and
 # build.zig.zon; a stale one in CI installs the old tool and the gate quietly
 # stops matching.
 check-pins: check-interpreter
