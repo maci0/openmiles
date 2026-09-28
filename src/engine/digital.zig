@@ -186,8 +186,25 @@ pub fn mixTimeMsToFrames(mix_ms: u64, sample_rate: u32) u64 {
 /// reading below quantizes the start point to a millisecond and can place it
 /// up to one millisecond in the past, so the voice plays at once instead of
 /// waiting out its delay.
+///
+/// Under a virtual clock the engine counter is not usable: the audio thread
+/// that advances it runs on wall time, so a delay scheduled from it is the one
+/// playback deadline a step sequence cannot reproduce (the same steps place the
+/// voice at a different point on every run). The stepped library clock is read
+/// instead, counted from the first reading, so the frames a delay is added to
+/// are a function of the steps alone.
 pub fn engineTimeFrames(self: *DigitalDriver) u64 {
-    return ma.ma_engine_get_time_in_pcm_frames(&self.engine);
+    if (!root.clock.isVirtual()) return ma.ma_engine_get_time_in_pcm_frames(&self.engine);
+    // minInt stands for "no base captured yet": every other i64 is a legal
+    // virtual reading, including the 0 a clock installed at the epoch starts on.
+    if (self.virtual_base_ns.load(.acquire) == no_virtual_base) {
+        self.virtual_base_ns.store(root.nowNs(), .release);
+    }
+    const elapsed_ns: i64 = @max(0, root.nowNs() - self.virtual_base_ns.load(.acquire));
+    const rate: i96 = self.getSampleRate();
+    if (rate == 0) return 0;
+    const frames: i96 = @divTrunc(@as(i96, elapsed_ns) * rate, std.time.ns_per_s);
+    return @intCast(@max(0, frames));
 }
 
 /// The frame an AIL_set_sample_playback_delay of `delay_ms` lands on: that many
@@ -439,6 +456,9 @@ pub const SampleStatus = enum(u32) {
 /// its capacity reserved at init so a push inside the cap cannot fail to grow.
 pub const max_system_state_level: usize = 255;
 
+/// Sentinel for a virtual engine-clock origin not yet captured.
+const no_virtual_base: i64 = std.math.minInt(i64);
+
 pub const DigitalDriver = struct {
     engine: ma.ma_engine,
     allocator: std.mem.Allocator,
@@ -466,6 +486,10 @@ pub const DigitalDriver = struct {
     // ns value (a virtual clock installed at 0 reads 0), so the first serve is
     // marked by a flag rather than by a sentinel reading.
     serve_started: bool = false,
+    // Origin of the virtual engine clock (see engineTimeFrames): the library
+    // reading captured on first use under a virtual clock, which every later
+    // reading is measured from.
+    virtual_base_ns: std.atomic.Value(i64) = .init(no_virtual_base),
     rolloff_factor: f32 = 1.0,
     doppler_factor: f32 = 1.0,
     distance_factor: f32 = 1.0,
