@@ -680,6 +680,73 @@ const MixCursor = struct {
     }
 };
 
+const DecodedPcm = struct {
+    samples: []i16, // owned; free with the allocator passed to decodeWavToPcm
+    channels: u32,
+    rate: u32,
+};
+
+/// Decode a WAV-wrapped IMA-ADPCM image to owned interleaved 16-bit PCM.
+/// Shared by the mixer source path and AIL_decompress_ADPCM, which both wrap
+/// the raw blocks and drive the same miniaudio decode; the two copies had
+/// drifted (differing scratch sizes, and a zero-channel divide guard that only
+/// one of them carried). The channel count is clamped to at least 1 so the
+/// frames-per-chunk division below cannot divide by zero.
+fn decodeWavToPcm(allocator: std.mem.Allocator, wav: []const u8) !DecodedPcm {
+    var decoder: openmiles.ma.ma_decoder = undefined;
+    var cfg = openmiles.ma.ma_decoder_config_init(openmiles.ma.ma_format_s16, 0, 0);
+    if (openmiles.ma.ma_decoder_init_memory(wav.ptr, wav.len, &cfg, &decoder) != openmiles.ma.MA_SUCCESS) {
+        return error.DecoderInitFailed;
+    }
+    defer _ = openmiles.ma.ma_decoder_uninit(&decoder);
+
+    const channels = @max(@as(u32, decoder.outputChannels), 1);
+    const rate = @as(u32, decoder.outputSampleRate);
+
+    var list: std.ArrayListUnmanaged(i16) = .empty;
+    errdefer list.deinit(allocator);
+    // Reserve the decoder-reported PCM size up front so appendSlice never
+    // realloc-copies the whole buffer mid-decode. The frame count is
+    // header-derived, hence spoofable; a saturating multiply + clamp keeps the
+    // hint from overflowing or panicking the usize cast on the 32-bit target,
+    // and the loop below is bounded by real reads, so an inflated hint only
+    // over-reserves.
+    var length_frames: u64 = 0;
+    _ = openmiles.ma.ma_decoder_get_length_in_pcm_frames(&decoder, &length_frames);
+    if (length_frames > 0) {
+        const hint: u64 = @min(length_frames *| @as(u64, channels), std.math.maxInt(usize));
+        list.ensureTotalCapacity(allocator, @intCast(hint)) catch {};
+    }
+
+    // Heap scratch (16-byte aligned) — avoids the stack-layout-dependent
+    // misaligned ma_int16 write inside miniaudio's IMA decoder that a stack
+    // array did not reliably prevent.
+    const chunk = try allocator.alignedAlloc(i16, .@"16", 4096 * 4);
+    defer allocator.free(chunk);
+    const chunk_frames: u64 = chunk.len / channels;
+    while (true) {
+        var fr: u64 = 0;
+        const read_result = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk.ptr, chunk_frames, &fr);
+        // A decoder error leaves fr at 0, indistinguishable from a clean end of
+        // stream. Fail the decode instead of returning a silently truncated
+        // image, and name the status the callers cannot see.
+        if (read_result != openmiles.ma.MA_SUCCESS and read_result != openmiles.ma.MA_AT_END) {
+            log("decodeWavToPcm: ma_decoder_read_pcm_frames failed with {d}\n", .{read_result});
+            return error.DecodeFailed;
+        }
+        if (fr == 0) break;
+        list.appendSlice(allocator, chunk[0..@intCast(fr * channels)]) catch return error.OutOfMemory;
+    }
+    if (list.items.len == 0) return error.EmptyResult;
+    // A failed toOwnedSlice is an optional return, not an error return, so the
+    // errdefer does not cover it; free the list explicitly.
+    const samples = list.toOwnedSlice(allocator) catch {
+        list.deinit(allocator);
+        return error.OutOfMemory;
+    };
+    return .{ .samples = samples, .channels = channels, .rate = rate };
+}
+
 // Decode one IMA-ADPCM source's raw blocks to owned interleaved 16-bit PCM via
 // the same wrap-and-decode path as AIL_decompress_ADPCM.
 fn decodeAdpcmSource(info: *const AILSOUNDINFO) ?MixSrc {
@@ -689,48 +756,17 @@ fn decodeAdpcmSource(info: *const AILSOUNDINFO) ?MixSrc {
     const block_size: u32 = if (info.block_size > 4 * @as(u32, ch)) info.block_size else 512;
     const wav = openmiles.wrapAdpcmInWav(openmiles.global_allocator, adpcm, block_size, ch, info.rate, info.samples) catch return null;
     defer openmiles.global_allocator.free(wav);
-    var decoder: openmiles.ma.ma_decoder = undefined;
-    var cfg = openmiles.ma.ma_decoder_config_init(openmiles.ma.ma_format_s16, 0, 0);
-    if (openmiles.ma.ma_decoder_init_memory(wav.ptr, wav.len, &cfg, &decoder) != openmiles.ma.MA_SUCCESS) return null;
-    defer _ = openmiles.ma.ma_decoder_uninit(&decoder);
-    const dch: u32 = decoder.outputChannels;
-    var list: std.ArrayListUnmanaged(i16) = .empty;
-    errdefer list.deinit(openmiles.global_allocator);
-    // Reserve the decoder-reported PCM size up front so appendSlice never
-    // realloc-copies the whole buffer mid-decode (same hint as
-    // AIL_decompress_ADPCM; an inflated header only over-reserves).
-    var length_frames: u64 = 0;
-    _ = openmiles.ma.ma_decoder_get_length_in_pcm_frames(&decoder, &length_frames);
-    if (length_frames > 0) {
-        const hint: u64 = @min(length_frames *| @as(u64, dch), std.math.maxInt(usize));
-        list.ensureTotalCapacity(openmiles.global_allocator, @intCast(hint)) catch {};
-    }
-    // Heap scratch (16-byte aligned) — avoids the stack-layout-dependent
-    // misaligned ma_int16 write inside miniaudio's IMA decoder (see decompress).
-    const chunk = openmiles.global_allocator.alignedAlloc(i16, .@"16", 4096 * 4) catch return null;
-    defer openmiles.global_allocator.free(chunk);
-    const cap_frames: u64 = chunk.len / @max(dch, 1);
-    while (true) {
-        var fr: u64 = 0;
-        const read_result = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk.ptr, cap_frames, &fr);
-        // A decoder error leaves fr at 0, indistinguishable from a clean end of
-        // stream. Fail the decode instead of returning a silently truncated
-        // image, and name the status the caller cannot see.
-        if (read_result != openmiles.ma.MA_SUCCESS and read_result != openmiles.ma.MA_AT_END) {
-            log("decodeAdpcmSource: ma_decoder_read_pcm_frames failed with {d}\n", .{read_result});
-            return null;
-        }
-        if (fr == 0) break;
-        // An OOM abandons the decode; the errdefer frees the partial list.
-        list.appendSlice(openmiles.global_allocator, chunk[0..@intCast(fr * dch)]) catch return null;
-    }
-    // A failed toOwnedSlice is an optional return, not an error return, so the
-    // errdefer does not cover it; free the list explicitly.
-    const buf = list.toOwnedSlice(openmiles.global_allocator) catch {
-        list.deinit(openmiles.global_allocator);
+    const pcm = decodeWavToPcm(openmiles.global_allocator, wav) catch |err| {
+        log("decodeAdpcmSource: {d} byte ADPCM image failed to decode ({any})\n", .{ wav.len, err });
         return null;
     };
-    return .{ .s16 = buf, .owned = buf, .channels = dch, .points = buf.len / @max(dch, 1), .rate = if (info.rate == 0) 22050 else info.rate };
+    return .{
+        .s16 = pcm.samples,
+        .owned = pcm.samples,
+        .channels = pcm.channels,
+        .points = pcm.samples.len / pcm.channels,
+        .rate = if (info.rate == 0) 22050 else info.rate,
+    };
 }
 
 /// SDK cap on the `operations[]` array an AILMIXINFO mixer call may name
@@ -1087,70 +1123,19 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
         return 0;
     };
     defer openmiles.global_allocator.free(adpcm_wav);
-    const raw: []const u8 = adpcm_wav;
-    var decoder: openmiles.ma.ma_decoder = undefined;
-    var config = openmiles.ma.ma_decoder_config_init(openmiles.ma.ma_format_s16, 0, 0); // preserve channel/rate from source
-    const dec_result = openmiles.ma.ma_decoder_init_memory(raw.ptr, raw.len, &config, &decoder);
-    if (dec_result != openmiles.ma.MA_SUCCESS) {
-        log("AIL_decompress_ADPCM: ma_decoder_init_memory({d} bytes) failed with {d}\n", .{ raw.len, dec_result });
-        openmiles.setLastError("Failed to open ADPCM image for decoding");
-        return 0;
-    }
-    defer _ = openmiles.ma.ma_decoder_uninit(&decoder);
-
-    // A decoder that reports zero channels would make the frames-per-chunk
-    // division below divide by zero; decodeAdpcmSource clamps the same field.
-    const channels = @max(@as(u32, decoder.outputChannels), 1);
-    const rate = @as(u32, decoder.outputSampleRate);
-    const bpf = channels * 2; // 16-bit = 2 bytes/sample
-
-    // Decode all frames into a temporary list
-    var pcm: std.ArrayListUnmanaged(u8) = .empty;
-    defer pcm.deinit(openmiles.global_allocator);
-
-    var length_frames: u64 = 0;
-    _ = openmiles.ma.ma_decoder_get_length_in_pcm_frames(&decoder, &length_frames);
-    if (length_frames > 0) {
-        // length_frames is decoder-reported (header-derived, so spoofable); a
-        // saturating multiply + clamp keeps the capacity hint from overflowing
-        // or panicking the usize cast on the 32-bit target. The decode loop is
-        // bounded by real reads, so an inflated hint only over-reserves.
-        const hint: u64 = @min(length_frames *| @as(u64, bpf), std.math.maxInt(usize));
-        pcm.ensureTotalCapacity(openmiles.global_allocator, @intCast(hint)) catch {};
-    }
-
-    // Heap-allocate the decode scratch: the allocator guarantees high alignment,
-    // avoiding a stack-layout-dependent misaligned write inside miniaudio's IMA
-    // decoder that a stack [u8 align(2)] / [i16] array did not reliably prevent.
-    const chunk_bytes: usize = 4096 * 8; // up to 4096 frames x 8 bytes (4ch 16-bit)
-    const chunk_buf = openmiles.global_allocator.alignedAlloc(u8, .@"16", chunk_bytes) catch {
-        openmiles.setLastError("AIL_decompress_ADPCM: cannot allocate the decode buffer");
+    const pcm = decodeWavToPcm(openmiles.global_allocator, adpcm_wav) catch |err| {
+        switch (err) {
+            error.DecoderInitFailed => openmiles.setLastError("Failed to open ADPCM image for decoding"),
+            error.DecodeFailed => openmiles.setLastError("ADPCM decode failed mid-stream"),
+            error.EmptyResult => openmiles.setLastError("AIL_decompress_ADPCM: the image decoded to no audio"),
+            error.OutOfMemory => openmiles.setLastError("AIL_decompress_ADPCM: out of memory while decoding"),
+        }
         return 0;
     };
-    defer openmiles.global_allocator.free(chunk_buf);
-    const chunk_frames: u64 = chunk_bytes / @as(usize, bpf);
-    while (true) {
-        var fr: u64 = 0;
-        const read_result = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk_buf.ptr, chunk_frames, &fr);
-        // As above: a decoder error also reports 0 frames, and returning the
-        // partial image here would hand back a short file that decodes as a
-        // normal-length one.
-        if (read_result != openmiles.ma.MA_SUCCESS and read_result != openmiles.ma.MA_AT_END) {
-            log("AIL_decompress_ADPCM: ma_decoder_read_pcm_frames failed with {d}\n", .{read_result});
-            openmiles.setLastError("ADPCM decode failed mid-stream");
-            return 0;
-        }
-        if (fr == 0) break;
-        const nbytes: usize = @intCast(fr * @as(u64, bpf));
-        pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..nbytes]) catch {
-            openmiles.setLastError("AIL_decompress_ADPCM: out of memory while decoding");
-            return 0;
-        };
-    }
-    if (pcm.items.len == 0) {
-        openmiles.setLastError("AIL_decompress_ADPCM: the image decoded to no audio");
-        return 0;
-    }
+    defer openmiles.global_allocator.free(pcm.samples);
+    const channels = pcm.channels;
+    const rate = pcm.rate;
+    const decoded: []const u8 = std.mem.sliceAsBytes(pcm.samples);
 
     // SDK (miscutil.cpp): the output is sized to exactly info->samples frames
     // (size = samples*channels*16/8). IMA block padding makes the decoder emit up
@@ -1159,21 +1144,24 @@ pub fn AIL_decompress_ADPCM(info: *const AILSOUNDINFO, outdata: **anyopaque, out
     // extended to the same declared size (MSS allocates `size` and leaves the
     // unfilled tail; we use deterministic silence instead of its uninitialized
     // bytes).
-    if (info.samples != 0) {
-        const target_bytes: usize = @intCast(@min(@as(u64, info.samples) *| @as(u64, channels) *| 2, std.math.maxInt(usize)));
-        if (pcm.items.len > target_bytes) {
-            pcm.items.len = target_bytes;
-        } else if (pcm.items.len < target_bytes) {
-            // The zero-extension is what makes the output exactly the declared
-            // sample count. Losing it to an allocation failure would hand back a
-            // shorter image than info->samples promises, with nothing to say so.
-            pcm.appendNTimes(openmiles.global_allocator, 0, target_bytes - pcm.items.len) catch {
-                log("AIL_decompress_ADPCM: cannot zero-extend to {d} bytes (short by {d})\n", .{ target_bytes, target_bytes - pcm.items.len });
-            };
-        }
+    const target_bytes: usize = @intCast(@min(@as(u64, info.samples) *| @as(u64, channels) *| 2, std.math.maxInt(usize)));
+    const kept = @min(decoded.len, target_bytes);
+    var resized: ?[]u8 = null;
+    defer if (resized) |r| openmiles.global_allocator.free(r);
+    if (kept != target_bytes) {
+        // The zero-extension is what makes the output exactly the declared
+        // sample count. Losing it to an allocation failure would hand back a
+        // shorter image than info->samples promises, with nothing to say so.
+        resized = openmiles.global_allocator.alloc(u8, target_bytes) catch {
+            log("AIL_decompress_ADPCM: cannot zero-extend to {d} bytes (short by {d})\n", .{ target_bytes, target_bytes - kept });
+            return 0;
+        };
+        @memcpy(resized.?[0..kept], decoded[0..kept]);
+        @memset(resized.?[kept..], 0);
     }
+    const out_pcm: []const u8 = resized orelse decoded[0..kept];
 
-    const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, pcm.items, @intCast(channels), rate, 16) catch |err| {
+    const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, out_pcm, @intCast(channels), rate, 16) catch |err| {
         log("Error: {any}\n", .{err});
         openmiles.setLastError("AIL_decompress_ADPCM: cannot build the output WAV");
         return 0;

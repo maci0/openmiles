@@ -328,20 +328,10 @@ pub fn fileCallbackReadAll(filename: [*:0]const u8) ![]u8 {
     // open returns the file length and writes the handle to the out-param;
     // a 0 length means the file could not be opened.
     var handle: u32 = 0;
-    var file_size = open_fn(filename, &handle);
+    const file_size = resolveVfsSize(cbs, open_fn(filename, &handle), handle);
     if (file_size == 0) {
-        // Some VFS return 0 from open and require a seek-to-end to learn the size.
-        if (cbs.seek) |seek_fn| {
-            const end_pos = seek_fn(handle, 0, SEEK_END);
-            if (end_pos > 0) {
-                file_size = @intCast(end_pos);
-                _ = seek_fn(handle, 0, SEEK_SET);
-            }
-        }
-        if (file_size == 0) {
-            close_fn(handle);
-            return error.FileNotFound;
-        }
+        close_fn(handle);
+        return error.FileNotFound;
     }
     defer close_fn(handle);
 
@@ -362,6 +352,21 @@ pub fn fileCallbackReadAll(filename: [*:0]const u8) ![]u8 {
 /// far below this; a larger length is a corrupt or hostile stat result, and
 /// honouring it means allocating whatever the caller claims.
 pub const max_file_load_bytes: u64 = 256 * 1024 * 1024;
+
+/// Resolve the length `open` reported for the file it just opened on `handle`.
+///
+/// Some VFS open fine but report length 0 until a seek-to-end names the size,
+/// so a 0 result is not yet "not found". Both read paths resolve it the same
+/// way; they used to carry a copy each, and the copies drifted into disagreeing
+/// about closing the handle on the unresolvable path.
+fn resolveVfsSize(cbs: FileCallbacks, reported: u32, handle: u32) u32 {
+    if (reported != 0) return reported;
+    const seek_fn = cbs.seek orelse return 0;
+    const end_pos = seek_fn(handle, 0, SEEK_END);
+    if (end_pos <= 0) return 0;
+    _ = seek_fn(handle, 0, SEEK_SET);
+    return @intCast(end_pos);
+}
 
 /// Read a whole file via the app's file callbacks when set, otherwise directly
 /// from the filesystem. Caller frees the returned buffer with global_allocator.
@@ -481,23 +486,12 @@ pub fn ailFileSize(filename: [*:0]const u8) u32 {
             setFileError("Read failed");
             return 0;
         };
-        // open returns the file length and fills the handle out-param.
+        // open returns the file length and fills the handle out-param. From
+        // here on the handle may be live, so every path below must close it;
+        // returning early before the close leaked one VFS handle per
+        // AIL_file_size call on an empty/sizeless file.
         var handle: u32 = 0;
-        var size = open_fn(filename, &handle);
-        if (size == 0) {
-            // Same 0-return ambiguity fileCallbackReadAll resolves: some VFS
-            // open fine but report length 0 until a seek-to-end names the
-            // size. From here on the handle may be live, so every path below
-            // must close it -- returning early here leaked one VFS handle per
-            // AIL_file_size call on an empty/sizeless file.
-            if (cbs.seek) |seek_fn| {
-                const end_pos = seek_fn(handle, 0, SEEK_END);
-                if (end_pos > 0) {
-                    size = @intCast(end_pos);
-                    _ = seek_fn(handle, 0, SEEK_SET);
-                }
-            }
-        }
+        const size = resolveVfsSize(cbs, open_fn(filename, &handle), handle);
         close_fn(handle);
         if (size == 0) {
             setFileError("File not found");
@@ -990,20 +984,18 @@ pub fn setRedistDirectory(path: []const u8) void {
         );
         return;
     }
-    const cut = path;
-    const len = cut.len;
     redist_mutex.lockUncancelable(io);
-    const unchanged = std.mem.eql(u8, getRedistDirectoryLocked(), cut);
-    @memcpy(redist_directory[0..len], cut);
-    redist_directory[len] = 0;
+    const unchanged = std.mem.eql(u8, getRedistDirectoryLocked(), path);
+    @memcpy(redist_directory[0..path.len], path);
+    redist_directory[path.len] = 0;
     redist_mutex.unlock(io);
     // The same directory set again is the same set of plugins: rescanning it
     // would load a second copy of every .asi into a driver that already has
     // them, so the reload only happens when the directory actually changed.
     if (unchanged) return;
     const driver = lastDigitalDriver() orelse return;
-    const scan_path = global_allocator.dupe(u8, cut) catch {
-        log("setRedistDirectory: cannot copy the path; '{s}' was not rescanned\n", .{cut});
+    const scan_path = global_allocator.dupe(u8, path) catch {
+        log("setRedistDirectory: cannot copy the path; '{s}' was not rescanned\n", .{path});
         return;
     };
     defer global_allocator.free(scan_path);

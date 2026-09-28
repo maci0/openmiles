@@ -206,24 +206,21 @@ pub fn readLength(path: []const u8, len: usize) usize {
     return @min(want, len);
 }
 
+/// Bytes a whole-file write of `path` should store, after any injected
+/// truncation. `len` when no fault is installed.
+pub fn writeLength(path: []const u8, len: usize) usize {
+    const f = fault orelse return len;
+    const hook = f.truncate_write orelse return len;
+    const want = hook(path) orelse return len;
+    return @min(want, len);
+}
+
 /// Write `bytes` to `file` in full, or to the length an installed schedule
 /// names for `path`. `file` must be positioned at the write offset. Returns
 /// the number of bytes stored, so the caller can tell a short write from a
 /// complete one exactly as it would from the real call.
 pub fn writeAll(io: std.Io, file: std.Io.File, path: []const u8, bytes: []const u8) !usize {
-    const f = fault orelse {
-        try file.writeStreamingAll(io, bytes);
-        return bytes.len;
-    };
-    const hook = f.truncate_write orelse {
-        try file.writeStreamingAll(io, bytes);
-        return bytes.len;
-    };
-    const want = hook(path) orelse {
-        try file.writeStreamingAll(io, bytes);
-        return bytes.len;
-    };
-    const len = @min(want, bytes.len);
+    const len = writeLength(path, bytes.len);
     try file.writeStreamingAll(io, bytes[0..len]);
     return len;
 }

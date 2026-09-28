@@ -81,9 +81,10 @@ fn openmiles_ASI_stream_seek(stream: *ASI_stream, pos: i32) callconv(.c) i32 {
 fn openmiles_ASI_stream_attribute(stream: *ASI_stream, name: [*:0]const u8) callconv(.c) i32 {
     const s: *ASI_Stream_Impl = @ptrCast(@alignCast(stream));
     const attr = std.mem.span(name);
-    // Saturate: outputSampleRate is a u32 decoder value that can exceed i32.
+    // Saturate: both are u32 decoder values, and an i32 attribute return has
+    // nowhere to report a value that does not fit, so clamping beats a panic.
     if (std.mem.eql(u8, attr, "OUTPUT RATE")) return std.math.cast(i32, s.decoder.outputSampleRate) orelse std.math.maxInt(i32);
-    if (std.mem.eql(u8, attr, "OUTPUT CHANNELS")) return @intCast(s.decoder.outputChannels);
+    if (std.mem.eql(u8, attr, "OUTPUT CHANNELS")) return std.math.cast(i32, s.decoder.outputChannels) orelse std.math.maxInt(i32);
     if (std.mem.eql(u8, attr, "OUTPUT BITS")) return 16;
     return 0;
 }

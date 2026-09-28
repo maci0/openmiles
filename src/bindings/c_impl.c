@@ -27,6 +27,13 @@ int openmiles_tsf_channel_note_count(tsf* f, int channel) {
 #include <stdio.h>
 #include <stdarg.h>
 
+// The SDK's AIL_sprintf takes no buffer length, so the limit below is the only
+// bound this function can enforce, and it is the caller's buffer that has to
+// be at least this large. MSS documents the same 4096-byte requirement for
+// AIL_sprintf; a caller passing a smaller buffer overruns it, here and in the
+// original.
+#define AIL_SPRINTF_MAX 4096
+
 void AIL_debug_printf(const char* fmt, ...) {
     (void)fmt; // no-op in release; debug logging handled by Zig logger
 }
@@ -34,7 +41,7 @@ void AIL_debug_printf(const char* fmt, ...) {
 char* AIL_sprintf(char* buf, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    vsnprintf(buf, 4096, fmt, args);
+    vsnprintf(buf, AIL_SPRINTF_MAX, fmt, args);
     va_end(args);
     return buf;
 }

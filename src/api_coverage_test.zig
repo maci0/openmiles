@@ -685,8 +685,12 @@ test "coverage: lifecycle / driver open-close exports" {
 
     // Variadic C exports.
     AIL_debug_printf("coverage %d", @as(c_int, 1));
-    var sbuf: [64]u8 = undefined;
-    _ = AIL_sprintf(@ptrCast(&sbuf), "v=%d", @as(c_int, 7));
+    // AIL_sprintf carries no length (the SDK signature), and the C
+    // implementation bounds the write at 4096 bytes, so the destination has to
+    // be that large; a short buffer here would overrun the stack frame.
+    var sbuf: [4096]u8 = undefined;
+    const formatted = AIL_sprintf(@ptrCast(&sbuf), "v=%d", @as(c_int, 7));
+    try testing.expectEqualStrings("v=7", std.mem.span(formatted));
 
     // Global teardown last.
     dg.AIL_shutdown();
