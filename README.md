@@ -128,8 +128,18 @@ openmiles.sleep(.fromMilliseconds(250)); // advances it instead of blocking
 installed clock, so a test that sleeps 250 ms spends no wall time and reads
 back exactly 250. A `Timer` started under a virtual clock spawns no thread;
 call `timer.tick()` once per period you want to elapse, and the callback sees
-the exact simulated timestamp. Replaying the same step sequence replays the
-same run, which is what makes a failing sequence reproducible.
+the exact simulated timestamp. A timer set started through
+`AIL_start_all_timers` steps the same way with `openmiles.tickAllTimers()`,
+which fires every registered timer once and advances the clock by the sum of
+their periods. Replaying the same step sequence replays the same run, which is
+what makes a failing sequence reproducible.
+
+A run that also invents names (today, the temporary file an ASI provider image
+is written under) needs a seed as well as a clock. `openmiles.startSimulation(seed)`
+installs both, and logs the seed so a failing run can be replayed from it;
+`endSimulation()` returns to the platform clock and to secure entropy. Unseeded,
+those names come from OS entropy and are not predictable, which is what
+production wants.
 
 ### Injecting disk faults
 

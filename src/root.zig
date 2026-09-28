@@ -790,6 +790,19 @@ pub fn stopAllTimers() void {
     for (snapshot) |t| t.stop();
 }
 
+/// One period of every running timer's callback, and one period of virtual
+/// time forward per timer. Under a virtual clock a started timer has no thread
+/// and never fires on its own, so a simulation that called AIL_start_all_timers
+/// rather than starting timers one handle at a time has no other way to reach
+/// them: this is the stepping counterpart of startAllTimers/stopAllTimers.
+/// Does nothing unless a virtual clock is installed.
+pub fn tickAllTimers() void {
+    if (!clock.isVirtual()) return;
+    const snapshot = snapshotTimers("tickAllTimers") orelse return;
+    defer global_allocator.free(snapshot);
+    for (snapshot) |t| t.tick();
+}
+
 pub fn releaseAllTimers() void {
     global_timers_mutex.lockUncancelable(io);
     const snapshot = global_allocator.dupe(*Timer, global_timers.items) catch {
@@ -1317,6 +1330,11 @@ pub fn startSimulation(seed: u64) void {
     sim_prng = std.Random.DefaultPrng.init(seed);
     sim_prng_mutex.unlock(io);
     useVirtualClock(0);
+    // The seed is the run's replay key, and the caller is usually a test
+    // runner that only reports the failure, so the log line is the one place
+    // it survives to the report. A run whose seed was never written down
+    // cannot be replayed.
+    log("startSimulation: seed=0x{x}\n", .{seed});
 }
 
 /// End a simulated run: back to the platform clock and to secure entropy.

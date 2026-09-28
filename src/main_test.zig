@@ -4234,6 +4234,73 @@ test "virtual clock replays a timer run from its step sequence" {
     try testing.expectEqualSlices(i64, &first, &second);
 }
 
+test "tickAllTimers steps every registered timer and is inert on the real clock" {
+    // A simulation that starts the whole timer set has no thread to wait on,
+    // so tickAllTimers is the only way its callbacks fire.
+    const Recorder = struct {
+        var fired: u32 = 0;
+        var stamps: [4]i64 = undefined;
+        fn cb(_: u32) callconv(.winapi) void {
+            if (fired < stamps.len) stamps[fired] = openmiles.nowNs();
+            fired += 1;
+        }
+    };
+
+    openmiles.useVirtualClock(0);
+    defer openmiles.useRealClock();
+    Recorder.fired = 0;
+
+    const fast = try openmiles.Timer.init(testing.allocator, Recorder.cb);
+    defer fast.deinit();
+    const slow = try openmiles.Timer.init(testing.allocator, Recorder.cb);
+    defer slow.deinit();
+    fast.setPeriodUs(1000);
+    slow.setPeriodUs(4000);
+
+    openmiles.startAllTimers();
+    try testing.expectEqual(@as(?std.Thread, null), fast.thread);
+    try testing.expectEqual(@as(i64, 0), openmiles.nowNs());
+
+    // Registered after the start, so it is running-free: a step must not fire
+    // a timer nobody started.
+    const idle = try openmiles.Timer.init(testing.allocator, Recorder.cb);
+    defer idle.deinit();
+    idle.setPeriodUs(1000);
+
+    // Deltas, not absolutes: an earlier test that left a timer registered
+    // would be stepped by the same call, and this test pins the periods it
+    // started itself rather than the whole registry's total.
+    const t0 = openmiles.nowNs();
+    openmiles.tickAllTimers();
+    // Two running timers fired once each, and time moved by the sum of their
+    // periods, not by the wall time the step took.
+    try testing.expectEqual(@as(u32, 2), Recorder.fired);
+    try testing.expectEqual(@as(i64, 5_000_000), openmiles.nowNs() - t0);
+    // Each callback sees the time as it stood at its own step, in registration
+    // order: the first reads 0, the second the period the first advanced. The
+    // whole step is the sum of the two periods, with no wall time in it.
+    try testing.expectEqualSlices(i64, &.{ t0, t0 + 1_000_000 }, Recorder.stamps[0..2]);
+
+    const t1 = openmiles.nowNs();
+    openmiles.tickAllTimers();
+    try testing.expectEqual(@as(u32, 4), Recorder.fired);
+    try testing.expectEqual(@as(i64, 5_000_000), openmiles.nowNs() - t1);
+
+    const t2 = openmiles.nowNs();
+    openmiles.stopAllTimers();
+    openmiles.tickAllTimers();
+    try testing.expectEqual(@as(u32, 4), Recorder.fired);
+    try testing.expectEqual(@as(i64, 0), openmiles.nowNs() - t2);
+
+    // On the real clock there is no step to take: the run loops own the periods
+    // and a step would double-fire them.
+    openmiles.useRealClock();
+    const before = openmiles.nowNs();
+    openmiles.tickAllTimers();
+    try testing.expectEqual(@as(u32, 4), Recorder.fired);
+    try testing.expect(openmiles.nowNs() >= before);
+}
+
 test "virtual clock sleep advances time instead of blocking" {
     openmiles.useVirtualClock(1_000_000);
     defer openmiles.useRealClock();

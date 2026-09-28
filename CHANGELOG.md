@@ -57,6 +57,8 @@ All notable changes to OpenMiles are recorded here. The format follows
   no new code could call without pulling the source tree for the header.
 - `mss.h` documents that `AIL_set_sample_file`'s `block` argument is not
   meaningful, since the call always reads a whole image out of memory.
+- `openmiles.tickAllTimers()` fires every registered, running timer once and advances the virtual clock by the sum of their periods. A simulated run that starts the whole timer set through `AIL_start_all_timers` has no thread to wait on, so it had no way to reach those callbacks; it had to start and step the timers one handle at a time.
+- `openmiles.startSimulation(seed)` logs the seed. The seed is a run's replay key and the caller is usually a test runner that reports only the failure, so a run whose seed was never written down could not be replayed.
 
 ### Changed
 
