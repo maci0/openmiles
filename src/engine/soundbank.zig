@@ -13,6 +13,7 @@
 const std = @import("std");
 const fs_compat = @import("../utils/fs_compat.zig");
 const root = @import("../root.zig");
+const wide = @import("../utils/wide.zig");
 
 pub const BANK_TAG: u32 = (@as(u32, 'B') << 24) | (@as(u32, 'A') << 16) | (@as(u32, 'N') << 8) | @as(u32, 'K');
 pub const BANK_VERSION: i32 = 8;
@@ -628,9 +629,18 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
     self.* = .{ .meta = meta, .filename = fname, .source_path = source, .allocator = allocator };
 
     // Copy SoundBankName[4] out terminated (meta_size >= header_size > off_name,
-    // enforced above, so the read is in bounds).
+    // enforced above, so the read is in bounds). The field is 4 bytes, so a
+    // name outside ASCII is cut mid-character: "café" is 5 bytes, and the
+    // field holds "caf" plus the lead byte of the é. name() hands this buffer
+    // to the C surface as a string, and the callers match it against the name
+    // the game asked for, so drop the partial character. The scratch carries a
+    // NUL past the field because utf8Prefix only trims a string longer than its
+    // limit, and 4 bytes is exactly the field.
     const nlen = @min(msz - off_name, 4);
-    @memcpy(self.name_buf[0..nlen], image[off_name..][0..nlen]);
+    var name_field: [5]u8 = [_]u8{0} ** 5;
+    @memcpy(name_field[0..nlen], image[off_name..][0..nlen]);
+    const cut_name = wide.utf8Prefix(&name_field, nlen);
+    @memcpy(self.name_buf[0..cut_name.len], cut_name);
 
     // Build the events/sounds name indexes before the bank joins the registry:
     // until registryAdd publishes it, no other thread can reach the Bank, so
@@ -888,4 +898,24 @@ test "sound record: a DataOffset near the top of the 32-bit range is rejected" {
         try testing.expectEqual(@as(u32, 0), bank.soundDurationMs("kick") orelse return error.NoSound);
         try testing.expectEqualStrings("kick", std.mem.span(bank.assetName(.sounds, 0) orelse return error.NoName));
     }
+}
+
+test "a bank name that does not fit SoundBankName[4] keeps whole characters" {
+    const testing = std.testing;
+    var img: [256]u8 = undefined;
+    @memset(&img, 0);
+    writeU32(&img, off_tag, BANK_TAG);
+    writeU32(&img, off_version, @bitCast(BANK_VERSION));
+    // "café" is 5 bytes, so the 4-byte field holds "caf" plus the lead byte of
+    // the two-byte character. The C surface reads name() as a string, and
+    // AIL_open_soundbank matches it against the name the game asked for.
+    const cafe = "caf\u{00e9}";
+    @memcpy(img[off_name..][0..4], cafe[0..4]);
+    writeU32(&img, off_meta_size, header_size);
+    const bank = try loadFromMemory(testing.allocator, "cafe.mbnk", img[0..header_size]);
+    defer bank.deinit();
+
+    const name = std.mem.span(bank.name());
+    try testing.expect(std.unicode.utf8ValidateSlice(name));
+    try testing.expectEqualStrings("caf", name);
 }

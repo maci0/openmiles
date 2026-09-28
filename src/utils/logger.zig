@@ -231,17 +231,67 @@ fn logConfigOnce() void {
     });
 }
 
-/// Neutralize control characters in an untrusted substring (a path, a VFS name,
-/// an error string) before it is written to the log.
+/// Neutralize control and invisible characters in an untrusted substring (a
+/// path, a VFS name, an error string) before it is written to the log.
 ///
 /// A filename carrying CR, ESC, or a bare LF can end the current record early
 /// and forge the next one, so a reader (or a downstream log shipper) sees a
 /// line the library never wrote. Tab and newline are the library's own framing
-/// and stay as they are.
-fn sanitizeText(text: []u8) void {
-    for (text) |*c| {
-        if ((c.* < 0x20 and c.* != '\n' and c.* != '\t') or c.* == 0x7f) c.* = '.';
+/// and stay as they are. The C1 controls are terminal controls of the same
+/// kind as ESC and are two UTF-8 bytes each, so a bytewise pass never saw them:
+/// a name carrying CSI (U+009B) moved the cursor exactly as one carrying ESC
+/// does. The invisible formatting characters (bidi overrides, zero-width
+/// joiners, the BOM) are not controls at all, and a name carrying U+202E
+/// renders reversed in whatever reads the log.
+///
+/// Returns the scrubbed length: a neutralized multi-byte character is replaced
+/// by the single byte '.', so the text is shorter than the buffer it came from.
+fn sanitizeText(text: []u8) usize {
+    var read: usize = 0;
+    var write: usize = 0;
+    while (read < text.len) {
+        const width = std.unicode.utf8ByteSequenceLength(text[read]) catch 1;
+        const end = @min(read + width, text.len);
+        const cp = std.unicode.utf8Decode(text[read..end]) catch {
+            // Not a character: the byte is kept as it came in, since the input
+            // was already broken and the log is not where to repair it.
+            text[write] = text[read];
+            read += 1;
+            write += 1;
+            continue;
+        };
+        if (neutralizeCodepoint(cp)) {
+            text[write] = '.';
+            write += 1;
+        } else {
+            std.mem.copyForwards(u8, text[write..][0 .. end - read], text[read..end]);
+            write += end - read;
+        }
+        read = end;
     }
+    return write;
+}
+
+// C1 controls: the 8-bit set, of which CSI (0x9B) and NEL (0x85) drive a
+// terminal the way ESC (0x1B) does.
+const c1_first: u21 = 0x80;
+const c1_last: u21 = 0x9f;
+// Bidi embedding, override and isolate: reordering characters that render a
+// name differently from the bytes the log actually holds.
+const bidi_format_first: u21 = 0x202a;
+const bidi_format_last: u21 = 0x202e;
+const bidi_isolate_first: u21 = 0x2066;
+const bidi_isolate_last: u21 = 0x2069;
+
+fn neutralizeCodepoint(cp: u21) bool {
+    if (cp == '\n' or cp == '\t') return false;
+    if (cp < 0x20 or cp == 0x7f) return true;
+    if (cp >= c1_first and cp <= c1_last) return true;
+    if (cp >= bidi_format_first and cp <= bidi_format_last) return true;
+    if (cp >= bidi_isolate_first and cp <= bidi_isolate_last) return true;
+    // ZERO WIDTH SPACE / NON-JOINER / JOINER, WORD JOINER, BOM.
+    if (cp == 0x200b or cp == 0x200c or cp == 0x200d or cp == 0x2060 or cp == 0xfeff) return true;
+    return false;
 }
 
 /// Write one record when logging is enabled. Self-initializes: a call before
@@ -278,8 +328,7 @@ fn formatRecord(
     };
     // The formatted message can carry an untrusted path or name, so scrub it
     // before it reaches any sink.
-    sanitizeText(msg);
-    return msg;
+    return msg[0..sanitizeText(msg)];
 }
 
 /// Wide sink buffer. Sized for the overflow marker as well as a normal record,
@@ -377,15 +426,44 @@ test "an oversized record is replaced by a marker, not dropped silently" {
 
 test "log text from an untrusted name cannot forge a record" {
     var forged = "C:\\evil.wav\r\nopenmiles: sample loaded\x1b[2K".*;
-    sanitizeText(&forged);
+    const forged_out = &forged;
     // CR and ESC are neutralized; the LF survives as the library's own line
     // framing, so a name can start a line but cannot rewrite or erase one.
     try testing.expectEqualStrings(
         "C:\\evil.wav.\nopenmiles: sample loaded.[2K",
-        &forged,
+        forged_out[0..sanitizeText(&forged)],
     );
 
     var framing = "line one\nline two\ttabbed".*;
-    sanitizeText(&framing);
-    try testing.expectEqualStrings("line one\nline two\ttabbed", &framing);
+    const framing_out = &framing;
+    try testing.expectEqualStrings("line one\nline two\ttabbed", framing_out[0..sanitizeText(&framing)]);
+}
+
+test "a C1 control in a name is neutralized like ESC" {
+    // U+009B (CSI) is two bytes, so a bytewise pass let it through untouched:
+    // a name carrying it moved the terminal cursor as surely as one carrying
+    // ESC. U+0085 (NEL) likewise ends a line in some readers.
+    var name = "a\u{009B}2Kb\u{0085}c".*;
+    const out = &name;
+    try testing.expectEqualStrings("a.2Kb.c", out[0..sanitizeText(&name)]);
+}
+
+test "invisible formatting characters in a name are neutralized" {
+    // U+202E RIGHT-TO-LEFT OVERRIDE renders what follows reversed, so a name
+    // carrying it reads as a different name than the log holds.
+    var name = "invoice\u{202E}fdp.exe\u{200B}ini".*;
+    const out = &name;
+    try testing.expectEqualStrings("invoice.fdp.exe.ini", out[0..sanitizeText(&name)]);
+}
+
+test "non-ascii text in a name survives the scrub" {
+    var name = "Juegos/Aventura Épica 🎮.asi".*;
+    const out = &name;
+    try testing.expectEqualStrings("Juegos/Aventura Épica 🎮.asi", out[0..sanitizeText(&name)]);
+}
+
+test "a byte that is not a character is kept as it came in" {
+    var name = [_]u8{ 'a', 0xff, 'b' };
+    try testing.expectEqual(@as(usize, 3), sanitizeText(&name));
+    try testing.expectEqualSlices(u8, &.{ 'a', 0xff, 'b' }, &name);
 }
