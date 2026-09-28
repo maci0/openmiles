@@ -132,6 +132,7 @@ pub const StreamSource = @import("engine/stream_buffer.zig").StreamSource;
 pub const soundbank = @import("engine/soundbank.zig");
 pub const Bank = soundbank.Bank;
 pub const event = @import("engine/event.zig");
+pub const miles_events = @import("engine/miles_events.zig");
 pub const mp3 = @import("engine/mp3.zig");
 pub const speaker = @import("engine/speaker.zig");
 

@@ -13,6 +13,7 @@ comptime {
     _ = @import("engine/digital.zig");
     _ = @import("engine/event.zig");
     _ = @import("engine/midi.zig");
+    _ = @import("engine/miles_events.zig");
     _ = @import("engine/soundbank.zig");
     _ = @import("api/miles.zig");
     _ = @import("utils/logger.zig");

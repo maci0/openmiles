@@ -4,6 +4,11 @@
 //! `AIL_*` names. The real mss32.dll (9.3f/9.3k) exports the `Miles*` set; this
 //! module supplies them.
 //!
+//! This file is the ABI: the two `extern` records a caller sees and the
+//! `callconv(.winapi)` functions that fill them. The state those functions act
+//! on lives in `engine/miles_events.zig`, so nothing here is reachable except
+//! through an export.
+//!
 //! Implemented behaviour: the event-system lifecycle (a linked list of systems
 //! rooted at `g_root`), the per-system variable store, the soundbank container
 //! (banks register on load; events/sounds resolve by name across them), event
@@ -26,9 +31,7 @@
 const std = @import("std");
 const openmiles = @import("openmiles");
 const log = openmiles.log;
-
-// MILESEVENT_ENQUEUE_* flags (mss.h).
-const ENQUEUE_FREE_EVENT: i32 = 0x2;
+const ev = openmiles.miles_events;
 
 // MILESEVENTSTATE (mss.h _MILESEVENTSTATE) — returned by MilesGetEventSystemState.
 pub const MILESEVENTSTATE = extern struct {
@@ -62,530 +65,6 @@ pub const MILESEVENTSOUNDINFO = extern struct {
     HasCompletionEvent: i32 = 0,
 };
 
-// MILESEVENTSOUNDSTATUS bitmask (mss.h).
-const STATUS_PENDING: i32 = 0x1;
-const STATUS_PLAYING: i32 = 0x2;
-const STATUS_COMPLETE: i32 = 0x4;
-
-// One tracked sound instance. The miniaudio mixer is not wired to the event VM
-// yet, so instances are tracked and progressed by the sound's bank duration
-// rather than by actual playback — enough for game logic that gates on whether a
-// queued sound is still playing.
-const SoundInstance = struct {
-    queued_id: u64,
-    instance_id: u64,
-    status: i32,
-    start_ms: u64,
-    duration_ms: u32,
-    sound_name: [:0]u8, // owned
-    labels: [:0]u8, // owned (comma/space-separated)
-    user_buffer: ?*anyopaque,
-    user_buffer_len: i32,
-    // Set while the instance is a selected eviction victim, so the compaction
-    // pass tests membership by field instead of by scanning the victim list
-    // once per instance.
-    evict_mark: bool = false,
-};
-
-// Case-insensitive glob with '*' (any run) and '?' (one character).
-fn globMatch(pat: []const u8, text: []const u8) bool {
-    var pi: usize = 0;
-    var ti: usize = 0;
-    var star: ?usize = null;
-    var star_ti: usize = 0;
-    while (ti < text.len) {
-        if (pi < pat.len and pat[pi] == '*') {
-            star = pi;
-            star_ti = ti;
-            pi += 1;
-        } else if (pi < pat.len and (pat[pi] == '?' or std.ascii.toLower(pat[pi]) == std.ascii.toLower(text[ti]))) {
-            pi += 1;
-            ti += 1;
-            // '?' is one character, not one byte: the continuation bytes of a
-            // multi-byte character go with their lead byte, or the wildcard would
-            // match half a code point and then fail on the other half.
-            if (pat[pi - 1] == '?') {
-                while (ti < text.len and text[ti] & 0xC0 == 0x80) : (ti += 1) {}
-            }
-        } else if (star) |s| {
-            pi = s + 1;
-            // The retry starts at a character boundary, the same rule the '?'
-            // branch follows. Advancing one byte at a time let it restart on a
-            // continuation byte, where a pattern byte could match the tail of a
-            // character the pattern never named: "*\xA9b" matched "a<e-acute>b"
-            // by lining its lone 0xA9 up with the trailing byte of the e-acute,
-            // so a label query in a legacy code page selected instances whose
-            // labels it does not equal.
-            star_ti += 1;
-            while (star_ti < text.len and text[star_ti] & 0xC0 == 0x80) : (star_ti += 1) {}
-            ti = star_ti;
-        } else return false;
-    }
-    while (pi < pat.len and pat[pi] == '*') pi += 1;
-    return pi == pat.len;
-}
-
-// An instance matches the label query if the query is empty (match all) or any
-// comma/space-separated query term globs onto any of the instance's labels.
-// (The SDK uses a richer comma-list wildcard grammar in mileseventsupport.cpp;
-// this token-glob approximation covers the common stop/enumerate-by-label case
-// and is strictly more correct than ignoring labels entirely.)
-fn labelMatch(labels: []const u8, query: ?[*:0]const u8) bool {
-    const q = if (query) |p| std.mem.span(p) else "";
-    if (q.len == 0) return true;
-    if (labels.len == 0) return false;
-    var qit = std.mem.tokenizeAny(u8, q, ", ");
-    while (qit.next()) |qterm| {
-        var lit = std.mem.tokenizeAny(u8, labels, ", ");
-        while (lit.next()) |lbl| {
-            if (globMatch(qterm, lbl)) return true;
-        }
-    }
-    return false;
-}
-
-// The event-system state below (instances, id counter, cache, persists, label
-// limits, the system list and its variable tables) is process-global, and every
-// one of it is reachable from a Miles entry point, which a game may call from
-// any thread: the SDK's own walk is enumerate-then-act from the main loop
-// while a worker enqueues events, the same split root.zig's atomic "current
-// driver" slots assume. None of the containers is safe under that split.
-// An ArrayListUnmanaged append and a StringHashMap put each write a length and a
-// capacity alongside the storage they point at, so two threads in one list
-// corrupt the heap rather than merely losing an entry; nextId is a
-// read-modify-write, so two instances take the same id and the resumable
-// enumerate walk skips and repeats entries; the system list walk reads a
-// half-linked list and hands back a freed system. One lock covers all of it.
-//
-// Lock order: this lock is outermost. The leaf lookups below (the bank container
-// duration/event lookups) take soundbank's registry lock, and that file never
-// calls back here, so the order is one-way and cannot cycle. It is the only
-// lock this file takes, and a public entry point is never called while it is
-// held.
-var state_mutex: std.Io.Mutex = .init;
-
-fn stateLock() void {
-    state_mutex.lockUncancelable(openmiles.io);
-}
-fn stateUnlock() void {
-    state_mutex.unlock(openmiles.io);
-}
-
-var g_instances: std.ArrayListUnmanaged(*SoundInstance) = .empty;
-var g_next_id: u64 = 1;
-
-// Sounds cached into memory by cache_sounds event steps (deduped); reported as
-// MILESEVENTSTATE.LoadedSoundCount and removed by purge_sounds steps.
-// Names are keyed case-insensitively, the way the bank container resolves them
-// (soundbank's name index is lowercased), so cache_sounds("KICK") and
-// purge_sounds("KICK") address the same entry.
-
-// Every name-keyed registry in this file keys a hash map on the lowercased
-// name and owns the key, so a name match is a hash lookup rather than a scan
-// with a case-insensitive compare per entry. Same shape as the bank's name
-// index (soundbank.zig), which resolves event and sound names the same way.
-// The one exception is g_persists, which keeps an ordered array because
-// MilesEnumeratePresetPersists walks it by position; a game's persisted
-// preset list is short enough for the dedup scan to cost nothing.
-
-// A case-lowercased probe key, in a stack buffer when the name fits (the
-// common case, no allocation) and on the heap otherwise. Same shape as the
-// bank's index probe. Filled in place: `key` points into the NameKey, so the
-// NameKey has to outlive the probe, not be returned by value.
-const NameKey = struct {
-    buf: [128]u8 = undefined,
-    key: []const u8 = "",
-    heap: ?[]u8 = null,
-
-    fn init(self: *NameKey, name: []const u8) void {
-        self.* = .{};
-        if (name.len < self.buf.len) {
-            for (name, 0..) |c, i| self.buf[i] = std.ascii.toLower(c);
-            self.key = self.buf[0..name.len];
-            return;
-        }
-        // Too long to probe from the stack. A failed copy leaves the key empty,
-        // so the name reads as absent: the same direction a failed insert takes.
-        const dup = openmiles.global_allocator.alloc(u8, name.len) catch return;
-        for (name, 0..) |c, i| dup[i] = std.ascii.toLower(c);
-        self.heap = dup;
-        self.key = dup;
-    }
-
-    fn deinit(self: *NameKey) void {
-        if (self.heap) |h| openmiles.global_allocator.free(h);
-    }
-};
-
-/// An owned lowercased copy of `name`, for a registry key.
-fn lowerDupe(name: []const u8) ?[]u8 {
-    const dup = openmiles.global_allocator.alloc(u8, name.len) catch return null;
-    for (name, 0..) |c, i| dup[i] = std.ascii.toLower(c);
-    return dup;
-}
-
-var g_cached: std.StringHashMapUnmanaged(void) = .empty;
-
-fn cacheAdd(name: []const u8) void {
-    if (name.len == 0) return;
-    var probe: NameKey = undefined;
-    probe.init(name);
-    defer probe.deinit();
-    if (g_cached.contains(probe.key)) return;
-    const key = lowerDupe(name) orelse return;
-    g_cached.put(openmiles.global_allocator, key, {}) catch openmiles.global_allocator.free(key);
-}
-fn cacheRemove(name: []const u8) void {
-    var probe: NameKey = undefined;
-    probe.init(name);
-    defer probe.deinit();
-    if (g_cached.fetchRemove(probe.key)) |kv| {
-        openmiles.global_allocator.free(kv.key);
-    }
-}
-fn cacheClear() void {
-    var it = g_cached.keyIterator();
-    while (it.next()) |k| openmiles.global_allocator.free(k.*);
-    g_cached.deinit(openmiles.global_allocator);
-    g_cached = .empty;
-}
-
-// Persisted presets (persist event steps); enumerated by MilesEnumeratePresetPersists
-// and counted in MILESEVENTSTATE.PersistCount. Keyed (deduped) by persist name.
-var g_persists: std.ArrayListUnmanaged([:0]u8) = .empty;
-
-fn persistAdd(name: []const u8) void {
-    if (name.len == 0) return;
-    // Case-blind, like every other name registry in this file (see NameKey): a
-    // preset persisted as "Menu" and again as "menu" is one preset, so
-    // PersistCount counts it once and the enumerator yields it once. An
-    // exact-byte compare stored both, so the count overstated what was
-    // persisted and two entries named the same preset.
-    for (g_persists.items) |n| {
-        if (std.ascii.eqlIgnoreCase(n, name)) return;
-    }
-    const dup = openmiles.global_allocator.dupeZ(u8, name) catch return;
-    g_persists.append(openmiles.global_allocator, dup) catch openmiles.global_allocator.free(dup);
-}
-fn persistClear() void {
-    for (g_persists.items) |n| openmiles.global_allocator.free(n);
-    g_persists.clearRetainingCapacity();
-}
-
-// Per-label concurrent-sound caps (MilesSetSoundLabelLimits / set_limits steps).
-// Format: "label count:label2 count2" (mss.h). A new sound must fit under the cap
-// of every label it carries; the oldest matching instance is evicted to make room.
-// Keyed on the lowercased label (see NameKey); the count is the value, so the
-// label is stored once, as the key the map owns.
-var g_limits: std.StringHashMapUnmanaged(u32) = .empty;
-
-fn limitsClear() void {
-    var it = g_limits.keyIterator();
-    while (it.next()) |k| openmiles.global_allocator.free(k.*);
-    g_limits.deinit(openmiles.global_allocator);
-    g_limits = .empty;
-}
-fn setLimits(limits_str: []const u8) void {
-    limitsClear();
-    var it = std.mem.tokenizeScalar(u8, limits_str, ':');
-    while (it.next()) |entry| {
-        var pit = std.mem.tokenizeAny(u8, entry, " \t");
-        const label = pit.next() orelse continue;
-        const count_s = pit.next() orelse continue;
-        const count = std.fmt.parseInt(u32, count_s, 10) catch continue;
-        // A label repeated in one string is one entry, the last count winning.
-        // put() on a name the map already owns keeps the key it stored and drops
-        // the one passed in, so the dupe went with it: every repeated label
-        // leaked a copy of its name on each set_limits step.
-        var probe: NameKey = undefined;
-        probe.init(label);
-        defer probe.deinit();
-        if (g_limits.getPtr(probe.key)) |slot| {
-            slot.* = count;
-            continue;
-        }
-        const key = lowerDupe(probe.key) orelse continue;
-        g_limits.put(openmiles.global_allocator, key, count) catch openmiles.global_allocator.free(key);
-    }
-}
-fn limitFor(label: []const u8) ?u32 {
-    var probe: NameKey = undefined;
-    probe.init(label);
-    defer probe.deinit();
-    return g_limits.get(probe.key);
-}
-fn instanceHasLabel(inst: *const SoundInstance, label: []const u8) bool {
-    var lit = std.mem.tokenizeAny(u8, inst.labels, ", ");
-    while (lit.next()) |lbl| {
-        if (std.ascii.eqlIgnoreCase(lbl, label)) return true;
-    }
-    return false;
-}
-// Evict the oldest instances carrying `label` until a slot is free under `lim`
-// (a cap of 0 evicts every one of them). The matches are gathered and ordered
-// by instance_id once, rather than rescanning the whole list to recount and
-// re-find the minimum after each eviction.
-fn evictOldestWithLabel(label: []const u8, lim: u32) void {
-    var matches: std.ArrayListUnmanaged(*SoundInstance) = .empty;
-    defer matches.deinit(openmiles.global_allocator);
-    matches.ensureTotalCapacity(openmiles.global_allocator, g_instances.items.len) catch {};
-    for (g_instances.items) |inst| {
-        if (!instanceHasLabel(inst, label)) continue;
-        // A scan that cannot finish leaves the cap unenforced and the new sound
-        // pushes the instance count past it, so say the limit was not applied
-        // rather than let the caller read a bounded count as a true one.
-        matches.append(openmiles.global_allocator, inst) catch {
-            openmiles.setLastErrorFmt("Cannot enforce the concurrent-sound limit for label '{s}'", .{label});
-            return;
-        };
-    }
-    // Already under the cap: nothing to evict.
-    const cap: usize = lim;
-    if (matches.items.len < cap) return;
-    std.sort.block(*SoundInstance, matches.items, {}, struct {
-        fn lt(_: void, a: *SoundInstance, b: *SoundInstance) bool {
-            return a.instance_id < b.instance_id;
-        }
-    }.lt);
-    // One slot short of the cap is enough room for the sound being added; a cap
-    // of 0 has no slot, so it evicts all matches.
-    const victims = matches.items[0..@min(matches.items.len, matches.items.len - cap + 1)];
-    // Compact the array in one pass, testing the mark rather than the victim's
-    // identity. The victims are ordered by instance_id, not by position, so
-    // membership by value was a scan of the victim list per instance, an O(N·V)
-    // pass that a cap of 0 over N instances turned into O(N^2) pointer compares
-    // on a single start-sound step. The write cursor never passes the read
-    // cursor, so the in-place compaction is safe.
-    for (victims) |victim| victim.evict_mark = true;
-    var w: usize = 0;
-    for (g_instances.items) |inst| {
-        if (inst.evict_mark) {
-            destroyInstance(inst);
-            continue;
-        }
-        g_instances.items[w] = inst;
-        w += 1;
-    }
-    g_instances.shrinkRetainingCapacity(w);
-}
-// Make room under each limited label of a new sound before it is added.
-fn enforceLimits(labels_in: []const u8) void {
-    var lit = std.mem.tokenizeAny(u8, labels_in, ", ");
-    while (lit.next()) |lbl| {
-        const lim = limitFor(lbl) orelse continue;
-        evictOldestWithLabel(lbl, lim);
-    }
-}
-// Apply a cache/purge step's namelist (built by the decoder) to the cache set.
-fn applyCacheStep(load: anytype, add: bool) void {
-    const list = load.namelist orelse return;
-    const n: usize = @intCast(@max(load.namecount, 0));
-    var k: usize = 0;
-    while (k < n) : (k += 1) {
-        const p = list[k] orelse continue;
-        const name = std.mem.span(@as([*:0]const u8, @ptrCast(p)));
-        if (add) cacheAdd(name) else cacheRemove(name);
-    }
-}
-
-fn nextId() u64 {
-    const id = g_next_id;
-    g_next_id += 1;
-    return id;
-}
-
-// Progress PLAYING instances to COMPLETE once their bank duration has elapsed.
-// A zero duration (sound unresolvable in any loaded bank) completes as soon as
-// processing starts: without this the instance would sit PLAYING forever and
-// MilesCompleteEventQueueProcessing would never reap it, growing g_instances
-// by one entry per enqueued event on games that loop event queues.
-fn updateInstances() void {
-    const now = openmiles.getMsCount64();
-    for (g_instances.items) |inst| {
-        if (inst.status == STATUS_PLAYING) {
-            // Not wrapping arithmetic: installing a virtual clock rebases the
-            // ms counter, so an instance started before the rebase reads as
-            // already elapsed under `-%` and completes on the first poll.
-            const elapsed: u64 = if (now > inst.start_ms) @intCast(now - inst.start_ms) else 0;
-            if (elapsed >= inst.duration_ms) inst.status = STATUS_COMPLETE;
-        }
-    }
-}
-
-fn destroyInstance(inst: *SoundInstance) void {
-    openmiles.global_allocator.free(inst.sound_name);
-    openmiles.global_allocator.free(inst.labels);
-    openmiles.global_allocator.destroy(inst);
-}
-
-// Create a tracked instance for a start-sound step. soundname is taken up to the
-// first ':'; its duration is resolved from the loaded-bank container.
-fn createInstance(queued_id: u64, soundname_full: []const u8, labels_in: []const u8, user_buffer: ?*anyopaque, ubl: i32) u64 {
-    enforceLimits(labels_in); // evict to make room under each labelled cap
-    const cut = std.mem.indexOfScalar(u8, soundname_full, ':') orelse soundname_full.len;
-    const sound = soundname_full[0..cut];
-    const dur: u32 = openmiles.soundbank.containerSoundDurationMs(sound) orelse 0;
-    const name = openmiles.global_allocator.dupeZ(u8, sound) catch return 0;
-    const labels = openmiles.global_allocator.dupeZ(u8, labels_in) catch {
-        openmiles.global_allocator.free(name);
-        return 0;
-    };
-    const inst = openmiles.global_allocator.create(SoundInstance) catch {
-        openmiles.global_allocator.free(name);
-        openmiles.global_allocator.free(labels);
-        return 0;
-    };
-    inst.* = .{
-        .queued_id = queued_id,
-        .instance_id = nextId(),
-        .status = STATUS_PENDING,
-        .start_ms = openmiles.getMsCount64(),
-        .duration_ms = dur,
-        .sound_name = name,
-        .labels = labels,
-        .user_buffer = user_buffer,
-        .user_buffer_len = ubl,
-    };
-    g_instances.append(openmiles.global_allocator, inst) catch {
-        destroyInstance(inst);
-        return 0;
-    };
-    return inst.instance_id;
-}
-
-// Shared walk over an event string's decoded steps: nextStep with a per-walk
-// scratch buffer, bounded at 256 steps so a corrupt/cyclic string cannot spin.
-// Steps whose decode fails end the walk (the partial step is not reported),
-// matching both call sites.
-const StepWalker = struct {
-    step: openmiles.event.EVENT_STEP_INFO = undefined,
-    scratch: [512]u8 align(8) = undefined,
-    cur: ?[*:0]const u8,
-    guard: u32 = 0,
-
-    // The walker is ~740 bytes (a step record plus a scratch buffer), and it is
-    // built once per enqueued event, so it is initialized in place rather than
-    // returned by value.
-    fn init(self: *StepWalker, event: ?[*]const u8) void {
-        self.* = .{ .cur = @ptrCast(event) };
-    }
-
-    fn next(self: *StepWalker) ?*const openmiles.event.EVENT_STEP_INFO {
-        const c = self.cur orelse return null;
-        if (self.guard >= 256) return null;
-        self.guard += 1;
-        self.cur = openmiles.event.nextStep(c, &self.step, &self.scratch) orelse return null;
-        return &self.step;
-    }
-};
-
-// Parse an event's bytecode and create an instance per start-sound step. The
-// whole parse runs under state_mutex: it allocates ids, appends instances and
-// edits the cache/presists/limits registries, and a game's worker thread
-// enqueueing while its main thread drains the queue is the ordinary case.
-fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: i32) u64 {
-    if (event == null) return 0;
-    stateLock();
-    defer stateUnlock();
-    var walker: StepWalker = undefined;
-    walker.init(event);
-    const qid = nextId();
-    while (walker.next()) |st| {
-        if (st.type == @intFromEnum(openmiles.event.StepType.start_sound)) {
-            const sn = st.u.start.soundname;
-            const lb = st.u.start.labels;
-            const lbl: []const u8 = if (lb.str) |lp| lp[0..@intCast(@max(lb.len, 0))] else "";
-            if (sn.str) |sp| _ = createInstance(qid, sp[0..@intCast(@max(sn.len, 0))], lbl, user_buffer, ubl);
-        } else if (st.type == @intFromEnum(openmiles.event.StepType.cache_sounds)) {
-            applyCacheStep(st.u.load, true);
-        } else if (st.type == @intFromEnum(openmiles.event.StepType.purge_sounds)) {
-            applyCacheStep(st.u.load, false);
-        } else if (st.type == @intFromEnum(openmiles.event.StepType.persist)) {
-            const pn = st.u.persist.name;
-            if (pn.str) |sp| persistAdd(sp[0..@intCast(@max(pn.len, 0))]);
-        } else if (st.type == @intFromEnum(openmiles.event.StepType.set_limits)) {
-            // Caps the event declares in its own text, not only the ones a game
-            // installs out of band with MilesSetSoundLabelLimits. The walk is in
-            // event order, so a limits step gates the start-sound steps after it.
-            const ls = st.u.limits.limits;
-            if (ls.str) |lp| setLimits(lp[0..@intCast(@max(ls.len, 0))]);
-        }
-    }
-    if (flags & ENQUEUE_FREE_EVENT != 0) std.c.free(@ptrCast(@constCast(event.?)));
-    return qid;
-}
-
-// One event variable. The name is the map key, lowercased and owned by the
-// table, so a get or set is a hash lookup however many variables a game's
-// event script declares.
-const Var = struct {
-    is_float: bool,
-    i: i32 = 0,
-    f: f32 = 0,
-};
-
-// The variables of one event system, keyed on the lowercased name.
-const VarTable = std.StringHashMapUnmanaged(Var);
-
-const EventSystem = struct {
-    next: ?*EventSystem = null,
-    vars: VarTable = .empty,
-    driver: ?*anyopaque = null,
-    command_buffer_size: i32 = 0,
-};
-
-var g_root: ?*EventSystem = null;
-
-// Resolve an event-system context: 0 means the default (root) system; a non-zero
-// value is trusted only if it identifies one of our live systems.
-fn resolveSystem(ctx: usize) ?*EventSystem {
-    if (ctx == 0) return g_root;
-    var s = g_root;
-    while (s) |sys| : (s = sys.next) {
-        if (@intFromPtr(sys) == ctx) return sys;
-    }
-    return null;
-}
-
-fn setVar(sys: *EventSystem, name: [*:0]const u8, is_float: bool, ival: i32, fval: f32) void {
-    const value: Var = .{ .is_float = is_float, .i = ival, .f = fval };
-    var probe: NameKey = undefined;
-    probe.init(std.mem.span(name));
-    defer probe.deinit();
-    if (sys.vars.getPtr(probe.key)) |slot| {
-        slot.* = value;
-        return;
-    }
-    // Not a name already in the table (the case-blind probe above would have
-    // found it), so the key is a copy the table owns.
-    const key = lowerDupe(probe.key) orelse return;
-    sys.vars.put(openmiles.global_allocator, key, value) catch openmiles.global_allocator.free(key);
-}
-
-fn getVar(ctx: usize, name: [*:0]const u8, is_float: bool, out: *anyopaque) i32 {
-    const sys = resolveSystem(ctx) orelse return 0;
-    var probe: NameKey = undefined;
-    probe.init(std.mem.span(name));
-    defer probe.deinit();
-    const vd = sys.vars.get(probe.key) orelse return 0;
-    if (vd.is_float != is_float) return 0;
-    if (is_float) {
-        const o: *f32 = @ptrCast(@alignCast(out));
-        o.* = vd.f;
-    } else {
-        const o: *i32 = @ptrCast(@alignCast(out));
-        o.* = vd.i;
-    }
-    return 1;
-}
-
-fn freeSystem(sys: *EventSystem) void {
-    var it = sys.vars.keyIterator();
-    while (it.next()) |k| openmiles.global_allocator.free(k.*);
-    sys.vars.deinit(openmiles.global_allocator);
-    openmiles.global_allocator.destroy(sys);
-}
-
 // --- lifecycle ---------------------------------------------------------------
 
 pub fn MilesStartupEventSystem(driver: ?*anyopaque, command_buf_len: i32, memory_buf: ?[*]u8, memory_len: i32) callconv(.winapi) ?*anyopaque {
@@ -594,34 +73,34 @@ pub fn MilesStartupEventSystem(driver: ?*anyopaque, command_buf_len: i32, memory
     // Check-then-publish: without the lock two threads both read an empty g_root
     // and each installs a system, and the loser's handle is unreachable from
     // the list shutdown walks, so it and its variables are never freed.
-    stateLock();
-    defer stateUnlock();
-    if (g_root) |r| return @ptrCast(r);
-    const sys = openmiles.global_allocator.create(EventSystem) catch {
+    ev.stateLock();
+    defer ev.stateUnlock();
+    if (ev.g_root) |r| return @ptrCast(r);
+    const sys = openmiles.global_allocator.create(ev.EventSystem) catch {
         openmiles.setLastError("MilesStartupEventSystem: cannot allocate the event system");
         return null;
     };
     sys.* = .{ .driver = driver, .command_buffer_size = command_buf_len };
-    g_root = sys;
+    ev.g_root = sys;
     log("MilesStartupEventSystem(driver={*}, cmdbuf={d})\n", .{ driver, command_buf_len });
     return @ptrCast(sys);
 }
 
 pub fn MilesAddEventSystem(driver: ?*anyopaque) callconv(.winapi) ?*anyopaque {
-    stateLock();
-    defer stateUnlock();
-    const sys = openmiles.global_allocator.create(EventSystem) catch {
+    ev.stateLock();
+    defer ev.stateUnlock();
+    const sys = openmiles.global_allocator.create(ev.EventSystem) catch {
         openmiles.setLastError("MilesAddEventSystem: cannot allocate the event system");
         return null;
     };
     sys.* = .{ .driver = driver };
     // append to the tail of the list (root must stay at index 0)
-    if (g_root) |r| {
+    if (ev.g_root) |r| {
         var tail = r;
         while (tail.next) |n| tail = n;
         tail.next = sys;
     } else {
-        g_root = sys;
+        ev.g_root = sys;
     }
     return @ptrCast(sys);
 }
@@ -630,45 +109,45 @@ pub fn MilesShutdownEventSystem() callconv(.winapi) void {
     // Held across the frees: a concurrent enqueue that re-added an instance
     // after the list was deinitialized would append into a slice whose backing
     // array the allocator had already taken back.
-    stateLock();
-    defer stateUnlock();
-    for (g_instances.items) |inst| destroyInstance(inst);
+    ev.stateLock();
+    defer ev.stateUnlock();
+    for (ev.g_instances.items) |inst| ev.destroyInstance(inst);
     // The backing array is the only allocation the instance list owns, and
     // clearRetainingCapacity would hand it to nobody: every session that
     // started a sound leaked it at shutdown. deinit returns it to the allocator
     // installed here, which is the one that grew it in a caller that swaps
     // allocators around this call.
-    g_instances.deinit(openmiles.global_allocator);
+    ev.g_instances.deinit(openmiles.global_allocator);
     // deinit leaves items undefined, and every walk of the list (the
     // enumeration, the label eviction) reads it before the next append. The
     // empty slice is what those walks need, not the undefined pointer
     // `.empty` carries.
-    g_instances = .{ .items = &.{}, .capacity = 0 };
-    cacheClear();
-    persistClear();
-    limitsClear();
-    var s = g_root;
+    ev.g_instances = .{ .items = &.{}, .capacity = 0 };
+    ev.cacheClear();
+    ev.persistClear();
+    ev.limitsClear();
+    var s = ev.g_root;
     while (s) |sys| {
         const nxt = sys.next;
-        freeSystem(sys);
+        ev.freeSystem(sys);
         s = nxt;
     }
-    g_root = null;
+    ev.g_root = null;
 }
 
 pub fn MilesGetEventSystemState(system: ?*anyopaque, state: ?*MILESEVENTSTATE) callconv(.winapi) void {
     const o = state orelse return;
-    stateLock();
-    defer stateUnlock();
+    ev.stateLock();
+    defer ev.stateUnlock();
     o.* = std.mem.zeroes(MILESEVENTSTATE);
     o.LoadedBankCount = @intCast(openmiles.soundbank.loadedCount());
-    o.LoadedSoundCount = @intCast(g_cached.count());
-    o.PersistCount = @intCast(g_persists.items.len);
-    updateInstances();
-    for (g_instances.items) |inst| {
-        if (inst.status == STATUS_PLAYING) o.PlayingSoundCount += 1;
+    o.LoadedSoundCount = @intCast(ev.g_cached.count());
+    o.PersistCount = @intCast(ev.g_persists.items.len);
+    ev.updateInstances();
+    for (ev.g_instances.items) |inst| {
+        if (inst.status == ev.STATUS_PLAYING) o.PlayingSoundCount += 1;
     }
-    if (resolveSystem(@intFromPtr(system))) |sys| {
+    if (ev.resolveSystem(@intFromPtr(system))) |sys| {
         o.CommandBufferSize = sys.command_buffer_size;
     }
 }
@@ -676,40 +155,40 @@ pub fn MilesGetEventSystemState(system: ?*anyopaque, state: ?*MILESEVENTSTATE) c
 // --- variables ---------------------------------------------------------------
 
 pub fn MilesSetVarI(system: usize, name: [*:0]const u8, value: i32) callconv(.winapi) void {
-    stateLock();
-    defer stateUnlock();
-    const sys = resolveSystem(system) orelse return;
-    setVar(sys, name, false, value, 0);
+    ev.stateLock();
+    defer ev.stateUnlock();
+    const sys = ev.resolveSystem(system) orelse return;
+    ev.setVar(sys, name, false, value, 0);
 }
 pub fn MilesSetVarF(system: usize, name: [*:0]const u8, value: f32) callconv(.winapi) void {
-    stateLock();
-    defer stateUnlock();
-    const sys = resolveSystem(system) orelse return;
-    setVar(sys, name, true, 0, value);
+    ev.stateLock();
+    defer ev.stateUnlock();
+    const sys = ev.resolveSystem(system) orelse return;
+    ev.setVar(sys, name, true, 0, value);
 }
 pub fn MilesGetVarI(context: usize, name: [*:0]const u8, out_value: ?*i32) callconv(.winapi) i32 {
     const ov = out_value orelse return 0;
-    stateLock();
-    defer stateUnlock();
-    return getVar(context, name, false, ov);
+    ev.stateLock();
+    defer ev.stateUnlock();
+    return ev.getVar(context, name, false, ov);
 }
 pub fn MilesGetVarF(context: usize, name: [*:0]const u8, out_value: ?*f32) callconv(.winapi) i32 {
     const ov = out_value orelse return 0;
-    stateLock();
-    defer stateUnlock();
-    return getVar(context, name, true, ov);
+    ev.stateLock();
+    defer ev.stateUnlock();
+    return ev.getVar(context, name, true, ov);
 }
 
 // --- event queue + sound instances -------------------------------------------
 
 pub fn MilesEnqueueEvent(event: ?[*]const u8, user_buffer: ?*anyopaque, user_buffer_len: i32, flags: i32, event_filter: u64) callconv(.winapi) u64 {
     _ = event_filter;
-    return enqueueParse(event, user_buffer, user_buffer_len, flags);
+    return ev.enqueueParse(event, user_buffer, user_buffer_len, flags);
 }
 pub fn MilesEnqueueEventContext(context: ?*anyopaque, event: ?[*]const u8, user_buffer: ?*anyopaque, user_buffer_len: i32, flags: i32, event_filter: u64) callconv(.winapi) u64 {
     _ = context;
     _ = event_filter;
-    return enqueueParse(event, user_buffer, user_buffer_len, flags);
+    return ev.enqueueParse(event, user_buffer, user_buffer_len, flags);
 }
 pub fn MilesEnqueueEventByName(name: ?[*:0]const u8) callconv(.winapi) u64 {
     const nm = std.mem.span(name orelse return 0);
@@ -718,38 +197,38 @@ pub fn MilesEnqueueEventByName(name: ?[*:0]const u8) callconv(.winapi) u64 {
     // concurrent MilesReleaseSoundBank would otherwise free it mid-walk.
     const found = openmiles.soundbank.containerFindEventOwned(nm) orelse return 0;
     defer found.bank.deinit();
-    return enqueueParse(found.data, null, 0, 0);
+    return ev.enqueueParse(found.data, null, 0, 0);
 }
 // Pending instances become playing and start their clock here.
 pub fn MilesBeginEventQueueProcessing() callconv(.winapi) i32 {
-    stateLock();
-    defer stateUnlock();
+    ev.stateLock();
+    defer ev.stateUnlock();
     const now = openmiles.getMsCount64();
-    for (g_instances.items) |inst| {
-        if (inst.status == STATUS_PENDING) {
-            inst.status = STATUS_PLAYING;
+    for (ev.g_instances.items) |inst| {
+        if (inst.status == ev.STATUS_PENDING) {
+            inst.status = ev.STATUS_PLAYING;
             inst.start_ms = now;
         }
     }
     return 0;
 }
 pub fn MilesCompleteEventQueueProcessing() callconv(.winapi) i32 {
-    stateLock();
-    defer stateUnlock();
-    updateInstances();
+    ev.stateLock();
+    defer ev.stateUnlock();
+    ev.updateInstances();
     var i: usize = 0;
-    while (i < g_instances.items.len) {
-        if (g_instances.items[i].status == STATUS_COMPLETE) {
-            destroyInstance(g_instances.swapRemove(i));
+    while (i < ev.g_instances.items.len) {
+        if (ev.g_instances.items[i].status == ev.STATUS_COMPLETE) {
+            ev.destroyInstance(ev.g_instances.swapRemove(i));
         } else i += 1;
     }
     return 0;
 }
 pub fn MilesClearEventQueue() callconv(.winapi) void {
-    stateLock();
-    defer stateUnlock();
-    for (g_instances.items) |inst| destroyInstance(inst);
-    g_instances.clearRetainingCapacity();
+    ev.stateLock();
+    defer ev.stateUnlock();
+    for (ev.g_instances.items) |inst| ev.destroyInstance(inst);
+    ev.g_instances.clearRetainingCapacity();
 }
 
 pub fn MilesStartSoundInstance(bank: ?*anyopaque, sound_name: ?[*:0]const u8, loop_count: u32, stream: i32, labels: ?[*:0]const u8, user_buffer: ?*anyopaque, user_buffer_len: i32, user_buffer_flags: i32) callconv(.winapi) u64 {
@@ -762,41 +241,33 @@ pub fn MilesStartSoundInstance(bank: ?*anyopaque, sound_name: ?[*:0]const u8, lo
     // The id and the instance it names are one allocation of state: taking the
     // id under a separate lock would let another thread's enqueue publish a
     // higher id first and reorder the enumerate walk.
-    stateLock();
-    defer stateUnlock();
-    const qid = nextId();
+    ev.stateLock();
+    defer ev.stateUnlock();
+    const qid = ev.nextId();
     // The handle a caller holds from here is the instance ID, the one
     // AILSOUNDINSTANCE reports; the queue ID belongs to MilesEnqueueEvent and
     // names the batch the step came from.
-    return createInstance(qid, std.mem.span(nm), lbl, user_buffer, user_buffer_len);
-}
-// Stop/Pause/Resume operate over instances matching both the status filter
-// (filter 0 = all) and the label query (null/empty = all). Returns the count.
-// Without a wired mixer, pause/resume have no audible effect but report the
-// matching count for API faithfulness.
-fn matchFilter(inst: *const SoundInstance, labels: ?[*:0]const u8, filter: u64) bool {
-    const status_ok = filter == 0 or (@as(u64, @intCast(inst.status)) & filter) != 0;
-    return status_ok and labelMatch(inst.labels, labels);
+    return ev.createInstance(qid, std.mem.span(nm), lbl, user_buffer, user_buffer_len);
 }
 pub fn MilesStopSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.winapi) u64 {
-    stateLock();
-    defer stateUnlock();
+    ev.stateLock();
+    defer ev.stateUnlock();
     var n: u64 = 0;
     var i: usize = 0;
-    while (i < g_instances.items.len) {
-        if (matchFilter(g_instances.items[i], labels, filter)) {
-            destroyInstance(g_instances.swapRemove(i));
+    while (i < ev.g_instances.items.len) {
+        if (ev.matchFilter(ev.g_instances.items[i], labels, filter)) {
+            ev.destroyInstance(ev.g_instances.swapRemove(i));
             n += 1;
         } else i += 1;
     }
     return n;
 }
 pub fn MilesPauseSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.winapi) u64 {
-    stateLock();
-    defer stateUnlock();
+    ev.stateLock();
+    defer ev.stateUnlock();
     var n: u64 = 0;
-    for (g_instances.items) |inst| {
-        if (matchFilter(inst, labels, filter)) n += 1;
+    for (ev.g_instances.items) |inst| {
+        if (ev.matchFilter(inst, labels, filter)) n += 1;
     }
     return n;
 }
@@ -807,9 +278,9 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
     _ = system;
     _ = search_for_id;
     const np = io_next orelse return 0;
-    stateLock();
-    defer stateUnlock();
-    updateInstances();
+    ev.stateLock();
+    defer ev.stateUnlock();
+    ev.updateInstances();
     const filter: u64 = if (status == 0) 0xffffffff else @intCast(@as(u32, @bitCast(status)));
     // The cursor carries the instance_id of the last entry handed out, not its
     // position in g_instances, and the walk visits entries in id order rather
@@ -838,11 +309,11 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
     // unambiguously the start rather than a resume point.
     const cursor_raw = @intFromPtr(np.*);
     const after_id: u64 = if (cursor_raw == std.math.maxInt(usize) or cursor_raw == 0) 0 else cursor_raw;
-    var found: ?*SoundInstance = null;
-    for (g_instances.items) |inst| {
+    var found: ?*ev.SoundInstance = null;
+    for (ev.g_instances.items) |inst| {
         if (inst.instance_id <= after_id) continue;
         if ((@as(u64, @intCast(inst.status)) & filter) == 0) continue;
-        if (!labelMatch(inst.labels, labels)) continue;
+        if (!ev.labelMatch(inst.labels, labels)) continue;
         if (found == null or inst.instance_id < found.?.instance_id) found = inst;
     }
     const inst = found orelse return 0;
@@ -876,16 +347,16 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
 pub fn MilesEnumeratePresetPersists(system: ?*anyopaque, io_next: ?*?*anyopaque, out_name: ?*?[*:0]const u8) callconv(.winapi) i32 {
     _ = system;
     const np = io_next orelse return 0;
-    stateLock();
-    defer stateUnlock();
+    ev.stateLock();
+    defer ev.stateUnlock();
     const first = @intFromPtr(np.*) == std.math.maxInt(usize) or @intFromPtr(np.*) == 0;
     const idx: usize = if (first) 0 else @intFromPtr(np.*);
-    if (idx >= g_persists.items.len) {
+    if (idx >= ev.g_persists.items.len) {
         np.* = @ptrFromInt(idx);
         if (out_name) |o| o.* = null;
         return 0;
     }
-    if (out_name) |o| o.* = g_persists.items[idx].ptr;
+    if (out_name) |o| o.* = ev.g_persists.items[idx].ptr;
     np.* = @ptrFromInt(idx + 1);
     return 1;
 }
@@ -896,9 +367,9 @@ pub fn MilesSetSoundStartOffset(instance: usize, offset: i32, is_ms: i32) callco
 }
 pub fn MilesSetSoundLabelLimits(system: ?*anyopaque, sound_limits: ?[*:0]const u8) callconv(.winapi) i32 {
     _ = system;
-    stateLock();
-    defer stateUnlock();
-    setLimits(if (sound_limits) |p| std.mem.span(p) else "");
+    ev.stateLock();
+    defer ev.stateUnlock();
+    ev.setLimits(if (sound_limits) |p| std.mem.span(p) else "");
     return 1;
 }
 
@@ -946,7 +417,7 @@ pub fn MilesGetEventLength(event_name: ?[*:0]const u8) callconv(.winapi) i32 {
     // a concurrent release would free.
     const found = openmiles.soundbank.containerFindEventOwned(name) orelse return 0;
     defer found.bank.deinit();
-    var walker: StepWalker = undefined;
+    var walker: ev.StepWalker = undefined;
     walker.init(found.data);
     while (walker.next()) |st| {
         if (st.type != @intFromEnum(openmiles.event.StepType.start_sound)) continue;
@@ -964,18 +435,18 @@ pub fn MilesGetEventLength(event_name: ?[*:0]const u8) callconv(.winapi) i32 {
 // Human-readable diagnostic dump (mss.h AIL_text_dump_event_system). Mirrors the
 // SDK's header lines; the returned buffer is malloc'd for the caller to free.
 pub fn MilesTextDumpEventSystem() callconv(.winapi) ?[*:0]u8 {
-    stateLock();
-    defer stateUnlock();
+    ev.stateLock();
+    defer ev.stateUnlock();
     var sys_count: i32 = 0;
-    var s = g_root;
+    var s = ev.g_root;
     while (s) |sys| : (s = sys.next) sys_count += 1;
-    updateInstances();
+    ev.updateInstances();
     var buf: [512]u8 = undefined;
     const text = std.fmt.bufPrint(&buf, "Event System Count: {d}\nSystem #1\nSound Source Count: {d}\nSound Instance Count: {d}\nPersistent Preset Count: {d}\nLoaded Bank Count: {d}\n", .{
         sys_count,
-        g_cached.count(),
-        g_instances.items.len,
-        g_persists.items.len,
+        ev.g_cached.count(),
+        ev.g_instances.items.len,
+        ev.g_persists.items.len,
         openmiles.soundbank.loadedCount(),
     }) catch {
         openmiles.setLastError("Cannot format the event system status");
@@ -1072,38 +543,4 @@ pub fn MilesEnumeratePresetPersists_v8(io_next: ?*?*anyopaque, out_name: ?*?[*:0
 }
 pub fn MilesEnumerateSoundInstances_v8(system: ?*anyopaque, io_next: ?*?*anyopaque, status: i32, labels: ?[*:0]const u8, search_for_id: u32, out_info: ?*anyopaque) callconv(.winapi) i32 {
     return MilesEnumerateSoundInstances(system, io_next, status, labels, search_for_id, out_info);
-}
-
-const testing = std.testing;
-
-test "glob: a retry after '*' restarts on a character boundary" {
-    // "*" then a lone continuation byte then "b" must not match "a<e-acute>b".
-    // The 0xA9 in the pattern is not the e-acute (U+00E9 is C3 A9), so the only
-    // way this could match is by lining the pattern byte up with the trailing
-    // byte of a character the pattern never named.
-    try testing.expect(!globMatch("*\xA9b", "a\u{00e9}b"));
-    // The same pattern with the whole character does match, and so does a
-    // pattern that wildcards the character: the fix rejects only the split.
-    try testing.expect(globMatch("*\u{00e9}b", "a\u{00e9}b"));
-    try testing.expect(globMatch("*\xe2\x98\x83b", "a\u{2603}b"));
-    try testing.expect(globMatch("*?*", "a\u{00e9}b"));
-    // A continuation byte names no character, so a pattern holding one cannot
-    // match a text holding that character, whatever the wildcards do.
-    try testing.expect(!globMatch("*?\xA9*", "a\u{00e9}b"));
-}
-
-test "glob: '?' consumes one character, '*' any run" {
-    try testing.expect(globMatch("kick", "kick"));
-    try testing.expect(!globMatch("kick", "kicks"));
-    try testing.expect(globMatch("k?ck", "kick"));
-    // One '?' is one character, so a two-character name needs two.
-    try testing.expect(!globMatch("??", "\u{00e9}"));
-    try testing.expect(globMatch("??", "a\u{00e9}"));
-    try testing.expect(globMatch("*.wav", "caf\u{00e9}.wav"));
-    try testing.expect(globMatch("*", ""));
-    try testing.expect(globMatch("", ""));
-    try testing.expect(!globMatch("", "a"));
-    // ASCII behavior is unchanged: every retry position is already a boundary.
-    try testing.expect(globMatch("*bcd", "abcd"));
-    try testing.expect(!globMatch("*bce", "abcd"));
 }
