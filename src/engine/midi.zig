@@ -639,7 +639,7 @@ pub const Sequence = struct {
     // while holding state_mutex, so this cannot be a plain field: the game
     // calls AIL_set_sequence_user_data from that same callback and would
     // deadlock on the mutex.
-    user_data: [8]std.atomic.Value(u32) = [_]std.atomic.Value(u32){.init(0)} ** 8,
+    user_data: [root.user_data_slots]std.atomic.Value(u32) = [_]std.atomic.Value(u32){.init(0)} ** root.user_data_slots,
     // Beat/measure tracking
     ms_per_beat: f64 = 500.0, // current ms/beat (MIDI-time units = file BPM based)
     next_beat_ms: f64 = 500.0,

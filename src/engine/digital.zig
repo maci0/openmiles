@@ -1060,7 +1060,7 @@ pub const Sample = struct {
     // Slot most recently resolved by AIL_load_sample_buffer, or the slot that
     // last drained a stream buffer.
     last_loaded_buffer: std.atomic.Value(i32) = .init(0),
-    user_data: [8]u32 = [_]u32{0} ** 8,
+    user_data: [root.user_data_slots]u32 = [_]u32{0} ** root.user_data_slots,
     // Bounded memory context for streaming formats loaded from raw pointers (freed on deinit)
     bounded_mem_ctx: ?*BoundedMemCtx = null,
     // Filter attached to this sample (set by AIL_set_sample_filter)
@@ -2173,7 +2173,7 @@ pub const Sample3D = struct {
     orient_ux: f32 = 0.0,
     orient_uy: f32 = 1.0,
     orient_uz: f32 = 0.0,
-    user_data: [8]u32 = [_]u32{0} ** 8,
+    user_data: [root.user_data_slots]u32 = [_]u32{0} ** root.user_data_slots,
     bounded_mem_ctx: ?*Sample.BoundedMemCtx = null,
     cached_length_frames: u64 = 0,
 

@@ -109,8 +109,8 @@ pub const Provider = struct {
     // from a file on disk. See publishImage / releaseImage.
     image_key: ?ImageKey = null,
     image_refs: u32 = 0,
-    user_data: [8]usize = [_]usize{0} ** 8,
-    system_data: [8]usize = [_]usize{0} ** 8,
+    user_data: [root.user_data_slots]usize = [_]usize{0} ** root.user_data_slots,
+    system_data: [root.user_data_slots]usize = [_]usize{0} ** root.user_data_slots,
     // Source of the interface handles handed to the plugin. Monotonic and
     // never reused, so a handle a plugin still holds cannot name a different
     // interface registered after the one it was given. Same width as the

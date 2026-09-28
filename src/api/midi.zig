@@ -134,13 +134,11 @@ pub fn AIL_sequence_position(seq_opt: ?*Sequence, beat: ?*i32, measure: ?*i32) c
 }
 pub fn AIL_sequence_user_data(seq_opt: ?*Sequence, index: i32) callconv(.winapi) u32 {
     const seq = seq_opt orelse return 0;
-
-    return seq.getUserData(@intCast(@min(@max(index, 0), 7)));
+    return seq.getUserData(@intCast(openmiles.userDataIndex(index)));
 }
 pub fn AIL_set_sequence_user_data(seq_opt: ?*Sequence, index: i32, value: u32) callconv(.winapi) void {
     const seq = seq_opt orelse return;
-
-    seq.setUserData(@intCast(@min(@max(index, 0), 7)), value);
+    seq.setUserData(@intCast(openmiles.userDataIndex(index)), value);
 }
 pub fn AIL_end_sequence(seq_opt: ?*Sequence) callconv(.winapi) void {
     const seq = seq_opt orelse return;

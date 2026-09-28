@@ -203,13 +203,11 @@ pub fn AIL_set_stream_position(s_opt: ?*Sample, pos: u32) callconv(.winapi) void
 }
 pub fn AIL_stream_user_data(s_opt: ?*Sample, index: i32) callconv(.winapi) u32 {
     const s = s_opt orelse return 0;
-    const idx: usize = @intCast(@min(@max(index, 0), 7));
-    return s.user_data[idx];
+    return s.user_data[openmiles.userDataIndex(index)];
 }
 pub fn AIL_set_stream_user_data(s_opt: ?*Sample, index: i32, value: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    const idx: usize = @intCast(@min(@max(index, 0), 7));
-    s.user_data[idx] = value;
+    s.user_data[openmiles.userDataIndex(index)] = value;
 }
 // SDK: AIL_stream_reverb(HSTREAM, F32* reverb_level, F32* reverb_reflect_time,
 // F32* reverb_decay_time). The engine's .room_type field holds the decay value.

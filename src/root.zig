@@ -155,6 +155,19 @@ pub fn clampUnit(v: f32) f32 {
     return std.math.clamp(v, 0.0, 1.0);
 }
 
+/// Slots in the per-handle user/system data array every AIL_/RIB_*_user_data
+/// call indexes. The MSS SDK stores eight per handle, and so do Sample,
+/// Sample3D, Sequence and Provider.
+pub const user_data_slots: usize = 8;
+
+/// Fold a caller-supplied user/system data slot index into the range
+/// `0..user_data_slots`. The index crosses the C ABI, so a game is free to
+/// pass one that names no slot; the fold keeps every entry point reading the
+/// same array through the same bound instead of each spelling its own.
+pub fn userDataIndex(index: i32) usize {
+    return @intCast(std.math.clamp(index, 0, @as(i32, @intCast(user_data_slots - 1))));
+}
+
 // AIL_MAX_FILE_HEADER_SIZE bounds how far AIL_file_type scans for an MPEG frame
 // sync (miscutil.cpp clamps the scan length to it). MSS 7.0 doubled it from 4096
 // to 8192 — verified by disassembling AIL_file_type in the reference DLLs: 6.5h

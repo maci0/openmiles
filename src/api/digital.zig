@@ -343,13 +343,11 @@ pub fn AIL_set_sample_loop_count(s_opt: ?*Sample, count: i32) callconv(.winapi) 
 }
 pub fn AIL_sample_user_data(s_opt: ?*Sample, index: i32) callconv(.winapi) u32 {
     const s = s_opt orelse return 0;
-    const idx: usize = @intCast(@min(@max(index, 0), 7));
-    return s.user_data[idx];
+    return s.user_data[openmiles.userDataIndex(index)];
 }
 pub fn AIL_set_sample_user_data(s_opt: ?*Sample, index: i32, value: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    const idx: usize = @intCast(@min(@max(index, 0), 7));
-    s.user_data[idx] = value;
+    s.user_data[openmiles.userDataIndex(index)] = value;
 }
 // SDK (mss.h 6.x): AIL_(set_)sample_reverb(HSAMPLE, F32 reverb_level,
 // F32 reverb_reflect_time, F32 reverb_decay_time) -- there is NO "room_type" arg.

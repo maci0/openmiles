@@ -224,14 +224,12 @@ pub fn AIL_active_3D_sample_count(dig_opt: ?*DigitalDriver) callconv(.winapi) u3
 pub fn AIL_3D_user_data(s: ?*anyopaque, index: i32) callconv(.winapi) u32 {
     const p = s orelse return 0;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
-    const idx: usize = @intCast(@min(@max(index, 0), 7));
-    return sample.user_data[idx];
+    return sample.user_data[openmiles.userDataIndex(index)];
 }
 pub fn AIL_set_3D_user_data(s: ?*anyopaque, index: i32, value: u32) callconv(.winapi) void {
     const p = s orelse return;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
-    const idx: usize = @intCast(@min(@max(index, 0), 7));
-    sample.user_data[idx] = value;
+    sample.user_data[openmiles.userDataIndex(index)] = value;
 }
 pub fn AIL_set_3D_sample_info(s: ?*anyopaque, info: ?*anyopaque) callconv(.winapi) i32 {
     const p = s orelse return 0;

@@ -561,21 +561,21 @@ pub fn AIL_request_EOB_ASI_reset_v7(s_opt: ?*Sample, buff_num: u32) callconv(.wi
 }
 pub fn RIB_provider_system_data(provider_opt: ?*Provider, index: u32) callconv(.winapi) usize {
     const provider = provider_opt orelse return 0;
-    if (index < 8) return provider.system_data[index];
+    if (index < openmiles.user_data_slots) return provider.system_data[index];
     return 0;
 }
 pub fn RIB_provider_user_data(provider_opt: ?*Provider, index: u32) callconv(.winapi) usize {
     const provider = provider_opt orelse return 0;
-    if (index < 8) return provider.user_data[index];
+    if (index < openmiles.user_data_slots) return provider.user_data[index];
     return 0;
 }
 pub fn RIB_set_provider_system_data(provider_opt: ?*Provider, index: u32, value: usize) callconv(.winapi) void {
     const provider = provider_opt orelse return;
-    if (index < 8) provider.system_data[index] = value;
+    if (index < openmiles.user_data_slots) provider.system_data[index] = value;
 }
 pub fn RIB_set_provider_user_data(provider_opt: ?*Provider, index: u32, value: usize) callconv(.winapi) void {
     const provider = provider_opt orelse return;
-    if (index < 8) provider.user_data[index] = value;
+    if (index < openmiles.user_data_slots) provider.user_data[index] = value;
 }
 pub fn RIB_find_file_dec_provider(name: [*:0]const u8, property: [*:0]const u8, filename: [*:0]const u8, search_dir: [*:0]const u8, file_ext: [*:0]const u8) callconv(.winapi) ?*Provider {
     log("RIB_find_file_dec_provider(name='{s}', property='{s}', filename='{s}', search_dir='{s}', file_ext='{s}')\n", .{ std.mem.span(name), std.mem.span(property), std.mem.span(filename), std.mem.span(search_dir), std.mem.span(file_ext) });
