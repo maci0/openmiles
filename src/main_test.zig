@@ -8761,3 +8761,79 @@ test "a miniaudio result code reaches the log as something an operator can act o
     try testing.expect(openmiles.maResultDescription(-123456).len > 0);
     try testing.expectEqualStrings("Unknown error", openmiles.maResultDescription(-123456));
 }
+
+test "concurrent Miles starts, drains and queries lose no instance" {    // A game's worker thread starting sounds while its main thread drains the
+    // queue and reads the state is the ordinary split. Every registry behind
+    // these calls is process-global: the instance list appends and grows its own
+    // backing array, the id counter is a read-modify-write, and the status walk
+    // reads the list while the drain swap-removes from it. The claim is
+    // arithmetic, not timing: every started instance must be reachable in the
+    // walk, so a torn length, a lost growth or a duplicated id shows up as a
+    // count below the number of starts.
+    _ = api_miles_t.MilesStartupEventSystem(null, 256, null, 0);
+    defer api_miles_t.MilesShutdownEventSystem();
+    api_miles_t.MilesClearEventQueue();
+
+    const thread_count = 4;
+    const per_thread = 250;
+    const CB = struct {
+        var gate: std.atomic.Value(u32) = .init(0);
+
+        fn starter(slot: usize) void {
+            _ = gate.fetchAdd(1, .release);
+            while (gate.load(.acquire) < thread_count) std.atomic.spinLoopHint();
+            var i: usize = 0;
+            while (i < per_thread) : (i += 1) {
+                // A distinct label per thread and per iteration, so the stop
+                // filter below is exact rather than an approximation.
+                var buf: [32]u8 = undefined;
+                const nm = std.fmt.bufPrintZ(&buf, "s{d}_{d}", .{ slot, i }) catch unreachable;
+                var lb: [32]u8 = undefined;
+                const label = std.fmt.bufPrintZ(&lb, "w{d}", .{slot}) catch unreachable;
+                _ = api_miles_t.MilesStartSoundInstance(null, nm, 0, 0, label, null, 0, 0);
+            }
+        }
+
+        fn reader() void {
+            _ = gate.fetchAdd(1, .release);
+            while (gate.load(.acquire) < thread_count) std.atomic.spinLoopHint();
+            var i: usize = 0;
+            while (i < per_thread) : (i += 1) {
+                var st: api_miles_t.MILESEVENTSTATE = undefined;
+                api_miles_t.MilesGetEventSystemState(null, &st);
+                var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+                var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
+                _ = api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, null, 0, @ptrCast(&info));
+            }
+        }
+    };
+
+    var handles: [thread_count + 1]std.Thread = undefined;
+    for (handles[0..thread_count], 0..) |*h, i| h.* = try std.Thread.spawn(.{}, CB.starter, .{i});
+    handles[thread_count] = try std.Thread.spawn(.{}, CB.reader, .{});
+    for (handles) |h| h.join();
+
+    // Every start is reachable in the walk, and every entry is distinct: the
+    // cursor is the instance id, so two instances sharing one would make the
+    // second unreachable and the count fall short.
+    var seen: usize = 0;
+    var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
+    while (api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, null, 0, @ptrCast(&info)) == 1) {
+        seen += 1;
+        if (seen > thread_count * per_thread) return error.TooManyInstances;
+    }
+    try testing.expectEqual(@as(usize, thread_count * per_thread), seen);
+    try testing.expectEqual(@as(u64, @intCast(seen)), milesLiveInstanceCount());
+}
+
+// Live instances as the module's own walk reports them. The concurrent test
+// asserts against this rather than reaching into the module's list, so the
+// number checked is the one a game would see.
+fn milesLiveInstanceCount() usize {
+    var n: usize = 0;
+    var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
+    while (api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, null, 0, @ptrCast(&info)) == 1) n += 1;
+    return n;
+}

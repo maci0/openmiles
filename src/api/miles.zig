@@ -144,6 +144,33 @@ fn labelMatch(labels: []const u8, query: ?[*:0]const u8) bool {
     return false;
 }
 
+// The event-system state below (instances, id counter, cache, persists, label
+// limits, the system list and its variable tables) is process-global, and every
+// one of it is reachable from a Miles entry point, which a game may call from
+// any thread: the SDK's own walk is enumerate-then-act from the main loop
+// while a worker enqueues events, the same split root.zig's atomic "current
+// driver" slots assume. None of the containers is safe under that split.
+// An ArrayListUnmanaged append and a StringHashMap put each write a length and a
+// capacity alongside the storage they point at, so two threads in one list
+// corrupt the heap rather than merely losing an entry; nextId is a
+// read-modify-write, so two instances take the same id and the resumable
+// enumerate walk skips and repeats entries; the system list walk reads a
+// half-linked list and hands back a freed system. One lock covers all of it.
+//
+// Lock order: this lock is outermost. The leaf lookups below (the bank container
+// duration/event lookups) take soundbank's registry lock, and that file never
+// calls back here, so the order is one-way and cannot cycle. It is the only
+// lock this file takes, and a public entry point is never called while it is
+// held.
+var state_mutex: std.Io.Mutex = .init;
+
+fn stateLock() void {
+    state_mutex.lockUncancelable(openmiles.io);
+}
+fn stateUnlock() void {
+    state_mutex.unlock(openmiles.io);
+}
+
 var g_instances: std.ArrayListUnmanaged(*SoundInstance) = .empty;
 var g_next_id: u64 = 1;
 
@@ -448,9 +475,14 @@ const StepWalker = struct {
     }
 };
 
-// Parse an event's bytecode and create an instance per start-sound step.
+// Parse an event's bytecode and create an instance per start-sound step. The
+// whole parse runs under state_mutex: it allocates ids, appends instances and
+// edits the cache/presists/limits registries, and a game's worker thread
+// enqueueing while its main thread drains the queue is the ordinary case.
 fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: i32) u64 {
     if (event == null) return 0;
+    stateLock();
+    defer stateUnlock();
     var walker: StepWalker = undefined;
     walker.init(event);
     const qid = nextId();
@@ -555,6 +587,11 @@ fn freeSystem(sys: *EventSystem) void {
 pub fn MilesStartupEventSystem(driver: ?*anyopaque, command_buf_len: i32, memory_buf: ?[*]u8, memory_len: i32) callconv(.winapi) ?*anyopaque {
     _ = memory_buf;
     _ = memory_len;
+    // Check-then-publish: without the lock two threads both read an empty g_root
+    // and each installs a system, and the loser's handle is unreachable from
+    // the list shutdown walks, so it and its variables are never freed.
+    stateLock();
+    defer stateUnlock();
     if (g_root) |r| return @ptrCast(r);
     const sys = openmiles.global_allocator.create(EventSystem) catch {
         openmiles.setLastError("MilesStartupEventSystem: cannot allocate the event system");
@@ -567,6 +604,8 @@ pub fn MilesStartupEventSystem(driver: ?*anyopaque, command_buf_len: i32, memory
 }
 
 pub fn MilesAddEventSystem(driver: ?*anyopaque) callconv(.winapi) ?*anyopaque {
+    stateLock();
+    defer stateUnlock();
     const sys = openmiles.global_allocator.create(EventSystem) catch {
         openmiles.setLastError("MilesAddEventSystem: cannot allocate the event system");
         return null;
@@ -584,6 +623,11 @@ pub fn MilesAddEventSystem(driver: ?*anyopaque) callconv(.winapi) ?*anyopaque {
 }
 
 pub fn MilesShutdownEventSystem() callconv(.winapi) void {
+    // Held across the frees: a concurrent enqueue that re-added an instance
+    // after the list was deinitialized would append into a slice whose backing
+    // array the allocator had already taken back.
+    stateLock();
+    defer stateUnlock();
     for (g_instances.items) |inst| destroyInstance(inst);
     // The backing array is the only allocation the instance list owns, and
     // clearRetainingCapacity would hand it to nobody: every session that
@@ -610,6 +654,8 @@ pub fn MilesShutdownEventSystem() callconv(.winapi) void {
 
 pub fn MilesGetEventSystemState(system: ?*anyopaque, state: ?*MILESEVENTSTATE) callconv(.winapi) void {
     const o = state orelse return;
+    stateLock();
+    defer stateUnlock();
     o.* = std.mem.zeroes(MILESEVENTSTATE);
     o.LoadedBankCount = @intCast(openmiles.soundbank.loadedCount());
     o.LoadedSoundCount = @intCast(g_cached.count());
@@ -626,18 +672,28 @@ pub fn MilesGetEventSystemState(system: ?*anyopaque, state: ?*MILESEVENTSTATE) c
 // --- variables ---------------------------------------------------------------
 
 pub fn MilesSetVarI(system: usize, name: [*:0]const u8, value: i32) callconv(.winapi) void {
+    stateLock();
+    defer stateUnlock();
     const sys = resolveSystem(system) orelse return;
     setVar(sys, name, false, value, 0);
 }
 pub fn MilesSetVarF(system: usize, name: [*:0]const u8, value: f32) callconv(.winapi) void {
+    stateLock();
+    defer stateUnlock();
     const sys = resolveSystem(system) orelse return;
     setVar(sys, name, true, 0, value);
 }
 pub fn MilesGetVarI(context: usize, name: [*:0]const u8, out_value: ?*i32) callconv(.winapi) i32 {
-    return getVar(context, name, false, out_value orelse return 0);
+    const ov = out_value orelse return 0;
+    stateLock();
+    defer stateUnlock();
+    return getVar(context, name, false, ov);
 }
 pub fn MilesGetVarF(context: usize, name: [*:0]const u8, out_value: ?*f32) callconv(.winapi) i32 {
-    return getVar(context, name, true, out_value orelse return 0);
+    const ov = out_value orelse return 0;
+    stateLock();
+    defer stateUnlock();
+    return getVar(context, name, true, ov);
 }
 
 // --- event queue + sound instances -------------------------------------------
@@ -662,6 +718,8 @@ pub fn MilesEnqueueEventByName(name: ?[*:0]const u8) callconv(.winapi) u64 {
 }
 // Pending instances become playing and start their clock here.
 pub fn MilesBeginEventQueueProcessing() callconv(.winapi) i32 {
+    stateLock();
+    defer stateUnlock();
     const now = openmiles.getMsCount64();
     for (g_instances.items) |inst| {
         if (inst.status == STATUS_PENDING) {
@@ -672,6 +730,8 @@ pub fn MilesBeginEventQueueProcessing() callconv(.winapi) i32 {
     return 0;
 }
 pub fn MilesCompleteEventQueueProcessing() callconv(.winapi) i32 {
+    stateLock();
+    defer stateUnlock();
     updateInstances();
     var i: usize = 0;
     while (i < g_instances.items.len) {
@@ -682,6 +742,8 @@ pub fn MilesCompleteEventQueueProcessing() callconv(.winapi) i32 {
     return 0;
 }
 pub fn MilesClearEventQueue() callconv(.winapi) void {
+    stateLock();
+    defer stateUnlock();
     for (g_instances.items) |inst| destroyInstance(inst);
     g_instances.clearRetainingCapacity();
 }
@@ -693,6 +755,11 @@ pub fn MilesStartSoundInstance(bank: ?*anyopaque, sound_name: ?[*:0]const u8, lo
     _ = bank;
     const nm = sound_name orelse return 0;
     const lbl: []const u8 = if (labels) |p| std.mem.span(p) else "";
+    // The id and the instance it names are one allocation of state: taking the
+    // id under a separate lock would let another thread's enqueue publish a
+    // higher id first and reorder the enumerate walk.
+    stateLock();
+    defer stateUnlock();
     const qid = nextId();
     createInstance(qid, std.mem.span(nm), lbl, user_buffer, user_buffer_len);
     return qid;
@@ -706,6 +773,8 @@ fn matchFilter(inst: *const SoundInstance, labels: ?[*:0]const u8, filter: u64) 
     return status_ok and labelMatch(inst.labels, labels);
 }
 pub fn MilesStopSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.winapi) u64 {
+    stateLock();
+    defer stateUnlock();
     var n: u64 = 0;
     var i: usize = 0;
     while (i < g_instances.items.len) {
@@ -717,6 +786,8 @@ pub fn MilesStopSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.wi
     return n;
 }
 pub fn MilesPauseSoundInstances(labels: ?[*:0]const u8, filter: u64) callconv(.winapi) u64 {
+    stateLock();
+    defer stateUnlock();
     var n: u64 = 0;
     for (g_instances.items) |inst| {
         if (matchFilter(inst, labels, filter)) n += 1;
@@ -730,6 +801,8 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
     _ = system;
     _ = search_for_id;
     const np = io_next orelse return 0;
+    stateLock();
+    defer stateUnlock();
     updateInstances();
     const filter: u64 = if (status == 0) 0xffffffff else @intCast(@as(u32, @bitCast(status)));
     // The cursor carries the instance_id of the last entry handed out, not its
@@ -797,6 +870,8 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
 pub fn MilesEnumeratePresetPersists(system: ?*anyopaque, io_next: ?*?*anyopaque, out_name: ?*?[*:0]const u8) callconv(.winapi) i32 {
     _ = system;
     const np = io_next orelse return 0;
+    stateLock();
+    defer stateUnlock();
     const first = @intFromPtr(np.*) == std.math.maxInt(usize) or @intFromPtr(np.*) == 0;
     const idx: usize = if (first) 0 else @intFromPtr(np.*);
     if (idx >= g_persists.items.len) {
@@ -815,6 +890,8 @@ pub fn MilesSetSoundStartOffset(instance: usize, offset: i32, is_ms: i32) callco
 }
 pub fn MilesSetSoundLabelLimits(system: ?*anyopaque, sound_limits: ?[*:0]const u8) callconv(.winapi) i32 {
     _ = system;
+    stateLock();
+    defer stateUnlock();
     setLimits(if (sound_limits) |p| std.mem.span(p) else "");
     return 1;
 }
@@ -881,6 +958,8 @@ pub fn MilesGetEventLength(event_name: ?[*:0]const u8) callconv(.winapi) i32 {
 // Human-readable diagnostic dump (mss.h AIL_text_dump_event_system). Mirrors the
 // SDK's header lines; the returned buffer is malloc'd for the caller to free.
 pub fn MilesTextDumpEventSystem() callconv(.winapi) ?[*:0]u8 {
+    stateLock();
+    defer stateUnlock();
     var sys_count: i32 = 0;
     var s = g_root;
     while (s) |sys| : (s = sys.next) sys_count += 1;

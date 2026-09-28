@@ -947,7 +947,14 @@ pub fn AIL_add_start_sound_event_step_v8(a0: ?*anyopaque, a1: ?*anyopaque, a2: ?
 pub fn AIL_find_marker_in_list_v8(a0: i32, a1: ?*anyopaque) callconv(.winapi) i32 {
     return AIL_find_marker_in_list(a0, a1, null);
 }
-var ftoa_buf: [32]u8 = undefined;
+// The v8 AIL_ftoa takes no caller buffer and hands back a pointer to the
+// formatter's own storage (rib.cpp keeps a static one), so the buffer is part
+// of the ABI: a game reads the returned string until its next call. Per-thread
+// rather than process-global, because a game logging a float from a worker
+// while its main thread does the same would otherwise have one thread's digits
+// rewritten under the other's read. One buffer per thread keeps the
+// last-call-wins contract and stops the two from sharing it.
+threadlocal var ftoa_buf: [32]u8 = undefined;
 pub fn AIL_ftoa_v8(v: f32) callconv(.winapi) ?*anyopaque {
     return AIL_ftoa(v, &ftoa_buf);
 }

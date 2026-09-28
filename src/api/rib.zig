@@ -511,7 +511,12 @@ pub fn RIB_enumerate_interface(provider_opt: ?*Provider, name: [*:0]const u8, en
 // pointed to by `data` per its subtype into a static buffer (rib.cpp). Subtypes:
 // RIB_DEC=1, RIB_HEX=2, RIB_FLOAT=3, RIB_PERCENT=4, RIB_BOOL=5, RIB_STRING=6;
 // RIB_READONLY=0x80000000 is a flag stripped before the switch.
-var type_string_buf: [256]u8 = undefined;
+// RIB_type_string returns a pointer to this buffer, so a caller reads the
+// string until its next call, and the buffer is per-thread for the same reason
+// the v8 AIL_ftoa buffer is: a registry trace emitted from a worker thread
+// would otherwise have its characters rewritten by the main thread's call
+// midway through the read, and the trace would name the wrong value.
+threadlocal var type_string_buf: [256]u8 = undefined;
 pub fn RIB_type_string(data: ?*const anyopaque, subtype: u32) callconv(.c) [*:0]const u8 {
     const d = data orelse return "";
     const st = subtype & ~@as(u32, 0x80000000);
