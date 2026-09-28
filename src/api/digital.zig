@@ -97,9 +97,13 @@ pub fn AIL_set_preference(number: u32, value: i32) callconv(.winapi) i32 {
 pub fn AIL_waveOutOpen(drvr_ptr: ?*?*DigitalDriver, lphwo: ?*u32, device_id: i32, format: ?*anyopaque) callconv(.winapi) u32 {
     log("AIL_waveOutOpen(drvr_ptr={*}, lphwo={*}, device_id={d}, format={*})\n", .{ drvr_ptr, lphwo, device_id, format });
     if (drvr_ptr) |ptr| {
-        const driver = openmiles.DigitalDriver.init(openmiles.global_allocator, 44100, 16, 2) catch |err| {
-            log("Error: {any}\n", .{err});
-            openmiles.setLastError("Failed to initialize digital driver");
+        // The same process-wide device AIL_open_digital_driver hands back, by
+        // the same counted open. Building a second engine here gave a game that
+        // mixes the two entry points two miniaudio devices on one output, which
+        // the second open can fail outright, and left the waveOutClose side of
+        // the pair as the only way to release the first one.
+        const driver = openmiles.openDigitalDriver(44100, 16, 2) orelse {
+            log("Error: digital driver init failed\n", .{});
             return 1;
         }; // MMSYSERR_ERROR
         ptr.* = driver;
@@ -1236,6 +1240,5 @@ pub fn AIL_destroy_wave_synthesizer(synth: *MidiDriver) callconv(.winapi) void {
 }
 pub fn AIL_waveOutClose(driver_opt: ?*DigitalDriver) callconv(.winapi) void {
     const driver = driver_opt orelse return;
-    openmiles.clearLastDigitalDriver(driver);
-    driver.deinit();
+    openmiles.closeDigitalDriver(driver);
 }

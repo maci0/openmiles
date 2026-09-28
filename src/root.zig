@@ -1719,14 +1719,17 @@ pub fn shutdown() void {
     logger.deinit();
 }
 
-/// Opens the one digital driver for the process, or returns the one already
-/// open. The handle is not reference counted: closeDigitalDriver must be called
-/// once, for one open, and the handle must not be released afterwards.
+/// Opens the one digital driver for the process, or takes a reference on the
+/// one already open. Opens are counted, so every one of them needs its own
+/// closeDigitalDriver; the device goes away with the last one.
 pub fn openDigitalDriver(frequency: u32, bits: i32, channels: i32) ?*DigitalDriver {
     clearLastError();
     driver_create_mutex.lockUncancelable(io);
     defer driver_create_mutex.unlock(io);
-    if (lastDigitalDriver()) |existing| return existing;
+    if (lastDigitalDriver()) |existing| {
+        existing.retain();
+        return existing;
+    }
     const ch: u32 = if (channels <= 0) 2 else @intCast(channels);
     const driver = DigitalDriver.init(global_allocator, frequency, bits, ch) catch |err| {
         log("openDigitalDriver: DigitalDriver.init failed: {any}\n", .{err});

@@ -79,6 +79,14 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ### Changed
 
+- The digital driver is reference counted, and `AIL_waveOutOpen` takes a
+  reference on the one the process already has instead of building a second
+  miniaudio engine. Both entry points name the same device, so a game that
+  opens through one and closes through the other, or opens through both, used
+  to get two audio devices on one output (the second open can fail outright)
+  and two independent teardowns of a handle the other still held. Opens are
+  counted, the device is torn down with the last close, and `AIL_shutdown`
+  still forces it down whatever is outstanding.
 - A miniaudio result code in a log line is printed with the text miniaudio
   returns for it, next to the code, rather than the code alone. `ma_engine_init
   failed: -1003` is unreadable to anyone who is not holding the miniaudio

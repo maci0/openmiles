@@ -1798,6 +1798,7 @@ test "opening the same in-memory plugin image twice keeps one module" {
 test "AIL_open_digital_driver twice returns the driver already open" {
     // The second open must be the first driver: a second miniaudio engine would
     // keep playing past the close the caller makes on the handle it holds.
+    // Opens are counted, so the second one owes a close of its own.
     defer {
         if (openmiles.lastDigitalDriver()) |d| openmiles.closeDigitalDriver(d);
     }
@@ -1806,6 +1807,31 @@ test "AIL_open_digital_driver twice returns the driver already open" {
     const second = openmiles.openDigitalDriver(22050, 8, 1) orelse return error.NoDriver;
     try testing.expectEqual(first, second);
     try testing.expectEqual(first, openmiles.lastDigitalDriver().?);
+    openmiles.closeDigitalDriver(second);
+    // Still published after the first of the two closes: a driver the other
+    // open still owns must not leave the pool, or the next open builds a
+    // second engine and the game has two devices on one output.
+    try testing.expectEqual(first, openmiles.lastDigitalDriver().?);
+    openmiles.closeDigitalDriver(first);
+    try testing.expectEqual(@as(?*openmiles.DigitalDriver, null), openmiles.lastDigitalDriver());
+}
+
+test "AIL_waveOutOpen takes a counted open of the same digital driver" {
+    // waveOutOpen and open_digital_driver are two names for the one device the
+    // process has. Opening through both has to hand back the same handle, and
+    // closing one has to leave the device the other still holds.
+    defer {
+        if (openmiles.lastDigitalDriver()) |d| openmiles.closeDigitalDriver(d);
+    }
+    openmiles.setLastDigitalDriver(null);
+    const drv = openmiles.openDigitalDriver(44100, 16, 2) orelse return error.NoDriver;
+    var wdrv: ?*openmiles.DigitalDriver = null;
+    try testing.expectEqual(@as(u32, 0), dg.AIL_waveOutOpen(&wdrv, null, 0, null));
+    try testing.expectEqual(drv, wdrv.?);
+    dg.AIL_waveOutClose(wdrv);
+    try testing.expectEqual(drv, openmiles.lastDigitalDriver().?);
+    openmiles.closeDigitalDriver(drv);
+    try testing.expectEqual(@as(?*openmiles.DigitalDriver, null), openmiles.lastDigitalDriver());
 }
 
 test "AIL_open_midi_driver twice returns the driver already open" {

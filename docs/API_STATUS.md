@@ -109,8 +109,8 @@ behaviour, not linkability.
 | `AIL_process_digital_audio` | 🟢 Implemented | Captures engine output via onProcess callback; returns 16-bit PCM with optional mono down-mix |
 | `AIL_set_digital_driver_processor` | 🟡 Partial | Callback is stored and returned on subsequent set (round-tripping); not invoked during processing |
 | `AIL_size_processed_digital_audio` | 🟢 Implemented | Computes output size from format parameters |
-| `AIL_open_digital_driver` | 🟢 Implemented | Uses miniaudio engine; `bits` parameter ignored |
-| `AIL_close_digital_driver` | 🟢 Implemented | |
+| `AIL_open_digital_driver` | 🟢 Implemented | Uses miniaudio engine; `bits` parameter ignored. Counted open of the one process-wide device: a second open takes a reference on the driver already open |
+| `AIL_close_digital_driver` | 🟢 Implemented | Releases one open; the device is torn down with the last one |
 | `AIL_set_digital_master_volume` | 🟢 Implemented | Linear final gain, 0-127 mapped to 0.0-1.0 (no perceptual curve, per the SDK) |
 | `AIL_digital_master_volume` | 🟢 Implemented | Returns current engine volume mapped to 0-127 |
 
@@ -442,10 +442,10 @@ behaviour, not linkability.
 ## Legacy Compatibility
 | Function | Status | Notes |
 |----------|--------|-------|
-| `AIL_waveOutClose` | 🟢 Implemented | |
+| `AIL_waveOutClose` | 🟢 Implemented | Releases one open of the digital driver; same close as `AIL_close_digital_driver` |
 | `AIL_midiOutClose` | ⚪ Stub | No-op; legacy midiOut not applicable |
 | `AIL_midiOutOpen` | 🟢 Implemented | Returns driver as handle so games that null-check succeed |
-| `AIL_waveOutOpen` | 🟢 Implemented | Opens digital driver; returns dummy waveOut handle |
+| `AIL_waveOutOpen` | 🟢 Implemented | Counted open of the same digital driver `AIL_open_digital_driver` returns; returns dummy waveOut handle |
 | `AIL_digital_handle_release` | ⚪ Stub | No-op |
 | `AIL_digital_handle_reacquire` | ⚪ Stub | Returns 1, or 0 for a null driver handle |
 

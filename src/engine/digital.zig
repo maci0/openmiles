@@ -518,6 +518,13 @@ const CapturedOnceI64 = struct {
 pub const DigitalDriver = struct {
     engine: ma.ma_engine,
     allocator: std.mem.Allocator,
+    // Outstanding opens of this driver. AIL_open_digital_driver and
+    // AIL_waveOutOpen are two names for the same process-wide device, so a game
+    // may hold the same handle through both and release it through both; the
+    // driver lives until the last one does. Counting opens is what makes the
+    // two close paths symmetric, instead of each one tearing down a device the
+    // other still owns.
+    refs: std.atomic.Value(usize) = std.atomic.Value(usize).init(1),
     providers: std.ArrayListUnmanaged(*root.Provider),
     timers: std.ArrayListUnmanaged(*root.Timer),
     samples: std.ArrayListUnmanaged(*Sample),
@@ -696,6 +703,19 @@ pub const DigitalDriver = struct {
         self.buses.clearRetainingCapacity();
     }
 
+    /// One more owner of this handle (see refs).
+    pub fn retain(self: *DigitalDriver) void {
+        _ = self.refs.fetchAdd(1, .monotonic);
+    }
+
+    /// One owner done with the handle; the last one tears the device down.
+    pub fn release(self: *DigitalDriver) void {
+        if (self.refs.fetchSub(1, .acq_rel) == 1) self.deinit();
+    }
+
+    /// Unconditional teardown, ignoring outstanding opens. Shutdown uses it:
+    /// the process is going away, so an open the game never closed is not a
+    /// reason to leave an audio device running.
     pub fn deinit(self: *DigitalDriver) void {
         root.clearLastDigitalDriver(self);
         root.unregisterDriver(self);
