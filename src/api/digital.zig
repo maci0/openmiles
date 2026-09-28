@@ -1227,8 +1227,12 @@ pub fn AIL_create_wave_synthesizer(dig_opt: ?*DigitalDriver, mdi: ?*MidiDriver, 
     return driver;
 }
 pub fn AIL_destroy_wave_synthesizer(synth: *MidiDriver) callconv(.winapi) void {
-    openmiles.clearLastMidiDriver(synth);
-    synth.deinit();
+    // The shared close, as AIL_DLS_close uses: the sequences allocated on this
+    // device are stopped and released before the driver they read through goes
+    // away. A bare deinit left each of them with an initialized ma_sound and a
+    // data source reading through a freed driver, and its entry in the global
+    // sequence list still naming the freed pointer.
+    openmiles.closeMidiDriver(synth);
 }
 pub fn AIL_waveOutClose(driver_opt: ?*DigitalDriver) callconv(.winapi) void {
     const driver = driver_opt orelse return;

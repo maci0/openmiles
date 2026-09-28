@@ -83,12 +83,14 @@ pub const MidiDriver = struct {
             .allocator = allocator,
             .soundfont = null,
         };
+        root.registerMidiDriver(self);
         root.setLastMidiDriver(self);
         return self;
     }
 
     pub fn deinit(self: *MidiDriver) void {
         root.clearLastMidiDriver(self);
+        root.unregisterMidiDriver(self);
         releaseAllChannels(@ptrCast(self));
         self.swapSoundfont(null, true);
         self.clearSoundfontSource();

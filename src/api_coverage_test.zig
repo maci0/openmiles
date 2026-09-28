@@ -837,3 +837,19 @@ test "coverage: v7.zig unified exports" {
     _ = v7.RIB_load_static_provider_library(null, "x");
     _ = v7.RIB_MAIN(null, "x");
 }
+
+test "AIL_destroy_wave_synthesizer releases the device it takes" {
+    // The synthesizer is built through the same path a game's DLS device is,
+    // and its destroy has to answer the registration the open made: a teardown
+    // that only cleared the "current driver" slot left the device, its
+    // soundfont borrow and its sequences alive past the close.
+    defer openmiles.closeAllDrivers();
+    openmiles.setLastMidiDriver(null);
+    _ = openmiles.openMidiDriver() orelse return error.NoDriver;
+    const before = openmiles.liveMidiDriverCount();
+    const synth = openmiles.MidiDriver.init(openmiles.global_allocator) catch return error.NoDriver;
+    try testing.expectEqual(before + 1, openmiles.liveMidiDriverCount());
+    dg.AIL_destroy_wave_synthesizer(synth);
+    try testing.expectEqual(before, openmiles.liveMidiDriverCount());
+    try testing.expect(openmiles.lastMidiDriver() == null);
+}

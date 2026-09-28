@@ -947,6 +947,14 @@ var driver_create_mutex: std.Io.Mutex = .init;
 /// opened or closed the driver, and isKnownDriver is called from every 3D
 /// handle-dispatch entry point.
 var known_drivers: std.ArrayList(*DigitalDriver) = .empty;
+
+/// Handles of every live MIDI driver, the digital table's counterpart.
+/// last_midi_driver names one driver, and every MidiDriver.init takes that slot,
+/// so the second device a game opens (AIL_DLS_open, AIL_create_wave_synthesizer)
+/// displaces the one it opened first. Shutdown could only reach the slot, so
+/// the displaced driver kept its allocation, its soundfont and its sequences for
+/// the life of the process. Guarded by the same mutex as the digital table.
+var known_midi_drivers: std.ArrayList(*MidiDriver) = .empty;
 var driver_table_mutex: std.Io.Mutex = .init;
 
 /// Returns false when the handle could not be tracked. The caller must then
@@ -966,6 +974,55 @@ pub fn unregisterDriver(driver: *DigitalDriver) void {
     driver_table_mutex.lockUncancelable(io);
     defer driver_table_mutex.unlock(io);
     removeFirst(&known_drivers, driver);
+}
+
+pub fn registerMidiDriver(driver: *MidiDriver) void {
+    driver_table_mutex.lockUncancelable(io);
+    defer driver_table_mutex.unlock(io);
+    known_midi_drivers.append(global_allocator, driver) catch {
+        // Unlike a digital driver, an untracked MIDI one is still usable: it
+        // answers its own handle. What is lost is the teardown at shutdown.
+        log("registerMidiDriver: driver table allocation failed; this device will not be closed at shutdown\n", .{});
+    };
+}
+
+pub fn unregisterMidiDriver(driver: *MidiDriver) void {
+    driver_table_mutex.lockUncancelable(io);
+    defer driver_table_mutex.unlock(io);
+    removeFirst(&known_midi_drivers, driver);
+}
+
+/// How many MIDI devices are live. Not an SDK surface: the test suite reads it
+/// to prove a second device (a DLS open, a wave synthesizer) is closed by the
+/// teardown and not only the one the "current driver" slot names.
+pub fn liveMidiDriverCount() usize {
+    driver_table_mutex.lockUncancelable(io);
+    defer driver_table_mutex.unlock(io);
+    return known_midi_drivers.items.len;
+}
+
+/// Close every device still open, not only the ones the "current driver" slots
+/// name. AIL_waveOutOpen, AIL_DLS_open and AIL_create_wave_synthesizer each
+/// build a device and take that slot, so a game holding more than one leaves
+/// every older one unreachable from shutdown, its engine, soundfont and
+/// sequences still running past it.
+///
+/// Both tables are taken out whole under one lock, so the deinit each close
+/// runs (which unregisters) cannot mutate what this walks, and the backing
+/// store goes with the drain instead of being retained for the process.
+pub fn closeAllDrivers() void {
+    driver_table_mutex.lockUncancelable(io);
+    var midi_drivers = known_midi_drivers;
+    known_midi_drivers = .empty;
+    var digital_drivers = known_drivers;
+    known_drivers = .empty;
+    driver_table_mutex.unlock(io);
+    // MIDI first: a sequence's voices are attached to the digital engine and
+    // have to be stopped before it is torn down.
+    for (midi_drivers.items) |m| closeMidiDriver(m);
+    for (digital_drivers.items) |d| closeDigitalDriver(d);
+    midi_drivers.deinit(global_allocator);
+    digital_drivers.deinit(global_allocator);
 }
 
 /// AIL_serve: the per-frame tick the game drives. The mixer itself runs on the
@@ -1539,8 +1596,7 @@ pub fn shutdown() void {
     // (their voices are attached to the digital engine and must be stopped
     // before it is torn down), then the drivers themselves.
     releaseAllTimers();
-    if (lastMidiDriver()) |m| closeMidiDriver(m);
-    if (lastDigitalDriver()) |d| closeDigitalDriver(d);
+    closeAllDrivers();
     // The startup provider is unpublished before it is freed, and the
     // application list is emptied under the lock, so a thread enumerating
     // providers on another sees a null pointer instead of one into freed

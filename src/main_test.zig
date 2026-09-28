@@ -1761,6 +1761,24 @@ test "AIL_open_midi_driver twice returns the driver already open" {
     try testing.expectEqual(first, openmiles.lastMidiDriver().?);
 }
 
+test "teardown closes every MIDI device, not only the current one" {
+    // AIL_DLS_open and AIL_create_wave_synthesizer each build a device and take
+    // the "current driver" slot, so a game holding two left the first one
+    // unreachable from shutdown: its allocation, its soundfont and its sequences
+    // stayed for the life of the process.
+    defer openmiles.closeAllDrivers();
+    openmiles.setLastMidiDriver(null);
+    const first = openmiles.openMidiDriver() orelse return error.NoDriver;
+    const second = openmiles.MidiDriver.init(openmiles.global_allocator) catch return error.NoDriver;
+    try testing.expectEqual(second, openmiles.lastMidiDriver().?);
+    try testing.expect(first != second);
+    try testing.expectEqual(2, openmiles.liveMidiDriverCount());
+
+    openmiles.closeAllDrivers();
+    try testing.expectEqual(0, openmiles.liveMidiDriverCount());
+    try testing.expect(openmiles.lastMidiDriver() == null);
+}
+
 test "setRedistDirectory with the same path does not rescan it" {
     // AIL_set_redist_directory is called more than once per session by several
     // games; an identical path must not push a second copy of every .asi into

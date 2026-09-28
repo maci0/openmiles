@@ -15,8 +15,7 @@ pub fn AIL_quick_startup(use_dig: i32, use_midi: i32, rate: u32, bits: i32, chan
 }
 pub fn AIL_quick_shutdown() callconv(.winapi) void {
     log("AIL_quick_shutdown()\n", .{});
-    if (openmiles.lastDigitalDriver()) |d| openmiles.closeDigitalDriver(d);
-    if (openmiles.lastMidiDriver()) |m| openmiles.closeMidiDriver(m);
+    openmiles.closeAllDrivers();
 }
 pub fn AIL_quick_load(filename: [*:0]const u8) callconv(.winapi) ?*Sample {
     log("AIL_quick_load(filename={s})\n", .{filename});

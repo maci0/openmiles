@@ -515,6 +515,12 @@ pub const DigitalDriver = struct {
             allocator.destroy(self);
             return error.OutOfMemory;
         };
+        // Every failure below frees `self`, and the reservation it holds would
+        // go with it: the struct the list lived in is gone, so the capacity
+        // stays allocated for the life of the process. ma_engine_init fails
+        // whenever the backend cannot hand over a device, which a game that
+        // probes for audio retries.
+        errdefer self.system_state_stack.deinit(allocator);
         var config = ma.ma_engine_config_init();
         if (@import("builtin").is_test) {
             config.noDevice = ma.MA_TRUE;
