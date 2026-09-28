@@ -167,7 +167,8 @@ pub fn AIL_XMIDI_master_volume(driver_opt: ?*openmiles.MidiDriver) callconv(.win
 pub fn AIL_set_XMIDI_master_volume(driver_opt: ?*openmiles.MidiDriver, volume: i32) callconv(.winapi) void {
     const midi = driver_opt orelse return;
     midi.master_volume = openmiles.mssVolumeToGain(volume);
-    if (midi.soundfont) |sf| {
+    if (midi.claimSoundfont()) |sf| {
+        defer midi.releaseSoundfontClaim();
         openmiles.tsf.tsf_set_volume(sf, midi.master_volume);
     }
 }
@@ -265,12 +266,14 @@ pub fn AIL_list_MIDI(midi: ?*const anyopaque, midi_size: u32, lst: ?*?*anyopaque
 extern fn openmiles_tsf_channel_note_count(f: ?*openmiles.tsf.tsf, channel: i32) i32;
 pub fn AIL_channel_notes(seq_opt: ?*Sequence, channel: i32) callconv(.winapi) i32 {
     const seq = seq_opt orelse return 0;
-    const sf = seq.driver.soundfont orelse return 0;
+    const sf = seq.driver.claimSoundfont() orelse return 0;
+    defer seq.driver.releaseSoundfontClaim();
     return openmiles_tsf_channel_note_count(sf, channel);
 }
 pub fn AIL_controller_value(seq_opt: ?*Sequence, channel: i32, controller: i32) callconv(.winapi) i32 {
     const seq = seq_opt orelse return 0;
-    const sf = seq.driver.soundfont orelse return 0;
+    const sf = seq.driver.claimSoundfont() orelse return 0;
+    defer seq.driver.releaseSoundfontClaim();
     const tsf_mod = openmiles.tsf;
     // TinySoundFont indexes the channel array with no lower bound of its own, so
     // a caller passing a negative channel would read in front of it.
@@ -295,8 +298,11 @@ pub fn AIL_controller_value(seq_opt: ?*Sequence, channel: i32, controller: i32) 
 // AIL_send_channel_voice_message(HMDIDRIVER mdi, HSEQUENCE S, S32 status, S32 data_1, S32 data_2)
 pub fn AIL_send_channel_voice_message(mdi_opt: ?*MidiDriver, seq_opt: ?*Sequence, status: i32, d1: i32, d2: i32) callconv(.winapi) void {
     // Prefer the sequence's soundfont; fall back to the driver's when no sequence.
-    const sf_opt = if (seq_opt) |seq| seq.driver.soundfont else if (mdi_opt) |mdi| mdi.soundfont else null;
-    const sf = sf_opt orelse return;
+    // Claimed, not just read: a swap on another thread closes the bank it
+    // displaces, and the tsf calls below dereference whatever the read returned.
+    const driver = if (seq_opt) |seq| seq.driver else if (mdi_opt) |mdi| mdi else return;
+    const sf = driver.claimSoundfont() orelse return;
+    defer driver.releaseSoundfontClaim();
     const tsf_mod = openmiles.tsf;
     const msg_type = status & 0xF0;
     const channel = status & 0x0F;
@@ -338,7 +344,8 @@ pub fn AIL_send_channel_voice_message(mdi_opt: ?*MidiDriver, seq_opt: ?*Sequence
 // SDK: AIL_send_sysex_message(HMDIDRIVER mdi, void const* buffer).
 pub fn AIL_send_sysex_message(mdi_opt: ?*MidiDriver, data: *anyopaque) callconv(.winapi) void {
     const mdi = mdi_opt orelse return;
-    const sf = mdi.soundfont orelse return;
+    const sf = mdi.claimSoundfont() orelse return;
+    defer mdi.releaseSoundfontClaim();
     const bytes: [*]const u8 = @ptrCast(data);
     if (bytes[0] != 0xF0) return;
     var body_len: usize = 0;
@@ -439,7 +446,8 @@ pub fn AIL_branch_index(seq_opt: ?*Sequence, marker: u32) callconv(.winapi) void
 /// documented 2048 bytes.
 pub fn AIL_register_ICA_array(seq_opt: ?*Sequence, arr: *anyopaque) callconv(.winapi) void {
     const seq = seq_opt orelse return;
-    const sf = seq.driver.soundfont orelse return;
+    const sf = seq.driver.claimSoundfont() orelse return;
+    defer seq.driver.releaseSoundfontClaim();
     const data: [*]const u8 = @ptrCast(arr);
     var ch: i32 = 0;
     while (ch < 16) : (ch += 1) {

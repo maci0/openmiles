@@ -112,6 +112,33 @@ trace and the log file.
 Contributing setup, the edit-test loop, and what a change is expected to carry
 are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
+### Which thread touches what
+
+Three kinds of thread reach the library at once: the game's own thread(s), the
+audio thread miniaudio runs the device callback on, and one thread per running
+`Timer`. The rules the code holds to:
+
+- A started `Timer` runs its callback on its own thread. `stop()` joins it,
+  `deinit()` joins and unregisters it. A callback that calls `AIL_stop_timer`
+  or `AIL_set_timer` on its own timer is answered without a join (joining the
+  current thread is fatal); the handle is reaped by the next external stop.
+- The audio thread reads the driver's SoundFont pointer through
+  `currentSoundfont()`, an atomic load. Loading, unloading, or replacing a bank
+  publishes a new pointer and closes the one it displaced only after in-flight
+  renders have released their claim, so a render never runs against freed
+  memory. A swap waits up to `MidiDriver.swap_wait_budget_ms` (500 ms) for
+  those claims and then returns with the bank left pending for the next swap,
+  because the render holding it may be inside a callback that is waiting on the
+  thread doing the swap.
+- A sequence's state is guarded by its own mutex. The audio callback takes it
+  with `tryLock` and renders silence when a control call holds it, so playback
+  never blocks on the game's thread. Fields a callback can read from inside
+  itself (user data, beat and measure, channel mapping) are atomic for that
+  reason.
+- Module-level state the API needs on every call, the current driver handles,
+  the timer registry, the driver table, the locked-channel table, and the debug
+  log, each has one mutex or atomic and is read through it.
+
 ### Driving time in tests
 
 Every deadline, period, and elapsed counter in the library reads one clock,

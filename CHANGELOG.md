@@ -137,6 +137,28 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ### Fixed
 
+- Loading, unloading, or replacing a SoundFont could deadlock the process
+  against its own audio thread. The swap published the replacement and then
+  spun on the render-claim count while holding the driver lock, so a render
+  inside a game callback that called back into a load blocked on that lock, and
+  neither thread moved again. The publish now happens under the lock and the
+  wait runs with it released, the wait is bounded
+  (`MidiDriver.swap_wait_budget_ms`), and a bank the bound expires on is held
+  back for the next swap rather than freed under a live render.
+- The driver's SoundFont pointer was read as a plain field on the audio thread
+  while a game thread wrote it, and the API entry points that call into the bank
+  (`AIL_channel_notes`, `AIL_controller_value`, the channel-voice and sysex
+  senders, `AIL_register_ICA_array`, `AIL_set_XMIDI_master_volume`) took no
+  claim on it, so a concurrent swap could close the bank between the read and
+  the call. The pointer is read through `MidiDriver.currentSoundfont()`, and
+  those entry points claim the bank for the duration of the call. A newly
+  loaded bank is given its output format before it is published rather than
+  after, so no render can read a half-configured one.
+- The debug log read its enabled flag, its configuration source, and the log
+  path as plain globals from any thread that logged, while `init()` was writing
+  them. The flag is read and written atomically, and the configuration record is
+  rendered under the lock `init()` holds, so a record cannot name a path that is
+  being overwritten.
 - The release archive shipped `deps/SHA256SUMS` and `SBOM.cdx.json` without the
   vendored headers those records describe. Unpacking it and running
   `sha256sum -c deps/SHA256SUMS` failed on all five entries, and the SBOM's

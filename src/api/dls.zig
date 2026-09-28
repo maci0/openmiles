@@ -197,7 +197,7 @@ pub fn AIL_DLS_get_info(driver_opt: ?*MidiDriver, info: ?*anyopaque, percent_cpu
         out.CurrentDLSMemory = cur;
         out.LargestSize = cur;
         out.MaxDLSMemory = std.math.maxInt(i32); // no fixed DLS memory cap
-        out.GMAvailable = if (driver.soundfont != null) 1 else 0;
+        out.GMAvailable = if (driver.currentSoundfont() != null) 1 else 0;
         out.GMBankSize = cur;
         const dst: *AILDLSINFO = @ptrCast(@alignCast(ip));
         dst.* = out;

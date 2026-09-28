@@ -38,7 +38,17 @@ const ImageHash = struct {
     }
 };
 
+/// Wall-clock nanoseconds, for a deadline that has to expire on its own.
+fn platformNowNs() i64 {
+    return @intCast(std.Io.Timestamp.now(io, .awake).nanoseconds);
+}
+
 pub const MidiDriver = struct {
+    /// How many displaced banks a swap can hold back for a later close. Bounded
+    /// so a driver whose renders never drain cannot grow the list without end;
+    /// a swap that finds it full logs and drops the bank rather than the list.
+    pub const max_pending_closes: usize = 4;
+
     allocator: std.mem.Allocator,
     // The audio thread renders from this pointer while the game thread can
     // replace or close the bank. tsf_close frees it, so a swap that closed the
@@ -49,9 +59,23 @@ pub const MidiDriver = struct {
     // replacement first, then waits until the claim count is zero before
     // closing what it displaced. Only the swapping thread waits, so the audio
     // thread never blocks. Every write goes through swapSoundfont.
+    //
+    // Read it through currentSoundfont(): the audio thread loads this pointer
+    // on every render while a game thread publishes a replacement, so a plain
+    // field read is a data race with the swap, whatever the width of the
+    // pointer. The release store in swapSoundfont pairs with the acquire load,
+    // and with the claim counter the reader bumps first.
     soundfont: ?*tsf.tsf = null,
     render_readers: std.atomic.Value(u32) = .init(0),
     soundfont_mutex: std.Io.Mutex = .init,
+    // Banks a swap displaced while a render still held a claim on them. The
+    // swap could not close one without waiting out a render that may itself be
+    // waiting on the swapping thread, so it is recorded here instead and closed
+    // by the next swap that finds the render threads idle, or left to the
+    // driver's teardown. A bank sitting here is not freed, only delayed, and
+    // the delay is logged.
+    pending_closes: [max_pending_closes]?*tsf.tsf = [_]?*tsf.tsf{null} ** max_pending_closes,
+    pending_close_count: usize = 0,
     master_volume: f32 = 1.0,
     sample_rate: u32 = 44100,
     owns_soundfont: bool = true, // false when soundfont is borrowed (AIL_create_wave_synthesizer)
@@ -140,7 +164,7 @@ pub const MidiDriver = struct {
     /// concurrent swap know the bank is idle enough to close.
     pub fn claimSoundfont(self: *MidiDriver) ?*tsf.tsf {
         _ = self.render_readers.fetchAdd(1, .seq_cst);
-        const sf = self.soundfont;
+        const sf = self.currentSoundfont();
         if (sf == null) self.releaseSoundfontClaim();
         return sf;
     }
@@ -149,21 +173,104 @@ pub const MidiDriver = struct {
         _ = self.render_readers.fetchSub(1, .seq_cst);
     }
 
+    /// The bank the driver holds, or null. The load is the pairing half of the
+    /// release store swapSoundfont makes, so a renderer either sees the bank
+    /// that was loaded when it took its claim or the one that replaced it, and
+    /// never a half-written pointer.
+    pub fn currentSoundfont(self: *const MidiDriver) ?*tsf.tsf {
+        return @atomicLoad(?*tsf.tsf, &self.soundfont, .acquire);
+    }
+
     /// Publish `next` as the driver's soundfont and close the one it replaces,
     /// after in-flight renders finish with it. The displaced bank is closed
     /// only when it was owned, which is the flag as it stood before this call.
     pub fn swapSoundfont(self: *MidiDriver, next: ?*tsf.tsf, next_owned: bool) void {
+        // Publish under the lock, so two concurrent swaps cannot both read the
+        // same displaced bank, then release it: the wait below is for a render
+        // thread, and that thread is free to call back into a swap of its own
+        // from a sequence or driver callback. Holding the lock across the wait
+        // is a deadlock: the render blocks on this mutex, this thread blocks on
+        // the render's claim, and neither ever moves again.
         self.soundfont_mutex.lockUncancelable(io);
-        defer self.soundfont_mutex.unlock(io);
-        const previous = self.soundfont;
+        const previous = @atomicLoad(?*tsf.tsf, &self.soundfont, .acquire);
         const previous_owned = self.owns_soundfont;
-        self.soundfont = next;
+        @atomicStore(?*tsf.tsf, &self.soundfont, next, .release);
         self.owns_soundfont = next_owned;
-        if (previous == next) return;
-        while (self.render_readers.load(.seq_cst) != 0) std.atomic.spinLoopHint();
-        if (previous) |sf| {
-            if (previous_owned) tsf.tsf_close(sf);
+        const displaced: ?*tsf.tsf = if (previous != next and previous_owned) previous else null;
+        self.soundfont_mutex.unlock(io);
+        self.closeWhenIdle(displaced);
+    }
+
+    /// Close `candidate` (and any bank an earlier swap could not close) once no
+    /// render holds a claim. A render that outlives the budget is not waited
+    /// for: it may be a render inside a callback that is itself blocked on this
+    /// thread, and a bounded return beats a process wedged with its audio
+    /// thread spinning. The bank is then closed by whichever swap or teardown
+    /// next finds the render threads idle.
+    fn closeWhenIdle(self: *MidiDriver, candidate: ?*tsf.tsf) void {
+        if (candidate != null) {
+            self.soundfont_mutex.lockUncancelable(io);
+            defer self.soundfont_mutex.unlock(io);
+            if (self.pending_close_count < self.pending_closes.len) {
+                self.pending_closes[self.pending_close_count] = candidate;
+                self.pending_close_count += 1;
+            } else {
+                log("MidiDriver: a displaced bank is still held by a render and the pending list is full; it is never closed\n", .{});
+            }
         }
+
+        // Take the whole list under the lock and close outside it: tsf_close
+        // runs the bank's teardown, and a callback it reaches must not find the
+        // driver lock held.
+        var to_close: [max_pending_closes]?*tsf.tsf = [_]?*tsf.tsf{null} ** max_pending_closes;
+        var count: usize = 0;
+        self.soundfont_mutex.lockUncancelable(io);
+        for (self.pending_closes[0..self.pending_close_count]) |sf| {
+            to_close[count] = sf;
+            count += 1;
+        }
+        self.pending_close_count = 0;
+        self.soundfont_mutex.unlock(io);
+        if (count == 0) return;
+
+        if (!self.waitForIdleReaders()) {
+            self.soundfont_mutex.lockUncancelable(io);
+            for (to_close[0..count]) |sf| {
+                if (self.pending_close_count < self.pending_closes.len) {
+                    self.pending_closes[self.pending_close_count] = sf;
+                    self.pending_close_count += 1;
+                }
+            }
+            const kept = self.pending_close_count;
+            self.soundfont_mutex.unlock(io);
+            log("MidiDriver: a render still holds a displaced bank after {d} ms; {d} bank(s) stay pending until the next swap\n", .{ swap_wait_budget_ms, kept });
+            return;
+        }
+        for (to_close[0..count]) |sf| tsf.tsf_close(sf);
+    }
+
+    /// How long a swap waits for in-flight renders before it gives up on
+    /// closing the bank it displaced. One render is a single audio buffer, so a
+    /// budget this far past that is a render parked on something, not one that
+    /// is still rendering.
+    pub const swap_wait_budget_ms: u64 = 500;
+    const swap_wait_budget_ns: i64 = @intCast(swap_wait_budget_ms * std.time.ns_per_ms);
+    // Gap between claim checks. Long enough that the wait is not a spin on a
+    // core the audio thread needs, short enough that the common case (a render
+    // that is already on its way out) still closes the bank promptly.
+    const swap_retry_sleep_ns: i64 = @intCast(100 * std.time.ns_per_us);
+
+    /// Whether every render claim has been dropped within the budget. The
+    /// deadline runs on the platform clock, not the library clock: virtual time
+    /// only moves when a test steps it, so a wait measured against it would
+    /// never time out.
+    fn waitForIdleReaders(self: *const MidiDriver) bool {
+        const deadline = platformNowNs() + swap_wait_budget_ns;
+        while (self.render_readers.load(.seq_cst) != 0) {
+            if (platformNowNs() >= deadline) return false;
+            io.sleep(.fromNanoseconds(swap_retry_sleep_ns), .awake) catch {};
+        }
+        return true;
     }
 
     /// Forget which source the loaded soundfont came from, so the next load of
@@ -186,7 +293,7 @@ pub const MidiDriver = struct {
     pub fn soundfontFromPath(self: *const MidiDriver, path: []const u8) ?*tsf.tsf {
         const p = self.soundfont_path orelse return null;
         if (!std.mem.eql(u8, p, path)) return null;
-        const sf = self.soundfont orelse return null;
+        const sf = self.currentSoundfont() orelse return null;
         return sf;
     }
 
@@ -241,7 +348,7 @@ pub const MidiDriver = struct {
         if (self.soundfont_image_ptr != @intFromPtr(data)) return null;
         if (self.soundfont_image_size != size) return null;
         if (!ImageHash.eql(self.soundfont_image_hash, ImageHash.of(data[0..size]))) return null;
-        const sf = self.soundfont orelse return null;
+        const sf = self.currentSoundfont() orelse return null;
         return sf;
     }
 
@@ -294,13 +401,17 @@ pub const MidiDriver = struct {
             self.allocator.free(path_z);
             return error.SoundFontLoadFailed;
         }
+        self.adoptOutputRate();
+        // Configure the bank before it is published, not after. A sequence that
+        // renders the moment the swap lands reads the bank's output format, and
+        // setting it once the audio thread can see the bank is a data race
+        // against that render.
+        tsf.tsf_set_output(loaded, tsf.TSF_STEREO_INTERLEAVED, @intCast(self.sample_rate), 0);
         self.swapSoundfont(loaded, true);
         self.clearSoundfontSource();
         self.soundfont_path = path_z;
         self.soundfont_refs = 1;
         self.captureSoundfontSize(filename);
-        self.adoptOutputRate();
-        tsf.tsf_set_output(self.soundfont, tsf.TSF_STEREO_INTERLEAVED, @intCast(self.sample_rate), 0);
     }
 
     /// Load a DLS/SF2 image, or hand back the bank already loaded from this
@@ -315,16 +426,17 @@ pub const MidiDriver = struct {
         const loaded = tsf.tsf_load_memory(data, @intCast(size));
         if (loaded == null) return error.SoundFontLoadFailed;
         const bank = loaded.?;
+        // Same rate the file path adopts: the data source hands the engine
+        // frames at self.sample_rate, so a fixed 44100 here played a
+        // 22050 Hz device at half speed. Applied before the bank is published,
+        // for the reason the file path sets its output there.
+        self.adoptOutputRate();
+        tsf.tsf_set_output(bank, tsf.TSF_STEREO_INTERLEAVED, @intCast(self.sample_rate), 0);
         self.swapSoundfont(bank, true);
         self.clearSoundfontSource();
         self.adoptSoundfontImage(data, size);
         self.soundfont_refs = 1;
         self.soundfont_size_bytes = @intCast(@min(size, std.math.maxInt(u32)));
-        // Same rate the file path adopts: the data source hands the engine
-        // frames at self.sample_rate, so a fixed 44100 here played a
-        // 22050 Hz device at half speed.
-        self.adoptOutputRate();
-        tsf.tsf_set_output(self.soundfont, tsf.TSF_STEREO_INTERLEAVED, @intCast(self.sample_rate), 0);
         return bank;
     }
 
@@ -359,12 +471,12 @@ pub const MidiDriver = struct {
 
     pub fn loadDLS(self: *MidiDriver, filename: []const u8) !*anyopaque {
         try self.loadSoundfont(filename);
-        return @ptrCast(self.soundfont.?);
+        return @ptrCast(self.currentSoundfont().?);
     }
 
     pub fn unloadDLS(self: *MidiDriver, bank: *anyopaque) void {
         const sf: *tsf.tsf = @ptrCast(@alignCast(bank));
-        if (self.soundfont) |current_sf| {
+        if (self.currentSoundfont()) |current_sf| {
             if (current_sf == sf) {
                 // A load of this bank that no unload has answered yet keeps it
                 // loaded: the game may still be holding the handle the first
@@ -1452,4 +1564,32 @@ test "beat and measure agree on a position before the start of the sequence" {
     seq.resyncBeatClockAt(0.0);
     try testing.expectEqual(@as(i32, 1), seq.current_beat_in_measure.load(.acquire));
     try testing.expectEqual(@as(i32, 1), seq.current_measure.load(.acquire));
+}
+
+test "a swap whose bank is still rendering returns instead of waiting forever" {
+    // The state a swap can deadlock in: a render holds a claim and is parked
+    // inside a game callback that is itself waiting on this thread. The swap
+    // has to publish the replacement, come back within its budget, and leave
+    // the bank it could not close for a later swap.
+    const driver = try MidiDriver.init(testing.allocator);
+    var bank: u8 = 0;
+    @atomicStore(?*tsf.tsf, &driver.soundfont, @ptrCast(&bank), .release);
+
+    const claimed = driver.claimSoundfont();
+    try testing.expectEqual(@as(?*tsf.tsf, @ptrCast(&bank)), claimed);
+
+    const started = platformNowNs();
+    driver.swapSoundfont(null, true);
+    const elapsed_ns = platformNowNs() - started;
+
+    // Published even though the wait could not complete.
+    try testing.expectEqual(@as(?*tsf.tsf, null), driver.currentSoundfont());
+    try testing.expect(elapsed_ns < 4 * @as(i64, @intCast(MidiDriver.swap_wait_budget_ms)) * std.time.ns_per_ms);
+    try testing.expectEqual(@as(usize, 1), driver.pending_close_count);
+
+    // The claim is the stuck render's, and this test is not it: drop the list
+    // rather than let deinit close a pointer that is not a bank.
+    driver.pending_close_count = 0;
+    driver.releaseSoundfontClaim();
+    driver.deinit();
 }

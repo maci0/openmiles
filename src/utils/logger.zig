@@ -40,6 +40,11 @@ var log_offset: u64 = 0;
 var initialized = false;
 var config_logged = false;
 var config_echoed = false;
+// Both are written by init()/applyDebugEnvValue under `mutex` and read by
+// log() on any thread, so they are read and written atomically: a record
+// formatted while a load is installing the setting must see a whole value, not
+// a torn byte. The path below is the same story in a longer buffer, so it is
+// only read under the lock.
 var debug_enabled = false;
 var debug_from_env = false;
 var debug_source: []const u8 = "the build default";
@@ -128,7 +133,7 @@ fn openLog(path: []const u8) ?std.Io.File {
 
 fn applyDebugEnvValue(value: []const u8) void {
     if (parseDebugFlag(value)) |enabled| {
-        debug_enabled = enabled;
+        @atomicStore(bool, &debug_enabled, enabled, .release);
         // The config line below names where the value came from, so a log
         // that says "off" is readable as "the environment asked for off" and
         // not as "nothing asked for anything".
@@ -170,7 +175,7 @@ pub fn init() void {
     // in the repository root and an appending debug log there grows to
     // max_log_bytes on every run and floods the test output. OPENMILES_DEBUG
     // still turns it on for whichever run wants the trace.
-    debug_enabled = builtin.mode == .Debug and build_options.log_by_default;
+    @atomicStore(bool, &debug_enabled, builtin.mode == .Debug and build_options.log_by_default, .release);
     debug_source = "the build default";
     setDefaultLogPath();
 
@@ -230,7 +235,7 @@ pub fn init() void {
         }
     }
 
-    if (debug_enabled) {
+    if (@atomicLoad(bool, &debug_enabled, .acquire)) {
         if (openLog(logPath())) |f| {
             // Records are written positionally at log_offset, so an offset of 0
             // on a file that already holds records overwrites the ones there.
@@ -307,6 +312,10 @@ fn writeConfigLine(buf: []u8) []const u8 {
 fn logConfigOnce() void {
     if (@atomicLoad(bool, &config_logged, .acquire)) return;
     @atomicStore(bool, &config_logged, true, .release);
+    // Rendered here rather than through log() because the values it reports are
+    // the ones init() is writing, and the only way to read them as a set is
+    // under the lock init() holds. emit() takes the lock too, so the record is
+    // formatted under it and written after it is released.
     var line_buf: [max_log_record_bytes]u8 = undefined;
     const line = writeConfigLine(&line_buf);
     if (line.len == 0) return;
@@ -396,9 +405,9 @@ fn neutralizeCodepoint(cp: u21) bool {
 /// init() reads the environment, so a constructor's record still honours
 /// OPENMILES_DEBUG and OPENMILES_LOG_PATH, and a call after deinit() reopens it.
 pub fn log(comptime fmt: []const u8, args: anytype) void {
-    if (!debug_enabled and @atomicLoad(bool, &initialized, .acquire)) return;
+    if (!@atomicLoad(bool, &debug_enabled, .acquire) and @atomicLoad(bool, &initialized, .acquire)) return;
     init();
-    if (!debug_enabled) return;
+    if (!@atomicLoad(bool, &debug_enabled, .acquire)) return;
     logConfigOnce();
     var rec: [max_log_record_bytes]u8 = undefined;
     const out = formatRecord(&rec, fmt, args);
