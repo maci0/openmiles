@@ -533,8 +533,16 @@ pub const Sequence = struct {
         if (self.ms_per_beat <= 0) return;
         const beats = satBeats(at_ms / self.ms_per_beat);
         self.next_beat_ms = @as(f64, @floatFromInt(beats + 1)) * self.ms_per_beat;
-        self.current_beat_in_measure.store(@mod(beats, self.beats_per_measure) + 1, .release);
-        self.current_measure.store(@divTrunc(beats, self.beats_per_measure) + 1, .release);
+        // Both counters floor the beat count. `@mod` is already Euclidean, so
+        // pairing it with `@divTrunc` disagreed below zero: a seek to a negative
+        // ms (AIL_set_sequence_ms_position passes the value through verbatim)
+        // put beat -10 in a 4/4 bar at beat 3 of measure -1, where the two
+        // counters describe different bars. `@divFloor` makes the pair agree.
+        // The divisor is floored at 1 so no time signature can divide by zero.
+        const per_measure: i64 = @max(self.beats_per_measure, 1);
+        const b: i64 = beats;
+        self.current_beat_in_measure.store(@intCast(@mod(b, per_measure) + 1), .release);
+        self.current_measure.store(@intCast(@divFloor(b, per_measure) + 1), .release);
     }
 
     fn resyncBeatClock(self: *Sequence) void {
@@ -1302,4 +1310,31 @@ test "a mid-sequence tempo change re-anchors the beat grid" {
     try testing.expectEqual(@as(f64, 4500.0), seq.next_beat_ms);
     try testing.expectEqual(@as(i32, 1), seq.current_beat_in_measure.load(.acquire));
     try testing.expectEqual(@as(i32, 3), seq.current_measure.load(.acquire));
+}
+
+test "beat and measure agree on a position before the start of the sequence" {
+    const driver = try MidiDriver.init(testing.allocator);
+    defer driver.deinit();
+    const seq = try Sequence.init(driver);
+    defer seq.deinit();
+
+    // AIL_set_sequence_ms_position hands a negative ms straight through, so
+    // -5000 ms at 500 ms/beat is beat -10, ten beats before the first one.
+    seq.ms_per_beat = 500.0;
+    seq.beats_per_measure = 4;
+    seq.resyncBeatClockAt(-5000.0);
+    // Measure -2 spans beats -10..-7, so -10 is its third beat. Truncating
+    // division put it at beat 3 of measure -1, a bar the beat does not belong
+    // to.
+    try testing.expectEqual(@as(i32, 3), seq.current_beat_in_measure.load(.acquire));
+    try testing.expectEqual(@as(i32, -2), seq.current_measure.load(.acquire));
+    try testing.expectEqual(@as(f64, -4500.0), seq.next_beat_ms);
+
+    // The last beat of that bar, then the first beat of the sequence.
+    seq.resyncBeatClockAt(-4500.0);
+    try testing.expectEqual(@as(i32, 4), seq.current_beat_in_measure.load(.acquire));
+    try testing.expectEqual(@as(i32, -2), seq.current_measure.load(.acquire));
+    seq.resyncBeatClockAt(0.0);
+    try testing.expectEqual(@as(i32, 1), seq.current_beat_in_measure.load(.acquire));
+    try testing.expectEqual(@as(i32, 1), seq.current_measure.load(.acquire));
 }

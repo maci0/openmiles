@@ -1687,7 +1687,14 @@ pub const Sample = struct {
         const vol = if (std.math.isNan(peak)) 0.0 else std.math.clamp(peak, 0.0, 1.0);
         self.setVolume(@intFromFloat(vol * 127.0));
         const sum = left + right;
-        if (sum > 0.0001) self.setPan(@intFromFloat(std.math.clamp(right / sum, 0.0, 1.0) * 127.0));
+        if (sum > 0.0001) {
+            // Two infinite levels sum to Inf and their ratio is NaN, which
+            // clamp() would hand to setPan as the upper bound: garbage in, hard
+            // right. Centre is the neutral answer setVolumePanF uses for the
+            // same input.
+            const balance = right / sum;
+            self.setPan(@intFromFloat((if (std.math.isNan(balance)) 0.5 else std.math.clamp(balance, 0.0, 1.0)) * 127.0));
+        }
         // setVolume/setPan clobbered save_*; overwrite with the exact reconstruction.
         self.save_pan_f = std.math.clamp(save_pan, 0.0, 1.0);
         self.save_vol_f = std.math.pow(f32, @max(save_volume, 0.0), 6.0 / 10.0);

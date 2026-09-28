@@ -753,7 +753,12 @@ pub fn AIL_set_sample_51_volume_levels(s_opt: ?*Sample, f_left: f32, f_right: f3
     const peak: f32 = @max(f_left, f_right);
     s.setVolume(@intFromFloat((if (std.math.isNan(peak)) 0.0 else std.math.clamp(peak, 0.0, 1.0)) * 127.0));
     const sum = f_left + f_right;
-    if (sum > 0.0001) s.setPan(@intFromFloat(std.math.clamp(f_right / sum, 0.0, 1.0) * 127.0));
+    if (sum > 0.0001) {
+        // Two infinite levels sum to Inf and their ratio is NaN, which clamp()
+        // would hand to setPan as the upper bound: garbage in, hard right.
+        const balance = f_right / sum;
+        s.setPan(@intFromFloat((if (std.math.isNan(balance)) 0.5 else std.math.clamp(balance, 0.0, 1.0)) * 127.0));
+    }
 
     // Store the reconstructed save_* (the F32 getter returns volume = save_volume^(6/10)).
     s.save_pan_f = std.math.clamp(save_pan, 0.0, 1.0);

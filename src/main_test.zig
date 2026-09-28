@@ -6142,6 +6142,24 @@ test "a non-finite volume level fails safe to silence" {
     try testing.expectEqual(@as(i32, 0), dg.AIL_sample_volume(s));
 }
 
+test "infinite volume levels fail safe to centre, not hard right" {
+    // Inf + Inf is Inf, so the L/R balance ratio is NaN. clamp() maps NaN to
+    // the upper bound, which drove the pan to 127 (hard right) on top of the
+    // full volume the peak already gives; centre is the neutral answer.
+    const s = try loadedSample(testing.allocator, 64, 1, 8000);
+    const drv = s.driver;
+    defer drv.deinit();
+    defer s.deinit();
+
+    s.setVolumeLevels(std.math.inf(f32), std.math.inf(f32));
+    // 0.5 * 127 truncates to 63, the same centre the pan=0.5 float setter stores.
+    try testing.expectEqual(@as(i32, 63), dg.AIL_sample_pan(s));
+
+    // A finite pair still balances the usual way.
+    s.setVolumeLevels(1.0, 0.0);
+    try testing.expectEqual(@as(i32, 0), dg.AIL_sample_pan(s));
+}
+
 test "v7 master reverb decay/predelay/damping all round-trip" {
     const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer drv.deinit();
