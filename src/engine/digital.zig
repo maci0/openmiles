@@ -731,7 +731,11 @@ pub const DigitalDriver = struct {
         self.buses.clearRetainingCapacity();
     }
 
-    /// One more owner of this handle (see refs).
+    /// One more owner of this handle (see refs): a second open of the one
+    /// process-wide device, which AIL_waveOutOpen takes from the same path
+    /// AIL_open_digital_driver does. The matching close is
+    /// root.closeDigitalDriver, which drops one open and reports whether it was
+    /// the last, so a driver another open still owns stays in the table.
     pub fn retain(self: *DigitalDriver) void {
         _ = self.refs.fetchAdd(1, .monotonic);
     }
