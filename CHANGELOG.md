@@ -76,6 +76,13 @@ All notable changes to OpenMiles are recorded here. The format follows
   happened but never when, and a log that hit the 64 MiB cap or interleaved
   lines from two engine instances could not be sorted back into order. The
   first line names the format.
+- `-Dmss_version` is accepted as a spelling of `-Dmss-version`. `zig build`
+  can only pass an option whose name has no hyphen through
+  `b.dependency("openmiles", .{.mss_version = 9})`, because the struct field
+  becomes a `-D` flag, so a project consuming the package as a Zig dependency
+  could not select the version at all: the call failed on an unknown option, and
+  without it the module always compiled as 9.0. The README's "Using the Zig
+  module" section documents the dependency path.
 
 ### Changed
 

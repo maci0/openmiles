@@ -231,7 +231,17 @@ pub fn build(b: *std.Build) void {
     // from it for both the --help text and the rejection message. A version
     // that could be added to the map without either of those naming it is a
     // typo reported against a stale list.
-    const mss_version_str = b.option([]const u8, "mss-version", b.fmt("Target MSS version ({s})", .{mss_version_help})) orelse "9";
+    // Two spellings of one option. `zig build -Dmss-version=5` reads better at
+    // a prompt and is what the docs and the workflows use, but a consuming
+    // project's `b.dependency("openmiles", .{.mss_version = 5})` turns the
+    // struct field into `-Dmss_version=5`, and a field name cannot hold a
+    // hyphen. Without the second spelling that call fails on an unknown
+    // option, and a project depending on the module cannot pick the version
+    // the module was written against at all.
+    const mss_version_help_text = b.fmt("Target MSS version ({s})", .{mss_version_help});
+    const mss_version_str = b.option([]const u8, "mss-version", mss_version_help_text) orelse
+        b.option([]const u8, "mss_version", mss_version_help_text) orelse
+        "9";
     const mss_version: u16 = parseMssVersion(mss_version_str) orelse {
         std.debug.print("error: invalid -Dmss-version='{s}'\n", .{mss_version_str});
         std.debug.print("       valid values: {s}\n", .{mss_version_help});

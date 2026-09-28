@@ -370,6 +370,11 @@ S32        MSS_CALLBACK AIL_set_preference(U32 number, S32 value);
 
 // Digital Audio Driver
 #if MSS_AT_LEAST(61)
+/* The process has one output device, and the opens are counted: a second
+ * AIL_open_digital_driver (or an AIL_waveOutOpen, which takes the same device)
+ * returns the handle the first one built rather than a second engine. Each open
+ * owes one AIL_close_digital_driver, and the device goes away with the last of
+ * them. A close of a handle no open still holds is ignored. */
 HDIGDRIVER MSS_CALLBACK AIL_open_digital_driver(U32 frequency, S32 bits, S32 channels, U32 flags);
 void       MSS_CALLBACK AIL_close_digital_driver(HDIGDRIVER dig);
 #endif

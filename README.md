@@ -525,6 +525,26 @@ can see, so `src/header_test.zig` reads the `AILFILETYPE_*` block out of
 `mss.h` and drives each name through the real classifier: a constant the engine
 renumbers, or one added to the header without a fixture, fails the test build.
 
+### Using the Zig module
+
+The package is fetchable as a Zig dependency, and the module it exposes is the
+library's Zig API: the same `openmiles` module the tests import, so a Zig
+program can call the engine directly instead of going through the C ABI. `zig
+build -Dmss-version` only shapes the DLL's export table; the module is the same
+whatever version the dependency is configured for, and `openmiles.mss_version`
+reads back the encoding it was configured with, so code can branch on it.
+
+```zig
+// build.zig
+const openmiles_dep = b.dependency("openmiles", .{ .mss_version = 9 });
+exe.root_module.addImport("openmiles", openmiles_dep.module("openmiles"));
+```
+
+The dependency field is `mss_version` and not `mss-version`: `b.dependency`
+turns a struct field into a `-D` flag, and a field name cannot hold a hyphen,
+so the option answers to both spellings. `zig fetch --save=openmiles <url>` (or
+a `.path` entry for a local checkout) puts it in `build.zig.zon`.
+
 ### Configuration
 
 The library reads its runtime configuration from the process environment. It
