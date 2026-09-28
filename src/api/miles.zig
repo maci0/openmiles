@@ -157,6 +157,9 @@ var g_next_id: u64 = 1;
 // name and owns the key, so a name match is a hash lookup rather than a scan
 // with a case-insensitive compare per entry. Same shape as the bank's name
 // index (soundbank.zig), which resolves event and sound names the same way.
+// The one exception is g_persists, which keeps an ordered array because
+// MilesEnumeratePresetPersists walks it by position; a game's persisted
+// preset list is short enough for the dedup scan to cost nothing.
 
 // A case-lowercased probe key, in a stack buffer when the name fits (the
 // common case, no allocation) and on the heap otherwise. Same shape as the
@@ -709,31 +712,55 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
     const np = io_next orelse return 0;
     updateInstances();
     const filter: u64 = if (status == 0) 0xffffffff else @intCast(@as(u32, @bitCast(status)));
-    // MSS_FIRST sentinel ((HMSSENUM)-1) starts a fresh walk at index 0, the
-    // same convention MilesEnumeratePresetPersists uses.
-    const first = @intFromPtr(np.*) == std.math.maxInt(usize) or @intFromPtr(np.*) == 0;
-    var idx: usize = if (first) 0 else @intFromPtr(np.*);
-    while (idx < g_instances.items.len) : (idx += 1) {
-        const inst = g_instances.items[idx];
+    // The cursor carries the instance_id of the last entry handed out, not its
+    // position in g_instances, and the walk visits entries in id order rather
+    // than array order.
+    //
+    // A positional cursor stops naming the same entry the moment the list is
+    // compacted, and the list is compacted under the caller's feet: the
+    // documented MSS walk is enumerate-then-act, so a game stops the instances
+    // it just enumerated (MilesStopSoundInstances swap-removes) and calls back
+    // in to continue.
+    //
+    // instance_id is monotonic and never reused (nextId), so it is a stable
+    // identity, but it is NOT array order: a swap-remove moves the tail entry
+    // into the freed slot, so a lower id can sit after a higher one. Selecting
+    // the lowest matching id above the cursor is therefore what makes the walk
+    // resumable: an id-ordered sequence is total and every entry appears
+    // exactly once, however the array is shuffled beneath it, and a stop
+    // between two calls cannot make the walk skip or repeat. An instance
+    // enqueued mid-walk has a higher id and is not reported, matching an SDK
+    // walk over a snapshot. The scan is per call over the handful of live
+    // instances, which the label caps keep small.
+    //
+    // MSS_FIRST sentinel ((HMSSENUM)-1) starts a fresh walk, the same
+    // convention MilesEnumeratePresetPersists uses. 0 is accepted as a fresh
+    // walk too: no instance ever holds id 0 (nextId starts at 1), so it is
+    // unambiguously the start rather than a resume point.
+    const cursor_raw = @intFromPtr(np.*);
+    const after_id: u64 = if (cursor_raw == std.math.maxInt(usize) or cursor_raw == 0) 0 else cursor_raw;
+    var found: ?*SoundInstance = null;
+    for (g_instances.items) |inst| {
+        if (inst.instance_id <= after_id) continue;
         if ((@as(u64, @intCast(inst.status)) & filter) == 0) continue;
         if (!labelMatch(inst.labels, labels)) continue;
-        if (out_info) |oi| {
-            const o: *MILESEVENTSOUNDINFO = @ptrCast(@alignCast(oi));
-            o.* = .{
-                .QueuedID = inst.queued_id,
-                .InstanceID = inst.instance_id,
-                .EventID = inst.queued_id,
-                .UserBuffer = inst.user_buffer,
-                .UserBufferLen = inst.user_buffer_len,
-                .Status = inst.status,
-                .UsedSound = inst.sound_name.ptr,
-            };
-        }
-        np.* = @ptrFromInt(idx + 1);
-        return 1;
+        if (found == null or inst.instance_id < found.?.instance_id) found = inst;
     }
-    np.* = @ptrFromInt(idx);
-    return 0;
+    const inst = found orelse return 0;
+    if (out_info) |oi| {
+        const o: *MILESEVENTSOUNDINFO = @ptrCast(@alignCast(oi));
+        o.* = .{
+            .QueuedID = inst.queued_id,
+            .InstanceID = inst.instance_id,
+            .EventID = inst.queued_id,
+            .UserBuffer = inst.user_buffer,
+            .UserBufferLen = inst.user_buffer_len,
+            .Status = inst.status,
+            .UsedSound = inst.sound_name.ptr,
+        };
+    }
+    np.* = @ptrFromInt(inst.instance_id);
+    return 1;
 }
 pub fn MilesEnumeratePresetPersists(system: ?*anyopaque, io_next: ?*?*anyopaque, out_name: ?*?[*:0]const u8) callconv(.winapi) i32 {
     _ = system;

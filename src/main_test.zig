@@ -7992,6 +7992,37 @@ test "zero-duration instances complete on processing instead of accumulating" {
     try testing.expectEqual(@as(i32, 0), state.PlayingSoundCount);
 }
 
+test "an instance enumeration walk survives stopping instances mid-walk" {
+    api_miles_t.MilesShutdownEventSystem();
+    defer api_miles_t.MilesShutdownEventSystem();
+
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("a"), 0, 0, cstr2("grp,a"), null, 0, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("b"), 0, 0, cstr2("grp,b"), null, 0, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("c"), 0, 0, cstr2("grp,c"), null, 0, 0);
+    _ = api_miles_t.MilesStartSoundInstance(null, cstr2("d"), 0, 0, cstr2("grp,d"), null, 0, 0);
+
+    // The documented MSS pattern: enumerate, act on what came back, keep
+    // walking. Stopping an entry compacts the list under the cursor, so a
+    // cursor naming a position rather than an identity would resume on whatever
+    // slid into the freed slot and never report the rest. Each instance also
+    // carries its own label so the walk stops exactly the one it enumerated.
+    var seen: usize = 0;
+    var seen_c = false;
+    var nx: ?*anyopaque = @ptrFromInt(std.math.maxInt(usize));
+    var info: api_miles_t.MILESEVENTSOUNDINFO = undefined;
+    while (api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, cstr2("grp"), 0, @ptrCast(&info)) == 1) {
+        seen += 1;
+        const used = std.mem.span(info.UsedSound.?);
+        if (std.mem.eql(u8, used, "c")) seen_c = true;
+        try testing.expectEqual(@as(u64, 1), api_miles_t.MilesStopSoundInstances(cstr2(used), 0));
+    }
+    try testing.expectEqual(@as(usize, 4), seen);
+    try testing.expect(seen_c);
+
+    // Everything the walk acted on is gone.
+    try testing.expectEqual(@as(u64, 0), api_miles_t.MilesStopSoundInstances(cstr2("grp"), 0));
+}
+
 test "container resolves bank-prefixed sound names (Container_GetSound)" {
     var img: [200]u8 = undefined;
     @memset(&img, 0);
