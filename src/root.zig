@@ -466,14 +466,21 @@ pub fn ailFileRead(filename: [*:0]const u8, dest: ?*anyopaque) ?*anyopaque {
 }
 
 /// AIL_file_size core: size in bytes via the app's callbacks when set, otherwise
-/// from the filesystem. Returns 0 and sets the file error on failure, except when
-/// the app set an open callback without a close one, where it returns 0 with no
-/// error set.
+/// from the filesystem. Returns 0 and sets the file error on failure. A
+/// partial callback set is a failure too: the app's AIL_file_error is the only
+/// signal these calls give, and a silent 0 cannot be told from a zero-length
+/// file.
 pub fn ailFileSize(filename: [*:0]const u8) u32 {
     clearFileError();
     if (currentFileCallbacks()) |cbs| {
-        const open_fn = cbs.open orelse return 0;
-        const close_fn = cbs.close orelse return 0;
+        const open_fn = cbs.open orelse {
+            setFileError("Read failed");
+            return 0;
+        };
+        const close_fn = cbs.close orelse {
+            setFileError("Read failed");
+            return 0;
+        };
         // open returns the file length and fills the handle out-param.
         var handle: u32 = 0;
         var size = open_fn(filename, &handle);
@@ -900,6 +907,16 @@ pub fn unregisterDriver(driver: *DigitalDriver) void {
     removeFirst(&known_drivers, driver);
 }
 
+/// AIL_serve: the per-frame tick the game drives. The mixer itself runs on the
+/// audio thread, so the work here is the part that needs the game's cadence:
+/// the sources that asked for automatic 3D dead reckoning advance by the time
+/// since the previous serve.
+pub fn serveAllDrivers() void {
+    driver_table_mutex.lockUncancelable(io);
+    defer driver_table_mutex.unlock(io);
+    for (known_drivers.items) |d| d.serve();
+}
+
 pub fn isKnownDriver(ptr: *anyopaque) bool {
     // Fast path: the current driver is always in the table (it is registered
     // before it is published, and unregisterDriver runs after
@@ -1246,10 +1263,12 @@ pub const Clock = struct {
         self.virtual_enabled.store(false, .release);
     }
 
-    /// Move virtual time forward by `ns`. Never moves it backwards.
+    /// Move virtual time forward by `ns`. Never moves it backwards: a negative
+    /// step would push `nowNs` below the epoch, where every elapsed counter
+    /// clamps to 0 and a rewound run reads as a stalled one.
     pub fn advance(self: *Clock, ns: i64) void {
         self.virtual_mutex.lockUncancelable(io);
-        self.virtual_ns += ns;
+        self.virtual_ns += @max(0, ns);
         self.virtual_mutex.unlock(io);
     }
 

@@ -28,7 +28,13 @@ pub const redbook_status_error: u32 = 3;
 /// drive.
 pub const Redbook = struct {
     allocator: std.mem.Allocator,
+    /// The disc has no tracks, so the current track is always 0; playback
+    /// position is a disc offset in ms, not a track index.
     current_track: u32 = 0,
+    /// Disc offset AIL_redbook_play was given, in ms. AIL_redbook_position
+    /// counts from it, so playing from 30 s into the disc reports 30 s rather
+    /// than restarting at zero.
+    start_offset_ms: u32 = 0,
     track_end: u32 = 0,
     status: RedbookStatus = .stopped,
     volume: u32 = 127,
@@ -47,12 +53,13 @@ pub const Redbook = struct {
         self.allocator.destroy(self);
     }
 
-    pub fn play(self: *Redbook, start: u32, end: u32) void {
-        self.current_track = start;
-        self.track_end = end;
+    pub fn play(self: *Redbook, start_ms: u32, end_ms: u32) void {
+        self.current_track = 0;
+        self.start_offset_ms = start_ms;
+        self.track_end = end_ms;
         self.status = .playing;
         self.play_start_ms = nowMs();
-        self.paused_position_ms = 0;
+        self.paused_position_ms = start_ms;
     }
 
     pub fn stop(self: *Redbook) void {
@@ -63,14 +70,14 @@ pub const Redbook = struct {
 
     pub fn pause(self: *Redbook) void {
         if (self.status == .playing) {
-            self.paused_position_ms = nowMs() - self.play_start_ms;
+            self.paused_position_ms = @as(i64, self.start_offset_ms) + (nowMs() - self.play_start_ms);
             self.status = .paused;
         }
     }
 
     pub fn resumePlayback(self: *Redbook) void {
         if (self.status == .paused) {
-            self.play_start_ms = nowMs() - self.paused_position_ms;
+            self.play_start_ms = nowMs() - (self.paused_position_ms - @as(i64, self.start_offset_ms));
             self.status = .playing;
         }
     }
@@ -84,7 +91,7 @@ pub const Redbook = struct {
             }
         }.f;
         return switch (self.status) {
-            .playing => clamp(nowMs() - self.play_start_ms),
+            .playing => clamp(@as(i64, self.start_offset_ms) + (nowMs() - self.play_start_ms)),
             .paused => clamp(self.paused_position_ms),
             .stopped => 0,
         };

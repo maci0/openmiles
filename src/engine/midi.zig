@@ -228,7 +228,11 @@ pub const MidiDriver = struct {
         self.soundfont_image_size = size;
         self.soundfont_refs = 1;
         self.soundfont_size_bytes = @intCast(@min(size, std.math.maxInt(u32)));
-        tsf.tsf_set_output(self.soundfont, tsf.TSF_STEREO_INTERLEAVED, 44100, 0);
+        // Same rate the file path adopts: the data source hands the engine
+        // frames at self.sample_rate, so a fixed 44100 here played a
+        // 22050 Hz device at half speed.
+        self.adoptOutputRate();
+        tsf.tsf_set_output(self.soundfont, tsf.TSF_STEREO_INTERLEAVED, @intCast(self.sample_rate), 0);
         return bank;
     }
 

@@ -3279,9 +3279,17 @@ test "AIL_load_sample_buffer returns the resolved slot (-1 on bad input) (SDK)" 
     // Slot >= n_buffers (2) is rejected with -1.
     try testing.expectEqual(@as(i32, -1), api_digital.AIL_load_sample_buffer(s, 2, p, 64));
     // MSS_BUFFER_HEAD (-1) resolves to the ring head and advances it (0,1,0,...).
-    const h0 = api_digital.AIL_load_sample_buffer(s, -1, p, 64);
-    const h1 = api_digital.AIL_load_sample_buffer(s, -1, p, 64);
+    // A second sample, so the head walks free slots: on `s` both are taken by
+    // the loads above, and a submission into a taken slot is refused.
+    const s2 = try openmiles.Sample.init(drv);
+    defer s2.deinit();
+    _ = api_v7.AIL_set_sample_info(s2, &info);
+    const h0 = api_digital.AIL_load_sample_buffer(s2, -1, p, 64);
+    const h1 = api_digital.AIL_load_sample_buffer(s2, -1, p, 64);
     try testing.expect(h0 >= 0 and h1 >= 0 and h0 != h1);
+    // The head came back around to a slot that still holds its buffer: the
+    // repeat is reported, not taken.
+    try testing.expectEqual(@as(i32, -1), api_digital.AIL_load_sample_buffer(s2, -1, p, 64));
     // Null sample -> -1.
     try testing.expectEqual(@as(i32, -1), api_digital.AIL_load_sample_buffer(null, 0, p, 64));
 }
@@ -3720,8 +3728,11 @@ test "Redbook play sets playing state" {
 
     rb.play(1, 5);
     try testing.expectEqual(openmiles.RedbookStatus.playing, rb.status);
-    try testing.expectEqual(@as(u32, 1), rb.current_track);
+    // AIL_redbook_play takes ms offsets, not a track number: the track stays 0
+    // (the emulated drive has none) and the position starts at the offset.
+    try testing.expectEqual(@as(u32, 0), rb.current_track);
     try testing.expectEqual(@as(u32, 5), rb.track_end);
+    try testing.expect(rb.getPosition() >= 1);
 }
 
 test "Redbook stop resets state" {
@@ -5349,8 +5360,8 @@ test "StreamSource ping-pongs two buffers and fires EOB on drain" {
 
     const buf_a = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 }; // 2 frames
     const buf_b = [_]u8{ 11, 12, 13, 14, 15, 16, 17, 18 }; // 2 frames
-    ss.loadBuffer(0, &buf_a, buf_a.len);
-    ss.loadBuffer(1, &buf_b, buf_b.len);
+    _ = ss.loadBuffer(0, &buf_a, buf_a.len);
+    _ = ss.loadBuffer(1, &buf_b, buf_b.len);
     try testing.expectEqual(@as(i32, -1), ss.bufferReady()); // both full
 
     var out: [16]u8 = undefined; // 4 frames
@@ -5387,8 +5398,8 @@ test "StreamSource zero-length buffer signals end of stream" {
     defer ss.deinit();
 
     const buf_a = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 }; // 2 frames
-    ss.loadBuffer(0, &buf_a, buf_a.len);
-    ss.loadBuffer(1, null, 0); // EOF marker
+    _ = ss.loadBuffer(0, &buf_a, buf_a.len);
+    _ = ss.loadBuffer(1, null, 0); // EOF marker
 
     // Total decoded frames must be exactly buf_a's 2 before EOF.
     var out: [16]u8 = undefined;
@@ -5403,7 +5414,7 @@ test "StreamSource underrun emits silence and keeps playing" {
     defer ss.deinit();
 
     const buf_a = [_]u8{ 9, 9 }; // 1 frame
-    ss.loadBuffer(0, &buf_a, buf_a.len);
+    _ = ss.loadBuffer(0, &buf_a, buf_a.len);
 
     var out: [8]u8 = [_]u8{0xAA} ** 8; // request 4 frames, only 1 available
     var read: u64 = 0;
@@ -5427,8 +5438,8 @@ test "StreamSource drains a buffer ending mid-frame" {
 
     // 2 whole frames plus 3 stray bytes.
     const buf_a = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8, 0xEE, 0xEE, 0xEE };
-    ss.loadBuffer(0, &buf_a, buf_a.len);
-    ss.loadBuffer(1, null, 0); // EOF marker
+    _ = ss.loadBuffer(0, &buf_a, buf_a.len);
+    _ = ss.loadBuffer(1, null, 0); // EOF marker
 
     var out: [16]u8 = undefined;
     // Reached end of stream instead of wedging, and the 2 whole frames survived.
@@ -5454,10 +5465,10 @@ test "StreamSource honors a 4-slot ring end to end" {
     const buf_b = [_]u8{ 5, 6, 7, 8 };
     const buf_c = [_]u8{ 9, 10, 11, 12 };
     const buf_d = [_]u8{ 13, 14, 15, 16 };
-    ss.loadBuffer(0, &buf_a, buf_a.len);
-    ss.loadBuffer(1, &buf_b, buf_b.len);
-    ss.loadBuffer(2, &buf_c, buf_c.len);
-    ss.loadBuffer(3, &buf_d, buf_d.len);
+    _ = ss.loadBuffer(0, &buf_a, buf_a.len);
+    _ = ss.loadBuffer(1, &buf_b, buf_b.len);
+    _ = ss.loadBuffer(2, &buf_c, buf_c.len);
+    _ = ss.loadBuffer(3, &buf_d, buf_d.len);
     try testing.expectEqual(@as(i32, -1), ss.bufferReady()); // ring full
 
     var out: [20]u8 = [_]u8{0xAA} ** 20; // request 5 frames; only 4 are queued
@@ -5489,8 +5500,10 @@ test "StreamSource a repeated submit into a live slot keeps the first buffer" {
 
     const buf_a = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 }; // 2 frames
     const buf_b = [_]u8{ 9, 9, 9, 9, 9, 9, 9, 9 }; // the repeat
-    ss.loadBuffer(0, &buf_a, buf_a.len);
-    ss.loadBuffer(0, &buf_b, buf_b.len);
+    _ = ss.loadBuffer(0, &buf_a, buf_a.len);
+    // The repeat is reported, not taken: the caller has to learn that its
+    // submission was dropped.
+    try testing.expect(!ss.loadBuffer(0, &buf_b, buf_b.len));
     // The repeat did not free the slot, and did not replace the queued data:
     // the other slot is still the only one the app may fill.
     try testing.expectEqual(@as(i32, 1), ss.bufferReady());
@@ -5512,7 +5525,7 @@ test "StreamSource a repeated submit into a live slot keeps the first buffer" {
     try testing.expectEqualSlices(u8, &buf_a, @as([*]const u8, @ptrCast(ctx.last_addr.?))[0..buf_a.len]);
     // Drained: the slot is free again and takes a new buffer, which plays.
     try testing.expectEqual(@as(i32, 0), ss.bufferReady());
-    ss.loadBuffer(0, &buf_b, buf_b.len);
+    _ = ss.loadBuffer(0, &buf_b, buf_b.len);
     var out2: [16]u8 = undefined;
     var read2: u64 = 0;
     const r2 = openmiles.ma.ma_data_source_read_pcm_frames(&ss.base, &out2, 4, &read2);
@@ -8239,8 +8252,8 @@ test "StreamSource.setSlotCount clamps to the SDK ring range" {
 
     // Below mss.h's low end: the ring still offers min_slots fillable slots.
     ss.setSlotCount(0);
-    ss.loadBuffer(0, &pcm, pcm.len);
-    ss.loadBuffer(1, &pcm, pcm.len);
+    _ = ss.loadBuffer(0, &pcm, pcm.len);
+    _ = ss.loadBuffer(1, &pcm, pcm.len);
     try testing.expectEqual(@as(i32, -1), ss.bufferReady());
 
     // Above its high end: the deepest ring is max_slots, and an index past it
@@ -8248,7 +8261,7 @@ test "StreamSource.setSlotCount clamps to the SDK ring range" {
     // as taken by a ring that will never play it.
     ss.setSlotCount(99);
     var i: usize = 2;
-    while (i < openmiles.StreamSource.max_slots) : (i += 1) ss.loadBuffer(i, &pcm, pcm.len);
+    while (i < openmiles.StreamSource.max_slots) : (i += 1) _ = ss.loadBuffer(i, &pcm, pcm.len);
     try testing.expectEqual(@as(i32, -1), ss.bufferReady());
     // Past the ring depth, slotInfo reports empty rather than reading outside
     // the slot array.
@@ -8267,7 +8280,7 @@ test "StreamSource.loadBuffer ignores a slot index past the ring depth" {
 
     // A 2-deep ring is the default; slot 2 belongs to no configured ring.
     const pcm = [_]u8{0xAB} ** 8;
-    ss.loadBuffer(2, &pcm, pcm.len);
+    _ = ss.loadBuffer(2, &pcm, pcm.len);
 
     var pos: u32 = 0;
     var len: u32 = 0;
@@ -8295,8 +8308,8 @@ test "StreamSource.bufferInfo reports each slot's play position and length" {
 
     const first = [_]u8{0} ** 8;
     const second = [_]u8{0} ** 4;
-    ss.loadBuffer(0, &first, first.len);
-    ss.loadBuffer(1, &second, second.len);
+    _ = ss.loadBuffer(0, &first, first.len);
+    _ = ss.loadBuffer(1, &second, second.len);
 
     // Two 16-bit mono frames out of slot 0. Slot 1 has not been touched, so its
     // position must still read 0 with its full length pending.
@@ -8327,6 +8340,6 @@ test "StreamSource.isStarved latches until the next submission" {
     try testing.expectEqual(@as(u64, 4), read);
     try testing.expect(ss.isStarved());
 
-    ss.loadBuffer(0, &[_]u8{0} ** 4, 4);
+    _ = ss.loadBuffer(0, &[_]u8{0} ** 4, 4);
     try testing.expect(!ss.isStarved());
 }

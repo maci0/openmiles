@@ -90,6 +90,9 @@ pub const StreamSource = struct {
     }
 
     /// Submit a buffer into slot `index`. A zero `len` marks end-of-stream.
+    /// Returns false when the submission was not taken, so the caller can
+    /// report the rejection rather than hand back a slot that still holds the
+    /// previous buffer.
     ///
     /// A slot that still holds an unplayed submission is not overwritten: the
     /// app only ever gets an index back from `bufferReady`, so a submission for
@@ -99,14 +102,14 @@ pub const StreamSource = struct {
     /// so the first submission stands and the repeat is reported instead. A
     /// drained slot (`data == null`, `eof == false`) is free and takes the new
     /// buffer as normal.
-    pub fn loadBuffer(self: *StreamSource, index: usize, data: ?*const anyopaque, len: usize) void {
+    pub fn loadBuffer(self: *StreamSource, index: usize, data: ?*const anyopaque, len: usize) bool {
         self.mutex.lockUncancelable(io);
         defer self.mutex.unlock(io);
-        if (index >= self.slot_count) return;
+        if (index >= self.slot_count) return false;
         const held = self.slots[index];
         if (held.data != null or held.eof) {
             root.log("StreamSource.loadBuffer: slot {d} still holds an unsubmitted buffer; the repeat is ignored\n", .{index});
-            return;
+            return false;
         }
         if (len == 0 or data == null) {
             self.slots[index] = .{ .eof = true };
@@ -114,6 +117,7 @@ pub const StreamSource = struct {
             self.slots[index] = .{ .data = @ptrCast(data), .len = len, .pos = 0 };
         }
         self.starved = false;
+        return true;
     }
 
     /// Resize the active ring. Under the lock because `onRead` (audio thread)

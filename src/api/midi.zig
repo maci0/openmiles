@@ -294,7 +294,7 @@ pub fn AIL_send_channel_voice_message(mdi_opt: ?*MidiDriver, seq_opt: ?*Sequence
     // scales or indexes the raw value, so an out-of-range byte is not rejected
     // but lands in the soundfont as a value the format cannot hold: d2 = 256
     // reaches tsf as note-on velocity 2.0 (a gain above unity), and the
-    // 14-bit pitch bend assembled as (d2 << 7) | d1 overflows its own field for
+    // 14-bit pitch bend assembled as (b2 << 7) | b1 overflows its own field for
     // any d2 above 0x3F, which tsf then stores as a bend past full deflection.
     // Reduce both to the byte the format defines.
     const b1: i32 = d1 & 0x7F;
@@ -313,10 +313,11 @@ pub fn AIL_send_channel_voice_message(mdi_opt: ?*MidiDriver, seq_opt: ?*Sequence
             _ = tsf_mod.tsf_channel_set_presetnumber(sf, channel, b1, if (channel == 9) 1 else 0);
         },
         0xE0 => {
-            // 14 bits: data byte 1 is the low 7, data byte 2 the high 7. The
-            // `& 0x3F` below keeps d2 to 6 bits, so the pair spans 0..8191 with
-            // 4096 as centre rather than the full 14-bit MIDI range.
-            const bend = ((b2 & 0x3F) << 7) | b1;
+            // 14 bits: data byte 1 is the low 7, data byte 2 the high 7, so the
+            // pair spans 0..16383 with 8192 as centre. That is the value tsf
+            // divides by 16383 (deps/tsf.h), and the value the XMIDI path
+            // forwards from tml, so the same number reaches the soundfont here.
+            const bend = (b2 << 7) | b1;
             _ = tsf_mod.tsf_channel_set_pitchwheel(sf, channel, bend);
         },
         0xA0 => {},

@@ -47,6 +47,11 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `AIL_serve` advances the 3D sources that asked for automatic position updating, by the time since the previous serve. The flag `AIL_auto_update_3D_position` sets had no effect before, and the call was a documented no-op.
+- A `set_limits` step inside an event installs the per-label caps its text declares, the same call `MilesSetSoundLabelLimits` makes. Only the out-of-band call applied them.
+
 ### Changed
 
 - The release job runs the same analysis gate as `make lint` before it builds
@@ -82,6 +87,21 @@ All notable changes to OpenMiles are recorded here. The format follows
   `GetProcAddress` and `LOAD_FUNC_EX` aborts on a name the DLL does not export.
   `tests/midi_test.c`, `tests/full_suite.c`, and `tests/rib_test.c` still name
   four of them and cannot run against a current DLL.
+- `AIL_send_channel_voice_message` sends the full 14-bit pitch bend (8192 centre). It masked the high byte to 6 bits, so a wheel at centre or full up reached the soundfont as a bend down.
+- `AIL_resume_sample` on a sample that had finished clears SMP_DONE. The voice played again while its status still read done, so a game polling status saw a finished voice.
+- `AIL_load_sample_buffer` reports a buffer that was refused (the slot still held an unsubmitted one) as -1 with the reason in `AIL_last_error`, and fires no SOB, instead of returning the slot as loaded. A null buffer ends the stream on a streaming sample and is refused on a whole-image one.
+- `AIL_update_3D_position` advances a source whether or not automatic updating is on. A v6.1+ game that only called it never moved its source, while the v5 spelling of the same call did.
+- `AIL_3D_provider_attribute` and `AIL_set_3D_provider_preference` resolve the open digital driver instead of casting the provider handle to one. An enumerated `HPROVIDER` is a RIB provider, so the pair read and wrote past the end of it.
+- `AIL_set_3D_sample_preference` for "Minimum distance" and "Maximum distance" applies the SDK's min <= max swap, as `AIL_set_3D_sample_distances` does. Writing the field alone could leave the pair in the order the spatializer leaves undefined.
+- `MilesAddSoundBank` accepts a name that differs from the bank's and drops it, as `mss.h` says, instead of failing the load with "Bank name mismatch".
+- `AIL_set_input_state` returns 1 for a disable it carried out. It reported the state reached, which is 0, so a successful stop read as a failure.
+- `AIL_open_ASI_provider` writes the plugin image to the game directory when the temp directory cannot hold it (unwritable, not a directory), instead of retrying the same absolute path and failing.
+- `AIL_file_size` sets the file error when the app installed only part of the callback set, so a 0 can be told from a zero-length file.
+- `AIL_DLS_close` stops the sequences allocated on the device before the driver they read through is destroyed.
+- A soundfont loaded from memory renders at the open device's rate, as the file path does. It was fixed at 44100, so a 22050 Hz device played it an octave down.
+- `AIL_redbook_play` takes millisecond offsets: `AIL_redbook_position` counts from the offset given, and `AIL_redbook_track` (a track number on a drive with no disc) stays 0 instead of reporting the offset as a track.
+- `openmiles.clock.advance` ignores a negative step, as its contract says. A rewind put virtual time below the epoch, where every elapsed counter reads 0.
+- A limits string naming the same label twice keeps the last count and no longer leaks the duplicate key.
 
 ## [0.2.0] - 2026-09-28
 

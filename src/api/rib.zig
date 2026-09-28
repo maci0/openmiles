@@ -258,6 +258,10 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
         if (!fits) log("AIL_open_ASI_provider: temp directory '{s}' leaves no room for the image name under the path limit; writing it to the current directory\n", .{dir});
         break :blk fits;
     } else false;
+    // Cleared once the temp directory turns out to be unusable (no room for the
+    // name, or the create fails for any reason but an occupied name), so the
+    // retry below builds the process-relative path the game directory needs.
+    var in_tmp_dir = use_tmp_dir;
 
     // The image is written to TEMP and then LoadLibrary'd, so the file name must
     // not be predictable: a sequential counter would let a local process plant
@@ -278,29 +282,38 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
     var id = std.mem.readInt(u64, &id_bytes, .little);
     const name_attempts = 4;
     for (0..name_attempts) |_| {
-        path = if (use_tmp_dir) std.fmt.bufPrintZ(&path_buf, "{s}om_asi_{x:016}.dll", .{ tmp_dir.?, id }) catch |err| {
-            log("AIL_open_ASI_provider: cannot format temp path: {any}\n", .{err});
-            openmiles.setLastError("Failed to format temp path for ASI provider");
-            return null;
-        } else std.fmt.bufPrintZ(&path_buf, ".{c}om_asi_{x:016}.dll", .{ std.fs.path.sep, id }) catch |err| {
-            log("AIL_open_ASI_provider: cannot format temp path: {any}\n", .{err});
-            openmiles.setLastError("Failed to format temp path for ASI provider");
-            return null;
-        };
-        if (use_tmp_dir) {
+        while (true) {
+            path = if (in_tmp_dir) std.fmt.bufPrintZ(&path_buf, "{s}om_asi_{x:016}.dll", .{ tmp_dir.?, id }) catch |err| {
+                log("AIL_open_ASI_provider: cannot format temp path: {any}\n", .{err});
+                openmiles.setLastError("Failed to format temp path for ASI provider");
+                return null;
+            } else std.fmt.bufPrintZ(&path_buf, ".{c}om_asi_{x:016}.dll", .{ std.fs.path.sep, id }) catch |err| {
+                log("AIL_open_ASI_provider: cannot format temp path: {any}\n", .{err});
+                openmiles.setLastError("Failed to format temp path for ASI provider");
+                return null;
+            };
+            if (!in_tmp_dir) break;
             if (std.Io.Dir.createFileAbsolute(io, path, .{ .exclusive = true })) |f| {
                 created = f;
                 break;
             } else |abs_err| switch (abs_err) {
-                // An occupied name retries with a fresh id; any other absolute-open
-                // failure falls through to the cwd-relative attempt.
+                // An occupied name retries with a fresh id.
                 error.PathAlreadyExists => {
                     id +%= 1;
                     continue;
                 },
-                else => {},
+                else => {
+                    // The temp directory is unusable (not writable, not a
+                    // directory, no room). Retrying the same absolute path
+                    // fails the same way, so drop to the game directory and
+                    // rebuild the path in its process-relative form.
+                    log("AIL_open_ASI_provider: temp directory unusable ({any}); writing the image to the current directory\n", .{abs_err});
+                    in_tmp_dir = false;
+                    continue;
+                },
             }
         }
+        if (created != null) break;
         if (openmiles.fs_compat.createFile(io, path, .{ .exclusive = true })) |f| {
             created = f;
             break;

@@ -355,12 +355,13 @@ pub fn AIL_set_3D_sample_preference(s: ?*anyopaque, name: [*:0]const u8, val: *a
         sample.setVolume(v.*);
     } else if (std.mem.eql(u8, n, "Minimum distance")) {
         const v: *const f32 = @ptrCast(@alignCast(val));
-        sample.min_distance = v.*;
-        if (sample.is_initialized) openmiles.ma.ma_sound_set_min_distance(&sample.sound, v.*);
+        // Through the pair setter, so the SDK's min <= max swap applies here as
+        // it does in AIL_set_3D_sample_distances: writing the field alone left
+        // min > max, the regime the spatializer leaves undefined.
+        sample.setMinMaxDistance(v.*, sample.max_distance);
     } else if (std.mem.eql(u8, n, "Maximum distance")) {
         const v: *const f32 = @ptrCast(@alignCast(val));
-        sample.max_distance = v.*;
-        if (sample.is_initialized) openmiles.ma.ma_sound_set_max_distance(&sample.sound, v.*);
+        sample.setMinMaxDistance(sample.min_distance, v.*);
     } else if (std.mem.eql(u8, n, "Cone inner angle")) {
         const v: *const f32 = @ptrCast(@alignCast(val));
         if (!std.math.isNan(v.*)) sample.cone_inner_rad = v.* * openmiles.deg2rad;
@@ -455,8 +456,12 @@ pub fn AIL_update_3D_position(s: ?*anyopaque, dt: f32) callconv(.winapi) void {
     const p = s orelse return;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     // SDK m3d.cpp: dt is milliseconds and velocity is per-millisecond, so the
-    // position advances by velocity * dt directly (no unit conversion).
-    sample.updatePosition(dt);
+    // position advances by velocity * dt directly (no unit conversion). This
+    // call is the dead-reckoning step itself, so it advances the source whether
+    // or not AIL_auto_update_3D_position was asked for; the flag only selects
+    // whether the driver advances it on its own as well. Gating it on the flag
+    // left a moving source frozen whenever a game only called this.
+    sample.updatePositionExplicit(dt);
 }
 pub fn AIL_set_3D_velocity_vector(s: ?*anyopaque, x: f32, y: f32, z: f32) callconv(.winapi) void {
     const p = s orelse return;
@@ -547,8 +552,13 @@ pub fn AIL_close_3D_listener(listener: *anyopaque) callconv(.winapi) void {
 }
 pub fn AIL_open_3D_object(provider: *anyopaque) callconv(.winapi) ?*anyopaque {
     // Prefer the active digital driver (the real engine); fall back to treating
-    // the provider handle as a driver for legacy callers.
-    const dig: *DigitalDriver = openmiles.lastDigitalDriver() orelse @ptrCast(@alignCast(provider));
+    // the provider handle as a driver for legacy callers, but only when it is
+    // one: an enumerated HPROVIDER is a *Provider, and a Sample3D built on that
+    // cast would read driver fields off the end of the provider.
+    const dig = providerDriver(provider) orelse {
+        openmiles.setLastError("No digital driver for 3D object");
+        return null;
+    };
     const s = openmiles.Sample3D.init(dig) catch |err| {
         log("Error: {any}\n", .{err});
         openmiles.setLastError("Failed to allocate 3D object");
@@ -560,8 +570,18 @@ pub fn AIL_close_3D_object(obj: *anyopaque) callconv(.winapi) void {
     const s: *openmiles.Sample3D = @ptrCast(@alignCast(obj));
     s.deinit();
 }
+// A provider handle from AIL_enumerate_3D_providers is a *Provider (the RIB
+// registration), not a driver, so reading driver fields off it would walk off
+// the end of the provider. Resolve the active driver the way
+// AIL_open_3D_object does, and only treat the handle as a driver when it
+// really is one.
+fn providerDriver(provider: *anyopaque) ?*DigitalDriver {
+    if (openmiles.lastDigitalDriver()) |d| return d;
+    if (!openmiles.isKnownDriver(provider)) return null;
+    return @ptrCast(@alignCast(provider));
+}
 pub fn AIL_3D_provider_attribute(provider: *anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
-    const dig: *DigitalDriver = @ptrCast(@alignCast(provider));
+    const dig = providerDriver(provider) orelse return;
     const n = std.mem.span(name);
     if (std.mem.eql(u8, n, "Rolloff factor")) {
         const v: *f32 = @ptrCast(@alignCast(val));
@@ -575,7 +595,7 @@ pub fn AIL_3D_provider_attribute(provider: *anyopaque, name: [*:0]const u8, val:
     }
 }
 pub fn AIL_set_3D_provider_preference(provider: *anyopaque, name: [*:0]const u8, val: *anyopaque) callconv(.winapi) void {
-    const dig: *DigitalDriver = @ptrCast(@alignCast(provider));
+    const dig = providerDriver(provider) orelse return;
     const n = std.mem.span(name);
     // Delegate to the dedicated setters so these also propagate to live samples
     // (ma rolloff / doppler), exactly like the AIL_set_3D_*_factor entry points.

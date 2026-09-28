@@ -66,7 +66,7 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_last_error` | 🟢 Implemented | Returns last error set by API calls; empty string when none |
 | `AIL_get_preference` | 🟢 Implemented | A number past the 512-slot table returns 0 and is logged |
 | `AIL_set_preference` | 🟢 Implemented | A number past the 512-slot table is dropped, logged, and returns 0 |
-| `AIL_serve` | ⚪ Stub | No-op; miniaudio uses its own audio thread |
+| `AIL_serve` | 🟢 Implemented | Mixes on miniaudio's own audio thread; the call itself advances the sources that asked for automatic 3D dead reckoning by the time since the previous serve |
 
 ## RIB / ASI Plugin System
 *(v4 interface API; provider management, enumeration and the ASI codecs from v5+)*
@@ -121,7 +121,7 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_allocate_file_sample` | 🟢 Implemented | |
 | `AIL_compress_ADPCM` | 🟢 Implemented | |
 | `AIL_decompress_ADPCM` | 🟢 Implemented | |
-| `AIL_load_sample_buffer` | 🟢 Implemented | True double-buffered streaming: with a format set via `AIL_set_sample_type`, feeds the buffer (zero-copy) into a custom `ma_data_source` that ping-pongs the two app buffers |
+| `AIL_load_sample_buffer` | 🟢 Implemented | True double-buffered streaming: with a format set via `AIL_set_sample_type`, feeds the buffer (zero-copy) into a custom `ma_data_source` that ping-pongs the two app buffers. A slot that still holds an unsubmitted buffer is refused: -1 with the reason in `AIL_last_error`, and no SOB |
 | `AIL_minimum_sample_buffer_size` | ⚪ Stub | Ignores `rate`/`format`, returns a constant 2048; the SDK formula needs driver values miniaudio does not expose |
 | `AIL_register_EOB_callback` | 🟢 Implemented | |
 | `AIL_register_SOB_callback` | 🟢 Implemented | |
@@ -248,7 +248,7 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_branch_index` | 🟢 Implemented | Sets branch index internally |
 | `AIL_channel_notes` | 🟢 Implemented | Counts active voices per channel via TinySoundFont |
 | `AIL_controller_value` | 🟢 Implemented | Reads directly from TinySoundFont |
-| `AIL_send_channel_voice_message` | 🟢 Implemented | Parses and forwards to TSF |
+| `AIL_send_channel_voice_message` | 🟢 Implemented | Parses and forwards to TSF; a pitch bend is the full 14-bit pair (8192 centre), the value the XMIDI path forwards |
 | `AIL_send_sysex_message` | 🟢 Implemented | Recognizes GM/GS/XG reset; resets all channels (notes off, controllers, volume, pan) |
 | `AIL_lock_channel` / `AIL_release_channel` | 🟢 Implemented | Global 16-channel reservation system; lock returns first free non-drum channel |
 | `AIL_register_beat_callback` | 🟢 Implemented | Fires continuously during playback |
@@ -273,17 +273,17 @@ complete list; the tables here cover behaviour, not linkability.
 *(Appeared in MSS v5+)*
 | Function | Status | Notes |
 |----------|--------|-------|
-| `AIL_3D_provider_attribute` | 🟢 Implemented | |
+| `AIL_3D_provider_attribute` | 🟢 Implemented | Reads the open digital driver's factors, whatever handle the provider is (an enumerated `HPROVIDER` is a RIB provider, not a driver) |
 | `AIL_3D_sample_attribute` | 🟢 Implemented | |
-| `AIL_auto_update_3D_position` | 🟢 Implemented | |
+| `AIL_auto_update_3D_position` | 🟢 Implemented | The source is then advanced by its velocity on every `AIL_serve`, by the time the frame took |
 | `AIL_enumerate_3D_provider_attributes` | 🟢 Implemented | |
 | `AIL_enumerate_3D_sample_attributes` | 🟢 Implemented | |
-| `AIL_set_3D_provider_preference` | 🟢 Implemented | |
+| `AIL_set_3D_provider_preference` | 🟢 Implemented | Same driver resolution as `AIL_3D_provider_attribute`; delegates to the dedicated factor setters |
 | `AIL_set_3D_sample_info` | 🟢 Implemented | |
 | `AIL_set_3D_sample_loop_block` | 🟢 Implemented | |
 | `AIL_set_3D_sample_preference` | 🟢 Implemented | |
 | `AIL_set_3D_velocity_vector` | 🟢 Implemented | |
-| `AIL_update_3D_position` | 🟢 Implemented | |
+| `AIL_update_3D_position` | 🟢 Implemented | Dead-reckoning step: advances the source by its stored velocity over `dt_ms`, whether or not automatic updating is on |
 | `AIL_allocate_3D_sample_handle` | 🟢 Implemented | Allocates Sample3D with full spatial audio support |
 | `AIL_release_3D_sample_handle` | 🟢 Implemented | Frees Sample3D handle |
 | `AIL_set_3D_sample_file` | 🟢 Implemented | Loads audio data from memory buffer into Sample3D |
@@ -404,7 +404,7 @@ complete list; the tables here cover behaviour, not linkability.
 | `AIL_redbook_tracks` | 🟢 Implemented | Returns 0 (no physical disc — games fall back gracefully) |
 | `AIL_redbook_track` | 🟢 Implemented | Returns current track |
 | `AIL_redbook_track_info` | 🟢 Implemented | Returns zeros (no disc) |
-| `AIL_redbook_position` | 🟢 Implemented | Real-time ms-from-play-start while playing |
+| `AIL_redbook_position` | 🟢 Implemented | Disc offset in ms, counted from the `start_ms` `AIL_redbook_play` was given; `AIL_redbook_track` is a track number and stays 0 (the emulated drive has no disc) |
 | `AIL_redbook_eject` | 🟢 Implemented | Stops playback |
 | `AIL_redbook_retract` | 🟢 Implemented | No-op (declared `void` in the SDK header) |
 | `AIL_redbook_id` | 🟢 Implemented | Returns empty string (no disc ID) |

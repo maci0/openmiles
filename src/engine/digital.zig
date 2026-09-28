@@ -409,6 +409,9 @@ pub const DigitalDriver = struct {
     // Per-mix callback (AILMIXERCB) invoked from the engine's process hook.
     mix_callback: ?*const fn (?*DigitalDriver) callconv(.winapi) void = null,
     samples_3d: std.ArrayListUnmanaged(*Sample3D) = .empty,
+    // Monotonic reading (ms) of the last AIL_serve, so the sources that asked
+    // for automatic 3D dead reckoning advance by the time the frame took.
+    last_serve_ms: i64 = 0,
     rolloff_factor: f32 = 1.0,
     doppler_factor: f32 = 1.0,
     distance_factor: f32 = 1.0,
@@ -639,6 +642,17 @@ pub const DigitalDriver = struct {
     /// way, so feeding it the product reproduces both knobs.
     pub fn effectiveDoppler(self: *const DigitalDriver) f32 {
         return self.distance_factor * self.doppler_factor;
+    }
+
+    /// AIL_serve: advance every source that asked for automatic 3D position
+    /// updating by the time since the previous serve. A source the app drives by
+    /// hand (AIL_update_3D_position) is not touched here, so the two ways of
+    /// moving a source never both apply to it.
+    pub fn serve(self: *DigitalDriver) void {
+        const now = @divTrunc(root.nowNs(), std.time.ns_per_ms);
+        const dt: f32 = @floatFromInt(@max(0, now - self.last_serve_ms));
+        self.last_serve_ms = now;
+        for (self.samples_3d.items) |s| s.updatePosition(dt);
     }
 
     pub fn getActiveSampleCount(self: *DigitalDriver) u32 {
@@ -1280,7 +1294,7 @@ pub const Sample = struct {
     /// retains ownership until its EOB fires). Lazily builds the streaming
     /// `ma_sound` on first call, using the format from `AIL_set_sample_type`.
     /// A zero `len` submits an end-of-stream marker.
-    pub fn loadStreamBuffer(self: *Sample, index: usize, data: *anyopaque, len: u32) !void {
+    pub fn loadStreamBuffer(self: *Sample, index: usize, data: ?*anyopaque, len: u32) !void {
         if (!self.stream_active) {
             // Tear down any prior decoder-based playback before switching modes.
             self.cleanupPlaybackState();
@@ -1304,7 +1318,7 @@ pub const Sample = struct {
             ma.ma_sound_set_looping(&self.sound, 0);
             _ = ma.ma_sound_set_end_callback(&self.sound, Sample.eosCallbackBridge, self);
         }
-        self.stream_src.loadBuffer(index, data, @intCast(len));
+        if (!self.stream_src.loadBuffer(index, data, @intCast(len))) return error.BufferSlotOccupied;
     }
 
     /// Index of a free stream buffer slot (0..slot_count-1), or -1 when the
@@ -1513,6 +1527,11 @@ pub const Sample = struct {
             // sample as well as unpause, though it does not reset loop state.
             _ = ma.ma_sound_start(&self.sound);
             self.is_paused = false;
+            // Resuming a sample that had finished restarts the voice, so the
+            // SMP_DONE left by AIL_end_sample (or by reaching the end) no longer
+            // describes it: leaving it set would report a playing voice as done
+            // until it finished a second time.
+            self.is_done.store(false, .release);
         }
     }
 

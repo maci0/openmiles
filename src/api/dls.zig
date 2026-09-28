@@ -253,8 +253,11 @@ pub fn AIL_DLS_open(mdi_opt: ?*MidiDriver, dig_opt: ?*DigitalDriver, libname: ?[
 pub fn AIL_DLS_close(driver_opt: ?*MidiDriver, flags: u32) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     _ = flags;
-    openmiles.clearLastMidiDriver(driver);
-    driver.deinit();
+    // The shared close, so the sequences allocated on this device are stopped
+    // and released before the driver they read through goes away, and the
+    // driver's other users (AIL_open_midi_driver handing back the current one)
+    // are restored rather than left with nothing.
+    openmiles.closeMidiDriver(driver);
 }
 pub fn AIL_set_DLS_processor(driver_opt: ?*MidiDriver, stage: i32, processor: ?*anyopaque) callconv(.winapi) ?*anyopaque {
     const driver = driver_opt orelse return null;

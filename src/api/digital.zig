@@ -211,7 +211,9 @@ pub fn AIL_close_digital_driver(driver_opt: ?*DigitalDriver) callconv(.winapi) v
     log("AIL_close_digital_driver(driver={*})\n", .{driver});
     openmiles.closeDigitalDriver(driver);
 }
-pub fn AIL_serve() callconv(.winapi) void {}
+pub fn AIL_serve() callconv(.winapi) void {
+    openmiles.serveAllDrivers();
+}
 pub fn AIL_set_digital_master_volume(driver_opt: ?*DigitalDriver, master_volume: i32) callconv(.winapi) void {
     const driver = driver_opt orelse return;
     log("AIL_set_digital_master_volume(driver={*}, volume={d})\n", .{ driver, master_volume });
@@ -443,20 +445,23 @@ pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: i32, data: ?*anyopaque,
         s.stream_head = @mod(bn + 1, n);
     }
     if (bn < 0) return -1; // defensive: SDK would index buf[<0]; we stay safe
-    s.last_loaded_buffer.store(bn, .release);
-    if (data == null) {
-        // SDK: a null buffer removes the slot from the ring; nothing to feed.
-        return bn;
-    }
     if (s.pcm_format != null) {
         // Raw PCM + a known format = MSS double-buffer streaming. Feed the buffer
         // into the ping-pong stream source (zero-copy; the app owns it until EOB).
-        s.loadStreamBuffer(@intCast(bn), data.?, len) catch |err| {
+        // A null buffer is the end-of-stream marker the transport speaks, which
+        // is how the slot is taken out of the ring without dropping what it holds.
+        s.loadStreamBuffer(@intCast(bn), data, if (data == null) 0 else len) catch |err| {
             openmiles.log("AIL_load_sample_buffer: stream feed failed: {any}\n", .{err});
             openmiles.setLastErrorFmt("AIL_load_sample_buffer: buffer {d} rejected ({any})", .{ bn, err });
             return -1;
         };
     } else {
+        if (data == null) {
+            // Nothing was loaded and nothing was removed: a whole-image sample
+            // has no ring slot to take, so the call reports no load.
+            openmiles.setLastErrorFmt("AIL_load_sample_buffer: buffer {d} has nothing to load", .{bn});
+            return -1;
+        }
         // No format hint: treat as a complete encoded file image (whole-buffer).
         s.load(data.?, @intCast(@min(len, @as(u32, std.math.maxInt(i32))))) catch |err| {
             openmiles.log("AIL_load_sample_buffer: load failed: {any}\n", .{err});
@@ -464,6 +469,10 @@ pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: i32, data: ?*anyopaque,
             return -1;
         };
     }
+    // The slot is only reported once the submission was accepted, so a
+    // rejected feed leaves AIL_sample_buffer_ready describing the ring that is
+    // really there.
+    s.last_loaded_buffer.store(bn, .release);
     // Fire SOB (Start Of Buffer) callback now that a new buffer is accepted.
     // AILSAMPLECB: void callback(HSAMPLE S), single arg; the app queries buffer state separately.
     openmiles.fireSampleCallback(&s.sob_callback, s);

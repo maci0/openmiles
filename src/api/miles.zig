@@ -454,6 +454,12 @@ fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, flags: 
         } else if (st.type == @intFromEnum(openmiles.event.StepType.persist)) {
             const pn = st.u.persist.name;
             if (pn.str) |sp| persistAdd(sp[0..@intCast(@max(pn.len, 0))]);
+        } else if (st.type == @intFromEnum(openmiles.event.StepType.set_limits)) {
+            // Caps the event declares in its own text, not only the ones a game
+            // installs out of band with MilesSetSoundLabelLimits. The walk is in
+            // event order, so a limits step gates the start-sound steps after it.
+            const ls = st.u.limits.limits;
+            if (ls.str) |lp| setLimits(lp[0..@intCast(@max(ls.len, 0))]);
         }
     }
     if (flags & ENQUEUE_FREE_EVENT != 0) std.c.free(@ptrCast(@constCast(event.?)));
@@ -774,15 +780,10 @@ pub fn MilesAddSoundBank(filename: ?[*:0]const u8, name: ?[*:0]const u8) callcon
         openmiles.setLastError("Failed to add sound bank");
         return null;
     };
-    // Same 4-char bank-name check AIL_open_soundbank applies: a game that names
-    // the bank it expects must not be handed a different one.
-    if (name) |np| {
-        if (!std.ascii.eqlIgnoreCase(std.mem.span(np), std.mem.span(bank.name()))) {
-            bank.deinit();
-            openmiles.setLastError("Bank name mismatch");
-            return null;
-        }
-    }
+    // `name` is accepted and dropped: the bank keeps the name its file carries
+    // (mss.h), so a caller that passes a different one neither renames the bank
+    // nor loses the load.
+    _ = name;
     return @ptrCast(bank);
 }
 pub fn MilesReleaseSoundBank(bank: ?*anyopaque) callconv(.winapi) i32 {

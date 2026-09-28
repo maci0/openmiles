@@ -203,7 +203,7 @@ test "fuzz StreamSource random feeds and reads" {
                     const idx = rand.intRangeAtMost(usize, 0, 3); // includes out-of-range >1
                     const off = rand.intRangeAtMost(usize, 0, src_buf.len);
                     const blen = rand.intRangeAtMost(usize, 0, src_buf.len - off);
-                    ss.loadBuffer(idx, src_buf[off..].ptr, blen);
+                    _ = ss.loadBuffer(idx, src_buf[off..].ptr, blen);
                 },
                 1 => {
                     const want = rand.intRangeAtMost(u64, 0, out.len / 4);
