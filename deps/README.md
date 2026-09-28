@@ -59,6 +59,13 @@ header that arrived from somewhere unexpected. The same script requires every
 vendored entry above to name a 40-character upstream commit, since a digest
 alone says which bytes shipped but not which release they came from.
 
+`deps/` holds files, not a tree: `SHA256SUMS` records the files in this
+directory, and the script fails on a subdirectory as well as on an unlisted
+file. `build.zig` puts `deps/` on the include path for the translate-C step, so
+a header below it would compile into the DLL with no digest, no upstream commit
+and no SBOM entry. `--update` refuses one too, so the digests cannot be
+rewritten into agreeing with a tree they do not describe.
+
 It also reads the version out of each header's own bytes and compares it to the
 **Version** field above. That field is what `gen_sbom.py` writes into
 `SBOM.cdx.json`, and a vulnerability scanner matches advisories against it, so a

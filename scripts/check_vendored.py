@@ -195,6 +195,20 @@ def vendored_files():
     return sorted(p for p in DEPS.iterdir() if p.is_file() and p.name not in NOT_VENDORED)
 
 
+def unrecorded_dirs():
+    """Subdirectories under deps/, which the digest list cannot describe.
+
+    SHA256SUMS names files in deps/ itself, and vendored_files() skips
+    everything that is not one. build.zig puts deps/ on the include path for
+    the translate-C step, so a header in a subdirectory is reachable and
+    compiles into the DLL while carrying no digest, no upstream commit and no
+    SBOM entry: third-party code with no recorded provenance. Flattening is
+    the fix; until then the directory is a finding, under --update too, since
+    that mode rewrites the digests from the same flat view.
+    """
+    return sorted(p.name for p in DEPS.iterdir() if p.is_dir())
+
+
 def read_sums():
     """Recorded digests by name, plus the SHA256SUMS lines that parse as none.
 
@@ -236,6 +250,17 @@ def main():
 
     files = vendored_files()
     on_disk = {p.name: digest(p) for p in files}
+
+    nested = [
+        f"{name}/ UNINVENTORIED  a subdirectory of deps/ carries no digest, "
+        "upstream commit or SBOM entry"
+        for name in unrecorded_dirs()
+    ]
+    if nested:
+        for finding in nested:
+            print(finding)
+        print(f"{len(nested)} finding(s) disagree with {SUMS.relative_to(ROOT)}")
+        return 1
 
     if args.update:
         # Bytes, not write_text: deps/ is `-text` in .gitattributes so the digests
