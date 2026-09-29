@@ -45,6 +45,16 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The release archive carries a generated `BUILDINFO.txt` recording the Zig
+  version, target and optimize mode the shipped DLL was built with, read from
+  `build.zig.zon`. `deps/SHA256SUMS` and `SBOM.cdx.json` already said which
+  third-party code the DLL carries and what the vendored headers hash to, but
+  nothing in the archive said what compiled it, so a rebuild had no toolchain to
+  reach for. Every field comes from the tree or from `SOURCE_DATE_EPOCH`, never
+  from the packaging host, so the archive stays byte-identical across hosts.
+
 ### Changed
 
 - The Quick API's three entry points that allocate a sample share one

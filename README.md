@@ -216,7 +216,13 @@ on each install.
 contributor guide, the vendored headers with their attribution and digests
 (`deps/`), the `docs/` this README links, so every relative link
 in it resolves in an unpacked archive, and the third-party inventory
-(`SBOM.cdx.json`). It needs `zip` on PATH and says so if it is missing, and
+(`SBOM.cdx.json`). It also generates one entry rather than copying it:
+`BUILDINFO.txt`, recording the Zig version, target and optimize mode the shipped
+DLL was built with, read from `build.zig.zon`. The other two records say which
+third-party code the DLL carries and what the vendored headers hash to, but
+neither says what compiled it, so an archive holding only those leaves a rebuild
+with no toolchain to reach for. It needs `zip` on PATH and says so if it is
+missing, and
 takes the digests for the optional checksum file from `sha256sum` or, where
 that is not the name
 (GNU vs BSD), from `shasum -a 256`. `--help` prints the same usage.

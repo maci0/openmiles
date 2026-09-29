@@ -153,7 +153,7 @@ def main() -> int:
         return 1
 
     print(
-        f"{len(entries)} archive entry/entries carry every file "
+        f"{len(entries)} copied archive entry/entries carry every file "
         f"{SUMS.relative_to(ROOT)} records and every file the shipped docs link"
     )
     return 0

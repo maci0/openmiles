@@ -21,6 +21,12 @@
 # the digests and of the timestamp are both handled, so a host that ships
 # `shasum` and a `touch` without `-d` produces the same archive bytes.
 #
+# One entry is generated rather than copied: BUILDINFO.txt, recording the
+# compiler, target and optimize mode the shipped DLL was built with, so the
+# archive says how to rebuild itself. Its fields come from build.zig.zon and
+# from the epoch above, never from the packaging host, so it does not disturb
+# the reproducibility the rest of the script is built for.
+#
 # The DLL is checked to be the 32-bit PE image the x86-windows ReleaseFast
 # cross-compile produces before anything is staged. `zig-out/bin/mss32.dll` is
 # a path any build of this project can leave a file at, so the path alone does
@@ -53,6 +59,12 @@ Arguments:
 Writes:
   <output.zip>.sha256  SHA-256 of the archive, naming it by base name so
                        sha256sum -c runs in the download directory
+
+Archive contents:
+  BUILDINFO.txt is generated, not copied: it records the Zig version, target
+  and optimize mode the shipped DLL was built with, read from build.zig.zon,
+  so the archive carries what a rebuild needs. Everything else is a file from
+  the tree, staged in the order the script lists.
 
 Options:
   -h, --help  show this help
@@ -341,6 +353,55 @@ for e in "${entries[@]}"; do
   stamp_mtime "$stage/$name"
   names+=("$name")
 done
+
+# The build environment that produced the archive. SBOM.cdx.json records which
+# third-party code the DLL carries and deps/SHA256SUMS records the bytes of the
+# vendored headers, but neither says which compiler built the image: a consumer
+# holding only the zip cannot attempt a rebuild, because nothing in it names a
+# toolchain to rebuild with. Every field below is read out of the tree or out of
+# a variable the caller set, never out of the packaging host, so the file is
+# identical for identical inputs and the archive stays reproducible.
+#
+# The zig version is the pin in build.zig.zon, which is the version the release
+# workflow installs and `make check-toolchain` refuses to build without, so it
+# is the toolchain the shipped bytes were produced with.
+pkg_version=$(sed -n 's/^[[:space:]]*\.version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' build.zig.zon)
+pkg_zig=$(sed -n 's/^[[:space:]]*\.minimum_zig_version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' build.zig.zon)
+# A build.zig.zon with neither field is not this project's manifest, and a
+# buildinfo naming no version is worse than none: it reads as a record of a
+# build that cannot be identified. Fail before the archive is written.
+if [ -z "$pkg_version" ] || [ -z "$pkg_zig" ]; then
+  echo "error: no .version or .minimum_zig_version in build.zig.zon; cannot record the build environment" >&2
+  exit 1
+fi
+# Heredoc, quoted: the expansion has to be the shell's, not the values' own,
+# and the unquoted form would let a backtick or $ in a version string run.
+# The target and the optimize mode are the ones require_i386_pe proved the DLL
+# is, so they are stated rather than parsed back out of the PE header.
+cat >"$stage/BUILDINFO.txt" <<EOF
+openmiles $pkg_version release build information
+
+package:     openmiles $pkg_version
+compiler:    zig $pkg_zig (pinned in build.zig.zon)
+target:      x86-windows
+optimize:    ReleaseFast
+source date: $epoch (UTC)
+
+Rebuild the DLL with zig $pkg_zig:
+
+    zig build -Dtarget=x86-windows -Doptimize=ReleaseFast
+
+The release workflow proves that command reproduces these bytes: the tree is
+built again under a different absolute path, timezone and locale, and the two
+images are compared byte for byte. The archive is stamped with the source date
+above, so unzipping and rezipping it in the entry order recorded by
+SHA256SUMS reproduces this file too.
+EOF
+# The same normalization every copied entry gets: without it the file carries
+# the packaging host's mode and clock, and the archive stops being reproducible.
+chmod 0644 "$stage/BUILDINFO.txt"
+stamp_mtime "$stage/BUILDINFO.txt"
+names+=("BUILDINFO.txt")
 
 if [ -n "$SUMS" ]; then
   mkdir -p "$(dirname "$SUMS")"
