@@ -9282,3 +9282,153 @@ fn milesLiveInstanceCount() usize {
     while (api_miles_t.MilesEnumerateSoundInstances(null, &nx, 0, null, 0, @ptrCast(&info)) == 1) n += 1;
     return n;
 }
+
+const api_filter = @import("api/filter.zig");
+
+// A f32 out-param for the filter attribute calls, which take a void* the
+// wrapper retypes; the test reads the value back through the same type.
+fn filterAttr(handle: *anyopaque, name: [:0]const u8) f32 {
+    var v: f32 = std.math.nan(f32);
+    api_filter.AIL_filter_attribute(handle, name.ptr, @ptrCast(&v));
+    return v;
+}
+
+fn setFilterAttr(handle: *anyopaque, name: [:0]const u8, value: f32) void {
+    var v = value;
+    api_filter.AIL_set_filter_attribute(handle, name.ptr, @ptrCast(&v));
+}
+
+// A filter plus the provider it registered against. AIL_open_filter refuses a
+// null provider, and the process startup provider only exists while some
+// earlier test's startup is still outstanding, so each test builds its own
+// rather than inheriting a global whose value depends on the run order.
+const OwnedFilter = struct {
+    provider: *openmiles.Provider,
+    handle: *anyopaque,
+
+    fn open(allocator: std.mem.Allocator, driver: *openmiles.DigitalDriver) !OwnedFilter {
+        const provider = try openmiles.Provider.init(allocator);
+        errdefer provider.deinit();
+        const handle = api_filter.AIL_open_filter(provider, driver) orelse
+            return error.FilterOpenFailed;
+        return .{ .provider = provider, .handle = handle };
+    }
+
+    fn close(self: OwnedFilter) void {
+        api_filter.AIL_close_filter(self.handle);
+        self.provider.deinit();
+    }
+};
+
+test "AIL_open_filter needs both a provider and a driver" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const provider = try openmiles.Provider.init(allocator);
+    defer provider.deinit();
+
+    // The real SDK rejects either half being null rather than substituting a
+    // default, and a caller that ignores the null handle then dereferences it.
+    try testing.expectEqual(@as(?*anyopaque, null), api_filter.AIL_open_filter(null, driver));
+    try testing.expectEqual(@as(?*anyopaque, null), api_filter.AIL_open_filter(provider, null));
+    try testing.expectEqual(@as(?*anyopaque, null), api_filter.AIL_open_filter(null, null));
+
+    const filter = try OwnedFilter.open(allocator, driver);
+    filter.close();
+}
+
+test "filter cutoff is clamped to 20 Hz..Nyquist and NaN is 1000 Hz" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const filter = try OwnedFilter.open(allocator, driver);
+    defer filter.close();
+    const handle = filter.handle;
+
+    // An untouched filter sits at the live engine's Nyquist, so a normalized
+    // cutoff of 1.0 means "no filtering" whatever the device rate is.
+    try testing.expectEqual(@as(f32, 22050.0), filterAttr(handle, "Cutoff"));
+    try testing.expectEqual(@as(f32, 2.0), filterAttr(handle, "Order"));
+
+    // The name is matched case-insensitively, as AIL_set_filter_attribute's
+    // callers spell it either way.
+    setFilterAttr(handle, "cutoff", 1000.0);
+    try testing.expectEqual(@as(f32, 1000.0), filterAttr(handle, "CUTOFF"));
+
+    // Below the floor and above the ceiling are the two ends of the clamp, and
+    // both land on the bound rather than on the requested value.
+    setFilterAttr(handle, "Cutoff", 0.0);
+    try testing.expectEqual(@as(f32, 20.0), filterAttr(handle, "Cutoff"));
+    setFilterAttr(handle, "Cutoff", -5000.0);
+    try testing.expectEqual(@as(f32, 20.0), filterAttr(handle, "Cutoff"));
+    setFilterAttr(handle, "Cutoff", 1.0e9);
+    try testing.expectEqual(@as(f32, 22050.0), filterAttr(handle, "Cutoff"));
+
+    // NaN would slip past the @max/@min pair and panic in the node config, so
+    // the setter substitutes 1000 Hz and that is what a later read reports.
+    setFilterAttr(handle, "Cutoff", std.math.nan(f32));
+    try testing.expectEqual(@as(f32, 1000.0), filterAttr(handle, "Cutoff"));
+}
+
+test "filter order is clamped to 1..4 and NaN is order 1" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const filter = try OwnedFilter.open(allocator, driver);
+    defer filter.close();
+    const handle = filter.handle;
+
+    setFilterAttr(handle, "Order", 0.0);
+    try testing.expectEqual(@as(f32, 1.0), filterAttr(handle, "Order"));
+    setFilterAttr(handle, "Order", 9.0);
+    try testing.expectEqual(@as(f32, 4.0), filterAttr(handle, "Order"));
+    setFilterAttr(handle, "Order", 3.0);
+    try testing.expectEqual(@as(f32, 3.0), filterAttr(handle, "Order"));
+    setFilterAttr(handle, "Order", std.math.nan(f32));
+    try testing.expectEqual(@as(f32, 1.0), filterAttr(handle, "Order"));
+
+    // A name the filter does not implement reads as 0 and leaves the state it
+    // would have changed alone, rather than matching a prefix.
+    setFilterAttr(handle, "Resonance", 42.0);
+    try testing.expectEqual(@as(f32, 0.0), filterAttr(handle, "Resonance"));
+    try testing.expectEqual(@as(f32, 1.0), filterAttr(handle, "Order"));
+}
+
+test "filter attribute enumeration walks Cutoff and Order then exhausts" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const filter = try OwnedFilter.open(allocator, driver);
+    defer filter.close();
+    const handle = filter.handle;
+
+    var next: ?*anyopaque = null;
+    var name: [*:0]const u8 = undefined;
+    try testing.expectEqual(@as(i32, 1), api_filter.AIL_enumerate_filter_attributes(handle, &next, &name));
+    try testing.expectEqualStrings("Cutoff", std.mem.span(name));
+    try testing.expectEqual(@as(i32, 1), api_filter.AIL_enumerate_filter_attributes(handle, &next, &name));
+    try testing.expectEqualStrings("Order", std.mem.span(name));
+
+    // The terminal call clears the cursor and the name, so a loop that follows
+    // `next` stops and a caller cannot read a stale name off it.
+    try testing.expectEqual(@as(i32, 0), api_filter.AIL_enumerate_filter_attributes(handle, &next, &name));
+    try testing.expectEqual(@as(?*anyopaque, null), next);
+    try testing.expectEqualStrings("", std.mem.span(name));
+}
+
+test "filter enumeration yields the built-in provider once" {
+    var next: ?*anyopaque = null;
+    var dest: ?*openmiles.Provider = null;
+    var name: [*:0]const u8 = undefined;
+    try testing.expectEqual(@as(i32, 1), api_filter.AIL_enumerate_filters(&next, &dest, &name));
+    try testing.expectEqualStrings(std.mem.span(api_filter.builtin_filter_name), std.mem.span(name));
+    // The built-in entry is backed by the process startup provider, which only
+    // exists while a startup is outstanding; the identity is the contract, not
+    // any particular run's use count.
+    try testing.expectEqual(openmiles.startupProvider(), dest);
+
+    try testing.expectEqual(@as(i32, 0), api_filter.AIL_enumerate_filters(&next, &dest, &name));
+    try testing.expectEqual(@as(?*anyopaque, null), next);
+    try testing.expectEqual(@as(?*openmiles.Provider, null), dest);
+}
+

@@ -196,6 +196,40 @@ pub const Filter = struct {
         return if (result == ma.MA_SUCCESS) null else result;
     }
 
+    /// Rebuild the LPF node from the current cutoff and order, keeping the
+    /// cutoff. miniaudio's ma_lpf_node_reinit refuses a change of filter order
+    /// (the sub-filter counts are fixed when the node is created, so a reinit
+    /// with different ones returns MA_INVALID_OPERATION), which is why an
+    /// order change cannot go through reinitLpf. Null when the node took the
+    /// config, or when there is no node yet to take it.
+    fn rebuildLpfNode(self: *Filter) ?ma.ma_result {
+        if (!self.lpf_initialized) return null;
+        const engine_rate = ma.ma_engine_get_sample_rate(&self.driver.engine);
+        const channels = ma.ma_engine_get_channels(&self.driver.engine);
+        ma.ma_lpf_node_uninit(&self.lpf_node, null);
+        self.lpf_initialized = false;
+        const config = ma.ma_lpf_node_config_init(channels, engine_rate, self.cutoff_frequency, self.order);
+        const result = ma.ma_lpf_node_init(@ptrCast(&self.driver.engine), &config, null, &self.lpf_node);
+        if (result != ma.MA_SUCCESS) return result;
+        const attach = ma.ma_node_attach_output_bus(
+            @ptrCast(&self.lpf_node),
+            0,
+            ma.ma_engine_get_endpoint(&self.driver.engine),
+            0,
+        );
+        if (attach != ma.MA_SUCCESS) {
+            ma.ma_lpf_node_uninit(&self.lpf_node, null);
+            return attach;
+        }
+        self.lpf_initialized = true;
+        // A sample's output bus pointed at the node that just went away, so
+        // every attached sample is re-pointed at its replacement.
+        for (self.attached_samples.items) |sample| {
+            _ = ma.ma_node_attach_output_bus(@ptrCast(&sample.sound), 0, @ptrCast(&self.lpf_node), 0);
+        }
+        return null;
+    }
+
     /// Set a named attribute. Supported: "Cutoff" (Hz), "Order" (1-4).
     pub fn setAttribute(self: *Filter, name: []const u8, value: f32) void {
         if (std.ascii.eqlIgnoreCase(name, "cutoff")) {
@@ -207,9 +241,10 @@ pub const Filter = struct {
             if (new_order != self.order) {
                 const previous = self.order;
                 self.order = new_order;
-                if (self.reinitLpf()) |result| {
+                if (self.rebuildLpfNode()) |result| {
                     log("Filter.setAttribute: the LPF node rejected order {d} ({d}); the filter keeps order {d}\n", .{ new_order, result, previous });
                     self.order = previous;
+                    _ = self.rebuildLpfNode();
                 }
             }
         } else {
