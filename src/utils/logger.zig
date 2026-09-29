@@ -105,6 +105,17 @@ fn setDefaultLogPath() void {
     log_path_len = default_log_name.len;
 }
 
+/// The configuration before the environment is read: the build decides, and
+/// the echo owed to an exported variable is not owed yet. Every field of the
+/// resolved configuration is set here, so a value left over from a previous
+/// init cannot describe the run that is starting.
+fn applyBuildDefaults() void {
+    @atomicStore(bool, &debug_enabled, builtin.mode == .Debug and build_options.log_by_default, .release);
+    debug_source = "the build default";
+    debug_from_env = false;
+    setDefaultLogPath();
+}
+
 /// Install `value` as the log path, or keep the default and say why. Empty
 /// and oversized values are misconfiguration, not a request to write nowhere.
 fn applyLogPath(value: []const u8) void {
@@ -174,10 +185,10 @@ pub fn init() void {
     // not (build_options.log_by_default is false there), because the suite runs
     // in the repository root and an appending debug log there grows to
     // max_log_bytes on every run and floods the test output. OPENMILES_DEBUG
-    // still turns it on for whichever run wants the trace.
-    @atomicStore(bool, &debug_enabled, builtin.mode == .Debug and build_options.log_by_default, .release);
-    debug_source = "the build default";
-    setDefaultLogPath();
+    // still turns it on for whichever run wants the trace. Everything the
+    // environment is about to override is reset here, so a second init does not
+    // describe the run with the values the first one left behind.
+    applyBuildDefaults();
 
     if (builtin.os.tag == .windows) {
         // The UTF-8 destination is sized in bytes from the unit count: a value
@@ -274,6 +285,11 @@ pub fn deinit() void {
     @atomicStore(bool, &config_logged, false, .release);
     @atomicStore(bool, &config_echoed, false, .release);
     @atomicStore(bool, &write_error_reported, false, .release);
+    // The flag says a run asked for its configuration on stderr, which is a
+    // claim about the environment this process has now left. Carrying it into
+    // the next init is how a run that exported nothing ends up printing a
+    // configuration line with no exporter to explain it.
+    debug_from_env = false;
 }
 
 /// The effective configuration, as one line: whether the debug log is on, what
@@ -659,6 +675,31 @@ test "the effective configuration names the source, the version and the file" {
     debug_from_env = false;
     applyDebugEnvValue("enabled-ish");
     try testing.expect(!debug_from_env);
+}
+
+test "the configuration a run starts from owes no echo to a run that has ended" {
+    const from_env_before = debug_from_env;
+    const source_before = debug_source;
+    defer {
+        debug_from_env = from_env_before;
+        debug_source = source_before;
+    }
+
+    // A process that exported OPENMILES_DEBUG, then unloaded the library and
+    // loaded it again with the export gone: the second load reads a
+    // configuration that nothing asked about, and a flag carried over from the
+    // first would print that line with no exporter behind it.
+    applyDebugEnvValue("1");
+    try testing.expect(debug_from_env);
+    deinit();
+    try testing.expect(!debug_from_env);
+
+    // The same for a load that never had an environment to read: the build
+    // default is the whole configuration, source included.
+    applyDebugEnvValue("0");
+    applyBuildDefaults();
+    try testing.expect(!debug_from_env);
+    try testing.expectEqualStrings("the build default", debug_source);
 }
 
 test "the configuration line scrubs a log path that carries control characters" {

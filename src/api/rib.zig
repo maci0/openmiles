@@ -194,13 +194,39 @@ fn tempDir(buf: []u8) ?[]const u8 {
         }.GetTempPathW;
         var wbuf: [max_temp_path_units]u16 = undefined;
         const len = GetTempPathW(wbuf.len, &wbuf);
-        if (len == 0 or len >= wbuf.len) {
+        // The two failures below are told apart because they have different
+        // causes and an operator can only fix one of them: a length of 0 is an
+        // environment with no temporary directory to find, and a length at or
+        // past the buffer is a %TEMP% longer than MAX_PATH, which the call
+        // reports as the size it needed. Reporting both as "unavailable" sends
+        // whoever reads it looking for a variable that is set and perfectly
+        // usable.
+        if (len == 0) {
             reportTempDir("the platform temporary directory", "TMP, TEMP and the system profile directory are all unavailable");
             return null;
         }
-        if (wide.utf8LenBound(wbuf[0..len]) > buf.len) return null;
-        const dir = wide.toUtf8(wbuf[0..len], buf) catch return null;
-        return appendSeparator(buf, dir);
+        if (len >= wbuf.len) {
+            reportTempDir(
+                "the platform temporary directory",
+                std.fmt.comptimePrint("does not fit in {d} UTF-16 units; set TMP or TEMP to a shorter directory", .{max_temp_path_units}),
+            );
+            return null;
+        }
+        // The same for a path whose UTF-8 form does not fit the caller's buffer:
+        // silently returning null would put the image in the game directory and
+        // say nothing, which is the outcome every other rejection here reports.
+        if (wide.utf8LenBound(wbuf[0..len]) > buf.len) {
+            reportTempDir("the platform temporary directory", "is too long to convert to a path this build can use");
+            return null;
+        }
+        const dir = wide.toUtf8(wbuf[0..len], buf) catch {
+            reportTempDir("the platform temporary directory", "is not valid UTF-8");
+            return null;
+        };
+        return appendSeparator(buf, dir) orelse {
+            reportTempDir("the platform temporary directory", "has no room for a trailing separator");
+            return null;
+        };
     }
     // TMPDIR is the POSIX convention; the game directory (the process cwd under
     // Wine) is the fallback, and the caller covers that case too. A TMPDIR that

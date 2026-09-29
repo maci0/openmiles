@@ -553,14 +553,22 @@ a `.path` entry for a local checkout) puts it in `build.zig.zon`.
 ### Configuration
 
 The library reads its runtime configuration from the process environment. It
-reads three variables and has no config file, so the table below is the whole
-surface: nothing else in the environment changes its behaviour.
+reads three variables of its own and has no config file; on Windows the
+temporary directory is the one the platform resolves rather than one it reads,
+so `TMP` and `TEMP` are named in the table too. Apart from those, nothing else
+in the environment changes its behaviour.
 
 | Variable | Values | Default | Effect |
 |----------|--------|---------|--------|
 | `OPENMILES_DEBUG` | `1`/`0`, `true`/`false`, `yes`/`no`, `on`/`off`, any case | logging on in a Debug build, off otherwise | Verbose trace to the debug log and to the debugger, capped at 64 MiB |
 | `OPENMILES_LOG_PATH` | a file path, absolute or relative to the current directory, at most 1023 bytes | `openmiles.log` in the current directory | Where the debug log is written |
-| `TMPDIR` | an absolute directory path of at most 778 bytes | `%TEMP%` on Windows, the game directory on other systems | Where the in-memory ASI plugin image is unpacked before it is loaded |
+| `TMPDIR` | an absolute directory path of at most 778 bytes | unused on Windows, the game directory on other systems | Where the in-memory ASI plugin image is unpacked before it is loaded |
+| `TMP`, then `TEMP` (Windows only) | a directory path, at most 259 UTF-16 units | the user profile directory | The same directory on Windows, through `GetTempPathW`; a `%TEMP%` too long to hold the image name is reported and the image goes to the game directory |
+
+`TMPDIR` is not read on Windows and `TMP`/`TEMP` are not read elsewhere: the two
+platforms resolve the temporary directory by their own convention, and a table
+that listed one name for both would send an operator setting the variable the
+running system ignores.
 
 An `OPENMILES_DEBUG` value outside that set (including an empty one) is
 reported on stderr and leaves the default in place, rather than silently
@@ -570,7 +578,10 @@ directory that is accepted but turns out to be unusable (the platform resolves
 none, it leaves no room for the image name under the path limit, or the image
 cannot be written there) is reported on stderr for the same reason: every one of
 them ends with the image unpacked into the game directory, and an operator whose
-`TMPDIR` is wrong would otherwise never learn why.
+`TMPDIR` is wrong would otherwise never learn why. On Windows the same report
+names the cause it found: a `%TEMP%` that does not fit `MAX_PATH`, one that will
+not convert to a path this build can use, and an environment with no temporary
+directory at all are three different things to go looking for.
 
 `-Dmss-version` and `-Doptimize` are build-time options (`zig build --help`),
 not runtime configuration: the shipped DLL is the same build everywhere, and

@@ -82,6 +82,19 @@ All notable changes to OpenMiles are recorded here. The format follows
   a `const` payload and `@ptrCast` it to `AIL_file_write`'s `void FAR *`, which
   discards the const qualifier, so `zig build test` failed to build the test
   binary at all.
+- The Windows temporary directory is now reported for every reason it is
+  refused. A `%TEMP%` longer than `MAX_PATH`, one that will not convert to a
+  path this build can use, and an environment with no temporary directory were
+  two of them the same "TMP, TEMP and the system profile directory are all
+  unavailable", and the first two were silent: the image went to the game
+  directory with nothing on stderr to say why. Each reports its own cause, and
+  the too-long case names the variables to shorten.
+- The configuration a run starts from no longer inherits the previous run's
+  `OPENMILES_DEBUG` echo. `debug_from_env` was set when an export was read and
+  never cleared, so a process that loaded the library twice, with the export
+  gone the second time, printed a configuration line about a build default that
+  nothing had asked about. `init()` and `deinit()` both reset it beside the
+  build defaults they own.
 - `docs/THREAT_MODEL.md` re-anchored at `src/engine/midi.zig`: the XMIDI loop
   stack, its depth check and the per-buffer jump budget had moved, so
   `make lint` failed `check-threat-model` on every run. The three mitigations
