@@ -150,9 +150,15 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: openmiles-artifacts-${{ matrix.os }}
+          # zig-out/include is the third install directory the build produces
+          # (b.installFile of src/mss.h in build.zig), and the release
+          # packager stages it as the archive's mss.h entry. An artifact that
+          # carried only the library and the binaries could not be packaged
+          # into a release without rebuilding the header first.
           path: |
             zig-out/lib/
             zig-out/bin/
+            zig-out/include/
           retention-days: 7
           # A build that produced nothing must not pass as a green upload.
           if-no-files-found: error

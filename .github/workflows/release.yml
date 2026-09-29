@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -147,7 +147,14 @@ jobs:
       - name: Install uv
         run: |
           set -euo pipefail
-          pipx install "uv==$(sed -n 's/^UV_VERSION := //p' Makefile)"
+          # The empty-check ci.yml has, and for the same reason: a sed that
+          # matched nothing leaves `uv==` for pipx to reject with a version
+          # parse error, which names neither the Makefile nor the field that
+          # has to change. This is the job that publishes, so it is the one
+          # that must not discover it on a release day.
+          version=$(sed -n 's/^UV_VERSION := //p' Makefile)
+          [ -n "$version" ] || { echo "no UV_VERSION in the Makefile" >&2; exit 1; }
+          pipx install "uv==${version}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install the pinned linters
@@ -318,8 +325,15 @@ jobs:
           fi
           head -1 release/NOTES.md
 
+      # The only step in the job that writes. Every earlier step builds, reads,
+      # and compares, and a token with write scope sitting in the environment
+      # of a step that compiles and runs the tree's own scripts is a write
+      # credential those steps do not need. Read scope at the workflow level,
+      # write scoped to the publish step here.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
+        permissions:
+          contents: write
         with:
           # Named explicitly: on a manual re-run github.ref is the branch the
           # workflow was dispatched from, not the tag being released.
