@@ -297,7 +297,18 @@ test "coverage: 3d.zig exports" {
     td.AIL_set_3D_user_data(s3, 0, 0);
     td.AIL_set_3D_sample_loop_block(s3, 0, -1);
     td.AIL_set_3D_sample_cone(s3, 0, 360, 64);
-    td.AIL_3D_sample_cone(s3, &f32o, &f32o, &i32o);
+    // The cone is stored in radians and handed back in degrees, so the round
+    // trip exercises the conversion on both sides. Distinct angles catch a
+    // getter that swapped the two; the volume out-param is 0..127 while the
+    // field holds 0..1, so it catches a missing rescale.
+    td.AIL_set_3D_sample_cone(s3, 30, 90, 64);
+    var cone_inner: f32 = 0;
+    var cone_outer: f32 = 0;
+    var cone_vol: i32 = 0;
+    td.AIL_3D_sample_cone(s3, &cone_inner, &cone_outer, &cone_vol);
+    try testing.expectApproxEqAbs(@as(f32, 30), cone_inner, 1e-3);
+    try testing.expectApproxEqAbs(@as(f32, 90), cone_outer, 1e-3);
+    try testing.expectEqual(@as(i32, 64), cone_vol);
     td.AIL_set_3D_sample_effects_level(s3, 0.5);
     try testing.expectEqual(@as(f32, 0.5), td.AIL_3D_sample_effects_level(s3));
     td.AIL_set_3D_sample_obstruction(s3, 0.25);
@@ -461,15 +472,22 @@ test "coverage: file/input.zig exports" {
     try testing.expectEqual(@as(u32, 0), fl.AIL_file_size("/nonexistent_om_test"));
     try testing.expect(fl.AIL_file_type(sc(), 16) == 0); // all-zero scratch: unknown
     try testing.expect(fl.AIL_file_read("/nonexistent_om_test", null) == null);
-    try testing.expectEqual(@as(i32, 1), fl.AIL_file_write("om_cov_test.bin", sc(), 4));
-    try testing.expectEqual(@as(u32, 4), fl.AIL_file_size("om_cov_test.bin"));
+    // Bytes this test owns, not the shared scratch buffer: the read-back below
+    // can only be compared against a pattern no other test can overwrite.
+    const payload = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
+    try testing.expectEqual(@as(i32, 1), fl.AIL_file_write("om_cov_test.bin", @ptrCast(&payload), payload.len));
+    try testing.expectEqual(@as(u32, payload.len), fl.AIL_file_size("om_cov_test.bin"));
     // The read-back path: the file just written must hand back its own bytes.
+    // Without the comparison a read that returned a short, empty, or stale
+    // buffer would still pass, and AIL_file_type/ailFileRead consumers would
+    // parse whatever came back.
     const read_back = fl.AIL_file_read("om_cov_test.bin", null) orelse return error.NoReadBack;
     defer mem.AIL_mem_free_lock(read_back);
+    try testing.expectEqualSlices(u8, &payload, @as([*]const u8, @ptrCast(read_back))[0..payload.len]);
     // A write into a nonexistent directory is the one failure that must leave a
     // message behind: a bare 0 with "No error" leaves the caller no way to tell
     // a missing directory from a full disk.
-    try testing.expectEqual(@as(i32, 0), fl.AIL_file_write("om_cov_missing_dir/x.bin", sc(), 4));
+    try testing.expectEqual(@as(i32, 0), fl.AIL_file_write("om_cov_missing_dir/x.bin", @ptrCast(&payload), payload.len));
     try testing.expect(!std.mem.eql(u8, "No error", std.mem.span(fl.AIL_file_error())));
     defer std.Io.Dir.cwd().deleteFile(openmiles.io, "om_cov_test.bin") catch {};
     fl.AIL_set_file_callbacks(null, null, null, null);
@@ -774,16 +792,31 @@ test "coverage: v7.zig unified exports" {
     v7.AIL_sample_volume_pan(s, &f32o, &f32o);
     v7.AIL_set_sample_low_pass_cut_off(s, 0, 8000);
     _ = v7.AIL_sample_low_pass_cut_off(s, 0);
+    // A normalized cutoff in range reads back verbatim, so a setter that drops
+    // the value or a getter that answers a constant fails here rather than at
+    // the next call site. 8000 above is out of the 0..1 range and pins to fully
+    // open, which is a separate rule and left to the engine tests.
+    v7.AIL_set_sample_low_pass_cut_off(s, 0, 0.25);
+    try testing.expectApproxEqAbs(@as(f32, 0.25), v7.AIL_sample_low_pass_cut_off(s, 0), 1e-6);
+    // Reverb is stored verbatim (the engine is driven with a clamped wet, but
+    // the getter returns what the app set), so dry and wet come back unchanged
+    // and independently. One out-param for both would hide a swap.
     v7.AIL_set_sample_reverb_levels(s, 0.7, 0.3);
-    v7.AIL_sample_reverb_levels(s, &f32o, &f32o);
+    var dry_lvl: f32 = 0;
+    var wet_lvl: f32 = 0;
+    v7.AIL_sample_reverb_levels(s, &dry_lvl, &wet_lvl);
+    try testing.expectApproxEqAbs(@as(f32, 0.7), dry_lvl, 1e-6);
+    try testing.expectApproxEqAbs(@as(f32, 0.3), wet_lvl, 1e-6);
     var si: openmiles.AILSOUNDINFO = .{ .format = 0, .data_ptr = sc(), .data_len = 16, .rate = 8000, .bits = 16, .channels = 1, .samples = 0, .block_size = 0, .initial_ptr = null };
     _ = v7.AIL_set_sample_info(s, &si);
     v7.AIL_set_sample_obstruction(s, 0.5);
-    _ = v7.AIL_sample_obstruction(s);
-    v7.AIL_set_sample_occlusion(s, 0.5);
-    _ = v7.AIL_sample_occlusion(s);
-    v7.AIL_set_sample_exclusion(s, 0.5);
-    _ = v7.AIL_sample_exclusion(s);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), v7.AIL_sample_obstruction(s), 1e-6);
+    v7.AIL_set_sample_occlusion(s, 0.25);
+    try testing.expectApproxEqAbs(@as(f32, 0.25), v7.AIL_sample_occlusion(s), 1e-6);
+    v7.AIL_set_sample_exclusion(s, 0.75);
+    try testing.expectApproxEqAbs(@as(f32, 0.75), v7.AIL_sample_exclusion(s), 1e-6);
+    // Distinct values on the three setters: read each one back and a getter
+    // wired to a neighbour's field shows up as a cross-check failure.
 
     // Listener + master + room.
     v7.AIL_listener_3D_position(drv, &f32o, &f32o, &f32o);
