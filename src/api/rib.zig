@@ -142,6 +142,25 @@ const max_temp_path_units: usize = 260;
 /// "om_asi_", sixteen hex digits, ".dll".
 const temp_image_name_units: usize = "om_asi_".len + 16 + ".dll".len;
 
+/// Permissions the unpacked image is created with.
+///
+/// The image is a plugin the game handed over in memory, written into a
+/// directory other users on the machine can usually write to as well. Created
+/// with the platform default it comes out world-readable there (0o666 less the
+/// umask, which is 0o644 on a stock Linux login and nothing at all on Wine
+/// under a shared account), so the game's plugin code sits in a shared
+/// directory until the provider is released, and stays there if the process
+/// dies first. Owner read/write is all the loader needs: the process that
+/// wrote the file is the one that opens it again to load the module.
+///
+/// Windows has no POSIX mode here: the enum is a file-attribute set, so a
+/// numeric mode would set attributes rather than restrict access, and the
+/// temp directory's own ACLs are what govern the file there.
+const temp_image_permissions: std.Io.File.Permissions = if (builtin.os.tag == .windows)
+    .default_file
+else
+    0o600;
+
 /// Whether `dir` plus that file name still fits inside `limit_units` UTF-16
 /// units, terminator included. Windows opens a path longer than MAX_PATH only
 /// with the long-path opt-in, a registry setting a game install has not made,
@@ -319,7 +338,7 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
                 return null;
             };
             if (!in_tmp_dir) break;
-            if (std.Io.Dir.createFileAbsolute(io, path, .{ .exclusive = true })) |f| {
+            if (std.Io.Dir.createFileAbsolute(io, path, .{ .exclusive = true, .permissions = temp_image_permissions })) |f| {
                 created = f;
                 break;
             } else |abs_err| switch (abs_err) {
@@ -351,7 +370,7 @@ pub fn AIL_open_ASI_provider(buffer: *const anyopaque, size: u32) callconv(.wina
             }
         }
         if (created != null) break;
-        if (openmiles.fs_compat.createFile(io, path, .{ .exclusive = true })) |f| {
+        if (openmiles.fs_compat.createFile(io, path, .{ .exclusive = true, .permissions = temp_image_permissions })) |f| {
             created = f;
             break;
         } else |cwd_err| switch (cwd_err) {
