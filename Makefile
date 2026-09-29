@@ -156,12 +156,12 @@ YAMLLINT_VERSION := 1.38.0
 # is a dependency like any other: a uv that resolves or builds a wheel
 # differently is a different tree than the one the gate was reviewed against.
 # ci.yml and release.yml each install it, so the version is declared here and
-# both workflows read it, the way release.yml already reads the two linters.
+# both workflows read it, the same way they read the two linters above.
 UV_VERSION := 0.12.19
 
-# The Zig, ruff, yamllint, and uv pins live in the Makefile, ci.yml, and
-# build.zig.zon; a stale one in CI installs the old tool and the gate quietly
-# stops matching.
+# The Zig pin lives in build.zig.zon and the ruff, yamllint, and uv pins here;
+# ci.yml and release.yml read all four from here rather than repeating them,
+# and check-pins fails a workflow that types one of its own.
 check-pins: check-interpreter
 	$(PYTHON) scripts/check_toolchain_pins.py
 
@@ -287,7 +287,7 @@ help:
 	@echo "  check-yaml          assert yamllint on PATH is the pinned version, then lint .github"
 	@echo "  check-interpreter   assert a Python 3 interpreter is named python3 or python"
 	@echo "  check-parity-tools  assert pefile is importable (only make parity needs it)"
-	@echo "  check-pins          assert the zig, ruff, and yamllint pins agree across the tree, the C warning set matches c_flags, and the interpreter meets ruff.toml's floor"
+	@echo "  check-pins          assert the zig, uv, ruff, and yamllint pins agree across the tree, no workflow repeats one, the C warning set matches c_flags, and the interpreter meets ruff.toml's floor"
 	@echo ""
 	@echo "These targets take no arguments, so 'make check-header --help' is make's own"
 	@echo "help and the check does not run. The Python gates behind them print their own"

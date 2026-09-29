@@ -4,14 +4,14 @@
 `make check-toolchain` and `make check-python` refuse to run against a Zig or
 ruff or yamllint other than the one the tree declares, so a developer's green
 run and CI's green run only mean the same thing if the pins agree.
-build.zig.zon names the zig version once, and the Makefile and the CI workflow
+build.zig.zon names the zig version once, and the Makefile and both workflows
 read it from there; the uv, ruff, and yamllint versions are Makefile literals
-that ci.yml repeats and release.yml reads. Nothing otherwise keeps them in step,
-and a stale pin is invisible: CI installs the old tool, the old tool is happy
-with the old tree, and the merge goes green. A release cut from a tag with no
-merge gate in front of it is the case that hides longest, so the release
-workflow is held to reading the Makefile rather than typing a version of its
-own.
+that ci.yml and release.yml each read out of the Makefile rather than repeat.
+Nothing otherwise keeps them in step, and a stale pin is invisible: CI installs
+the old tool, the old tool is happy with the old tree, and the merge goes
+green. A release cut from a tag with no merge gate in front of it is the case
+that hides longest, which is why both workflows are held to reading the
+Makefile rather than typing a version of their own.
 
 The same drift applies to the C warning set, which build.zig declares once and
 the two gates that compile C on their own repeat: check_header.py for mss.h,
@@ -57,17 +57,18 @@ CHECK_HEADER = ROOT / "scripts" / "check_header.py"
 CHECK_EXAMPLES = ROOT / "scripts" / "check_examples.py"
 RUFF_TOML = ROOT / "ruff.toml"
 
-# Makefile variable -> (files that must repeat it, pattern naming the pin).
-PINS = {
-    "RUFF_VERSION": (CI_YML, r"uv tool install ruff=={v}"),
-    "YAMLLINT_VERSION": (CI_YML, r"uv tool install yamllint=={v}"),
-    "UV_VERSION": (CI_YML, r"pipx install uv=={v}"),
-}
+# Makefile variables that name a tool version. Each is a literal here and
+# nowhere else: both workflows that install these tools read them out of the
+# Makefile, and this script is what holds them to that.
+PINS = ("UV_VERSION", "RUFF_VERSION", "YAMLLINT_VERSION")
 
-# The release workflow runs the same three linters from a tag, with no merge
-# gate between the commit and the cut, so it reads each pin out of the Makefile
-# instead of repeating it. A literal here is a version nothing compares.
-DERIVED_PINS = (RELEASE_YML, ("UV_VERSION", "RUFF_VERSION", "YAMLLINT_VERSION"))
+# The workflows that install the pinned linters, each of which has to take every
+# pin out of the Makefile rather than repeating it. A literal in either is a
+# version nothing compares: the analyzer set that gates a merge, and the one
+# that cuts a release from a tag with no merge gate in front of it, can then
+# differ from the tree's, and the drift is invisible in the way that matters
+# (CI installs the old tool, the old tool is happy with the old tree).
+DERIVED_PINS = ((CI_YML, PINS), (RELEASE_YML, PINS))
 
 # Workflows that build the tree, so each has to take its zig from build.zig.zon
 # rather than repeating it.
@@ -162,12 +163,14 @@ def zig_workflow_problems(path, text):
 
 
 def derived_pin_problems(path, text, names):
-    """Report a release workflow that repeats a pin the Makefile already owns.
+    """Report a workflow that repeats a pin the Makefile already owns.
 
-    A literal in this workflow is invisible in the way that matters: a tag is
-    cut with no merge gate in front of it, so the analyzer set that ships can
-    be one no other run has ever used. Reading the Makefile leaves a single
-    copy, and a pin the gate does not compare is a pin that drifts.
+    A literal in either workflow is invisible in the way that matters. On the
+    merge gate CI installs whatever the literal says and the old tool is happy
+    with the tree it gates; on a release the tag is cut with no merge gate in
+    front of it, so the analyzer set that ships can be one no other run has
+    ever used. Reading the Makefile leaves a single copy, and a pin the gate
+    does not compare is a pin that drifts.
     """
     bad = []
     for name in names:
@@ -262,9 +265,6 @@ def main():
         return 1
     problems = []
 
-    ci = read(CI_YML)
-    if ci is None:
-        return 1
     zon = read(ZON)
     if zon is None:
         return 1
@@ -275,16 +275,7 @@ def main():
         problems.append("ZIG_VERSION")
 
     pins = {name: makefile_var(makefile, name) for name in PINS}
-    for name, (path, pattern) in PINS.items():
-        value = pins[name]
-        if value is None:
-            problems.append(name)
-            continue
-        # The pattern is built from the pin, so a file naming a different
-        # version reads as UNPINNED: that is the drift case.
-        if not re.search(pattern.format(v=re.escape(value)), ci, re.MULTILINE):
-            print(f"{path.relative_to(ROOT)} UNPINNED  no '{name}' pin of {value}")
-            problems.append(name)
+    problems.extend(name for name, value in pins.items() if value is None)
 
     for path in ZIG_WORKFLOWS:
         text = read(path)
@@ -293,11 +284,11 @@ def main():
             continue
         problems.extend(zig_workflow_problems(path, text))
 
-    path, names = DERIVED_PINS
-    text = read(path)
-    if text is None:
-        problems.append(f"{path.name} missing")
-    else:
+    for path, names in DERIVED_PINS:
+        text = read(path)
+        if text is None:
+            problems.append(f"{path.name} missing")
+            continue
         problems.extend(derived_pin_problems(path, text, names))
 
     problems.extend(c_flag_problems())

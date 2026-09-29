@@ -63,6 +63,15 @@ All notable changes to OpenMiles are recorded here. The format follows
   verified, so a header arriving from a lookalike host carrying the right bytes
   and a plausible commit id passed every check; the commit names a revision, not
   a repository. Both upstreams resolve to `github.com`, named in `SOURCE_HOSTS`.
+- `ci.yml` reads the `UV_VERSION`, `RUFF_VERSION` and `YAMLLINT_VERSION` pins out
+  of the `Makefile` instead of repeating them, the way `release.yml` already
+  did, and `make check-pins` now fails a workflow that types one of its own.
+
+### Fixed
+- `docs/THREAT_MODEL.md` re-anchored at `src/engine/midi.zig`: the XMIDI loop
+  stack, its depth check and the per-buffer jump budget had moved, so
+  `make lint` failed `check-threat-model` on every run. The three mitigations
+  the model cites were always in the file; only the line numbers were stale.
 
 ## [0.3.0] - 2026-09-28
 

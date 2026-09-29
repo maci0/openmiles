@@ -66,13 +66,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-zig-${{ steps.zig.outputs.version }}-
 
-      # uv installs the two pinned linters below, and is pinned to the
-      # UV_VERSION in the Makefile for the same reason they are, so
-      # scripts/check_toolchain_pins.py fails when this and the Makefile
-      # disagree. Nothing installed it before: the runner image ships pipx, not
-      # uv, so the first `uv tool install` failed the whole ubuntu leg with
-      # exit 127 before any gate ran. The binary lands in ~/.local/bin, the
-      # same directory the two install steps below put their tools in, and that
+      # The three pins below are read out of the Makefile rather than typed
+      # here, the way release.yml reads them, so a version is declared once
+      # and scripts/check_toolchain_pins.py fails a workflow that repeats one.
+      #
+      # Nothing installed uv before: the runner image ships pipx, not uv, so
+      # the first `uv tool install` failed the whole ubuntu leg with exit 127
+      # before any gate ran. The binary lands in ~/.local/bin, the same
+      # directory the two install steps below put their tools in, and that
       # directory is put on PATH here rather than relied on from the image: an
       # entry appended to GITHUB_PATH applies to the steps after this one, so
       # `uv` resolves in both install steps whether or not the runner image
@@ -81,25 +82,30 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           set -euo pipefail
-          pipx install uv==0.12.19
+          version=$(sed -n 's/^UV_VERSION := //p' Makefile)
+          [ -n "$version" ] || { echo "no UV_VERSION in the Makefile" >&2; exit 1; }
+          pipx install "uv==${version}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install ruff
         if: matrix.os == 'ubuntu-latest'
-        # Pinned to the RUFF_VERSION in the Makefile so the local gate and CI
-        # run the same analyzer; `make lint` refuses any other version.
+        # The RUFF_VERSION in the Makefile, so the local gate and CI run the
+        # same analyzer; `make lint` refuses any other version.
         run: |
           set -euo pipefail
-          uv tool install ruff==0.16.4
+          version=$(sed -n 's/^RUFF_VERSION := //p' Makefile)
+          [ -n "$version" ] || { echo "no RUFF_VERSION in the Makefile" >&2; exit 1; }
+          uv tool install "ruff==${version}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Install yamllint
         if: matrix.os == 'ubuntu-latest'
-        # Pinned to the YAMLLINT_VERSION in the Makefile, same reason as the
-        # ruff above.
+        # The YAMLLINT_VERSION in the Makefile, same reason as the ruff above.
         run: |
           set -euo pipefail
-          uv tool install yamllint==1.38.0
+          version=$(sed -n 's/^YAMLLINT_VERSION := //p' Makefile)
+          [ -n "$version" ] || { echo "no YAMLLINT_VERSION in the Makefile" >&2; exit 1; }
+          uv tool install "yamllint==${version}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Lint (zig fmt + ruff + shellcheck + yamllint + C header parity, same rules as `make lint`)
