@@ -57,7 +57,12 @@ compared byte for byte across timezones.
 header swapped in without a matching digest, or a digest edited to match a
 header that arrived from somewhere unexpected. The same script requires every
 vendored entry above to name a 40-character upstream commit, since a digest
-alone says which bytes shipped but not which release they came from.
+alone says which bytes shipped but not which release they came from, and it
+requires the **Source** URL to be an `https` URL on an approved host (`SOURCE_HOSTS`
+in the script). A commit id names a revision, not a repository, so a lookalike
+host carrying the right bytes and a plausible commit string would otherwise pass
+every other check here; both entries resolve to `github.com`, and moving an
+upstream is a deliberate edit to that set.
 
 `deps/` holds files, not a tree: `SHA256SUMS` records the files in this
 directory, and the script fails on a subdirectory as well as on an unlisted
@@ -82,7 +87,8 @@ Update checklist:
    above next to the version. A branch name resolves to different bytes every
    week, so a header fetched from `master` cannot be traced back to what was
    reviewed.
-2. Download only from the upstream URLs listed above.
+2. Download only from the upstream URLs listed above; the script fails an entry
+   whose **Source** is not one of the hosts in `SOURCE_HOSTS`.
 3. Confirm the version against the header's own bytes, which
    `scripts/check_vendored.py` then compares to the **Version** field above:
    miniaudio carries `MA_VERSION_MAJOR/MINOR/REVISION`, but tsf.h and tml.h

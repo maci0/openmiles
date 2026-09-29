@@ -9,8 +9,9 @@ ship. This check closes that gap: `make lint` runs it, so CI rejects either.
 
 deps/README.md documents where each file comes from and under which license,
 including the upstream commit each vendored header was taken from; this script
-is the machine-readable half of the same record, and rejects a vendored header
-whose entry names no commit.
+is the machine-readable half of the same record. It rejects a vendored header
+whose entry names no commit, whose version disagrees with the version in its own
+bytes, or whose Source is not one of the approved upstream hosts.
 
 --update rewrites deps/SHA256SUMS from the files on disk, for a deliberate
 header swap. Review the diff before committing it: the point of the check is
@@ -83,6 +84,26 @@ FIRST_PARTY_RE = re.compile(r"first-party")
 # header swapped for a newer release with the README entry left behind puts
 # the superseded version in the inventory, so every advisory published for the
 # release that actually shipped is a miss.
+# Where a vendored header may come from. Both upstreams are GitHub repos, and
+# a single approved host is a short enough list to hold in the head: the point
+# is that a Source line naming any other URL fails here, at the moment the tree
+# is linted, rather than at the moment somebody believes it. deps/README.md's
+# update checklist asks for a download from the listed URL, and this is the
+# machine-readable half of that instruction.
+#
+# A header fetched from a lookalike host carrying a matching name and a
+# plausible commit-shaped string would otherwise pass every other check here:
+# the digest records which bytes shipped, and nothing else in the tree records
+# which host they came from. Both entries resolve to github.com today, so a
+# vendor that moves off it is a deliberate edit to this set, not an accident.
+SOURCE_SCHEME = "https"
+SOURCE_HOSTS = {"github.com"}
+
+# A repository URL is "https://host/owner/repo"; anything shorter is a page
+# rather than the repository a commit id can be fetched from.
+SOURCE_PATH_PARTS = 2
+SOURCE_URL_RE = re.compile(r"^(?P<scheme>[a-z][a-z0-9+.-]*)://(?P<host>[^/?#]+)/?(?P<path>[^?#]*)")
+
 VERSION_MACROS = ("MA_VERSION_MAJOR", "MA_VERSION_MINOR", "MA_VERSION_REVISION")
 VERSION_MACRO_RES = tuple(
     re.compile(rf"^#define\s+{macro}\s+(\d+)\s*$", re.MULTILINE) for macro in VERSION_MACROS
@@ -158,11 +179,30 @@ def readme_entries():
     return entries
 
 
+def source_problems(name, source):
+    """Why a vendored entry's recorded Source is not one of the approved upstreams."""
+    if source is None:
+        return [f"{name} NOSOURCE  its section records no source URL"]
+    match = SOURCE_URL_RE.match(source)
+    if match is None:
+        return [f"{name} BADSOURCE  source {source!r} is not an absolute URL"]
+    if match.group("scheme") != SOURCE_SCHEME:
+        return [f"{name} BADSOURCE  source {source!r} is not {SOURCE_SCHEME}://"]
+    host = match.group("host").lower()
+    if host not in SOURCE_HOSTS:
+        allowed = ", ".join(sorted(SOURCE_HOSTS))
+        return [f"{name} BADSOURCE  source host {host!r} is not one of {allowed}"]
+    parts = [p for p in match.group("path").split("/") if p]
+    if len(parts) < SOURCE_PATH_PARTS:
+        return [f"{name} BADSOURCE  source {source!r} names no repository"]
+    return []
+
+
 def entry_problems(name, entry):
     """What deps/README.md claims about one file in deps/ fails to hold.
 
-    A first-party file has no upstream and no upstream version, so the commit
-    and the version checks do not apply to it.
+    A first-party file has no upstream and no upstream version, so the commit,
+    the version and the source checks do not apply to it.
     """
     readme = README.relative_to(ROOT)
     findings = []
@@ -177,7 +217,9 @@ def entry_problems(name, entry):
         )
     elif entry.version is None:
         findings.append(f"{name} NOVERSION  its {readme} section records no version")
+        findings += source_problems(name, entry.source)
     else:
+        findings += source_problems(name, entry.source)
         stated = header_version(DEPS / name)
         if stated is None:
             findings.append(

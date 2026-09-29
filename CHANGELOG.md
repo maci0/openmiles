@@ -47,6 +47,13 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- `scripts/check_vendored.py` fails a vendored entry whose **Source** is not an
+  `https` URL on an approved host. Version, upstream commit and digest were all
+  verified, so a header arriving from a lookalike host carrying the right bytes
+  and a plausible commit id passed every check; the commit names a revision, not
+  a repository. Both upstreams resolve to `github.com`, named in `SOURCE_HOSTS`.
+
 ## [0.3.0] - 2026-09-28
 
 Digital driver lifecycle counting, SoundFont thread safety, Miles event-system hardening, ASI codec fuzzing, reproducible release packaging, and comprehensive stability and documentation fixes.
