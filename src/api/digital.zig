@@ -738,12 +738,10 @@ fn decodeWavToPcm(allocator: std.mem.Allocator, wav: []const u8) !DecodedPcm {
         list.appendSlice(allocator, chunk[0..@intCast(fr * channels)]) catch return error.OutOfMemory;
     }
     if (list.items.len == 0) return error.EmptyResult;
-    // A failed toOwnedSlice is an optional return, not an error return, so the
-    // errdefer does not cover it; free the list explicitly.
-    const samples = list.toOwnedSlice(allocator) catch {
-        list.deinit(allocator);
-        return error.OutOfMemory;
-    };
+    // toOwnedSlice leaves the list intact when it fails, and the catch returns
+    // an error, so the errdefer above is what frees it. Calling deinit here as
+    // well freed the same backing store twice.
+    const samples = list.toOwnedSlice(allocator) catch return error.OutOfMemory;
     return .{ .samples = samples, .channels = channels, .rate = rate };
 }
 

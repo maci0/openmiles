@@ -39,27 +39,40 @@ fn regUnlock() void {
 }
 
 /// Reserve room for one more registry entry, before a load owns any memory, so
-/// publishing the bank it builds cannot fail. A bank that could not be
-/// registered would be invisible to every containerFindEvent /
-/// containerSoundDurationMs lookup while still holding its memory, so the load
-/// fails on the reservation instead of on the append.
-fn registryReserve() !void {
+/// a load that cannot be registered fails before it builds its metadata rather
+/// than after. Best-effort: the reservation is taken under one lock acquisition
+/// and the publishing append under another, so it does not make the append
+/// infallible, and registryAdd is where a bank that still cannot be tracked is
+/// reported.
+fn registryReserve() void {
     regLock();
     defer regUnlock();
-    try g_registry.ensureUnusedCapacity(registry_alloc, 1);
+    g_registry.ensureUnusedCapacity(registry_alloc, 1) catch {
+        root.log("soundbank: cannot reserve a registry slot; the load reports a failure only if the publishing append cannot grow the list\n", .{});
+    };
 }
 
 /// Track a loaded bank in the global registry, or hand back the bank already
 /// loaded from the same file (see `registryAcquireBySource`), with a reference
-/// taken for this open. Only call after registryReserve succeeded.
-fn registryAdd(bank: *Bank) *Bank {
+/// taken for this open. Null when the registry could not take the entry, in
+/// which case the caller tears the bank down: an unregistered bank holds its
+/// memory while every containerFindEvent / containerSoundDurationMs lookup
+/// answers as if it were never loaded.
+fn registryAdd(bank: *Bank) ?*Bank {
     regLock();
     defer regUnlock();
     if (registryFindLocked(bank.source_path)) |existing| {
         existing.refs += 1;
         return existing;
     }
-    g_registry.appendAssumeCapacity(bank);
+    // A fallible append, not appendAssumeCapacity on registryReserve's word.
+    // The reservation is taken under one lock acquisition and the append under
+    // another, so two loads running side by side each reserve against the same
+    // length and the second append can land past the capacity the first one
+    // saw. registryReserve stays as the early failure (it keeps a doomed load
+    // from building metadata at all), but the append that publishes the bank
+    // has to be able to report its own failure.
+    g_registry.append(registry_alloc, bank) catch return null;
     return bank;
 }
 /// The live bank whose resolved source path is `source_path`, or null. The
@@ -638,7 +651,7 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
         return existing;
     }
     errdefer allocator.free(source);
-    try registryReserve();
+    registryReserve();
 
     const meta_size = std.mem.readInt(i32, image[off_meta_size..][0..4], .little);
     if (meta_size < header_size or @as(usize, @intCast(meta_size)) > image.len) return error.BadMetaSize;
@@ -705,7 +718,10 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
     // that table on the linear-scan path.
     self.event_index = self.buildNameIndex(.events) catch .{};
     self.sound_index = self.buildNameIndex(.sounds) catch .{};
-    const registered = registryAdd(self);
+    const registered = registryAdd(self) orelse {
+        self.teardown();
+        return error.RegistryFull;
+    };
     if (registered != self) {
         // Another load of the same file reached the registry between the lookup
         // above and this one, and already holds the bank. The copy just built is
