@@ -228,6 +228,10 @@ time) pinned to UTC, and no host metadata is stored. Packaging it twice yields
 byte-identical files, on any host timezone and locale, which the release
 workflow checks with `cmp` after repackaging under a different `TZ` and
 `LC_ALL`.
+It refuses to stage a `zig-out/bin/mss32.dll` that is not the 32-bit PE the
+x86-windows ReleaseFast cross-compile produces: a Debug build, a build for
+another target, or a leftover from an earlier run can all leave a file at that
+path, and the path does not say which of them the bytes in it are.
 
 The archive is checkable rather than merely described. `deps/SHA256SUMS` and
 `SBOM.cdx.json` name the vendored headers, so the headers ship beside those

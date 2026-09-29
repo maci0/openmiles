@@ -19,6 +19,11 @@
 # the digests and of the timestamp are both handled, so a host that ships
 # `shasum` and a `touch` without `-d` produces the same archive bytes.
 #
+# The DLL is checked to be the 32-bit PE image the x86-windows ReleaseFast
+# cross-compile produces before anything is staged. `zig-out/bin/mss32.dll` is
+# a path any build of this project can leave a file at, so the path alone does
+# not say the bytes in it are the ones the archive is defined to carry.
+#
 # Exit status: 0 archive written, 1 packaging failed, 2 bad invocation.
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 1
@@ -29,6 +34,10 @@ Usage: scripts/package_release.sh <output.zip> [<sha256sums>]
 
 Packages zig-out/bin/mss32.dll and its licence and attribution files into
 <release>.zip, stamped with SOURCE_DATE_EPOCH so the bytes are reproducible.
+
+The DLL is refused unless it is the 32-bit PE image the x86-windows
+ReleaseFast cross-compile produces, so a Debug build, a build for another
+target, or a leftover from an earlier run is not published as a win32 release.
 
 Arguments:
   <output.zip>    archive to write, replaced if it exists
@@ -139,6 +148,11 @@ else
   exit 1
 fi
 
+command -v od >/dev/null 2>&1 || {
+  echo "error: od not found on PATH (needed to check that the DLL is a 32-bit PE)" >&2
+  exit 1
+}
+
 # Timestamps. `touch -d @epoch` is GNU; BSD touch takes only `-t`, and reading
 # an epoch is `date -r` there and `date -d @` here. Both spellings name the
 # same instant, and TZ is pinned to UTC above, so the archive bytes do not
@@ -243,6 +257,57 @@ for e in "${entries[@]}"; do
     exit 1
   fi
 done
+
+# The archive is a win32 drop-in, so what it stages as mss32.dll has to be the
+# 32-bit PE the cross-compile produces. Nothing about the path says which build
+# left it there: a plain `zig build` on a Windows host, a Debug or
+# ReleaseSafe build of the right target, and a build for some other target all
+# put a file at zig-out/bin/mss32.dll, and the script would stage whichever
+# one it found and publish it under a win32 name. The release workflow catches
+# it with objdump before packaging; the README also documents this script as the
+# local path, so the check belongs here and reads the file rather than trusting
+# the name.
+#
+# od is used rather than `file`, whose output is a sentence that differs across
+# host locales and versions, and the two multi-byte fields are assembled from
+# hex by hand rather than read with a native-width od conversion, so a big-endian
+# host reads the same values off disk.
+require_i386_pe() {
+  local f=$1 size sig lfanew_hex off pe machine
+  size=$(wc -c < "$f")
+  # DOS stub, then the little-endian 4-byte offset of the PE header at 0x3c.
+  sig=$(od -An -tx1 -N2 "$f" 2>/dev/null | tr -d ' \n')
+  if [ "$sig" != "4d5a" ]; then
+    echo "error: $f is not a PE image (no MZ signature at offset 0)" >&2
+    return 1
+  fi
+  lfanew_hex=$(od -An -tx1 -j60 -N4 "$f" 2>/dev/null | tr -d ' \n')
+  if [ "${#lfanew_hex}" -ne 8 ]; then
+    echo "error: $f is $size bytes, too short to hold a PE header" >&2
+    return 1
+  fi
+  off=$((16#${lfanew_hex:6:2} * 16777216 + 16#${lfanew_hex:4:2} * 65536 +
+    16#${lfanew_hex:2:2} * 256 + 16#${lfanew_hex:0:2}))
+  if [ "$off" -le 0 ] || [ $((off + 6)) -gt "$size" ]; then
+    echo "error: $f has no PE header where its own header points (offset $off)" >&2
+    return 1
+  fi
+  pe=$(od -An -tx1 -j "$off" -N4 "$f" 2>/dev/null | tr -d ' \n')
+  if [ "$pe" != "50450000" ]; then
+    echo "error: $f has no PE signature at offset $off" >&2
+    return 1
+  fi
+  # IMAGE_FILE_MACHINE_I386, 0x014c, little-endian on disk.
+  machine=$(od -An -tx1 -j $((off + 4)) -N2 "$f" 2>/dev/null | tr -d ' \n')
+  if [ "$machine" != "4c01" ]; then
+    echo "error: $f is a PE image but not 32-bit x86 (machine 0x$machine)" >&2
+    return 1
+  fi
+}
+if ! require_i386_pe zig-out/bin/mss32.dll; then
+  echo "  run: zig build -Dtarget=x86-windows -Doptimize=ReleaseFast" >&2
+  exit 1
+fi
 
 # Stamped once, so every entry shares it. `epoch` was checked above, before
 # any file is required, so a bad SOURCE_DATE_EPOCH fails as a usage error

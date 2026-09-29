@@ -80,6 +80,7 @@ jobs:
       - name: Install uv
         if: matrix.os == 'ubuntu-latest'
         run: |
+          set -euo pipefail
           pipx install uv==0.12.19
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
@@ -88,6 +89,7 @@ jobs:
         # Pinned to the RUFF_VERSION in the Makefile so the local gate and CI
         # run the same analyzer; `make lint` refuses any other version.
         run: |
+          set -euo pipefail
           uv tool install ruff==0.16.4
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
@@ -96,6 +98,7 @@ jobs:
         # Pinned to the YAMLLINT_VERSION in the Makefile, same reason as the
         # ruff above.
         run: |
+          set -euo pipefail
           uv tool install yamllint==1.38.0
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
