@@ -34,6 +34,7 @@ const openmiles = @import("openmiles");
 const api_v8 = @import("api/v8.zig");
 const api_miles = @import("api/miles.zig");
 const api_dls = @import("api/dls.zig");
+const api_midi = @import("api/midi.zig");
 const api_rib = @import("api/rib.zig");
 const api_memory = @import("api/memory.zig");
 
@@ -2598,4 +2599,327 @@ fn fuzzAsiRoundTripOne(ctx: *asi_ctx, smith: *std.testing.Smith) anyerror!void {
 test "fuzz: ASI compress/decompress round trip" {
     var ctx: asi_ctx = .{};
     try std.testing.fuzz(&ctx, fuzzAsiRoundTripOne, .{ .corpus = &asi_corpus });
+}
+
+// --- Target 11: the SMF time-signature reader --------------------------------
+//
+// `parseSmfBeatsPerMeasure` walks the first track of a Standard MIDI File to
+// find its first time signature meta event, and the unit it returns is the one
+// every beat and measure counter in the sequencer counts in: a wrong answer
+// puts each bar line and each seek-derived position in the wrong place. The
+// walk is hand-written over bytes the process did not author (a MIDI file off
+// disk), and it has to reason about three variable-length encodings in the
+// wrong order to stay in step: the delta time before every event, the length
+// inside a meta or sysex event, and the running-type-less channel messages
+// whose data length the status byte picks.
+//
+// fuzz_test.zig only reaches it with a file this project converted itself, so
+// an SMF from anywhere else has never been read by it. This target builds a
+// track out of well-formed events and predicts the answer from the
+// construction, so a misread event length, a VLQ that stops one byte early, or
+// a false meta match on a data byte becomes a failing input rather than a
+// silent wrong bar line.
+
+/// Largest answer a 0x58 event can produce: the reader scales the notated
+/// numerator, so the widest signature a `u8` numerator can spell is 255/1.
+const max_beats_per_measure: i32 = 255 * 4;
+
+const smf_max_events = 24;
+
+/// One event the builder wrote, and what the reader has to make of it.
+const smf_event = struct {
+    /// Offset just past the event in the finished image.
+    end: u16,
+    /// 0 for a channel message, otherwise the meta event's type byte.
+    meta_type: u8,
+    /// The answer this event yields, when it is a time signature.
+    beats: i32,
+};
+
+const smf_ctx = struct {
+    data: [4096]u8 = undefined,
+    events: [smf_max_events]smf_event = undefined,
+};
+
+/// Signatures a file actually carries, with the quarter-note beats each one
+/// names: the notated numerator scaled by the denominator's log2, rounded to
+/// the nearest whole quarter note. 7/8 and 5/8 do not divide into quarters, so
+/// they round, and a `dd` past 8 names a unit below a 64th note that no
+/// signature means, which reads as 4/4.
+const smf_signatures = [_]struct { numerator: u8, dd: u8, beats: i32 }{
+    .{ .numerator = 4, .dd = 2, .beats = 4 }, // 4/4
+    .{ .numerator = 3, .dd = 2, .beats = 3 }, // 3/4
+    .{ .numerator = 6, .dd = 2, .beats = 6 }, // 6/4
+    .{ .numerator = 2, .dd = 1, .beats = 4 }, // 2/1, two half notes
+    .{ .numerator = 3, .dd = 1, .beats = 6 }, // 3/1, three half notes
+    .{ .numerator = 2, .dd = 0, .beats = 8 }, // 2/0, two whole notes
+    .{ .numerator = 6, .dd = 3, .beats = 3 }, // 6/8, three quarters
+    .{ .numerator = 7, .dd = 3, .beats = 4 }, // 7/8, rounded up
+    .{ .numerator = 5, .dd = 3, .beats = 3 }, // 5/8, rounded up
+    .{ .numerator = 9, .dd = 3, .beats = 5 }, // 9/8
+    .{ .numerator = 1, .dd = 0, .beats = 4 }, // 1/0, one whole note
+    .{ .numerator = 1, .dd = 1, .beats = 2 }, // 1/1, one half note
+    .{ .numerator = 0, .dd = 2, .beats = 4 }, // no numerator reads as 4/4
+    .{ .numerator = 4, .dd = 9, .beats = 4 }, // a dd past 8 reads as 4/4
+};
+
+/// What the reader must report for a track the builder wrote: the first time
+/// signature the walk can reach, and 4 when it meets the end of the track,
+/// runs out of bytes, or finds no signature at all.
+fn expectedBeats(events: []const smf_event, trk_end: usize) i32 {
+    for (events) |ev| {
+        if (ev.end > trk_end) return 4; // cut off: the walk cannot reach it
+        if (ev.meta_type == 0x2F) return 4; // end of track ends the walk
+        if (ev.meta_type == 0x58) return ev.beats;
+    }
+    return 4;
+}
+
+fn fuzzSmfTimeSignatureOne(ctx: *smf_ctx, smith: *std.testing.Smith) anyerror!void {
+    if (!smith.boolWeighted(1, 3)) {
+        // A quarter of the inputs are raw bytes: no image structure at all, so
+        // the reader's own bounds are what the run checks. Any answer in range
+        // is valid; a trap or a runaway index is not, at the full length or at
+        // any truncation of it.
+        const n: usize = @intCast(smith.slice(&ctx.data));
+        for (0..@min(n, 96) + 1) |k| {
+            const r = openmiles.parseSmfBeatsPerMeasure(ctx.data[0..k]);
+            try testing.expect(r >= 1 and r <= max_beats_per_measure);
+        }
+        return;
+    }
+
+    @memcpy(ctx.data[0..4], "MThd");
+    std.mem.writeInt(u32, ctx.data[4..8], 6, .big);
+    std.mem.writeInt(u16, ctx.data[8..10], @intCast(smith.index(3)), .big); // format
+    std.mem.writeInt(u16, ctx.data[10..12], 1, .big); // one track, as built below
+    std.mem.writeInt(u16, ctx.data[12..14], @intCast(smith.index(0x8001)), .big); // division
+    @memcpy(ctx.data[14..18], "MTrk");
+
+    var pos: usize = 22;
+    const n_events = 1 + smith.index(smf_max_events);
+    var count: usize = 0;
+    while (count < n_events and pos + 8 < ctx.data.len) : (count += 1) {
+        // Every event carries a delta time, and the multi-byte form is the one
+        // a long-running track accumulates: the reader's VLQ loop has to
+        // consume all four bytes or every event after it lands mid-stream.
+        if (smith.boolWeighted(4, 1)) {
+            ctx.data[pos] = 0x81;
+            ctx.data[pos + 1] = 0x80;
+            ctx.data[pos + 2] = 0x80;
+            ctx.data[pos + 3] = 0x00;
+            pos += 4;
+        } else {
+            ctx.data[pos] = @intCast(smith.index(0x80)); // no continuation bit
+            pos += 1;
+        }
+
+        const kind = smith.index(10);
+        var meta_type: u8 = 0;
+        var beats: i32 = 0;
+        if (kind == 0) { // note on, two data bytes
+            const ev = [_]u8{ 0x90, 0x40, 0x64 };
+            @memcpy(ctx.data[pos..][0..3], &ev);
+            pos += 3;
+        } else if (kind == 1) { // note off, two data bytes
+            const ev = [_]u8{ 0x80, 0x40, 0x40 };
+            @memcpy(ctx.data[pos..][0..3], &ev);
+            pos += 3;
+        } else if (kind == 2) { // program change, one data byte
+            const ev = [_]u8{ 0xC0, 0x05 };
+            @memcpy(ctx.data[pos..][0..2], &ev);
+            pos += 2;
+        } else if (kind == 3) { // sysex, a VLQ length the reader has to skip
+            const payload = smith.index(6);
+            ctx.data[pos] = 0xF0;
+            ctx.data[pos + 1] = @intCast(payload); // under four bytes: one VLQ byte
+            pos += 2;
+            @memset(ctx.data[pos..][0..payload], 0x7E);
+            pos += payload;
+        } else if (kind == 4) { // end of track: the walk stops here
+            const ev = [_]u8{ 0xFF, 0x2F, 0x00 };
+            @memcpy(ctx.data[pos..][0..3], &ev);
+            meta_type = 0x2F;
+            pos += 3;
+        } else if (kind == 5) { // a time signature
+            const sig = smf_signatures[smith.index(smf_signatures.len)];
+            const ev = [_]u8{ 0xFF, 0x58, 0x04, sig.numerator, sig.dd, 0x24 };
+            @memcpy(ctx.data[pos..][0..6], &ev);
+            meta_type = 0x58;
+            beats = sig.beats;
+            pos += 6;
+        } else { // a text or set-tempo meta the reader must skip by its length
+            const text_type: u8 = if (smith.boolWeighted(1, 1)) 0x01 else 0x51;
+            const payload = 1 + smith.index(4);
+            ctx.data[pos] = 0xFF;
+            ctx.data[pos + 1] = text_type;
+            ctx.data[pos + 2] = @intCast(payload);
+            pos += 3;
+            @memset(ctx.data[pos..][0..payload], 0x59);
+            pos += payload;
+            meta_type = text_type;
+        }
+        ctx.events[count] = .{ .end = @intCast(pos), .meta_type = meta_type, .beats = beats };
+    }
+    const events = ctx.events[0..count];
+
+    // The declared track length is what bounds the walk, and no real file
+    // guarantees it matches what follows, so the four cases a truncated or
+    // hostile download produces all have to give the same answer the events
+    // actually reach imply.
+    const declared: u32 = switch (smith.index(5)) {
+        0 => @intCast(pos - 22), // the truth
+        1 => 0, // an interrupted write
+        2 => 0xFFFF_FFFF, // a lying header
+        3 => @intCast((pos - 22) / 2),
+        else => smith.value(u32),
+    };
+    std.mem.writeInt(u32, ctx.data[18..22], declared, .big);
+
+    // And the file can end before its own track does, on an event boundary, so
+    // the walk runs out of bytes rather than out of events.
+    const dropped = if (count == 0) 0 else smith.index(count + 1);
+    const len = if (count == 0) 22 else events[count - dropped - 1].end;
+    const trk_end = @min(22 + @as(usize, declared), len);
+    try testing.expectEqual(expectedBeats(events, trk_end), openmiles.parseSmfBeatsPerMeasure(ctx.data[0..len]));
+}
+
+const smf_corpus = [_][]const u8{
+    // The smallest complete file: a header and one empty track.
+    "MThd" ++ "\x00\x00\x00\x06" ++ "\x00\x00\x00\x01\x00\x78" ++ "MTrk" ++ "\x00\x00\x00\x04" ++ "\x00\xFF\x2F\x00",
+    // A 4/4 bar, a note, a text meta the reader has to skip by its length, and
+    // the end of the track.
+    "MThd" ++ "\x00\x00\x00\x06" ++ "\x00\x00\x00\x01\x00\x60" ++ "MTrk" ++ "\x00\x00\x00\x1C" ++
+        "\x00\xFF\x58\x04\x04\x02\x18\x08" ++ "\x00\x90\x40\x64" ++ "\x81\x80\x80\x00" ++
+        "\x00\xFF\x01\x04test" ++ "\x00\xFF\x2F\x00",
+    // 6/8, whose answer (3) is not its notated numerator, behind a sysex whose
+    // length the reader has to skip.
+    "MThd" ++ "\x00\x00\x00\x06" ++ "\x01\x00\x00\x01\x00\x78" ++ "MTrk" ++ "\x00\x00\x00\x14" ++
+        "\x00\xF0\x03\x7E\x7E\x7E" ++ "\x00\xFF\x58\x04\x06\x03\x18\x08" ++ "\x00\xFF\x2F\x00",
+    // A track that declares more than it holds: the walk stops at the bytes.
+    "MThd" ++ "\x00\x00\x00\x06" ++ "\x00\x00\x00\x01\x00\x78" ++ "MTrk" ++ "\xFF\xFF\xFF\xFF" ++
+        "\x00\xFF\x58\x04\x03\x02\x18\x08",
+    // A track that declares less than it holds: the signature is out of reach.
+    "MThd" ++ "\x00\x00\x00\x06" ++ "\x00\x00\x00\x01\x00\x78" ++ "MTrk" ++ "\x00\x00\x00\x00" ++
+        "\x00\xFF\x58\x04\x07\x03\x18\x08" ++ "\x00\xFF\x2F\x00",
+    // Cut off inside the time signature, and cut off before it.
+    "MThd" ++ "\x00\x00\x00\x06" ++ "\x00\x00\x00\x01\x00\x78" ++ "MTrk" ++ "\x00\x00\x00\x04" ++ "\x00\xFF\x58\x04",
+    "MThd" ++ "\x00\x00\x00\x06" ++ "\x00\x00\x00\x01\x00\x78" ++ "MTrk" ++ "\x00\x00\x00\x00" ++ "\x00",
+    // Not a MIDI file at all.
+    "RIFF" ++ "\x00\x00\x00\x20" ++ "WAVEfmt ",
+    "",
+};
+
+test "fuzz: SMF time-signature reader" {
+    var ctx: smf_ctx = .{};
+    try std.testing.fuzz(&ctx, fuzzSmfTimeSignatureOne, .{ .corpus = &smf_corpus });
+}
+
+// --- Target 12: the MIDI / XMIDI listing export --------------------------------
+//
+// AIL_list_MIDI takes an image and a size from the C caller, reads the header
+// fields out of it, and hands back a malloc'd C string the caller prints and
+// frees with AIL_mem_free_lock. No other fuzz target hands it an image: the
+// export-adversary test passes a null pointer, so the reading of a header the
+// process did not author, and the allocation handed across the trust boundary,
+// had no coverage. The invariants are the ones a caller relies on: a listing
+// that is refused leaves the out-parameters empty, a listing that is returned
+// is NUL-terminated inside the block the caller's free owns, its length is the
+// size the same call reported, and the three numbers it prints are the bytes
+// the header spells. The last one is a differential: the image's own header
+// says what the text has to say.
+
+const list_midi_ctx = struct {
+    data: [2048]u8 = undefined,
+    head: [64]u8 = undefined,
+};
+
+fn listMidiText(p: ?*anyopaque) []const u8 {
+    const text: [*:0]const u8 = @ptrCast(@alignCast(p.?));
+    return std.mem.span(text);
+}
+
+fn fuzzListMidiOne(ctx: *list_midi_ctx, smith: *std.testing.Smith) anyerror!void {
+    const n: usize = @intCast(smith.slice(&ctx.data));
+    const size: u32 = @intCast(if (n == 0) 0 else smith.index(n + 1));
+    const img: [*]const u8 = @ptrCast(ctx.data[0..n].ptr);
+
+    var lst: ?*anyopaque = null;
+    var lsz: u32 = 0;
+    const ok = api_midi.AIL_list_MIDI(@ptrCast(img), size, &lst, &lsz, 0);
+    // The caller reads lst and lsz whatever the call returned, so a refusal
+    // that left either set is a listing read from a pointer no one owns.
+    if (ok != 1) {
+        try testing.expectEqual(@as(?*anyopaque, null), lst);
+        try testing.expectEqual(@as(u32, 0), lsz);
+        // Only an MThd or FORM head is recognized, and only once the declared
+        // size covers the four tag bytes the comparison reads.
+        if (size >= 4) {
+            try testing.expect(!std.mem.eql(u8, ctx.data[0..4], "MThd"));
+            try testing.expect(!std.mem.eql(u8, ctx.data[0..4], "FORM"));
+        }
+        return;
+    }
+
+    const out = lst orelse return error.MissingListing;
+    defer freeLock(out);
+    const text = listMidiText(out);
+    try testing.expect(lsz > 0);
+    // The terminator has to sit inside the block the caller's free owns, one
+    // byte past the length the call reported.
+    try testing.expectEqual(text.len, @as(usize, lsz));
+    try testing.expectEqual(@as(u8, 0), @as([*]const u8, @ptrCast(out))[lsz]);
+
+    const head = ctx.data[0..@min(size, 14)];
+    var want: [96]u8 = undefined;
+    if (std.mem.eql(u8, head[0..4], "MThd")) {
+        try testing.expect(std.mem.indexOf(u8, text, "Standard MIDI File") != null);
+        const format = std.fmt.bufPrint(&want, "Format: {d}", .{std.mem.readInt(u16, ctx.data[8..10], .big)}) catch unreachable;
+        try testing.expect(std.mem.indexOf(u8, text, format) != null);
+        const tracks = std.fmt.bufPrint(&want, "Tracks: {d}", .{std.mem.readInt(u16, ctx.data[10..12], .big)}) catch unreachable;
+        try testing.expect(std.mem.indexOf(u8, text, tracks) != null);
+        const division = std.fmt.bufPrint(&want, "Division: {d} ticks/quarter", .{std.mem.readInt(u16, ctx.data[12..14], .big)}) catch unreachable;
+        try testing.expect(std.mem.indexOf(u8, text, division) != null);
+    } else {
+        // The XMIDI branch reports the size the caller passed, so a listing of
+        // the same bytes under a different size has to say a different number.
+        const size_line = std.fmt.bufPrint(&want, "Size: {d} bytes", .{size}) catch unreachable;
+        try testing.expect(std.mem.indexOf(u8, text, size_line) != null);
+        try testing.expect(std.mem.indexOf(u8, text, "XMIDI sequence") != null);
+    }
+
+    // The listing is built from the declared size, not from what follows it, so
+    // the same prefix passed on its own has to produce the same text: a
+    // listing that read past the size would differ here.
+    if (size >= 14 and size < n) {
+        @memcpy(ctx.head[0..size], ctx.data[0..size]);
+        var lst2: ?*anyopaque = null;
+        var lsz2: u32 = 0;
+        const ok2 = api_midi.AIL_list_MIDI(@ptrCast(ctx.head[0..size].ptr), size, &lst2, &lsz2, 0);
+        if (ok2 == 1) {
+            defer freeLock(lst2);
+            try testing.expectEqualStrings(listMidiText(lst2), text);
+            try testing.expectEqual(lsz, lsz2);
+        }
+    }
+}
+
+const list_midi_corpus = [_][]const u8{
+    // A one-track file, and a format-1 file with the division a sequencer uses.
+    "MThd" ++ "\x00\x00\x00\x06" ++ "\x00\x00\x00\x01\x00\x60" ++ "MTrk" ++ "\x00\x00\x00\x04" ++ "\x00\xFF\x2F\x00",
+    "MThd" ++ "\x00\x00\x00\x06" ++ "\x01\x00\x00\x02\x02\x10" ++ "MTrk" ++ "\x00\x00\x00\x04" ++ "\x00\xFF\x2F\x00",
+    // An XMIDI image, whose branch prints the size the caller declared.
+    "FORM" ++ "\x00\x00\x00\x14" ++ "XMID" ++ "EVNT" ++ "\x00\x00\x00\x04" ++ "\x00\xFF\x2F\x00",
+    // Cut inside the header, and cut before it.
+    "MThd" ++ "\x00\x00",
+    "M",
+    // Tags that are not a MIDI file, and bytes that are nothing at all.
+    "RIFF" ++ "\x00\x00\x00\x20" ++ "WAVEfmt ",
+    "MThX" ++ "\x00\x00\x00\x06" ++ "\x00\x00\x00\x01\x00\x60",
+    "",
+};
+
+test "fuzz: MIDI and XMIDI listing export" {
+    var ctx: list_midi_ctx = .{};
+    try std.testing.fuzz(&ctx, fuzzListMidiOne, .{ .corpus = &list_midi_corpus });
 }
