@@ -51,6 +51,54 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 Digital driver lifecycle counting, SoundFont thread safety, Miles event-system hardening, ASI codec fuzzing, reproducible release packaging, and comprehensive stability and documentation fixes.
 
+### Breaking
+
+The PE export table is unchanged, so a game that only drops in `mss32.dll` is
+unaffected by everything below. The breaks are in the two surfaces a source
+consumer compiles against: the Zig API under `src/` and `mss.h`.
+
+Zig API, for a project that consumes the package as a dependency
+(`b.dependency("openmiles", ...)`):
+
+- `fileCallbackReadAll` takes the allocator it allocates from:
+  `fileCallbackReadAll(filename)` is now
+  `fileCallbackReadAll(allocator, filename)`. The returned buffer belongs to
+  that allocator and must be freed with it, so a caller that passed only the
+  filename no longer compiles, and one that freed the old buffer with its own
+  allocator is now freeing across allocators.
+- `parseSmfTimeSigNumerator` is gone, renamed `parseSmfBeatsPerMeasure`. It
+  always returned the measure's quarter-note beat count (the time-signature
+  denominator), never the numerator its old name promised, so the new name is
+  what the return value already was.
+- `unregisterSequence(seq)` is gone. `claimSequenceRelease(seq) bool` replaces
+  it: the release is now a claim under the lock, and it reports whether the
+  handle was still tracked. A handle it does not name has already been freed, so
+  a caller that released twice now has to act on the `false` instead of freeing
+  twice.
+- `registerSequence(seq)` returns `bool`, reporting whether the handle was
+  tracked. A caller that discards the result is unaffected; a caller that stored
+  the function in a `*const fn (*Sequence) void` no longer type-checks. A
+  `false` means the handle could not be tracked, and the caller owns tearing it
+  down.
+- `maybeResolveCaseInsensitivePath` moved from `openmiles` to
+  `openmiles.fs_compat`, next to the other filesystem helpers that call it. The
+  signature is unchanged.
+- `satI32`, `satU32` and `removeFirst` are now re-exports of
+  `utils/saturate.zig` and `utils/list.zig` rather than definitions in the
+  module root. They keep their signatures, so `openmiles.satI32(v)` still
+  compiles; a caller importing `openmiles/utils/saturate.zig` by path gets the
+  same functions.
+
+`mss.h`:
+
+- `MilesSetVarI`, `MilesSetVarF`, `MilesGetVarI` and `MilesGetVarF` take
+  `void* system` where they took `U32 system`. The handle is what
+  `MilesStartupEventSystem` returns, so the new type is the one the rest of the
+  event-system calls in the header already use. The parameter is one pointer
+  wide on every target and the stdcall decoration is unchanged, so a binary
+  linked against the old header still resolves and runs; a source consumer that
+  copied the handle into its own `U32` must drop that copy.
+
 ### Added
 
 - Coverage-guided fuzz targets for `AIL_decompress_ASI` and for the
@@ -1152,3 +1200,8 @@ contract.
   label filtering, per-label caps) but does not yet route them through the
   mixer for audio output, so event-driven sounds are queryable but silent.
   See `docs/API_STATUS.md` for the per-function matrix.
+
+[Unreleased]: https://github.com/maci0/openmiles/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/maci0/openmiles/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/maci0/openmiles/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/maci0/openmiles/releases/tag/v0.1.0
