@@ -965,8 +965,11 @@ comptime {
                 }
             }
         }
-        // (The CRT entry DllMainCRTStartup is the PE entry point via the header,
-        // not an export — real mss32.dll does not export it, so neither do we.)
+        // (The CRT entry DllMainCRTStartup is not ours to suppress: it is the PE
+        // entry point the linker places in the export table as
+        // _DllMainCRTStartup@12. never_export only filters this targets loop, so
+        // real mss32.dll not exporting it is tolerated as an EXTRA, not a
+        // MISSING.)
         // Variadic functions use callconv(.c), generating `_FuncName` in COFF (not `_FuncName@N`).
         // They are NOT in the stdcall targets loop, so they need explicit /EXPORT renames so the
         // DLL export table contains the bare name (AIL_debug_printf) rather than _AIL_debug_printf.

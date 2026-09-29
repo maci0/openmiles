@@ -89,8 +89,11 @@ documented here.
 
 > The per-version "ours" counts in the tables below are from the sweep runs
 > recorded here, which predate the current export table: the default v9 build
-> now emits 392 distinct exports (`objdump -p` on
-> `zig build -Dtarget=x86-windows`), not the 635 those tables carry. Treat
+> now emits 394 distinct exports (`objdump -p` on
+> `zig build -Dtarget=x86-windows`), not the 635 those tables carry. Those 394
+> are the 392 names the `src/main.zig` table emits plus the two the build adds
+> outside it: `AIL_sprintf` (a `/EXPORT:` directive) and `_DllMainCRTStartup@12`
+> (a linker artifact, see below). Treat
 > them as the record of a past run, not the current count. The live count comes
 > from the built DLL or from `scripts/check_all_versions.sh`; the load-bearing
 > claim is the MISSING/DECORATION diff, not the export total. The v6 row's
@@ -122,21 +125,24 @@ EXTRA breaks down into two very different groups:
    fewer — and forcing EXTRA to 0 against one sub-version would *reduce* fidelity
    to the others.
 
-2. **Truly spurious (17, in no Miles DLL or SDK header).** `RIB_MAIN` (removed —
-   real plugins export `RIB_Main`; the host exports `MIX_RIB_MAIN`),
-   `DllMainCRTStartup` (a Zig/lld entry-point artifact), and 15 convenience
-   wrappers the project added (`AIL_pause_sequence`, `AIL_quick_stop`,
-   `AIL_open_midi_driver`, ...). The wrappers existed for the project's own C
-   harnesses in `tests/`, which resolve every entry point by name through
-   `GetProcAddress`. Since then they were suppressed from the PE export table:
-   `never_export` in `src/main.zig` lists every name no real release ever
-   exported, and the implementations stay callable from the Zig tests, which
-   link the module directly. A C harness that resolves one of these names by
-   name through `GetProcAddress` no longer finds it. The harnesses that still
-   name a `never_export` entry (`AIL_open_midi_driver`, `AIL_close_midi_driver`,
-   `AIL_ASI_provider_attribute`, `AIL_set_timer_user_data`) load them with
-   `LOAD_FUNC_OPT` in `tests/test_utils.h` and skip the section when the symbol
-   is absent, so they still run against a current DLL.
+2. **Truly spurious (in no Miles DLL or SDK header).** `never_export` in
+   `src/main.zig` lists 36 such names: 11 first-generation mistakes, 13
+   wrong-name duplicates (a real Miles export exists under a different name,
+   which is also emitted, so MISSING stays 0), and 12 v6 "resource library",
+   sample-attribute-persistence, and `*_attribute`/`*_preference` spellings the
+   real DSP-property surface never used. Their implementations stay callable
+   from the Zig tests, which link the module directly. A C harness that
+   resolves one of these names by name through `GetProcAddress` no longer finds
+   it. The harnesses that still name a `never_export` entry
+   (`AIL_open_midi_driver`, `AIL_close_midi_driver`, `AIL_ASI_provider_attribute`,
+   `AIL_set_timer_user_data`) load them with `LOAD_FUNC_OPT` in
+   `tests/test_utils.h` and skip the section when the symbol is absent, so they
+   still run against a current DLL.
+
+   `RIB_MAIN` is a third of a kind and needs no suppression: it was a
+   wrong-name duplicate (real plugins export `RIB_Main`, the host exports
+   `MIX_RIB_MAIN`) and was renamed rather than dropped, so it is not in the
+   table at all.
 
 **EXTRA bounding.** Using a presence map computed over *all* 148
 reference DLLs (per-function set of major versions it appears in), every target
@@ -154,13 +160,16 @@ range exports the symbol) and re-verified: **all of v4-v9 stay byte-exact (0
 missing, 0 mismatch)**. This dropped EXTRA sharply (v7 148→46, v8 243→128,
 v9 280→159).
 
-**Remaining EXTRA is sub-version variance, plus a group since eliminated:**
+**Remaining EXTRA is sub-version variance, plus one linker artifact:**
 
-1. *Artifacts, since eliminated:* `DllMainCRTStartup` (a Zig/lld entry-point
-   artifact, never a real Miles export) and the 15 convenience wrappers counted
-   above. Neither is in the table any more: the CRT entry is the PE entry point
-   rather than an export, and `never_export` in `src/main.zig` drops the
-   wrappers while their implementations stay callable from the Zig tests.
+1. *Artifacts:* `DllMainCRTStartup` is a Zig/lld entry-point artifact, never a
+   real Miles export. It is still in the shipped table as
+   `_DllMainCRTStartup@12`: `never_export` only filters the `src/main.zig`
+   targets loop, so it cannot suppress a symbol the linker adds on its own.
+   It is benign for the load-bearing guarantee, since parity here is
+   MISSING/DECORATION, and an absent name would be the failure mode that
+   matters. The convenience wrappers counted above *were* eliminated, by
+   `never_export`.
 
 The byte-exact MISSING/MISMATCH result remains the load-bearing fidelity
 guarantee; EXTRA is now at its safe floor.

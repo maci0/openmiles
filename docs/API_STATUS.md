@@ -5,20 +5,26 @@ System (MSS) API across versions v3–v9.
 
 **Export-ABI parity is complete:** every `-Dmss-version` build (v3–v9) reproduces
 its reference `mss32.dll`'s decorated export table with zero missing exports, and
-every exported function is exercised by the fuzz harness plus unit/C-integration
-tests. The status below describes *behaviour* — whether a function does real work,
-has known limitations, or is a compatibility stub.
+every exported function is reached by the Zig unit and fuzz suites. (The C
+harnesses in `tests/` load the built DLL through `GetProcAddress` and are the
+outer layer, but nothing runs them in CI; see `CONTRIBUTING.md`.) The status
+below describes *behaviour* — whether a function does real work, has known
+limitations, or is a compatibility stub.
 
-**A listed function is not necessarily callable.** A handful of names below
-(`AIL_open_midi_driver`, `AIL_close_midi_driver`, `AIL_pause_sample`,
-`AIL_pause_sequence`, `AIL_set_timer_user_data`, `AIL_set_sample_filter`,
-`AIL_set_filter_attribute`, `AIL_3D_sample_ms_position`,
+**A listed function is not necessarily callable.** 36 of the names below appear
+in no Miles export table, so `never_export` in `src/main.zig` suppresses them
+from every emitted export table (`AIL_open_midi_driver`, `AIL_close_midi_driver`,
+`AIL_pause_sample`, `AIL_pause_sequence`, `AIL_set_timer_user_data`,
+`AIL_set_sample_filter`, `AIL_set_filter_attribute`, `AIL_3D_sample_ms_position`,
 `AIL_set_3D_sample_ms_position`, `AIL_set_mem_callbacks`,
 `AIL_open_ASI_provider`, `AIL_close_ASI_provider`,
-`AIL_ASI_provider_attribute`, `AIL_quick_stop`, `AIL_DLS_unload_file`) appear in
-no Miles export table, so `src/main.zig` lists them as `never_export`: they are
-implemented and covered by the Zig tests, which link the module directly, but
-the DLL does not export them, and a call from your own code will not link. A C
+`AIL_ASI_provider_attribute`, `AIL_quick_stop`, `AIL_DLS_unload_file`, and 21
+more; the list in `src/main.zig` is the authoritative one). They are
+implemented and reachable from the Zig tests, which link the module directly,
+but the DLL does not export them, and a call from your own code will not link.
+Three of the 36 (`AIL_3D_sample_float_distances`,
+`AIL_set_3D_sample_float_distances`, `AIL_input_close`) have no Zig test that
+names them. A C
 harness that resolves one by name through `GetProcAddress` does not find it
 either; `tests/midi_test.c`, `tests/full_suite.c`, and `tests/rib_test.c` still
 name a few of these (`AIL_open_midi_driver`, `AIL_close_midi_driver`,
@@ -527,9 +533,12 @@ the one in `scripts/check_all_versions.sh` in step, and
 `scripts/check_header.py` still checks all three against the export table.
 
 Per-version arity differences are reproduced exactly (e.g. `AIL_init_sample`
-`@4→@12→@8`, the v4/v5 5-arg `AIL_3D_sample_distances@20`, `AIL_input_open@12`,
-the v7-only `@16` DSP-stage API, `MIX_RIB_MAIN` `@8`/`@20`, and the v8-vs-v9
-`Miles*` event-API arities) via per-version export aliases.
+`@4→@12→@8`, the v4/v5 5-arg `AIL_3D_sample_distances@20`, the v7-only `@16`
+DSP-stage API, `MIX_RIB_MAIN` `@8`/`@20`, and the v8-vs-v9 `Miles*` event-API
+arities) via per-version export aliases. Renames across a version boundary are
+reproduced the same way: 6.0 exports `AIL_input_info@4` and 6.1+ exports
+`AIL_get_input_info@4` for the same shape, and only the first is emitted in a
+v6.0 build.
 
 ## Behavioural fidelity audit (2026-06)
 A systematic pass cross-checking each implementation against the MSS 9.x SDK

@@ -1227,10 +1227,12 @@ pub fn AIL_create_wave_synthesizer(dig_opt: ?*DigitalDriver, mdi: ?*MidiDriver, 
 }
 pub fn AIL_destroy_wave_synthesizer(synth: *MidiDriver) callconv(.winapi) void {
     // The shared close, as AIL_DLS_close uses: the sequences allocated on this
-    // device are stopped and released before the driver they read through goes
-    // away. A bare deinit left each of them with an initialized ma_sound and a
-    // data source reading through a freed driver, and its entry in the global
-    // sequence list still naming the freed pointer.
+    // device are stopped before the driver they read through goes away. A bare
+    // deinit left each of them with an initialized ma_sound and a data source
+    // reading through a freed driver. The handles are not freed here; the
+    // driver close marks them orphaned and keeps their table entries, so the
+    // game's own AIL_release_sequence_handle still owns them (see
+    // root.destroyMidiDriver).
     openmiles.closeMidiDriver(synth);
 }
 pub fn AIL_waveOutClose(driver_opt: ?*DigitalDriver) callconv(.winapi) void {

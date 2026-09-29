@@ -35,7 +35,7 @@ It replaces the proprietary MSS audio stack with [miniaudio](https://miniaud.io/
 - **Event system (v8/v9)** -- byte-faithful event-text codec (`AIL_create_event` / `AIL_next_event_step`, all step types) plus the v9 `Miles*` API: variables, event enqueue, and a sound-instance lifecycle (durations, label filtering, per-label caps, state reporting)
 - **SoundBank (v8/v9)** -- loads the `BANK`-format soundbank into a global container, enumerates event/sound/preset/environment assets, resolves event bytecode + sound info/duration by name
 - **Perceptual volume curve** -- cubic attenuation matching the original MSS ~60dB dynamic range
-- **Full export-ABI parity** -- v3–v9 export tables diff to zero against the reference DLLs; every exported function is fuzzed and unit-tested
+- **Full export-ABI parity** -- v3–v9 export tables diff to zero against the reference DLLs; every exported function is reached by the Zig unit and fuzz suites
 
 ## Building
 
@@ -645,11 +645,12 @@ graph TD
 
 ## API Coverage
 
-The default (v9) DLL exports **392** functions spanning the v3–v9 API surface.
+The default (v9) DLL exports **394** functions spanning the v3–v9 API surface.
 The legacy `waveOut` calls stop at 6.6 and the `midiOut` calls at 7.0, matching
 the reference DLLs, so neither is in this table, and the `DIG_`/`MDI_` prefix
-aliases are not exported. Every exported function is covered by the fuzz
-harness and by unit or C-integration tests. See
+aliases are not exported. Every exported function is reached by the Zig unit
+and fuzz suites; the C harnesses in `tests/` are the extra layer, and nothing
+runs them in CI (see [CONTRIBUTING.md](CONTRIBUTING.md)). See
 [docs/API_STATUS.md](docs/API_STATUS.md) for the per-function implementation matrix.
 
 Beyond export-table parity, behaviour is cross-checked against the MSS SDK
@@ -661,7 +662,7 @@ section of [docs/API_STATUS.md](docs/API_STATUS.md)).
 | Category | Status |
 |----------|--------|
 | Core System | Mostly implemented (some Windows/hardware-specific APIs are no-ops) |
-| Digital Audio (Samples & Streams) | Fully implemented |
+| Digital Audio (Samples & Streams) | Playback fully implemented; the per-object processor callbacks and the auto-service/buffer-size queries are stubs |
 | MIDI / XMIDI | Core playback fully implemented; DLS/SF2 loaded via TinySoundFont |
 | 3D Positional Audio | Fully implemented |
 | RIB / ASI Plugin System | Fully implemented |

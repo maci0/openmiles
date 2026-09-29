@@ -36,7 +36,7 @@ This matrix tracks the availability of major API groups across different histori
 | Memory Image Loading | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
 | Streaming (File-based) | v3 | 🔴 | 🟢 | 🟢 | 🟢 Full | |
 | Input API | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | Recording via miniaudio capture device |
-| Compression API | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | IMA-ADPCM WAV encode via the bundled encoder, decode by wrapping the raw blocks in a WAV for miniaudio |
+| Compression API | v5 | 🔴 | 🔴 | 🟢 | 🟢 Full | IMA-ADPCM WAV encode via the bundled encoder, decode by wrapping the raw blocks in a WAV for miniaudio |
 | Filter API | v6 | 🔴 | 🔴 | 🟢 | 🟢 Full | Low-pass filter via miniaudio ma_lpf_node; real-time cutoff/order control |
 
 ## 3. 3D Positional Audio
@@ -51,13 +51,13 @@ This matrix tracks the availability of major API groups across different histori
 |:---|:---:|:---:|:---:|:---:|:---:|:---|
 | `MDI_` Prefix Functions | v2 | 🟢 | 🟢 | ⚪ | 🔴 None | Aliases not yet exported |
 | XMIDI Branching | v2 | 🟢 | 🟢 | 🟢 | 🟢 Full | Tempo fade, position seek with channel state replay |
-| DLS / SF2 Loading | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | |
+| DLS / SF2 Loading | v5 | 🔴 | 🔴 | 🟢 | 🟢 Full | Dropped after v7 |
 
 ## 5. RIB (RAD Interface Broker)
 | Function Group | Intro | AIL v2 | MSS v3 | MSS 6.6 | OpenMiles | Notes |
 |:---|:---:|:---:|:---:|:---:|:---:|:---|
 | Provider Infrastructure | v4 | 🔴 | 🔴 | 🟢 | 🟢 Full | |
-| Provider Enumeration | v6 | 🔴 | 🔴 | 🟢 | 🟢 Full | Real provider enumeration with interface matching |
+| Provider Enumeration | v5 | 🔴 | 🔴 | 🟢 | 🟢 Full | Real provider enumeration with interface matching |
 
 ---
 

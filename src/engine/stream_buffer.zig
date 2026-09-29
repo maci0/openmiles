@@ -215,7 +215,7 @@ pub const StreamSource = struct {
                     continue;
                 }
                 self.starved = true;
-                break; // leave the rest of the output as the caller-zeroed silence
+                break; // the zero-fill below covers the rest of the output
             }
 
             const avail = slot.len - slot.pos;

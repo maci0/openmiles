@@ -2569,8 +2569,9 @@ pub const Sample3D = struct {
     }
 
     /// Explicit dead-reckoning step for AIL_3D_update_position: advance the
-    /// position by velocity over `dt_ms` milliseconds, unconditionally (unlike
-    /// the auto-tick updatePosition, which is gated on the auto_update flag).
+    /// position by velocity over `dt_ms` milliseconds. Both this and the auto-tick
+    /// updatePosition skip a sample at rest; only the auto-tick one also consults
+    /// the `auto_update` flag, which an explicit update deliberately bypasses.
     pub fn updatePositionExplicit(self: *Sample3D, dt_ms: f32) void {
         // early-out when velocity is ~0, mirroring AIL_API_update_listener_3D_position.
         const eps: f32 = 0.0001; // MSS_EPSILON
