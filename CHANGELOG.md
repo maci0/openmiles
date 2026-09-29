@@ -47,6 +47,22 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The temporary ASI provider image is created with `Permissions.fromMode(0o600)`
+  rather than a bare `0o600`. `std.Io.File.Permissions` is a non-exhaustive enum,
+  not a mode integer, so the tree did not compile at all: every `zig build` and
+  `make test` on a non-Windows target failed with `expected type
+  'Io.File.Permissions__enum_2901', found 'comptime_int'`. The owner-only mode
+  itself is unchanged.
+- The parity setup steps in `CONTRIBUTING.md` and `scripts/requirements.txt`
+  now create the virtual environment `uv pip install` requires, instead of
+  naming an install command that stops with `No virtual environment found`.
+  `.venv/` is gitignored, and `make check-parity-tools` names the same three
+  steps.
+- 90 of the 197 `file:line anchor` references in `docs/THREAT_MODEL.md` were
+  stale, so `make lint` and CI failed on a clean checkout. All 197 resolve again.
+
 ### Added
 
 - `scripts/package_release.sh` writes `<output.zip>.sha256` beside the archive,

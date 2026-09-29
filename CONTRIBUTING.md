@@ -27,11 +27,18 @@ fetched: every dependency is a vendored header under `deps/`, verified by
 `make parity` is the one exception. It diffs each `-Dmss-version` build against
 a reference DLL under `references/`, which is copyrighted and not distributed,
 so it never runs in CI and is not part of `make check`. It also needs one
-third-party Python package, declared in `scripts/requirements.txt`:
+third-party Python package, declared in `scripts/requirements.txt`. `uv pip
+install` refuses to run outside a virtual environment, so the environment comes
+first; the `source` line is what puts the venv's `python3` on PATH, which is the
+one `make parity` and `scripts/check_all_versions.sh` resolve:
 
 ```bash
+uv venv
+source .venv/bin/activate
 uv pip install -r scripts/requirements.txt
 ```
+
+Deactivate with `deactivate` when you are done. `.venv/` is gitignored.
 
 Optional: a `test_media/` directory holding `test.wav`, `test.mid`, and
 `test.sf2`. The build installs it next to the test binaries and the fixtures

@@ -3,7 +3,12 @@
 # read only by scripts/check_exports.py, which scripts/check_all_versions.sh
 # (`make parity`) drives. Install with:
 #
+#   uv venv
+#   source .venv/bin/activate
 #   uv pip install -r scripts/requirements.txt
+#
+# The venv is not optional: `uv pip install` refuses to install outside one, and
+# the `source` is what puts its python3 on PATH for the gate that reads this.
 #
 # Pinned so a parity verdict is comparable across machines; pefile parses the
 # reference DLLs' export tables, and a different release could read them

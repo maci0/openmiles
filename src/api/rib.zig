@@ -155,7 +155,10 @@ const temp_image_name_units: usize = "om_asi_".len + 16 + ".dll".len;
 ///
 /// Windows has no POSIX mode here: the enum is a file-attribute set, so a
 /// numeric mode would set attributes rather than restrict access, and the
-/// temp directory's own ACLs are what govern the file there.
+/// temp directory's own ACLs are what govern the file there. The condition is
+/// known at comptime, so the branch that does not apply to the target is never
+/// analyzed: `fromMode` is the POSIX enum's constructor and does not exist on
+/// the Windows one.
 const temp_image_permissions: std.Io.File.Permissions = if (builtin.os.tag == .windows)
     .default_file
 else

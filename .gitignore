@@ -25,6 +25,9 @@ release/
 # writes a cache next to each of them the first time it imports one.
 __pycache__/
 *.pyc
+# The virtual environment `uv venv` creates for scripts/requirements.txt, the
+# one package `make parity` needs.
+.venv/
 europa_dump.txt
 exports.txt
 targets.txt
