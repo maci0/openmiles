@@ -214,7 +214,7 @@ check-host-tools:
 # failing later on an import.
 check-parity-tools:
 	@[ -n "$(PYTHON)" ] || { echo "error: neither python3 nor python found on PATH; the scripts/*.py gates need one" >&2; exit 1; }
-	@$(PYTHON) -c 'import pefile' 2>/dev/null || { echo "error: pefile not found; uv pip install -r scripts/requirements.txt" >&2; exit 1; }
+	@$(PYTHON) scripts/check_exports.py --check-deps >/dev/null 2>&1 || { echo "error: pefile not found; uv pip install -r scripts/requirements.txt" >&2; exit 1; }
 
 # check-toolchain comes first because `zig fmt` is part of this gate: a stray
 # zig on PATH would format-check the tree with a formatter no other step

@@ -702,6 +702,13 @@ pub const Sequence = struct {
     // methods (start/stop/setMsPosition/setLoopCount/etc.) use lock.
     state_mutex: std.Io.Mutex = .init,
 
+    /// Beat callbacks one fireBeatCallbacks call may fire before it resyncs
+    /// the clock. The sibling of max_xmidi_jumps_per_buffer: a tempo so short
+    /// that more beats than this fell between two calls would re-fire the
+    /// capped run on every later call, so past the budget the clock is derived
+    /// from the elapsed time instead.
+    const max_beat_callbacks_per_call: u32 = 16;
+
     /// Resolve a logical MIDI channel to its physical (mapped) channel.
     fn mapChannel(self: *const Sequence, ch: i32) i32 {
         const idx: usize = @intCast(@min(@max(ch, 0), 15));
@@ -1130,7 +1137,7 @@ pub const Sequence = struct {
     fn fireBeatCallbacks(self: *Sequence) void {
         if (self.ms_per_beat <= 0) return;
         const cb_ptr = self.beat_callback.load(.acquire);
-        var budget: u32 = 16; // cap iterations to prevent infinite loop on corrupted tempo
+        var budget: u32 = max_beat_callbacks_per_call;
         while (self.time_ms >= self.next_beat_ms and budget > 0) : (budget -= 1) {
             const beat = self.current_beat_in_measure.load(.acquire);
             const measure = self.current_measure.load(.acquire);

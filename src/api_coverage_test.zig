@@ -473,9 +473,11 @@ test "coverage: file/input.zig exports" {
     try testing.expect(fl.AIL_file_type(sc(), 16) == 0); // all-zero scratch: unknown
     try testing.expect(fl.AIL_file_read("/nonexistent_om_test", null) == null);
     // Bytes this test owns, not the shared scratch buffer: the read-back below
-    // can only be compared against a pattern no other test can overwrite.
-    const payload = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
-    try testing.expectEqual(@as(i32, 1), fl.AIL_file_write("om_cov_test.bin", @ptrCast(&payload), payload.len));
+    // can only be compared against a pattern no other test can overwrite. A
+    // var, because AIL_file_write takes the `void FAR *` mss.h declares and a
+    // @ptrCast off a const pointer to it does not compile.
+    var payload = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
+    try testing.expectEqual(@as(i32, 1), fl.AIL_file_write("om_cov_test.bin", &payload, payload.len));
     try testing.expectEqual(@as(u32, payload.len), fl.AIL_file_size("om_cov_test.bin"));
     // The read-back path: the file just written must hand back its own bytes.
     // Without the comparison a read that returned a short, empty, or stale
@@ -487,7 +489,7 @@ test "coverage: file/input.zig exports" {
     // A write into a nonexistent directory is the one failure that must leave a
     // message behind: a bare 0 with "No error" leaves the caller no way to tell
     // a missing directory from a full disk.
-    try testing.expectEqual(@as(i32, 0), fl.AIL_file_write("om_cov_missing_dir/x.bin", @ptrCast(&payload), payload.len));
+    try testing.expectEqual(@as(i32, 0), fl.AIL_file_write("om_cov_missing_dir/x.bin", &payload, payload.len));
     try testing.expect(!std.mem.eql(u8, "No error", std.mem.span(fl.AIL_file_error())));
     defer std.Io.Dir.cwd().deleteFile(openmiles.io, "om_cov_test.bin") catch {};
     fl.AIL_set_file_callbacks(null, null, null, null);

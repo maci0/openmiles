@@ -11,7 +11,14 @@ import argparse
 import re
 import sys
 
-import pefile
+try:
+    import pefile
+except ImportError:
+    # Deferred rather than fatal so `--check-deps` can answer the question the
+    # Makefile's parity preflight asks without a `python -c` one-liner in the
+    # Makefile itself, which is a second language in a command that belongs to
+    # one. Every other path reports the same missing package.
+    pefile = None
 
 EXIT_OK = 0
 PROG = "check_exports.py"
@@ -25,8 +32,13 @@ EXIT_FAIL = 1
 EXIT_USAGE = 2
 
 
+DEPS_HINT = "pefile not importable; uv pip install -r scripts/requirements.txt"
+
+
 def exports(path):
     """Export names of a PE image, or raise ValueError naming the bad input."""
+    if pefile is None:
+        raise ValueError(DEPS_HINT)
     try:
         pe = pefile.PE(path, fast_load=True)
     except OSError as exc:
@@ -56,6 +68,16 @@ def norm(n):
 
 
 def main(argv=None):
+    # Before argparse: the preflight runs this with no DLL arguments at all, and
+    # it only wants to know whether the third-party import resolved.
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv == ["--check-deps"]:
+        if pefile is None:
+            print(f"{PROG}: {DEPS_HINT}", file=sys.stderr)
+            return EXIT_FAIL
+        return EXIT_OK
+
     parser = argparse.ArgumentParser(
         prog=PROG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -67,6 +89,11 @@ def main(argv=None):
     )
     parser.add_argument("ours", metavar="OURS.dll", help="DLL we built")
     parser.add_argument("reference", metavar="REFERENCE.dll", help="real Miles DLL")
+    parser.add_argument(
+        "--check-deps",
+        action="store_true",
+        help="report whether pefile is importable, and exit (pass it alone)",
+    )
     parser.add_argument(
         "--names-only",
         action="store_true",

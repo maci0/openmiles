@@ -71,9 +71,17 @@ All notable changes to OpenMiles are recorded here. The format follows
   XMIDI sequence opens at delta 0 with its volume, pan and reset-controllers
   writes ahead of the first note, so every sequence's first note rendered at the
   soundfont's default volume and pan.
+- `make check-parity-tools` asks `scripts/check_exports.py --check-deps` whether
+  `pefile` imported, instead of a `python -c 'import pefile'` one-liner in the
+  makefile. The probe belongs to the script that owns the dependency, and a
+  parity run launched without `pefile` now names the missing package instead of
+  ending on an `ImportError` traceback.
 
 ### Fixed
-
+- `src/api_coverage_test.zig` compiled again: the file/input coverage test built
+  a `const` payload and `@ptrCast` it to `AIL_file_write`'s `void FAR *`, which
+  discards the const qualifier, so `zig build test` failed to build the test
+  binary at all.
 - `docs/THREAT_MODEL.md` re-anchored at `src/engine/midi.zig`: the XMIDI loop
   stack, its depth check and the per-buffer jump budget had moved, so
   `make lint` failed `check-threat-model` on every run. The three mitigations
