@@ -87,7 +87,15 @@ def link_target(raw: str) -> str | None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(prog=PROG, description=__doc__)
+    ap = argparse.ArgumentParser(
+        prog=PROG,
+        # The docstring is laid out as prose in paragraphs; the default
+        # formatter reflows it into one wall of text, the reason every sibling
+        # gate passes this.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__,
+        epilog="Exit status: 0 the archive carries what it names, 1 it does not, 2 bad invocation.",
+    )
     ap.parse_args()
 
     entries = parse_entries(PACKAGER.read_text(encoding="utf-8"))
