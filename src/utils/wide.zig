@@ -234,8 +234,6 @@ test "fuzz: valid utf-8 survives the round trip whatever it contains" {
     var prng = std.Random.DefaultPrng.init(0xA17F);
     const rand = prng.random();
     var bytes: [96]u8 = undefined;
-    // Worst case in both directions for a 96-byte input: one UTF-16 unit per
-    // UTF-8 byte, and one to three UTF-8 bytes per unit.
     var wbuf: [bytes.len + 2]u16 = undefined;
     var out: [bytes.len * 3 + 2]u8 = undefined;
     var i: usize = 0;

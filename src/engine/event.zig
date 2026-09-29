@@ -178,9 +178,10 @@ pub const EventConstruct = struct {
     bytes: std.ArrayListUnmanaged(u8) = .empty,
     allocator: std.mem.Allocator,
     // Set when an append runs out of memory mid-build. The step builders keep
-    // appending after that, but close() must refuse to hand out the result: a
-    // truncated event string would decode as garbage inside the event VM with
-    // no signal at all.
+    // appending after that, but each returns !failed, and close() refuses to
+    // hand out the result: a step that could not be appended is not a step, and
+    // a truncated event string decodes as garbage inside the event VM with no
+    // signal at all.
     failed: bool = false,
 
     pub fn create(allocator: std.mem.Allocator) ?*EventConstruct {
@@ -230,8 +231,6 @@ pub const EventConstruct = struct {
     pub fn addClearState(self: *EventConstruct) bool {
         self.printType(.clear_state);
         self.raw(";");
-        // A step that could not be appended is not a step: reporting success
-        // would hand the caller a 1 for a step the build never took.
         return !self.failed;
     }
     pub fn addOneString(self: *EventConstruct, t: StepType, s: []const u8) bool {
@@ -239,8 +238,6 @@ pub const EventConstruct = struct {
         self.raw(";");
         self.raw(s);
         self.raw(";");
-        // A step that could not be appended is not a step: reporting success
-        // would hand the caller a 1 for a step the build never took.
         return !self.failed;
     }
     // --- field encoders (mirror the SDK AIL_mem_print* calls and the decoder) ---
@@ -306,8 +303,6 @@ pub const EventConstruct = struct {
         self.raw(";");
         self.fieldCStr(lib);
         self.fieldCStr(sounds);
-        // A step that could not be appended is not a step: reporting success
-        // would hand the caller a 1 for a step the build never took.
         return !self.failed;
     }
     pub fn addApplyEnv(self: *EventConstruct, name: ?*const anyopaque, is_dynamic: i32) bool {
@@ -316,8 +311,6 @@ pub const EventConstruct = struct {
         self.raw(";");
         self.fieldCStr(name);
         self.fieldDigit(@as(i32, if (is_dynamic != 0) 1 else 0));
-        // A step that could not be appended is not a step: reporting success
-        // would hand the caller a 1 for a step the build never took.
         return !self.failed;
     }
     pub fn addSoundLimit(self: *EventConstruct, name: ?*const anyopaque, limits: ?*const anyopaque) bool {
@@ -326,8 +319,6 @@ pub const EventConstruct = struct {
         self.raw(";");
         self.fieldCStr(name);
         self.fieldCStr(limits);
-        // A step that could not be appended is not a step: reporting success
-        // would hand the caller a 1 for a step the build never took.
         return !self.failed;
     }
     pub fn addPersist(self: *EventConstruct, preset: ?*const anyopaque, name: ?*const anyopaque, labels: ?*const anyopaque, is_dynamic: i32) bool {
@@ -338,8 +329,6 @@ pub const EventConstruct = struct {
         self.fieldCStr(name);
         self.fieldCStr(labels);
         self.fieldDigit(is_dynamic);
-        // A step that could not be appended is not a step: reporting success
-        // would hand the caller a 1 for a step the build never took.
         return !self.failed;
     }
     pub fn addRamp(self: *EventConstruct, name: ?*const anyopaque, labels: ?*const anyopaque, time: f32, target: ?*const anyopaque, type_: i32, apply_to_new: i32, interp: i32) bool {
@@ -353,8 +342,6 @@ pub const EventConstruct = struct {
         self.fieldDigit(type_);
         self.fieldDigit(apply_to_new);
         self.fieldDigit(interp);
-        // A step that could not be appended is not a step: reporting success
-        // would hand the caller a 1 for a step the build never took.
         return !self.failed;
     }
     pub fn addControlSounds(self: *EventConstruct, labels: ?*const anyopaque, marker_start: ?*const anyopaque, marker_end: ?*const anyopaque, position: ?*const anyopaque, preset: ?*const anyopaque, loop_count: u8, type_: i32, fade_out: f32, preset_apply: i32) bool {
@@ -369,8 +356,6 @@ pub const EventConstruct = struct {
         self.fieldDigit(type_);
         self.fieldFloat(fade_out);
         self.fieldDigit(preset_apply);
-        // A step that could not be appended is not a step: reporting success
-        // would hand the caller a 1 for a step the build never took.
         return !self.failed;
     }
     pub fn addSetLfo(self: *EventConstruct, name: ?*const anyopaque, base: ?*const anyopaque, amplitude: ?*const anyopaque, freq: ?*const anyopaque, invert: i32, polarity: i32, waveform: i32, duty_cycle: i32, is_lfo: i32) bool {
@@ -388,8 +373,6 @@ pub const EventConstruct = struct {
         self.fieldDigit(waveform & 3);
         self.fieldUChar(@truncate(@as(u32, @bitCast(duty_cycle))));
         self.fieldDigit(@as(i32, if (is_lfo != 0) 1 else 0));
-        // A step that could not be appended is not a step: reporting success
-        // would hand the caller a 1 for a step the build never took.
         return !self.failed;
     }
     pub fn addMoveVar(self: *EventConstruct, name: ?*const anyopaque, times: ?[*]const f32, interp_types: ?[*]const i32, values: ?[*]const f32) bool {
@@ -409,8 +392,6 @@ pub const EventConstruct = struct {
         self.fieldFloat(v[0]);
         self.fieldFloat(v[1]);
         self.fieldFloat(v[2]);
-        // A step that could not be appended is not a step: reporting success
-        // would hand the caller a 1 for a step the build never took.
         return !self.failed;
     }
     pub fn addSetBlend(self: *EventConstruct, name: ?*const anyopaque, sound_count: i32, in_min: ?[*]const f32, in_max: ?[*]const f32, out_min: ?[*]const f32, out_max: ?[*]const f32, min_p: ?[*]const f32, max_p: ?[*]const f32) bool {
@@ -434,8 +415,6 @@ pub const EventConstruct = struct {
             self.fieldFloat(mnp[i]);
             self.fieldFloat(mxp[i]);
         }
-        // A step that could not be appended is not a step: reporting success
-        // would hand the caller a 1 for a step the build never took.
         return !self.failed;
     }
     pub fn addStartSound(self: *EventConstruct, args: StartSoundArgs) bool {
@@ -465,8 +444,6 @@ pub const EventConstruct = struct {
         self.fieldFloat(args.fadeintime);
         self.fieldDigit(args.evictiontype);
         self.fieldDigit(args.selecttype);
-        // A step that could not be appended is not a step: reporting success
-        // would hand the caller a 1 for a step the build never took.
         return !self.failed;
     }
     pub fn close(self: *EventConstruct) ?[*]u8 {

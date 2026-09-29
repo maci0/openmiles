@@ -140,7 +140,7 @@ report the missing file when it is absent. On Linux they build but cannot run:
 - Tests. A bug fix gets the failing test first; the Zig tests live in the
   `test` blocks of the module they cover, with the module-level suites in
   `src/test_root.zig` and `src/engine_test_root.zig`. The harnesses in `tests/`
-  are a separate thing, described below.
+  are a separate thing, described above.
 - An entry in `docs/API_STATUS.md` when a function's implementation status
   changes, and the relevant table in `README.md` when a coverage claim does.
 

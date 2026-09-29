@@ -35,8 +35,6 @@ All notable changes to OpenMiles are recorded here. The format follows
   DLL and are not swept; `scripts/check_header.py` checks them against the
   export table, and `scripts/check_versions.py` fails if a `-Dmss-version`
   value is neither swept nor listed as unswept with a reason.
-- ABI parity is checked by `scripts/check_all_versions.sh` against reference
-  DLLs under `references/` (not committed; supply them locally to run it).
 - The first tagged release decides the stability promise. While the version is
   `0.x`, SemVer promises nothing: a minor bump may carry a behavioural break,
   and the export table, not the version number, is the compatibility contract a
@@ -46,6 +44,12 @@ All notable changes to OpenMiles are recorded here. The format follows
   Breaking section naming the version it affects.
 
 ## [Unreleased]
+
+### Changed
+
+- The Quick API's three entry points that allocate a sample share one
+  `newQuickSample` helper, and `AIL_quick_load`'s VFS-or-disk read is now
+  `loadQuickSample`. Same handles, same last-error text, same log lines.
 
 ### Fixed
 

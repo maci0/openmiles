@@ -33,10 +33,9 @@
     if (!p_##name) p_##name = (t_##name)GetProcAddress(mss, MSS_DECORATE(name, bytes)); \
     if (!p_##name) printf("Not exported by this build, skipping what needs it: %s\n", #name);
 
-// Type definitions
-// These mirror the declarations in src/mss.h, which is what a consumer
-// compiles against; a divergence here hides a header defect from the harness
-// that is supposed to exercise it.
+/* These mirror the declarations in src/mss.h, which is what a consumer
+ * compiles against; a divergence here hides a header defect from the harness
+ * that is supposed to exercise it. */
 typedef int (__stdcall *t_AIL_startup)(void);
 typedef void (__stdcall *t_AIL_shutdown)(void);
 typedef void (__stdcall *t_AIL_set_redist_directory)(const char*);

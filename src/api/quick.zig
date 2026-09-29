@@ -17,78 +17,82 @@ pub fn AIL_quick_shutdown() callconv(.winapi) void {
     log("AIL_quick_shutdown()\n", .{});
     openmiles.closeAllDrivers();
 }
-pub fn AIL_quick_load(filename: [*:0]const u8) callconv(.winapi) ?*Sample {
-    log("AIL_quick_load(filename={s})\n", .{filename});
-    openmiles.clearLastError();
-    if (openmiles.lastDigitalDriver()) |d| {
-        const s = openmiles.Sample.init(d) catch |err| {
-            log("Error: {any}\n", .{err});
-            openmiles.setLastError("Failed to allocate sample for quick load");
-            return null;
-        };
-        if (openmiles.currentFileCallbacks() != null) {
-            if (openmiles.fileCallbackReadAll(d.allocator, filename)) |b| {
-                s.loadFromOwnedMemory(b) catch {
-                    d.allocator.free(b);
-                    openmiles.setLastError("Failed to load quick sample from memory");
-                    s.deinit();
-                    return null;
-                };
-                return s;
-            } else |err| {
-                // The app replaced the filesystem, so a read it could not serve
-                // is a failed load, not a hint to read a different file off
-                // disk: falling through loaded an unrelated same-named file, or
-                // reported a disk failure for an asset the VFS never had.
-                log("AIL_quick_load: callback read failed ({any})\n", .{err});
-                openmiles.setLastError("Failed to load quick sample file");
+// The handle every quick entry starts from. `what` names the caller in the
+// last-error text, so an allocation failure says which entry ran.
+fn newQuickSample(d: *DigitalDriver, what: []const u8) ?*Sample {
+    return openmiles.Sample.init(d) catch |err| {
+        log("Error: {any}\n", .{err});
+        openmiles.setLastError(what);
+        return null;
+    };
+}
+
+// Read `filename` into a fresh quick sample: through the app's VFS callbacks
+// when it installed any, off disk otherwise. A failure sets the last error and
+// releases the partial sample, so every caller gets the same outcome.
+fn loadQuickSample(d: *DigitalDriver, filename: [*:0]const u8) ?*Sample {
+    const s = newQuickSample(d, "Failed to allocate sample for quick load") orelse return null;
+    if (openmiles.currentFileCallbacks() != null) {
+        if (openmiles.fileCallbackReadAll(d.allocator, filename)) |b| {
+            s.loadFromOwnedMemory(b) catch {
+                d.allocator.free(b);
+                openmiles.setLastError("Failed to load quick sample from memory");
                 s.deinit();
                 return null;
-            }
-        }
-        s.loadFromFile(std.mem.span(filename)) catch {
+            };
+            return s;
+        } else |err| {
+            // The app replaced the filesystem, so a read it could not serve is a
+            // failed load, not a hint to read a different file off disk: falling
+            // through loaded an unrelated same-named file, or reported a disk
+            // failure for an asset the VFS never had.
+            log("AIL_quick_load: callback read failed ({any})\n", .{err});
             openmiles.setLastError("Failed to load quick sample file");
             s.deinit();
             return null;
-        };
-        return s;
+        }
     }
-    return null;
+    s.loadFromFile(std.mem.span(filename)) catch {
+        openmiles.setLastError("Failed to load quick sample file");
+        s.deinit();
+        return null;
+    };
+    return s;
+}
+pub fn AIL_quick_load(filename: [*:0]const u8) callconv(.winapi) ?*Sample {
+    log("AIL_quick_load(filename={s})\n", .{filename});
+    openmiles.clearLastError();
+    const d = openmiles.lastDigitalDriver() orelse return null;
+    return loadQuickSample(d, filename);
 }
 pub fn AIL_quick_load_mem(data: *anyopaque, size: u32) callconv(.winapi) ?*Sample {
     log("AIL_quick_load_mem(data={*}, size={d})\n", .{ data, size });
     openmiles.clearLastError();
-    if (openmiles.lastDigitalDriver()) |d| {
-        const s = openmiles.Sample.init(d) catch |err| {
-            log("Error: {any}\n", .{err});
-            openmiles.setLastError("Failed to allocate sample for quick load");
+    const d = openmiles.lastDigitalDriver() orelse return null;
+    const s = newQuickSample(d, "Failed to allocate sample for quick load") orelse return null;
+    // The handle owns its image. A quick sample is a self-contained asset
+    // the game plays, copies, and unloads independently of the buffer it
+    // passed in: borrowing the caller's memory left AIL_quick_copy with
+    // nothing to duplicate (it returned a handle holding no audio at all)
+    // and left the sample reading memory the app was free to reuse.
+    if (size == 0) {
+        // No length given: fall back to header/bounded detection, which has
+        // no image to copy from.
+        s.load(data, -1) catch {
+            openmiles.setLastError("Failed to load quick sample from memory");
+            s.deinit();
             return null;
         };
-        // The handle owns its image. A quick sample is a self-contained asset
-        // the game plays, copies, and unloads independently of the buffer it
-        // passed in: borrowing the caller's memory left AIL_quick_copy with
-        // nothing to duplicate (it returned a handle holding no audio at all)
-        // and left the sample reading memory the app was free to reuse.
-        if (size == 0) {
-            // No length given: fall back to header/bounded detection, which has
-            // no image to copy from.
-            s.load(data, -1) catch {
-                openmiles.setLastError("Failed to load quick sample from memory");
-                s.deinit();
-                return null;
-            };
-        } else {
-            const raw: [*]const u8 = @ptrCast(@alignCast(data));
-            const bytes = raw[0..@min(size, @as(u32, std.math.maxInt(i32)))];
-            s.loadFromMemory(bytes, true) catch {
-                openmiles.setLastError("Failed to load quick sample from memory");
-                s.deinit();
-                return null;
-            };
-        }
-        return s;
+    } else {
+        const raw: [*]const u8 = @ptrCast(@alignCast(data));
+        const bytes = raw[0..@min(size, @as(u32, std.math.maxInt(i32)))];
+        s.loadFromMemory(bytes, true) catch {
+            openmiles.setLastError("Failed to load quick sample from memory");
+            s.deinit();
+            return null;
+        };
     }
-    return null;
+    return s;
 }
 // AIL_quick_load_named_mem(void const *mem, char const *filename, U32 size) -> HAUDIO
 // Like AIL_quick_load_mem, but the filename supplies a format hint. Our loader
@@ -106,29 +110,23 @@ pub fn AIL_quick_copy(s_opt: ?*Sample) callconv(.winapi) ?*Sample {
     const s = s_opt orelse return null;
     log("AIL_quick_copy(s={*})\n", .{s});
     openmiles.clearLastError();
-    if (openmiles.lastDigitalDriver()) |d| {
-        const new_s = openmiles.Sample.init(d) catch |err| {
-            log("Error: {any}\n", .{err});
-            openmiles.setLastError("Failed to allocate sample for quick copy");
-            return null;
-        };
-        const buf = s.owned_buffer orelse {
-            // A sample with no owned image (a bounded streaming mount, or one
-            // loaded from a bare pointer) has nothing to duplicate. Handing back
-            // an empty handle instead reported success and the copy then played
-            // silence forever, with no way for the caller to tell.
-            openmiles.setLastError("Cannot copy a sample that holds no image");
-            new_s.deinit();
-            return null;
-        };
-        new_s.loadFromMemory(buf, true) catch {
-            openmiles.setLastError("Failed to copy sample data");
-            new_s.deinit();
-            return null;
-        };
-        return new_s;
-    }
-    return null;
+    const d = openmiles.lastDigitalDriver() orelse return null;
+    const new_s = newQuickSample(d, "Failed to allocate sample for quick copy") orelse return null;
+    const buf = s.owned_buffer orelse {
+        // A sample with no owned image (a bounded streaming mount, or one
+        // loaded from a bare pointer) has nothing to duplicate. Handing back
+        // an empty handle instead reported success and the copy then played
+        // silence forever, with no way for the caller to tell.
+        openmiles.setLastError("Cannot copy a sample that holds no image");
+        new_s.deinit();
+        return null;
+    };
+    new_s.loadFromMemory(buf, true) catch {
+        openmiles.setLastError("Failed to copy sample data");
+        new_s.deinit();
+        return null;
+    };
+    return new_s;
 }
 pub fn AIL_quick_unload(s_opt: ?*Sample) callconv(.winapi) void {
     const s = s_opt orelse return;

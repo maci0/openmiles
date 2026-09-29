@@ -125,10 +125,9 @@ for ver in "${VERSIONS[@]}"; do
     skipped+=("$ver")
     continue
   fi
-  # The build's own chatter goes to stderr whatever stream its runner chooses,
-  # so the table on stdout stays machine-readable: stdout is documented as one
-  # row per version, and a "Build Summary:" block in the middle of it breaks
-  # anything reading that table.
+  # The build's own chatter goes to stderr whatever stream its runner chooses:
+  # stdout carries one table row per version and a "Build Summary:" block in the
+  # middle of it breaks anything reading that table.
   if ! zig build --prefix "$out_prefix" -Dmss-version="$ver" -Dtarget=x86-windows >&2; then
     echo "v$ver: BUILD FAILED" >&2
     fail=1
