@@ -223,7 +223,12 @@ that is not the name
 The optional second argument writes
 a `SHA256SUMS` naming exactly the archive entries, so `sha256sum -c` passes on
 an unpacked download; the script creates the directory it lands in, while the
-directory the archive itself goes into has to exist. The archive is reproducible: entry order is fixed, every
+directory the archive itself goes into has to exist. Every run also writes
+`<output.zip>.sha256` beside the archive: the digests above are of the files
+*inside* the zip, so a consumer who has downloaded the archive and not unpacked
+it has nothing to check the fetched bytes against, and `sha256sum -c
+<output.zip>.sha256` in the download directory is the check. The release
+publishes it beside the zip. The archive is reproducible: entry order is fixed, every
 entry takes one timestamp (`SOURCE_DATE_EPOCH`, defaulting to the HEAD commit
 time) pinned to UTC, and no host metadata is stored. Packaging it twice yields
 byte-identical files, on any host timezone and locale, which the release

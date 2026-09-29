@@ -263,7 +263,9 @@ jobs:
       # their own terms, and a consumer who wants to trace that grant back to an
       # upstream release needs the attribution and the digests, not just this
       # repository's URL. The checksums are written from the packaging script's
-      # own entry list, so they name exactly the files the archive holds.
+      # own entry list, so they name exactly the files the archive holds. Those
+      # name the entries *inside* the archive, so the script also writes the
+      # digest of the archive itself beside it; the release attaches both.
       - name: Package release
         run: ./scripts/package_release.sh "openmiles-${TAG}-win32.zip" release/SHA256SUMS
 
@@ -283,7 +285,13 @@ jobs:
           # has to be absolute to land outside the tree.
           ./scripts/package_release.sh "$RUNNER_TEMP/repeat.zip"
           cmp "openmiles-${TAG}-win32.zip" "$RUNNER_TEMP/repeat.zip"
-          rm "$RUNNER_TEMP/repeat.zip"
+          # Same bytes, same digest: the .sha256 the packaging step wrote is
+          # proved to describe the archive rather than a different one. Only
+          # the digest field is compared, the file name in it being the name
+          # the two runs happened to write.
+          test "$(cut -d' ' -f1 "openmiles-${TAG}-win32.zip.sha256")" = \
+            "$(cut -d' ' -f1 "$RUNNER_TEMP/repeat.zip.sha256")"
+          rm "$RUNNER_TEMP/repeat.zip" "$RUNNER_TEMP/repeat.zip.sha256"
 
       # The release body a consumer reads is the curated `## [<version>]`
       # section the tag check above already required, not the commit list
@@ -318,6 +326,7 @@ jobs:
           tag_name: ${{ env.TAG }}
           files: |
             openmiles-${{ env.TAG }}-win32.zip
+            openmiles-${{ env.TAG }}-win32.zip.sha256
             release/SHA256SUMS
           body_path: release/NOTES.md
           # A release published with no assets is a silent failure: the action

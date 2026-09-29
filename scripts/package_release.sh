@@ -9,7 +9,9 @@
 # The second argument, when given, receives a SHA256SUMS listing every entry of
 # the archive, in archive order, and nothing else: a checksum file naming files
 # the archive does not contain fails `sha256sum -c` on the consumer side, so the
-# two are written from the same list.
+# two are written from the same list. Those digests are of the files inside the
+# zip, so the archive's own digest is written beside it as <output.zip>.sha256
+# on every run, and the release publishes it next to the zip.
 #
 # The archive is byte-identical for identical inputs: entries are staged in the
 # explicit order below rather than the filesystem order of a glob, every entry
@@ -39,10 +41,18 @@ The DLL is refused unless it is the 32-bit PE image the x86-windows
 ReleaseFast cross-compile produces, so a Debug build, a build for another
 target, or a leftover from an earlier run is not published as a win32 release.
 
+Writes <output.zip>.sha256 beside the archive on every run: the digests of
+the entries inside the zip say nothing about the bytes of the zip, and the
+archive is the artifact a consumer downloads.
+
 Arguments:
   <output.zip>    archive to write, replaced if it exists
   [<sha256sums>]  optional SHA256SUMS listing every archive entry, in
                   archive order
+
+Writes:
+  <output.zip>.sha256  SHA-256 of the archive, naming it by base name so
+                       sha256sum -c runs in the download directory
 
 Options:
   -h, --help  show this help
@@ -346,5 +356,15 @@ rm -f "$OUT"
 # zlib. Entry order comes from ${names[@]}, not from a directory read.
 out_abs=$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")
 (cd "$stage" && zip -X -9 -q "$out_abs" "${names[@]}")
+
+# The digest of the archive, beside the archive, after it is written: the
+# optional SHA256SUMS above names the entries *inside* the zip, so a consumer
+# who has downloaded the zip and not unpacked it has nothing to check the
+# bytes they fetched against. The name recorded is the base name, so
+# `sha256sum -c` runs in the directory the download landed in. Written for
+# every run, not only when SUMS is given: the archive is the artifact, and
+# this file is the only record of its bytes.
+(cd "$(dirname "$out_abs")" && sha256 "$(basename "$out_abs")" > "$(basename "$out_abs").sha256")
+echo "wrote $out_abs.sha256"
 
 echo "wrote $out_abs ($(wc -c < "$out_abs") bytes, epoch $epoch)"

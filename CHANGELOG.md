@@ -49,6 +49,11 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ### Added
 
+- `scripts/package_release.sh` writes `<output.zip>.sha256` beside the archive,
+  and the release attaches it. The `SHA256SUMS` a release already published
+  names the files *inside* the zip, so a consumer who downloaded the archive
+  and had not unpacked it had no record of the archive's own bytes to check
+  them against.
 - `scripts/check_workflow_shell.py`, in `make lint` and therefore in CI: every
   `run:` block in `.github` is extracted and shellchecked as bash. The shell in
   a workflow installs the pinned tools, cross-checks `build.zig.zon` against the
@@ -99,6 +104,11 @@ All notable changes to OpenMiles are recorded here. The format follows
   stack, its depth check and the per-buffer jump budget had moved, so
   `make lint` failed `check-threat-model` on every run. The three mitigations
   the model cites were always in the file; only the line numbers were stale.
+- `docs/THREAT_MODEL.md` re-anchored across `src/api/`, `src/engine/`,
+  `src/root.zig` and `src/fuzz_native_test.zig`, which had drifted the same
+  way: `make lint` failed `check-threat-model` on 90 references.
+  `scripts/check_threat_model_refs.py --update` re-aimed each one at the line
+  its anchor is on now.
 - `AIL_set_3D_sample_loop_block` and `AIL_set_stream_loop_block` apply the SDK
   loop-block argument rules the 2D `AIL_set_sample_loop_block` already did:
   both offsets `-2` is a no-op, a single `-2` keeps that side's current
