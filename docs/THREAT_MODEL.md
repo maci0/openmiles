@@ -200,8 +200,8 @@ Three entry points load plugin code, and all three end at the same
 2. `AIL_set_redist_directory` (`src/api/digital.zig:76 AIL_set_redist_directory`)
    records a game-supplied directory, and `loadAllAsi` scans it
    (`src/engine/digital.zig:808 loadAllAsi`), called on a directory change
-   (`src/root.zig:1321 loadAllAsi`) and again when a digital driver opens
-   (`src/root.zig:1828 loadAllAsi`). The directory is not restricted to the game
+   (`src/root.zig:1339 loadAllAsi`) and again when a digital driver opens
+   (`src/root.zig:1846 loadAllAsi`). The directory is not restricted to the game
    directory: the game names any path, so a redist directory pointing at a
    download or per-user shared folder extends plugin execution to every plugin
    extension found there.
@@ -223,9 +223,10 @@ Controls present, on both scans:
   so `con .asi` is rejected as `CON` and not read as a file called `con `
   (`src/root.zig:708 isSafePluginFilename`).
 - A rescan that finds an already-loaded module skips it, so one module is
-  loaded once per process: `src/root.zig:896 isPluginAlreadyLoaded` for the
-  application list, and `src/root.zig:909 isPluginLoadedAnywhere` for the
-  redist scan, which also skips modules the application list already holds.
+  loaded once per process: `src/root.zig:905 isPluginAlreadyLoaded` for the
+  application list, and `src/root.zig:918 isPluginLoadedAnywhere` for both
+  scans, which searches the application list and the open driver's own list, so
+  neither scan loads a module the other already holds.
 - The loaded module runs in-process with the game's full authority. This is the
   original MSS design, and plugins are unsigned.
 
@@ -256,7 +257,7 @@ performs no scan:
 |---------|-------------------|-------------------------------------------|
 | Extension allowlist `.asi`/`.m3d`/`.flt` | `src/root.zig:702 isPluginExtension` | No: the extension is never inspected, so any file the OS loader accepts is loaded |
 | Filename safety: `..`, separators, NTFS streams, DOS device names | `src/root.zig:708 isSafePluginFilename` | No: a path with `..` segments, a named stream, or a device name reaches the loader |
-| Already-loaded dedup, one module per process | `src/root.zig:896 isPluginAlreadyLoaded`, `src/root.zig:909 isPluginLoadedAnywhere` | No: the same module can be loaded repeatedly, and a module the application list already holds is loaded again |
+| Already-loaded dedup, one module per process | `src/root.zig:905 isPluginAlreadyLoaded`, `src/root.zig:918 isPluginLoadedAnywhere` | No: the same module can be loaded repeatedly, and a module the application list already holds is loaded again |
 | Random exclusive temp file | `src/api/rib.zig:373 exclusive` | No: it never takes the in-memory image path at all |
 
 `Provider.load` itself performs no path validation. It takes the basename as the
@@ -284,7 +285,7 @@ Controls present:
   `openmiles.randomNameBytes`, which draws from the run's seeded PRNG under a
   simulation and otherwise from `io.randomSecure`; failure to obtain entropy
   fails closed rather than falling back to a guessable name
-  (`src/root.zig:1644 randomNameBytes`, called from
+  (`src/root.zig:1662 randomNameBytes`, called from
   `src/api/rib.zig:349 randomNameBytes`).
 - The file is created with `.exclusive = true` (`src/api/rib.zig:373 exclusive`),
   so a planted name cannot be opened for overwrite and a race replacement loses.
@@ -349,7 +350,7 @@ Gaps:
 | Fixed loop stack with depth check | `src/engine/midi.zig:694 xmidi_loop_stack` | XMIDI FOR/NEXT recursion |
 | Per-buffer XMIDI jump budget, 256 | `src/engine/midi.zig:600 max_xmidi_jumps_per_buffer` | A zero-frame FOR/NEXT body spinning the audio thread; a full loop stack degrades to a log line rather than an out-of-bounds write |
 | Unpredictable exclusive temp file | `src/api/rib.zig:373 exclusive` | Temp-file pre-planting and name race |
-| Redist rescan only on an actual path change | `src/root.zig:1307 unchanged` | Repeated directory walks and double plugin loads from a game that re-sets the same redist path |
+| Redist rescan only on an actual path change | `src/root.zig:1325 unchanged` | Repeated directory walks and double plugin loads from a game that re-sets the same redist path |
 | Bank registry returns the loaded bank for a repeated path | `src/engine/soundbank.zig:97 registryAcquireBySource` | Duplicate copies of one bank accumulating on reload |
 | Stream ring depth clamped to the SDK range | `src/engine/stream_buffer.zig:129 clamped` | Caller-supplied buffer count turning into an oversized ring |
 | Plugin extension allowlist and separator rejection | `src/root.zig:702 isPluginExtension` | Directory traversal in the CWD plugin scan |
@@ -400,7 +401,7 @@ something other than a control in this tree.
   extension it finds there. The game is not restricted to its own directory, so
   a game that honours a per-user or downloaded content path is a plugin
   execution path the user did not install. The rescan-on-change check
-  (`src/root.zig:1307 unchanged`) bounds the work to a directory that actually
+  (`src/root.zig:1325 unchanged`) bounds the work to a directory that actually
   changed, so a game that re-sets the same path each time does not re-walk it,
   but a game that alternates between two paths re-walks both.
 - **Write-path abuse through `AIL_WAV_file_write`.** The export creates or

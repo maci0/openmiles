@@ -824,9 +824,18 @@ pub fn loadApplicationProviders(dir: []const u8) i32 {
             // must not register the same module twice: the duplicate would answer
             // provider enumeration with the same codecs twice and keep a second
             // copy of the module loaded for as long as the process runs.
+            //
+            // Both provider lists are searched, not only the application one. A
+            // game can set its redist directory and open a driver first, which
+            // puts every .asi in that directory in the driver's own list, and
+            // only then hand the same directory to RIB_load_application_providers.
+            // Checking the application list alone saw an empty one and loaded a
+            // second dlopen'd copy of each module, which is the same duplicate
+            // this check exists to prevent, in the one order the application
+            // check alone missed.
             var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
             const resolved = fs_compat.maybeResolveCaseInsensitivePath(full_path, &resolved_buf) orelse full_path;
-            if (isProviderPathLoaded(resolved)) continue;
+            if (isPluginLoadedAnywhere(driverProviders(), resolved)) continue;
             const p = Provider.load(alloc, full_path) catch |err| {
                 log("loadApplicationProviders: failed to load plugin '{s}': {any}\n", .{ name, err });
                 continue;
@@ -909,6 +918,15 @@ pub fn isPluginAlreadyLoaded(providers: []const *Provider, path: []const u8) boo
 pub fn isPluginLoadedAnywhere(owned: []const *Provider, path: []const u8) bool {
     if (isPluginAlreadyLoaded(owned, path)) return true;
     return isProviderPathLoaded(path);
+}
+
+/// The open digital driver's own provider list, or an empty slice when no
+/// driver is open, so a caller deduping a module can search it without
+/// branching on the open state. Taken the same way setRedistDirectory takes the
+/// driver it scans with: an atomic load, and the list read outside any lock.
+pub fn driverProviders() []const *Provider {
+    const driver = lastDigitalDriver() orelse return &.{};
+    return driver.providers.items;
 }
 
 /// Forget `p` before it is freed outside shutdown, which is the state

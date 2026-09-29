@@ -2004,6 +2004,45 @@ test "a redist directory startup already scanned loads no second copy" {
     try testing.expectEqual(after_scan, driver.providers.items.len);
 }
 
+test "an application scan of a directory the driver already scanned loads no second copy" {
+    // The other order of the same pair: a game calls AIL_set_redist_directory
+    // and AIL_open_digital_driver before it hands the directory to
+    // RIB_load_application_providers, so the modules are in the driver's own
+    // provider list and the application list is still empty. The application
+    // scan has to see that list, or it dlopens a second copy of every module
+    // the process already holds, and both copies stay loaded until
+    // AIL_shutdown. The module is copied under a path of its own so the
+    // identity under test is one no other test in this process registered.
+    const img_path = "zig-out/bin/plugins/mock.asi";
+    std.Io.Dir.cwd().access(openmiles.io, img_path, .{}) catch return error.MissingMockPlugin;
+    const cwd = std.Io.Dir.cwd();
+    const dir_name = "om_app_scan_dedup_test";
+    cwd.createDir(openmiles.io, dir_name, .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+    defer cwd.deleteTree(openmiles.io, dir_name) catch {};
+    try cwd.copyFile(img_path, cwd, dir_name ++ "/mock.asi", openmiles.io, .{});
+
+    defer {
+        if (openmiles.lastDigitalDriver()) |d| openmiles.closeDigitalDriver(d);
+        openmiles.setRedistDirectory("");
+    }
+    openmiles.setLastDigitalDriver(null);
+    const driver = openmiles.openDigitalDriver(44100, 16, 2) orelse return error.NoDriver;
+
+    // The driver's scan is what puts the module in the driver's list.
+    openmiles.setRedistDirectory(dir_name);
+    try testing.expectEqual(@as(usize, 1), driver.providers.items.len);
+    const providers_before = openmiles.getProviderCount();
+
+    // The application scan of the same directory finds the module already
+    // loaded and registers nothing.
+    try testing.expectEqual(@as(i32, 0), openmiles.loadApplicationProviders(dir_name));
+    try testing.expectEqual(providers_before, openmiles.getProviderCount());
+    try testing.expectEqual(@as(usize, 1), driver.providers.items.len);
+}
+
 test "adopting a module already in the plugin list unloads the second copy" {
     // A scan checks a module's identity, then loads it (running the plugin's
     // RIB_Main, which takes as long as it likes), and only then tracks it. A
