@@ -82,28 +82,66 @@ fn programHeaderTableFits(eh: *const std.elf.Ehdr, img_len: usize) bool {
     return end <= @as(u64, img_len);
 }
 
-/// Repair std.DynLib's ElfDynLib map: re-copy writable segments from their real
-/// file offsets and apply the load-base-relative relocations against the load
-/// base.
+/// Where a writable segment's initialized bytes are read from: the file on
+/// disk when a mapped image is being repaired, and a filling source when the
+/// image is already in memory. A fuzz image is built in a buffer rather than
+/// mapped from a path, so the pass cannot reopen itself, and a parser that can
+/// only be reached through a file descriptor is a parser that is only ever
+/// tested by hand.
+const SegmentSource = struct {
+    /// The open file a real image is read back from, or null when the image
+    /// already holds every byte a segment claims.
+    fd: ?*const std.posix.fd_t,
+    readAt: *const fn (fd: ?*const std.posix.fd_t, offset: u64, buf: []u8) anyerror!void,
+};
+
+/// Fill `buf` from the open file `fd` names, starting at `offset`. A short
+/// read is a truncated file, not an error to retry past: the segment claims
+/// bytes the file does not have.
+fn readSegmentFromFd(fd: ?*const std.posix.fd_t, offset: u64, buf: []u8) anyerror!void {
+    var got: usize = 0;
+    while (got < buf.len) {
+        const rc = std.os.linux.pread((fd orelse return error.ImageFixupFailed).*, buf[got..].ptr, buf.len - got, @intCast(offset +| @as(u64, got)));
+        switch (std.os.linux.errno(rc)) {
+            .SUCCESS => {
+                if (rc == 0) return error.ImageFixupFailed; // truncated file
+                got += rc;
+            },
+            .INTR => continue,
+            else => return error.ImageFixupFailed,
+        }
+    }
+}
+
 fn applyElfFixups(lib: *std.DynLib, path: []const u8) !void {
-    const img = lib.inner.memory;
+    const path_z = try std.heap.page_allocator.dupeZ(u8, path);
+    defer std.heap.page_allocator.free(path_z);
+    const fd = std.posix.openat(std.posix.AT.FDCWD, path_z, .{ .ACCMODE = .RDONLY }, 0) catch return error.ImageFixupFailed;
+    defer _ = std.os.linux.close(fd);
+    try fixupImage(lib.inner.memory, .{ .fd = &fd, .readAt = readSegmentFromFd });
+}
+
+/// Repair an already-mapped ELF image in place: re-copy writable segments from
+/// their real file offsets and apply the load-base-relative relocations against
+/// the load base.
+///
+/// Every field this reads is file-controlled, and the walks below are the
+/// unchecked ones (`[*]Phdr`, `[*]usize`, `[*]Rela`), so each bound is checked
+/// against the image before the pointer is formed rather than left to the
+/// slice bounds checks that a raw pointer does not get.
+fn fixupImage(img: []align(@alignOf(std.elf.Ehdr)) u8, seg: SegmentSource) !void {
     const base = @intFromPtr(img.ptr);
     if (img.len < @sizeOf(std.elf.Ehdr)) return error.ImageFixupFailed;
     const eh: *const std.elf.Ehdr = @ptrCast(img.ptr);
     if (!std.mem.eql(u8, eh.e_ident[0..4], std.elf.MAGIC)) return error.ImageFixupFailed;
     if (!programHeaderTableFits(eh, img.len)) return error.ImageFixupFailed;
 
-    const path_z = try std.heap.page_allocator.dupeZ(u8, path);
-    defer std.heap.page_allocator.free(path_z);
-    const fd = std.posix.openat(std.posix.AT.FDCWD, path_z, .{ .ACCMODE = .RDONLY }, 0) catch return error.ImageFixupFailed;
-    defer _ = std.os.linux.close(fd);
-
     const phdrs: [*]align(1) const std.elf.Phdr = @ptrFromInt(base + @as(usize, @intCast(eh.e_phoff)));
     var dynamic_vaddr: ?usize = null;
     for (phdrs[0..eh.e_phnum]) |ph| {
         switch (ph.p_type) {
             std.elf.PT_LOAD => if ((ph.p_flags & std.elf.PF_W) != 0) {
-                recopyWritableSegment(fd, img, ph) catch return error.ImageFixupFailed;
+                recopyWritableSegment(img, seg, ph) catch return error.ImageFixupFailed;
             },
             std.elf.PT_DYNAMIC => dynamic_vaddr = std.math.cast(usize, ph.p_vaddr) orelse return error.ImageFixupFailed,
             else => {},
@@ -162,7 +200,7 @@ fn applyRelativeRelocations(base: usize, img_len: usize, rel_type: u32, relas: [
 
 /// Copy the segment's initialized bytes from p_offset (the source std uses,
 /// file offset 0, yields ELF-header garbage for every non-first segment).
-fn recopyWritableSegment(fd: std.posix.fd_t, img: []u8, ph: std.elf.Phdr) !void {
+fn recopyWritableSegment(img: []u8, seg: SegmentSource, ph: std.elf.Phdr) !void {
     if (ph.p_filesz == 0) return;
     // Saturating: p_vaddr and p_filesz are file-controlled, so a sum that wraps
     // would compare as small and pass the bound with a segment that lies past
@@ -170,18 +208,7 @@ fn recopyWritableSegment(fd: std.posix.fd_t, img: []u8, ph: std.elf.Phdr) !void 
     if (@as(u64, ph.p_vaddr) +| ph.p_filesz > img.len) return error.ImageFixupFailed;
     const buf = try std.heap.page_allocator.alloc(u8, @intCast(ph.p_filesz));
     defer std.heap.page_allocator.free(buf);
-    var got: usize = 0;
-    while (got < buf.len) {
-        const rc = std.os.linux.pread(fd, buf[got..].ptr, buf.len - got, @intCast(ph.p_offset +| @as(u64, got)));
-        switch (std.os.linux.errno(rc)) {
-            .SUCCESS => {
-                if (rc == 0) return error.ImageFixupFailed; // truncated file
-                got += rc;
-            },
-            .INTR => continue,
-            else => return error.ImageFixupFailed,
-        }
-    }
+    try seg.readAt(seg.fd, ph.p_offset, buf);
     @memcpy(img[ph.p_vaddr..][0..@intCast(ph.p_filesz)], buf);
 }
 
@@ -321,4 +348,233 @@ test "a slot at a misaligned or out-of-image offset is rejected" {
 
     var past_end = [_]std.elf.Rela{.{ .r_offset = image.len, .r_info = rel_type, .r_addend = 0 }};
     try testing.expectError(error.ImageFixupFailed, applyRelativeRelocations(base, image.len, rel_type, past_end[0..]));
+}
+
+// --- fuzzing the image walk -------------------------------------------------
+
+/// An image with an unmapped page after it.
+///
+/// The fixup pass indexes raw pointers (a [*]Phdr, a [*]usize, a [*]Rela), and
+/// a raw pointer is exactly what Zig's slice bounds checks do not cover: an
+/// offset a crafted header aims past the end of the image is a wild access,
+/// not a panic. Ending the allocation where the image ends, and taking the page
+/// after it away with PROT_NONE, turns that access into a fault the test run
+/// cannot walk past. This walk is otherwise reachable only by mapping a real
+/// library, so a hostile `.asi` plugin is the only thing that would ever hand
+/// it a lie.
+const GuardedImage = struct {
+    buf: []u8,
+    /// Aligned as a mapped image is, so the pass can form the `*Ehdr` and
+    /// `*Phdr` it forms over a real map without the test asserting an alignment
+    /// the image does not have.
+    img: []align(@alignOf(std.elf.Ehdr)) u8,
+
+    fn init(img_len: usize) !GuardedImage {
+        const page = std.heap.page_size_min;
+        const pages = std.mem.alignForward(usize, img_len, page) / page + 1;
+        const buf = try std.heap.page_allocator.alloc(u8, pages * page);
+        errdefer std.heap.page_allocator.free(buf);
+        if (@intFromPtr(buf.ptr) % page != 0) return error.ImageFixupFailed;
+        const img_end = std.mem.alignForward(usize, img_len, page);
+        if (img_end % @alignOf(std.elf.Ehdr) != 0) return error.ImageFixupFailed;
+        if (std.os.linux.mprotect(buf.ptr + img_end, page, .{ .READ = true }) != 0) {
+            return error.ImageFixupFailed;
+        }
+        return .{ .buf = buf, .img = @alignCast(buf[0..img_len]) };
+    }
+
+    fn deinit(self: *GuardedImage) void {
+        // The guard page is PROT_NONE, and unmapping a range that contains a
+        // protected page is fine, but restoring it first keeps the free
+        // independent of how the mapping was left.
+        _ = std.os.linux.mprotect(self.buf.ptr + std.mem.alignForward(usize, self.img.len, std.heap.page_size_min), std.heap.page_size_min, .{ .READ = true, .WRITE = true });
+        std.heap.page_allocator.free(self.buf);
+    }
+};
+
+/// Stands in for the file on disk: the segment's copy has to be visible in the
+/// image, and a buffer that costs no descriptor and no second mapping is where
+/// it is visible from.
+fn fillSegment(_: ?*const std.posix.fd_t, _: u64, buf: []u8) anyerror!void {
+    @memset(buf, 0xA5);
+}
+
+const mem_source = SegmentSource{ .fd = null, .readAt = fillSegment };
+
+/// Write the dynamic section of a crafted image: `pairs` unrelated entries, a
+/// DT_RELA and a DT_RELASZ at the two slots `off` and `sz`, and a DT_NULL when
+/// the fuzzer wants the walk to stop on the terminator rather than on the end
+/// of the image. Returns nothing: the caller already knows the table, so there
+/// is no entry list to hand back.
+fn writeDynamic(img: []u8, dyn_vaddr: usize, pairs: usize, off: usize, off_value: usize, sz: usize, sz_value: usize) void {
+    const dyn: [*]usize = @ptrCast(@alignCast(img.ptr + dyn_vaddr));
+    for (dyn[0 .. pairs * 2]) |*v| v.* = 0;
+    dyn[2 * off] = std.elf.DT_RELA;
+    dyn[2 * off + 1] = off_value;
+    dyn[2 * sz] = std.elf.DT_RELASZ;
+    dyn[2 * sz + 1] = sz_value;
+    if (pairs > 0 and dyn[2 * pairs - 1] == 0) dyn[2 * pairs - 1] = 0; // DT_NULL terminator
+}
+
+/// The bytes the pass is allowed to write: writable PT_LOAD segments that pass
+/// the in-image bound, and relocation slots that pass the alignment and range
+/// bound. Over-marking is harmless (a slot the pass never reached is marked but
+/// stays untouched), so the check the caller runs stays one-directional.
+fn writableBytes(alloc: std.mem.Allocator, img_len: usize, phdrs: []const std.elf.Phdr, relas: []align(1) const std.elf.Rela) ![]bool {
+    const owned = try alloc.alloc(bool, img_len);
+    @memset(owned, false);
+    for (phdrs) |ph| {
+        if (ph.p_type != std.elf.PT_LOAD or (ph.p_flags & std.elf.PF_W) == 0 or ph.p_filesz == 0) continue;
+        if (@as(u64, ph.p_vaddr) +| ph.p_filesz > img_len) continue;
+        @memset(owned[@intCast(ph.p_vaddr)..][0..@intCast(ph.p_filesz)], true);
+    }
+    for (relas) |r| {
+        if (r.r_offset % @alignOf(usize) != 0 or r.r_offset > img_len -| @sizeOf(usize)) continue;
+        @memset(owned[@intCast(r.r_offset)..][0..@sizeOf(usize)], true);
+    }
+    return owned;
+}
+
+test "fuzz: a crafted ELF image is refused or repaired inside its own bytes" {
+    if (native_os != .linux) return error.SkipZigTest;
+    // Every field the walk reads is file-controlled and every one of them can
+    // lie, so the corpus is not a byte soup: each image is an ELF skeleton
+    // with the lying fields fuzzed, because a soup is rejected at the magic and
+    // never reaches the program header, dynamic, or relocation walks that this
+    // pass exists to bound.
+    var prng = std.Random.DefaultPrng.init(0xE1F);
+    const rand = prng.random();
+    const alloc = testing.allocator;
+
+    const img_len = 2048;
+    const phoff = 64;
+    const phnum = 4;
+    const dyn_vaddr = 512;
+    const rela_off = 1024;
+    const rela_cap = (img_len - rela_off) / @sizeOf(std.elf.Rela);
+    const rel_type: u64 = relative_reloc_type orelse 0;
+
+    var guarded = try GuardedImage.init(img_len);
+    defer guarded.deinit();
+    const img = guarded.img;
+
+    var i: usize = 0;
+    while (i < 2000) : (i += 1) {
+        @memset(img, 0);
+        rand.bytes(img);
+
+        const eh: *std.elf.Ehdr = @ptrCast(@alignCast(img.ptr));
+        @memcpy(eh.e_ident[0..4], std.elf.MAGIC);
+        eh.e_phoff = phoff;
+        eh.e_phentsize = @sizeOf(std.elf.Phdr);
+        eh.e_phnum = phnum;
+
+        // Two writable loads whose p_vaddr and p_filesz lie about where their
+        // bytes go, the dynamic section, and a type the walk must ignore.
+        const phdrs: [*]std.elf.Phdr = @ptrCast(@alignCast(img.ptr + phoff));
+        for (phdrs[0..phnum]) |*ph| ph.* = std.mem.zeroes(std.elf.Phdr);
+        phdrs[0].p_type = std.elf.PT_LOAD;
+        phdrs[0].p_flags = std.elf.PF_W | std.elf.PF_R;
+        phdrs[0].p_vaddr = rand.intRangeAtMost(u64, 0, img_len);
+        phdrs[0].p_filesz = rand.intRangeAtMost(u64, 0, img_len);
+        phdrs[0].p_offset = rand.int(u64);
+        phdrs[2].p_type = std.elf.PT_LOAD;
+        phdrs[2].p_flags = std.elf.PF_W;
+        phdrs[2].p_vaddr = rand.intRangeAtMost(u64, 0, img_len);
+        phdrs[2].p_filesz = rand.intRangeAtMost(u64, 0, img_len);
+        phdrs[1].p_type = std.elf.PT_DYNAMIC;
+        phdrs[1].p_vaddr = dyn_vaddr;
+        phdrs[3].p_type = std.elf.PT_NOTE;
+
+        // The relocation table: entries with a fuzzed r_info, so most are
+        // skipped as another type and a few are applied, with r_offset ranging
+        // over aligned, misaligned, in-image, and past-the-end values.
+        const relas: [*]align(1) std.elf.Rela = @ptrCast(@alignCast(img.ptr + rela_off));
+        const n_relas = rand.intRangeAtMost(usize, 0, rela_cap);
+        for (relas[0..n_relas]) |*r| {
+            r.* = .{
+                .r_offset = rand.int(u64),
+                .r_info = if (rand.boolean()) rel_type else rand.int(u64),
+                .r_addend = rand.int(i64),
+            };
+        }
+        // DT_RELASZ is a byte count and a lying one need not agree with the
+        // table planted above: truncated below one entry, cut mid-entry, or
+        // past the image entirely.
+        const rela_sz = switch (rand.intRangeAtMost(u8, 0, 3)) {
+            0 => n_relas * @sizeOf(std.elf.Rela) + rand.intRangeAtMost(usize, 0, @sizeOf(std.elf.Rela) * 2),
+            1 => rand.intRangeAtMost(usize, 0, n_relas * @sizeOf(std.elf.Rela)),
+            2 => rand.intRangeAtMost(usize, 0, img_len * 2),
+            else => rand.int(usize),
+        };
+
+        // The two tags sit at distinct slots, so neither is overwritten by the
+        // other and the table the pass reads is the one this harness marked.
+        const pairs = rand.intRangeAtMost(usize, 2, 40);
+        const off_slot = rand.intRangeAtMost(usize, 0, pairs - 1);
+        const sz_slot = rand.intRangeAtMost(usize, 0, pairs - 1);
+        writeDynamic(img, dyn_vaddr, pairs, off_slot, if (rand.boolean()) rela_off else rand.int(usize), sz_slot, rela_sz);
+
+        const before = try alloc.dupe(u8, img);
+        defer alloc.free(before);
+        // The pass reads floor(rela_sz / 24) entries from the table offset, so
+        // that is the set whose slots it may write; a lie that sends it past
+        // the table is rejected before any relocation is applied.
+        const applied = if (rela_off != 0 and rela_sz <= img_len - rela_off) rela_sz / @sizeOf(std.elf.Rela) else 0;
+        const owned = try writableBytes(alloc, img_len, phdrs[0..phnum], @as([*]align(1) const std.elf.Rela, @ptrCast(relas))[0..applied]);
+        defer alloc.free(owned);
+
+        // The whole point: a bad image must fail the load, never the process.
+        fixupImage(img, mem_source) catch {};
+
+        // Nothing outside the bytes the pass owns may have moved, and nothing
+        // outside the image is mapped at all, so an escaped access faults
+        // above instead of passing unnoticed.
+        for (img, 0..) |now, k| {
+            if (!owned[k]) try testing.expectEqual(before[k], now);
+        }
+    }
+}
+
+test "fuzz: a second pass over a crafted image settles where the first one did" {
+    if (native_os != .linux) return error.SkipZigTest;
+    // The pair assertion across the mapping boundary: re-running the pass over
+    // the same bytes must not move anything the first run settled. A length
+    // field the pass both read and wrote, or a count a lie made grow between
+    // runs, shows up here as a diff rather than as a crash.
+    var prng = std.Random.DefaultPrng.init(0xE1F01);
+    const rand = prng.random();
+    const alloc = testing.allocator;
+
+    const img_len = 2048;
+    const rela_off = 1024;
+    var guarded = try GuardedImage.init(img_len);
+    defer guarded.deinit();
+    const img = guarded.img;
+
+    var i: usize = 0;
+    while (i < 500) : (i += 1) {
+        @memset(img, 0);
+        rand.bytes(img);
+        const eh: *std.elf.Ehdr = @ptrCast(@alignCast(img.ptr));
+        @memcpy(eh.e_ident[0..4], std.elf.MAGIC);
+        eh.e_phoff = 64;
+        eh.e_phentsize = @sizeOf(std.elf.Phdr);
+        eh.e_phnum = 2;
+        const phdrs: [*]std.elf.Phdr = @ptrCast(@alignCast(img.ptr + 64));
+        for (phdrs[0..2]) |*ph| ph.* = std.mem.zeroes(std.elf.Phdr);
+        phdrs[0].p_type = std.elf.PT_LOAD;
+        phdrs[0].p_flags = std.elf.PF_W;
+        phdrs[0].p_vaddr = rand.intRangeAtMost(u64, 0, img_len);
+        phdrs[0].p_filesz = rand.intRangeAtMost(u64, 0, img_len);
+        phdrs[1].p_type = std.elf.PT_DYNAMIC;
+        phdrs[1].p_vaddr = 512;
+        writeDynamic(img, 512, 4, 0, rela_off, 2, rand.intRangeAtMost(usize, 0, 512));
+
+        fixupImage(img, mem_source) catch {};
+        const settled = try alloc.dupe(u8, img);
+        defer alloc.free(settled);
+        fixupImage(img, mem_source) catch {};
+        try testing.expectEqualSlices(u8, settled, img);
+    }
 }
