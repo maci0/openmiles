@@ -445,6 +445,13 @@ pub const MidiDriver = struct {
             self.soundfont_refs += 1;
             return sf;
         }
+        // tsf_load_memory takes a C `int`; an image past that cannot be handed
+        // to it, and truncating the length would give tsf a header without the
+        // chunks it indexes. See loadSoundfont for the file-path form.
+        if (size > std.math.maxInt(c_int)) {
+            log("loadSoundfontImage: image is {d} bytes, past what a C int length carries\n", .{size});
+            return error.SoundFontLoadFailed;
+        }
         const loaded = tsf.tsf_load_memory(data, @intCast(size));
         if (loaded == null) return error.SoundFontLoadFailed;
         const bank = loaded.?;
@@ -458,7 +465,9 @@ pub const MidiDriver = struct {
         self.clearSoundfontSource();
         self.adoptSoundfontImage(data, size);
         self.soundfont_refs = 1;
-        self.soundfont_size_bytes = @intCast(@min(size, std.math.maxInt(u32)));
+        // `size` is already u32, so it is the record verbatim; the u64 clamp
+        // belongs to captureSoundfontSize, where the length comes off the file.
+        self.soundfont_size_bytes = size;
         return bank;
     }
 
@@ -1203,6 +1212,12 @@ pub const Sequence = struct {
         // Parse into a local first: only swap (and free the old sequence) once
         // the new data has parsed. Failing mid-swap would leave current_msg
         // pointing at freed TML memory while a playing sequence kept rendering.
+        // tml_load_memory takes a C `int`; a length past that cannot be narrowed
+        // without the @intCast panicking, so reject it as the file paths do.
+        if (smf_data.len > std.math.maxInt(c_int)) {
+            log("loadMidi: sequence is {d} bytes, past what a C int length carries\n", .{smf_data.len});
+            return error.MidiLoadFailed;
+        }
         const loaded = tsf.tml_load_memory(smf_data.ptr, @intCast(smf_data.len));
         if (loaded == null) return error.MidiLoadFailed;
         // state_mutex across the swap and the fields rewritten from the new

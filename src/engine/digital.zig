@@ -170,7 +170,10 @@ fn bytePosition(self: anytype) u32 {
     var cursor: u64 = 0;
     _ = ma.ma_sound_get_cursor_in_pcm_frames(&self.sound, &cursor);
     const bpf = self.bytesPerFrame();
-    return @as(u32, @intCast(@min(cursor * @as(u64, bpf), std.math.maxInt(u32))));
+    // Saturating multiply, as in Sample3D.getLength: the clamp after the fact
+    // does not protect the multiply, which panics in a checked build when the
+    // product wraps before @min sees it.
+    return @as(u32, @intCast(@min(cursor *| @as(u64, bpf), std.math.maxInt(u32))));
 }
 
 /// Seek to a byte position. The SDK (AIL_API_set_sample_position) rounds the
@@ -1629,6 +1632,11 @@ pub const Sample = struct {
         self.reverb_dry_level = 1.0;
         self.reverb_level = 0.0; // wet
         self.reverb_room_type = 0.0;
+        // removeReverb above dropped the delay node, and the reflection time is
+        // the delay it was built with: leaving it set made AIL_sample_reverb
+        // report the previous sample's value and made setReverbLevels reuse it
+        // instead of default_reverb_reflect_time.
+        self.reverb_reflect_time = 0.0;
         self.v7_obstruction = 0.0;
         self.v7_occlusion = 0.0;
         self.v7_exclusion = 0.0;

@@ -35,6 +35,14 @@ const max_log_message_bytes = 1024;
 // reaches OutputDebugString instead of failing the conversion and vanishing.
 const max_log_record_bytes = max_log_message_bytes + stamp_bytes + 128 + 1;
 
+// What is left of a record for its body once the stamp is accounted for. The
+// configuration line is rendered into a buffer of this size, not of
+// max_log_record_bytes: the line is then copied into the record behind the
+// stamp, so a line as long as the whole record did not fit there and wrote
+// past its end. A line over budget is dropped instead (writeConfigLine returns
+// an empty slice), which is the same outcome a message that will not fit has.
+const max_log_body_bytes = max_log_record_bytes - stamp_bytes;
+
 var log_file: ?std.Io.File = null;
 var log_offset: u64 = 0;
 var initialized = false;
@@ -332,7 +340,7 @@ fn logConfigOnce() void {
     // the ones init() is writing, and the only way to read them as a set is
     // under the lock init() holds. emit() takes the lock too, so the record is
     // formatted under it and written after it is released.
-    var line_buf: [max_log_record_bytes]u8 = undefined;
+    var line_buf: [max_log_body_bytes]u8 = undefined;
     const line = writeConfigLine(&line_buf);
     if (line.len == 0) return;
     var rec: [max_log_record_bytes]u8 = undefined;
@@ -348,7 +356,7 @@ fn logConfigOnce() void {
 fn echoConfigOnce() void {
     if (@atomicLoad(bool, &config_echoed, .acquire)) return;
     @atomicStore(bool, &config_echoed, true, .release);
-    var line_buf: [max_log_record_bytes]u8 = undefined;
+    var line_buf: [max_log_body_bytes]u8 = undefined;
     const line = writeConfigLine(&line_buf);
     if (line.len == 0) return;
     std.debug.print("{s}", .{line});
@@ -585,6 +593,26 @@ test "OPENMILES_LOG_PATH selects the file and rejects an empty or oversized valu
     try testing.expectEqual(max_log_path_bytes - 1, logPath().len);
     applyLogPath(&[_]u8{'p'} ** max_log_path_bytes);
     try testing.expectEqualStrings(default_log_name, logPath());
+}
+
+test "the configuration line fits behind the stamp it is written with" {
+    // The line is rendered into a buffer the size of the whole record and then
+    // copied into the record behind the stamp, so a long path used to produce
+    // a line up to stamp_bytes longer than the space behind it. Every path
+    // applyLogPath accepts is walked here; the result is either dropped (empty,
+    // the same outcome an over-long message has) or short enough to copy.
+    // Not applyLogPath(logPath()): the saved slice is log_path_buf itself, and
+    // restoring it would memcpy the buffer onto itself.
+    defer setDefaultLogPath();
+    var line_buf: [max_log_body_bytes]u8 = undefined;
+    const candidate = "p" ** max_log_path_bytes;
+    var path_len: usize = 0;
+    while (path_len <= max_log_path_bytes - 1) : (path_len += 1) {
+        applyLogPath(candidate[0..path_len]);
+        const line = writeConfigLine(&line_buf);
+        if (line.len == 0) continue;
+        try testing.expect(line.len <= max_log_record_bytes - stamp_bytes);
+    }
 }
 
 test "an environment read that Windows cannot decode by length alone is classified" {

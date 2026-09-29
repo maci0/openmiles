@@ -2370,6 +2370,26 @@ test "Sample setReverb and getReverb roundtrip" {
     try testing.expectEqual(@as(f32, 0.3), rev.reflect_time);
 }
 
+test "re-initing a reverbed sample clears the reflection time" {
+    // AIL_init_sample on a recycled handle clears the dry/wet/room-type state;
+    // the reflection time is the delay the dropped node was built with, and
+    // leaving it behind made AIL_sample_reverb report the previous sample's
+    // value and made setReverbLevels reuse it instead of the default.
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const sample = try openmiles.Sample.init(driver);
+    defer sample.deinit();
+
+    sample.setReverb(2.5, 0.7, 0.3);
+    sample.reset();
+    const rev = sample.getReverb();
+    try testing.expectEqual(@as(f32, 0.0), rev.room_type);
+    try testing.expectEqual(@as(f32, 0.0), rev.level);
+    try testing.expectEqual(@as(f32, 0.0), rev.reflect_time);
+}
+
 test "Sample setReverb with zero level clears reverb" {
     const allocator = testing.allocator;
     const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);

@@ -1724,7 +1724,14 @@ pub fn useRealClock() void {
 
 fn elapsedNs() u64 {
     ensureStartupTime();
-    return @intCast(@max(0, nowNs() - startup_ns));
+    // Snapshot the base under the mutex, the argument Clock.nowNs makes for
+    // virtual_ns: startup_ns is a plain i64 and the 32-bit target has no
+    // 64-bit atomics, so an unlocked read tears against useVirtualClock
+    // rewriting it. ensureStartupTime only orders the ready flag, not this.
+    startup_ns_mutex.lockUncancelable(io);
+    const base = startup_ns;
+    startup_ns_mutex.unlock(io);
+    return @intCast(@max(0, nowNs() - base));
 }
 
 pub fn getMsCount() u32 {
