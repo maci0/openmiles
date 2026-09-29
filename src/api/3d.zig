@@ -252,7 +252,8 @@ pub fn AIL_set_3D_sample_info(s: ?*anyopaque, info: ?*anyopaque) callconv(.winap
 pub fn AIL_set_3D_sample_loop_block(s: ?*anyopaque, loop_start: i32, loop_end: i32) callconv(.winapi) void {
     const p = s orelse return;
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
-    sample.setLoopBlock(loop_start, loop_end);
+    const block = openmiles.resolveLoopBlock(sample, loop_start, loop_end) orelse return;
+    sample.setLoopBlock(block[0], block[1]);
 }
 // AIL_set_3D_sample_cone(H3DSAMPLE, F32 inner_angle, F32 outer_angle, S32 outer_volume)
 // outer_volume is an MSS 0-127 scalar; stored internally as a 0..1 gain.

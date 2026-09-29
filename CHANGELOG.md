@@ -66,12 +66,44 @@ All notable changes to OpenMiles are recorded here. The format follows
 - `ci.yml` reads the `UV_VERSION`, `RUFF_VERSION` and `YAMLLINT_VERSION` pins out
   of the `Makefile` instead of repeating them, the way `release.yml` already
   did, and `make check-pins` now fails a workflow that types one of its own.
+- XMIDI conversion orders a same-tick control or program change before a
+  same-tick note-on. Sorting by raw status byte put the note-on first, and an
+  XMIDI sequence opens at delta 0 with its volume, pan and reset-controllers
+  writes ahead of the first note, so every sequence's first note rendered at the
+  soundfont's default volume and pan.
 
 ### Fixed
+
 - `docs/THREAT_MODEL.md` re-anchored at `src/engine/midi.zig`: the XMIDI loop
   stack, its depth check and the per-buffer jump budget had moved, so
   `make lint` failed `check-threat-model` on every run. The three mitigations
   the model cites were always in the file; only the line numbers were stale.
+- `AIL_set_3D_sample_loop_block` and `AIL_set_stream_loop_block` apply the SDK
+  loop-block argument rules the 2D `AIL_set_sample_loop_block` already did:
+  both offsets `-2` is a no-op, a single `-2` keeps that side's current
+  offset, and a reversed pair is swapped. The 3D and stream entry points
+  passed the pair straight through, so `-2` cleared the loop block instead of
+  leaving it alone, and a game that gave the block the SDK way round (a common
+  habit, since the 2D call accepts it) got a sample that played through once.
+  The normalization is now `openmiles.resolveLoopBlock`, shared by all three.
+- `AIL_stop_sequence` on a sequence that never reached a sound reports
+  `SEQ_STOPPED`. `Sequence.status` returned `SEQ_DONE` for every sequence that
+  was not initialized, which is checked before the stop flag, so a game that
+  starts a sequence, falls back when the driver cannot play it, and then stops
+  it could never observe `SEQ_STOPPED`.
+- `AIL_set_sequence_ms_position` applies the tempo events it passes over even
+  when the driver has no soundfont loaded. The seek consumes every event before
+  the target whether or not it applies it, so the tempo in force at the seek
+  point was being skipped, and beat and measure were recalculated from the
+  file's initial tempo.
+- `AIL_load_sample_buffer` leaves the ring's head cursor on the slot it names
+  when the submission is refused. The cursor advanced before the feed, so a
+  refusal left it one slot ahead, and the next `MSS_BUFFER_HEAD` call skipped
+  the slot `AIL_sample_buffer_ready` had just reported as free.
+- `AIL_enumerate_filter_attributes` clears the name on the terminal call, as
+  its own comment says it does. It wrote the first attribute's name instead, so
+  a caller reading the name before the return value got `"Cutoff"` back from a
+  call that reported no attribute.
 
 ## [0.3.0] - 2026-09-28
 

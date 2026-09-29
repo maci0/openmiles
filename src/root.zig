@@ -168,6 +168,27 @@ pub fn userDataIndex(index: i32) usize {
     return @intCast(std.math.clamp(index, 0, @as(i32, @intCast(user_data_slots - 1))));
 }
 
+/// Normalize the (start, end) pair of an MSS loop-block call, for every
+/// sample type exposing `bytesPerFrame`, `loop_start_frame` and
+/// `loop_end_frame`. SDK (mss.h 6.x): both -2 is a no-op, a single -2 keeps
+/// that side's current offset, and a reversed pair is swapped (the compare is
+/// unsigned, so it is the byte offsets that are ordered, not the frames).
+/// Returns null when the call is a no-op; the caller does nothing then.
+pub fn resolveLoopBlock(sample: anytype, loop_start: i32, loop_end: i32) ?[2]i32 {
+    if (loop_start == -2 and loop_end == -2) return null;
+    const bpf: u64 = sample.bytesPerFrame();
+    var start = loop_start;
+    var end = loop_end;
+    if (start == -2) start = @intCast(@min(sample.loop_start_frame *| bpf, @as(u64, std.math.maxInt(i32))));
+    if (end == -2) end = if (sample.loop_end_frame > 0) @intCast(@min(sample.loop_end_frame *| bpf, @as(u64, std.math.maxInt(i32)))) else 0;
+    if (@as(u32, @bitCast(start)) > @as(u32, @bitCast(end))) {
+        const t = start;
+        start = end;
+        end = t;
+    }
+    return .{ start, end };
+}
+
 // AIL_MAX_FILE_HEADER_SIZE bounds how far AIL_file_type scans for an MPEG frame
 // sync (miscutil.cpp clamps the scan length to it). MSS 7.0 doubled it from 4096
 // to 8192 — verified by disassembling AIL_file_type in the reference DLLs: 6.5h

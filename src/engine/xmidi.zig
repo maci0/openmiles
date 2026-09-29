@@ -351,14 +351,26 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
         }
     }
 
-    // Sort by absolute time; at same tick: meta events first, then note-offs, then note-ons, etc.
+    // Sort by absolute time; at same tick: meta events first, then note-offs,
+    // then the channel-state events (volume/pan/program/pitch), then note-ons.
+    // An XMIDI sequence opens at delta 0 with its CC7/CC10/CC121 setup ahead of
+    // the first note, and ordering by raw status byte would put that 0x90
+    // note-on ahead of them, so the first note of every sequence would render
+    // at the soundfont's default volume and pan.
+    const sameTickRank = struct {
+        fn of(data: []const u8) u3 {
+            if (data[0] == 0xFF) return 0;
+            return switch (data[0] & 0xF0) {
+                0x80 => 1, // note off
+                0xA0, 0xB0, 0xC0, 0xD0, 0xE0 => 2, // pressure, control, program, pitch bend
+                else => 3, // note on last: it plays the state the earlier events set
+            };
+        }
+    };
     std.sort.block(SmfEvent, events.items, {}, struct {
         fn lt(_: void, a: SmfEvent, b: SmfEvent) bool {
             if (a.abs_time != b.abs_time) return a.abs_time < b.abs_time;
-            const aMeta = a.data[0] == 0xFF;
-            const bMeta = b.data[0] == 0xFF;
-            if (aMeta != bMeta) return aMeta; // meta events before all channel events
-            return (a.data[0] & 0xF0) < (b.data[0] & 0xF0);
+            return sameTickRank.of(a.data[0..2]) < sameTickRank.of(b.data[0..2]);
         }
     }.lt);
 

@@ -2199,7 +2199,7 @@ pub const Sample3D = struct {
         fireSampleCallback(&self.eos_callback, self);
     }
 
-    fn bytesPerFrame(self: *const Sample3D) u32 {
+    pub fn bytesPerFrame(self: *const Sample3D) u32 {
         if (self.decoder) |d| {
             const bps = ma.ma_get_bytes_per_sample(d.outputFormat);
             return bps * @as(u32, @intCast(d.outputChannels));

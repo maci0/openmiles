@@ -68,9 +68,11 @@ pub fn AIL_enumerate_filter_attributes(filter: *anyopaque, next: *?*anyopaque, n
     const idx: usize = if (next.* == null) 0 else @intFromPtr(next.*);
     if (idx >= filter_attr_names.len) {
         // MSSENUM contract: the terminal call clears the cursor and the
-        // destination, so a loop that follows `next` terminates.
+        // destination, so a loop that follows `next` terminates, and a caller
+        // that reads the name before the return value does not get the first
+        // attribute back on a call that reported no attribute.
         next.* = null;
-        name.* = filter_attr_names[0];
+        name.* = "";
         return 0;
     }
     name.* = filter_attr_names[idx];

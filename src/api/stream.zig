@@ -270,7 +270,8 @@ pub fn AIL_stream_info(s_opt: ?*Sample, datarate: ?*i32, sndtype: ?*i32, length:
 }
 pub fn AIL_set_stream_loop_block(s_opt: ?*Sample, loop_start: i32, loop_end: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    s.setLoopBlock(loop_start, loop_end);
+    const block = openmiles.resolveLoopBlock(s, loop_start, loop_end) orelse return;
+    s.setLoopBlock(block[0], block[1]);
 }
 pub fn AIL_service_stream(s_opt: ?*Sample, onoff: i32) callconv(.winapi) i32 {
     _ = onoff; // `fillup`: block on pending async IO (no async IO in our model)

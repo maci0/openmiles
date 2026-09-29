@@ -365,20 +365,8 @@ pub fn AIL_set_sample_reverb(s_opt: ?*Sample, reverb_level: f32, reverb_reflect_
 }
 pub fn AIL_set_sample_loop_block(s_opt: ?*Sample, loop_start: i32, loop_end: i32) callconv(.winapi) void {
     const s = s_opt orelse return;
-    // SDK (AIL_API_set_sample_loop_block): both -2 is a no-op; a -2 offset means
-    // "keep the current one"; if start > end (unsigned) the two are swapped.
-    if (loop_start == -2 and loop_end == -2) return;
-    const bpf: u64 = s.bytesPerFrame();
-    var start = loop_start;
-    var end = loop_end;
-    if (start == -2) start = @intCast(@min(s.loop_start_frame *| bpf, @as(u64, std.math.maxInt(i32))));
-    if (end == -2) end = if (s.loop_end_frame > 0) @intCast(@min(s.loop_end_frame *| bpf, @as(u64, std.math.maxInt(i32)))) else 0;
-    if (@as(u32, @bitCast(start)) > @as(u32, @bitCast(end))) {
-        const t = start;
-        start = end;
-        end = t;
-    }
-    s.setLoopBlock(start, end);
+    const block = openmiles.resolveLoopBlock(s, loop_start, loop_end) orelse return;
+    s.setLoopBlock(block[0], block[1]);
 }
 pub fn AIL_set_sample_adpcm_block_size(s_opt: ?*Sample, block_size: u32) callconv(.winapi) void {
     const s = s_opt orelse return;
@@ -440,10 +428,16 @@ pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: i32, data: ?*anyopaque,
     const s = s_opt orelse return -1;
     if (buff_num >= s.n_buffers) return -1;
     var bn = buff_num;
+    var head_advanced = false;
+    var head_next: i32 = 0;
     if (bn == MSS_BUFFER_HEAD) {
         const n = if (s.n_buffers > 0) s.n_buffers else 1;
         bn = s.stream_head;
-        s.stream_head = @mod(bn + 1, n);
+        // The cursor moves only once the slot it names has been taken, so a
+        // refusal leaves it where it was and the head keeps naming the slot
+        // AIL_sample_buffer_ready reports.
+        head_next = @mod(bn + 1, n);
+        head_advanced = true;
     }
     if (bn < 0) return -1; // defensive: SDK would index buf[<0]; we stay safe
     if (s.pcm_format != null) {
@@ -470,6 +464,7 @@ pub fn AIL_load_sample_buffer(s_opt: ?*Sample, buff_num: i32, data: ?*anyopaque,
             return -1;
         };
     }
+    if (head_advanced) s.stream_head = head_next;
     // The slot is only reported once the submission was accepted, so a
     // rejected feed leaves AIL_sample_buffer_ready describing the ring that is
     // really there.

@@ -1318,11 +1318,12 @@ pub const Sequence = struct {
     }
 
     pub fn status(self: *Sequence) MidiStatus {
-        if (!self.is_initialized) return .done; // MSS: uninitialized sequences report SEQ_DONE
         if (self.is_playing.load(.acquire)) return .playing; // includes paused state
         if (self.is_done.load(.acquire)) return .done;
         // Loaded-but-never-played -> SEQ_DONE; only after AIL_stop_sequence is it
-        // SEQ_STOPPED (SEQ_DONE covers "finished or not yet played").
+        // SEQ_STOPPED (SEQ_DONE covers "finished or not yet played"). A
+        // sequence that never reached a sound is still reportable as stopped:
+        // AIL_stop_sequence marks it whether or not start() got that far.
         return if (self.was_stopped.load(.acquire)) .stopped else .done;
     }
 
@@ -1374,6 +1375,12 @@ pub const Sequence = struct {
         defer if (soundfont != null) self.driver.releaseSoundfontClaim();
         while (self.current_msg) |msg| {
             if (@as(f64, @floatFromInt(msg.*.time)) >= target_ms) break;
+            // Update tempo so beat/measure recalculation below uses the tempo
+            // that was active at the seek point, not the file's initial tempo.
+            // The seek consumes every event it passes, so this cannot sit
+            // behind the soundfont claim: a driver with no bank loaded still
+            // needs the tempo clock the seek point implies.
+            if (msg.*.type == tsf.TML_SET_TEMPO) self.applyTempoEvent(msg);
             if (soundfont) |sf| {
                 // Apply channel mapping so seek-replay state targets the same
                 // physical channel that onRead will use for live events.
@@ -1392,11 +1399,6 @@ pub const Sequence = struct {
                     },
                     tsf.TML_PITCH_BEND => {
                         _ = tsf.tsf_channel_set_pitchwheel(sf, phys_ch, openmiles_tml_get_pitch_bend(msg));
-                    },
-                    tsf.TML_SET_TEMPO => {
-                        // Update tempo so beat/measure recalculation below uses the tempo
-                        // that was active at the seek point, not the file's initial tempo.
-                        self.applyTempoEvent(msg);
                     },
                     else => {},
                 }
