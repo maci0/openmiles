@@ -438,6 +438,54 @@ pub fn log(comptime fmt: []const u8, args: anytype) void {
     emit(out);
 }
 
+/// Width of the "YYYY-MM-DDTHH:MM:SS" part of the stamp, the part that only
+/// changes once a second.
+const stamp_second_bytes = 19;
+
+/// Cached second prefix and the epoch second it was rendered from. Every
+/// engine entry point logs, and the calendar conversion behind this prefix
+/// (epoch day, then year day, then month day) is the most expensive part of
+/// formatting a record; every record inside the same second rendered the same
+/// answer. `stamp_cache_mutex` guards both, since records come from the audio
+/// thread, the timer threads, and the game thread at once, and the prefix is
+/// copied out under that lock rather than read from the shared buffer after
+/// releasing it. A clock that steps backwards simply misses and re-renders.
+var stamp_cache_mutex: std.Io.Mutex = .init;
+var stamp_cache_secs: u64 = 0;
+var stamp_cache_set: bool = false;
+var stamp_cache_buf: [stamp_second_bytes]u8 = undefined;
+
+/// Write the "YYYY-MM-DDTHH:MM:SS" prefix for `epoch_secs` into `out`, from
+/// the cache when the previous record of this second already rendered it.
+fn secondPrefix(epoch_secs: u64, out: *[stamp_second_bytes]u8) void {
+    stamp_cache_mutex.lockUncancelable(io);
+    defer stamp_cache_mutex.unlock(io);
+    if (stamp_cache_set and stamp_cache_secs == epoch_secs) {
+        @memcpy(out, &stamp_cache_buf);
+        return;
+    }
+    const secs = std.time.epoch.EpochSeconds{ .secs = epoch_secs };
+    const year_day = secs.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_secs = secs.getDaySeconds();
+    const rendered = std.fmt.bufPrint(
+        &stamp_cache_buf,
+        "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}",
+        .{
+            year_day.year,
+            @intFromEnum(month_day.month),
+            @as(u16, month_day.day_index) + 1,
+            day_secs.getHoursIntoDay(),
+            day_secs.getMinutesIntoHour(),
+            day_secs.getSecondsIntoMinute(),
+        },
+    ) catch unreachable;
+    std.debug.assert(rendered.len == stamp_second_bytes);
+    stamp_cache_secs = epoch_secs;
+    stamp_cache_set = true;
+    @memcpy(out, &stamp_cache_buf);
+}
+
 /// Render the current time as the fixed-width stamp that opens every record.
 ///
 /// UTC, and marked `Z`, because the library cannot read the host's time zone
@@ -451,24 +499,39 @@ pub fn log(comptime fmt: []const u8, args: anytype) void {
 /// the game's own log at all.
 fn writeStamp(rec: []u8) []const u8 {
     const now = std.Io.Clock.real.now(io);
-    const secs = std.time.epoch.EpochSeconds{ .secs = @intCast(now.toSeconds()) };
-    const year_day = secs.getEpochDay().calculateYearDay();
-    const month_day = year_day.calculateMonthDay();
-    const day_secs = secs.getDaySeconds();
+    var prefix: [stamp_second_bytes]u8 = undefined;
+    secondPrefix(@intCast(now.toSeconds()), &prefix);
     const millis: u16 = @intCast(@mod(now.toMilliseconds(), std.time.ms_per_s));
     return std.fmt.bufPrint(
         rec[0..stamp_bytes],
-        "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z ",
-        .{
+        "{s}.{d:0>3}Z ",
+        .{ &prefix, millis },
+    ) catch unreachable;
+}
+
+test "the cached second prefix renders the same text as a direct conversion" {
+    // The cache is only sound if a hit is byte-identical to a miss. Drive it
+    // both ways on the same second and across a second boundary, where the
+    // cached entry has to be replaced rather than reused.
+    const probe_seconds = [_]u64{ 1_700_000_000, 1_700_000_001, 1_700_000_000, 0, 946_684_800 };
+    var cached: [stamp_second_bytes]u8 = undefined;
+    for (probe_seconds) |secs| {
+        secondPrefix(secs, &cached);
+        const direct = std.time.epoch.EpochSeconds{ .secs = secs };
+        const year_day = direct.getEpochDay().calculateYearDay();
+        const month_day = year_day.calculateMonthDay();
+        const day_secs = direct.getDaySeconds();
+        var want: [stamp_second_bytes]u8 = undefined;
+        _ = try std.fmt.bufPrint(&want, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}", .{
             year_day.year,
             @intFromEnum(month_day.month),
             @as(u16, month_day.day_index) + 1,
             day_secs.getHoursIntoDay(),
             day_secs.getMinutesIntoHour(),
             day_secs.getSecondsIntoMinute(),
-            millis,
-        },
-    ) catch unreachable;
+        });
+        try testing.expectEqualStrings(&want, &cached);
+    }
 }
 
 /// Render one record into `rec`: the stamp, then the formatted message, or an

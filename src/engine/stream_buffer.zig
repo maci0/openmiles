@@ -190,6 +190,14 @@ pub const StreamSource = struct {
         var eob_n: usize = 0;
         var total: usize = 0;
         var at_end = false;
+        // Bytes per output frame and the active ring depth, read once here
+        // instead of off `self` inside the walk. Both are fixed for the whole
+        // locked section: frame_size is set only by init, and slot_count only by
+        // setSlotCount, which takes this same mutex. Loading them per iteration
+        // made every step a read the compiler could not prove stable across the
+        // writes through `slot`, on the audio thread's hottest loop.
+        const frame_size = self.frame_size;
+        const slot_count = self.slot_count;
 
         self.mutex.lockUncancelable(io);
         while (total < fc) {
@@ -203,8 +211,12 @@ pub const StreamSource = struct {
                 // Current slot empty — advance to the next ring slot holding
                 // data or an end marker; if none, underrun.
                 var next: ?usize = null;
-                for (1..self.slot_count) |k| {
-                    const idx = (self.current + k) % self.slot_count;
+                for (1..slot_count) |k| {
+                    // Wrapping subtract, not `%`: self.current and k are both
+                    // below slot_count, so the sum is under 2 * slot_count and
+                    // one conditional subtraction is the modulo.
+                    const sum = self.current + k;
+                    const idx = if (sum >= slot_count) sum - slot_count else sum;
                     if (self.slots[idx].data != null or self.slots[idx].eof) {
                         next = idx;
                         break;
@@ -219,6 +231,9 @@ pub const StreamSource = struct {
             }
 
             const avail = slot.len - slot.pos;
+            // One division per slot, not two: the quotient gives whole frames
+            // and the remainder falls out of the same multiply.
+            const avail_frames = avail / frame_size;
             // A buffer can end mid-frame: AIL_load_sample_buffer forwards the
             // caller's byte count without a whole-frame check, so 16-bit stereo
             // (frame_size 4) accepts an odd length. The trailing bytes are not a
@@ -227,10 +242,9 @@ pub const StreamSource = struct {
             // would leave the sub-frame remainder in place forever: avail would
             // stay nonzero, take_frames would be 0, the read loop would make no
             // progress on every call, and the sample would never fire EOB or EOS.
-            const whole_frames = avail - (avail % self.frame_size);
-            if (whole_frames == 0) {
+            if (avail_frames == 0) {
                 if (avail != 0) {
-                    root.log("StreamSource.onRead: dropping {d} trailing byte(s) of a {d}-byte partial frame in slot {d}\n", .{ avail, self.frame_size, self.current });
+                    root.log("StreamSource.onRead: dropping {d} trailing byte(s) of a {d}-byte partial frame in slot {d}\n", .{ avail, frame_size, self.current });
                     slot.pos = slot.len;
                 }
                 // Buffer drained: capture EOB, free the slot, advance.
@@ -243,19 +257,21 @@ pub const StreamSource = struct {
                     eob_n += 1;
                 }
                 slot.* = .{};
-                self.current = (self.current + 1) % self.slot_count;
+                const next_slot = self.current + 1;
+                self.current = if (next_slot >= slot_count) next_slot - slot_count else next_slot;
                 continue;
             }
 
             // Frames, not bytes, on both sides: a byte-wise min can land mid-frame
             // and yield 0, which would stall the ring for the rest of the call.
-            const take_frames = @min(avail / self.frame_size, fc - total);
+            const take_frames = @min(avail_frames, fc - total);
             std.debug.assert(take_frames > 0);
+            const take_bytes = take_frames * frame_size;
             if (out_base) |ob| {
-                const dst = ob + total * self.frame_size;
-                @memcpy(dst[0 .. take_frames * self.frame_size], slot.data.?[slot.pos .. slot.pos + take_frames * self.frame_size]);
+                const dst = ob + total * frame_size;
+                @memcpy(dst[0..take_bytes], slot.data.?[slot.pos .. slot.pos + take_bytes]);
             }
-            slot.pos += take_frames * self.frame_size;
+            slot.pos += take_bytes;
             total += take_frames;
         }
         self.cursor_frames += total;

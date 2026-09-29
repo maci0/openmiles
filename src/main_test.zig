@@ -82,6 +82,40 @@ test "Sample allocation and basic properties" {
     try testing.expectEqual(@as(f32, -0.5), sample.pan);
 }
 
+test "Sample frees unlink by index, so a hole does not strand a later handle" {
+    const allocator = testing.allocator;
+    const driver = try openmiles.DigitalDriver.init(allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    // Free out of order and from the middle, which is where a swapRemove moves
+    // a different handle into the hole. Every survivor must still be reachable
+    // through the driver's own list, and every one freed must be gone from it.
+    const a = try openmiles.Sample.init(driver);
+    const b = try openmiles.Sample.init(driver);
+    const c = try openmiles.Sample.init(driver);
+    const d = try openmiles.Sample.init(driver);
+    try testing.expectEqual(@as(usize, 4), driver.samples.items.len);
+
+    b.deinit();
+    try testing.expectEqual(@as(usize, 3), driver.samples.items.len);
+    d.deinit();
+    a.deinit();
+    try testing.expectEqual(@as(usize, 1), driver.samples.items.len);
+    try testing.expectEqual(@as(*openmiles.Sample, c), driver.samples.items[0]);
+    c.deinit();
+    try testing.expectEqual(@as(usize, 0), driver.samples.items.len);
+
+    const p = try openmiles.Sample3D.init(driver);
+    const q = try openmiles.Sample3D.init(driver);
+    const r = try openmiles.Sample3D.init(driver);
+    q.deinit();
+    p.deinit();
+    try testing.expectEqual(@as(usize, 1), driver.samples_3d.items.len);
+    try testing.expectEqual(@as(*openmiles.Sample3D, r), driver.samples_3d.items[0]);
+    r.deinit();
+    try testing.expectEqual(@as(usize, 0), driver.samples_3d.items.len);
+}
+
 test "MidiDriver init and deinit" {
     const allocator = testing.allocator;
     const driver = try openmiles.MidiDriver.init(allocator);

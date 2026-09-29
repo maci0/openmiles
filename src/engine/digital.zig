@@ -353,6 +353,11 @@ pub const CompressorNode = extern struct {
         const n = @min(pInCount.*, pOutCount.*);
         const in = ppIn[0];
         const out = ppOut[0];
+        // The envelope lives in a local for the whole block and is written back
+        // once. Read and written through `self` per frame, it is a load the
+        // compiler cannot hoist across the writes to `out` (which may alias the
+        // node), so every frame paid a dependent load on the audio thread.
+        var env: f32 = self.env;
         var f: usize = 0;
         while (f < n) : (f += 1) {
             const l = in[f * 2];
@@ -360,11 +365,12 @@ pub const CompressorNode = extern struct {
             const peak = @max(@abs(l), @abs(r));
             var target: f32 = 1.0;
             if (peak > threshold) target = (threshold + (peak - threshold) / ratio) / peak;
-            const coef: f32 = if (target < self.env) attack else release;
-            self.env += (target - self.env) * coef;
-            out[f * 2] = l * self.env;
-            out[f * 2 + 1] = r * self.env;
+            const coef: f32 = if (target < env) attack else release;
+            env += (target - env) * coef;
+            out[f * 2] = l * env;
+            out[f * 2 + 1] = r * env;
         }
+        self.env = env;
         pInCount.* = n;
         pOutCount.* = n;
     }
@@ -1023,6 +1029,11 @@ pub const default_reverb_reflect_time: f32 = 0.05;
 
 pub const Sample = struct {
     driver: *DigitalDriver,
+    // Slot this handle occupies in driver.samples, so freeing it unlinks in
+    // O(1) instead of scanning every handle the driver still holds. Kept
+    // current by reindex on every swapRemove, so a stale value can only come
+    // from a driver torn down under the handle, which skips the unlink.
+    list_index: usize = 0,
     sound: ma.ma_sound,
     decoder: ?*ma.ma_decoder = null,
     is_initialized: bool = false,
@@ -1197,6 +1208,7 @@ pub const Sample = struct {
         errdefer driver.allocator.destroy(self);
         self.* = .{
             .driver = driver,
+            .list_index = driver.samples.items.len,
             .sound = undefined,
             .decoder = null,
             .owned_buffer = null,
@@ -1208,7 +1220,14 @@ pub const Sample = struct {
 
     pub fn deinit(self: *Sample) void {
         log("Sample.deinit: s={*}\n", .{self});
-        if (!self.driver_is_dead) root.removeFirst(&self.driver.samples, self);
+        if (!self.driver_is_dead) {
+            const index = self.list_index;
+            root.removeAt(&self.driver.samples, index, struct {
+                fn fixup(moved: *Sample, at: usize) void {
+                    moved.list_index = at;
+                }
+            }.fixup);
+        }
         // Detach from any attached Filter first — Filter's attached_samples
         // list would otherwise hold a dangling pointer after we're freed.
         if (self.attached_filter) |f| {
@@ -2165,6 +2184,8 @@ pub const Sample = struct {
 
 pub const Sample3D = struct {
     driver: *DigitalDriver,
+    // Slot this handle occupies in driver.samples_3d; see Sample.list_index.
+    list_index: usize = 0,
     sound: ma.ma_sound,
     decoder: ?*ma.ma_decoder = null,
     owned_buffer: ?[]u8 = null,
@@ -2232,13 +2253,20 @@ pub const Sample3D = struct {
     pub fn init(driver: *DigitalDriver) !*Sample3D {
         const self = try driver.allocator.create(Sample3D);
         errdefer driver.allocator.destroy(self);
-        self.* = .{ .driver = driver, .sound = undefined };
+        self.* = .{ .driver = driver, .list_index = driver.samples_3d.items.len, .sound = undefined };
         try driver.samples_3d.append(driver.allocator, self);
         return self;
     }
 
     pub fn deinit(self: *Sample3D) void {
-        if (!self.driver_is_dead) root.removeFirst(&self.driver.samples_3d, self);
+        if (!self.driver_is_dead) {
+            const index = self.list_index;
+            root.removeAt(&self.driver.samples_3d, index, struct {
+                fn fixup(moved: *Sample3D, at: usize) void {
+                    moved.list_index = at;
+                }
+            }.fixup);
+        }
         self.cleanupPlaybackState();
         self.driver.allocator.destroy(self);
     }

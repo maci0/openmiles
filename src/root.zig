@@ -32,6 +32,7 @@ pub const log = logger.log;
 pub const fs_compat = @import("utils/fs_compat.zig");
 pub const wide = @import("utils/wide.zig");
 pub const removeFirst = @import("utils/list.zig").removeFirst;
+pub const removeAt = @import("utils/list.zig").removeAt;
 pub const satI32 = @import("utils/saturate.zig").satI32;
 pub const satU32 = @import("utils/saturate.zig").satU32;
 
