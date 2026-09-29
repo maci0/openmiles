@@ -283,7 +283,7 @@ help:
 	@echo "Individual checks (make lint runs all of them but check-interpreter"
 	@echo "and check-parity-tools, which only the targets that need them run):"
 	@echo "  check-toolchain     assert zig on PATH is the pinned build.zig.zon version"
-	@echo "  check-host-tools    assert shellcheck and a Python 3 interpreter are installed"
+	@echo "  check-host-tools    assert shellcheck, yamllint, and a Python 3 interpreter are installed"
 	@echo "  check-header        assert src/mss.h matches the export table and struct layouts per -Dmss-version"
 	@echo "  check-examples      compile every C snippet in README.md and docs/ against src/mss.h"
 	@echo "  check-versions      assert every -Dmss-version is parity-swept or declared unswept"

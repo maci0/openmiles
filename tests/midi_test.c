@@ -4,8 +4,23 @@
 #include "test_utils.h"
 
 int play_test_main(int argc, char** argv) {
-    if (argc < 3) {
-        fprintf(stderr, "Usage: %s <midi_file.mid> <soundfont.sf2>\n", argv[0]);
+    static const char* const SYNOPSIS = "<midi_file.mid> <soundfont.sf2>";
+    static const char* const NOTES =
+        "Loads the SoundFont into the MIDI driver and runs the MIDI file\n"
+        "through the sequence API. The sequence surface is v6.1-v7.0 only, so\n"
+        "a build outside that range reports SKIPPED and exits 0 rather than\n"
+        "failing. The harness loads mss32.dll from the directory it is in, so\n"
+        "run it from zig-out/bin next to the DLL.";
+
+    char* pos[2];
+    int code = 0;
+    int n = test_parse_args(argc, argv, pos, 2, SYNOPSIS, NOTES, &code);
+    if (n < 0) {
+        return code;
+    }
+    if (n < 2) {
+        fprintf(stderr, "error: <midi_file.mid> and <soundfont.sf2> are both required\n");
+        test_usage(stderr, argv[0], SYNOPSIS, NOTES);
         return 2;
     }
 
@@ -13,7 +28,7 @@ int play_test_main(int argc, char** argv) {
 
     HMODULE mss = LoadLibrary("mss32.dll");
     if (!mss) {
-        printf("Failed to load mss32.dll (Error %d)\n", (int)GetLastError());
+        fprintf(stderr, "Failed to load mss32.dll (Error %d)\n", (int)GetLastError());
         return 1;
     }
 
@@ -62,19 +77,30 @@ int play_test_main(int argc, char** argv) {
     void* dig = p_AIL_open_digital_driver(44100, 16, 2, 0);
     void* midi = p_AIL_open_midi_driver(0);
     if (!midi) {
-        printf("Failed to open MIDI driver.\n");
+        fprintf(stderr, "Failed to open MIDI driver.\n");
+        p_AIL_close_digital_driver(dig);
+        p_AIL_shutdown();
+        FreeLibrary(mss);
         return 1;
     }
 
-    printf("Loading SoundFont: %s\n", argv[2]);
-    if (!p_AIL_DLS_load_file(midi, argv[2], 0)) {
-        printf("Failed to load SoundFont.\n");
+    printf("Loading SoundFont: %s\n", pos[1]);
+    if (!p_AIL_DLS_load_file(midi, pos[1], 0)) {
+        fprintf(stderr, "Failed to open SoundFont: %s\n", pos[1]);
+        p_AIL_close_midi_driver(midi);
+        p_AIL_close_digital_driver(dig);
+        p_AIL_shutdown();
+        FreeLibrary(mss);
         return 1;
     }
 
-    FILE* f = fopen(argv[1], "rb");
+    FILE* f = fopen(pos[0], "rb");
     if (!f) {
-        printf("Failed to open MIDI file.\n");
+        fprintf(stderr, "Failed to open MIDI file: %s\n", pos[0]);
+        p_AIL_close_midi_driver(midi);
+        p_AIL_close_digital_driver(dig);
+        p_AIL_shutdown();
+        FreeLibrary(mss);
         return 1;
     }
     fseek(f, 0, SEEK_END);
@@ -86,7 +112,7 @@ int play_test_main(int argc, char** argv) {
 
     void* seq = p_AIL_allocate_sequence_handle(midi);
     if (!seq) {
-        printf("FAILED: Allocate Sequence Handle returned NULL\n");
+        fprintf(stderr, "FAILED: Allocate Sequence Handle returned NULL\n");
         free(data);
         p_AIL_close_midi_driver(midi);
         p_AIL_close_digital_driver(dig);

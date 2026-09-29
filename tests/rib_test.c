@@ -6,13 +6,23 @@ typedef int (__stdcall *t_AIL_enumerate_filters)(void** next, void** dest, char*
 typedef void* (__stdcall *t_AIL_ASI_provider_attribute)(void* provider, const char* name);
 
 int play_test_main(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
+    static const char* const SYNOPSIS = "";
+    static const char* const NOTES =
+        "Scans ./plugins for ASI providers through the RIB and fails when it\n"
+        "finds none, so it has to run from zig-out/bin next to the DLL and the\n"
+        "plugins the build installed. It takes no arguments.";
+
+    int code = 0;
+    char* pos[1];
+    if (test_parse_args(argc, argv, pos, 0, SYNOPSIS, NOTES, &code) < 0) {
+        return code;
+    }
+
     printf("--- OpenMiles RIB/ASI Test ---\n");
-    
+
     HMODULE mss = LoadLibrary("mss32.dll");
     if (!mss) {
-        printf("Failed to load mss32.dll\n");
+        fprintf(stderr, "Failed to load mss32.dll\n");
         return 1;
     }
 
@@ -43,7 +53,7 @@ int play_test_main(int argc, char** argv) {
     int count = 0;
     while (p_AIL_enumerate_filters(&next, &dest, &name)) {
         if (!name) {
-            printf("FAILED: Provider returned NULL name\n");
+            fprintf(stderr, "FAILED: Provider returned NULL name\n");
             p_AIL_shutdown();
             FreeLibrary(mss);
             return 1;
@@ -62,7 +72,7 @@ int play_test_main(int argc, char** argv) {
 
     printf("Total providers found: %d\n", count);
     if (count == 0) {
-        printf("FAILED: No ASI providers found (expected at least 1 in ./plugins)\n");
+        fprintf(stderr, "FAILED: No ASI providers found (expected at least 1 in ./plugins)\n");
         p_AIL_shutdown();
         FreeLibrary(mss);
         return 1;

@@ -60,6 +60,14 @@ All notable changes to OpenMiles are recorded here. The format follows
 - The Quick API's three entry points that allocate a sample share one
   `newQuickSample` helper, and `AIL_quick_load`'s VFS-or-disk read is now
   `loadQuickSample`. Same handles, same last-error text, same log lines.
+- The four Windows harnesses in `tests/` now answer their command line the same
+  way: `-h` and `--help` print a usage on stdout and exit 0, a mistyped flag or
+  a surplus positional print it on stderr and exit 2, and a missing required
+  argument names itself on stderr. `rib_test` took no arguments and ignored
+  any it was given, and `full_suite` accepted a fourth silently.
+- A diagnostic that stops a harness run now goes to stderr rather than stdout.
+  The checks themselves still report on stdout, so a piped run reads as a
+  report with no failure text mixed into it.
 
 ### Fixed
 

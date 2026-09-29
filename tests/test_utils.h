@@ -3,6 +3,7 @@
 
 #include "../deps/windows_stub.h"
 #include <stdio.h>
+#include <string.h>
 
 #ifdef _WIN32
 /* MSVC stdcall decoration: a leading underscore plus the @<argbytes> suffix,
@@ -12,11 +13,71 @@
 #define MSS_DECORATE(name, bytes) #name
 #endif
 
+/* Every harness in this directory answers its command line the same way, so
+ * the four do not each invent a spelling: -h and --help print the usage on
+ * stdout and exit 0, a mistyped flag or a surplus positional prints it on
+ * stderr and exits 2, and the run's own results go to stdout while the
+ * diagnostics that stop the run go to stderr. The split matters to anyone
+ * piping the output: a report read from stdout is never interleaved with the
+ * reason a run could not finish.
+ *
+ * `notes` may be NULL for a harness with nothing to say past its synopsis. */
+static void test_usage(FILE* out, const char* prog, const char* synopsis,
+                       const char* notes) {
+    /* A harness that takes no arguments has an empty synopsis, and the
+     * separator with it, so the usage line does not end in a stray space. */
+    if (*synopsis) {
+        fprintf(out, "Usage: %s %s\n", prog, synopsis);
+    } else {
+        fprintf(out, "Usage: %s\n", prog);
+    }
+    if (notes && *notes) fprintf(out, "\n%s\n", notes);
+    fprintf(out, "\nOptions:\n  -h, --help  show this help\n");
+    fprintf(out,
+            "\nExit status: 0 the run completed, 1 a check failed, 2 bad invocation.\n");
+}
+
+/* Splits the command line into at most `cap` positionals, in order. Returns the
+ * number it found, or -1 when the harness must stop instead: the reason has
+ * already been reported and the code to exit with is in *exit_code, 0 for help
+ * and 2 for a bad invocation.
+ *
+ * A lone "-" is a positional, not a flag, so a file named "-" still reaches the
+ * harness. */
+static int test_parse_args(int argc, char** argv, char** pos, int cap,
+                           const char* synopsis, const char* notes,
+                           int* exit_code) {
+    int count = 0;
+    for (int i = 1; i < argc; i++) {
+        char* arg = argv[i];
+        if (arg[0] != '-' || arg[1] == '\0') {
+            if (count == cap) {
+                fprintf(stderr, "error: unexpected argument: %s\n", arg);
+                test_usage(stderr, argv[0], synopsis, notes);
+                *exit_code = 2;
+                return -1;
+            }
+            pos[count++] = arg;
+            continue;
+        }
+        if (strcmp(arg, "-h") == 0 || strcmp(arg, "--help") == 0) {
+            test_usage(stdout, argv[0], synopsis, notes);
+            *exit_code = 0;
+            return -1;
+        }
+        fprintf(stderr, "error: unknown option: %s\n", arg);
+        test_usage(stderr, argv[0], synopsis, notes);
+        *exit_code = 2;
+        return -1;
+    }
+    return count;
+}
+
 #define LOAD_FUNC_EX(name, bytes) \
     p_##name = (t_##name)GetProcAddress(mss, #name); \
     if (!p_##name) p_##name = (t_##name)GetProcAddress(mss, MSS_DECORATE(name, bytes)); \
     if (!p_##name) { \
-        printf("Failed to load function: %s\n", #name); \
+        fprintf(stderr, "Failed to load function: %s\n", #name); \
         return 1; \
     }
 

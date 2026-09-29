@@ -3,8 +3,21 @@
 #include "test_utils.h"
 
 int play_test_main(int argc, char** argv) {
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s <audio_file.wav>\n", argv[0]);
+    static const char* const SYNOPSIS = "<audio_file.wav>";
+    static const char* const NOTES =
+        "Opens the given audio file through the stream API and plays it. The\n"
+        "harness loads mss32.dll from the directory it is in, so run it from\n"
+        "zig-out/bin next to the DLL and the ./plugins directory.";
+
+    char* pos[1];
+    int code = 0;
+    int n = test_parse_args(argc, argv, pos, 1, SYNOPSIS, NOTES, &code);
+    if (n < 0) {
+        return code;
+    }
+    if (n < 1) {
+        fprintf(stderr, "error: missing <audio_file.wav>\n");
+        test_usage(stderr, argv[0], SYNOPSIS, NOTES);
         return 2;
     }
 
@@ -12,7 +25,7 @@ int play_test_main(int argc, char** argv) {
 
     HMODULE mss = LoadLibrary("mss32.dll");
     if (!mss) {
-        printf("Failed to load mss32.dll (Error %d)\n", (int)GetLastError());
+        fprintf(stderr, "Failed to load mss32.dll (Error %d)\n", (int)GetLastError());
         return 1;
     }
 
@@ -41,16 +54,16 @@ int play_test_main(int argc, char** argv) {
 
     void* dig = p_AIL_open_digital_driver(44100, 16, 2, 0);
     if (!dig) {
-        printf("Failed to open digital driver: %s\n", p_AIL_last_error());
+        fprintf(stderr, "Failed to open digital driver: %s\n", p_AIL_last_error());
         return 1;
     }
     printf("Digital driver opened.\n");
 
     p_AIL_set_redist_directory("./plugins");
 
-    void* stream = p_AIL_open_stream(dig, argv[1], 0);
+    void* stream = p_AIL_open_stream(dig, pos[0], 0);
     if (!stream) {
-        printf("Failed to open stream: %s\n", p_AIL_last_error());
+        fprintf(stderr, "Failed to open stream: %s\n", p_AIL_last_error());
         p_AIL_close_digital_driver(dig);
         p_AIL_shutdown();
         return 1;

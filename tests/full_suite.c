@@ -6,6 +6,9 @@
 
 #define SMP_PLAYING 4
 
+/* The result of a check, so it belongs on stdout with the rest of the report:
+ * this harness prints PASSED and FAILED alike and a caller reading a piped run
+ * sees every check, not only the ones that broke. */
 #define TEST_ASSERT(cond, msg) \
     if (!(cond)) { \
         printf("FAILED: %s\n", msg); \
@@ -24,15 +27,32 @@ typedef void (__stdcall *t_AIL_set_timer_user_data)(void*, unsigned int);
 typedef unsigned int (__stdcall *t_AIL_set_timer_user)(void*, unsigned int);
 
 int play_test_main(int argc, char** argv) {
+    static const char* const SYNOPSIS = "[<wav> [<mid> [<sf2>]]]";
+    static const char* const NOTES =
+        "Drives the whole API surface in six sections. The three media\n"
+        "arguments are positional and all optional: each defaults to the\n"
+        "fixture under test_media/ next to the executable, which the build\n"
+        "installs only when that directory is present in the tree.\n"
+        "A section whose entry points this build does not export reports\n"
+        "SKIPPED and the run continues.";
+
+    char* pos[3];
+    int code = 0;
+    if (test_parse_args(argc, argv, pos, 3, SYNOPSIS, NOTES, &code) < 0) {
+        return code;
+    }
+    /* Every positional is optional here, so the count is not read; what matters
+     * is that a fourth argument was rejected above. */
+
     printf("--- OpenMiles Full API Suite ---\n");
-    
-    const char* wav_file = (argc > 1) ? argv[1] : "test_media/test.wav";
-    const char* mid_file = (argc > 2) ? argv[2] : "test_media/test.mid";
-    const char* sf2_file = (argc > 3) ? argv[3] : "test_media/test.sf2";
+
+    const char* wav_file = pos[0] ? pos[0] : "test_media/test.wav";
+    const char* mid_file = pos[1] ? pos[1] : "test_media/test.mid";
+    const char* sf2_file = pos[2] ? pos[2] : "test_media/test.sf2";
 
     HMODULE mss = LoadLibrary("mss32.dll");
     if (!mss) {
-        printf("Failed to load mss32.dll (Error %d)\n", (int)GetLastError());
+        fprintf(stderr, "Failed to load mss32.dll (Error %d)\n", (int)GetLastError());
         return 1;
     }
 

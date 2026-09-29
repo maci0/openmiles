@@ -134,9 +134,17 @@ zig build
 cd zig-out/bin && full_suite.exe
 ```
 
-`play_test`, `midi_test`, and `full_suite` take the fixture paths as arguments
-(`test_media/test.wav`, `test_media/test.mid`, `test_media/test.sf2`) and
-report the missing file when it is absent. On Linux they build but cannot run:
+`play_test` and `midi_test` take the fixture paths as required positional
+arguments (`test_media/test.wav`, `test_media/test.mid`,
+`test_media/test.sf2`) and report the missing file when it is absent;
+`full_suite` takes the same three, in that order, and defaults each to the
+fixture when it is left out. `rib_test` takes none.
+
+All four answer the command line the same way: `-h` or `--help` prints the
+usage on stdout and exits 0, a mistyped flag or a surplus argument prints it
+on stderr and exits 2, and the checks themselves report on stdout while the
+diagnostic that stops a run goes to stderr, so a piped report never carries the
+reason a run could not finish. On Linux they build but cannot run:
 `deps/windows_stub.h` resolves no export, so every call is a null pointer.
 
 ## What a change is expected to carry
