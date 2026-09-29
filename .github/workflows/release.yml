@@ -20,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -325,15 +325,8 @@ jobs:
           fi
           head -1 release/NOTES.md
 
-      # The only step in the job that writes. Every earlier step builds, reads,
-      # and compares, and a token with write scope sitting in the environment
-      # of a step that compiles and runs the tree's own scripts is a write
-      # credential those steps do not need. Read scope at the workflow level,
-      # write scoped to the publish step here.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
-        permissions:
-          contents: write
         with:
           # Named explicitly: on a manual re-run github.ref is the branch the
           # workflow was dispatched from, not the tag being released.
