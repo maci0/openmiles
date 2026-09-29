@@ -286,9 +286,23 @@ fn instanceHasLabel(inst: *const SoundInstance, label: []const u8) bool {
 // by instance_id once, rather than rescanning the whole list to recount and
 // re-find the minimum after each eviction.
 fn evictOldestWithLabel(label: []const u8, lim: u32) void {
+    const cap: usize = lim;
+    // Count the matches before gathering them. Every start-sound step runs this
+    // for each of its labels, and the ordinary case is a list already under the
+    // cap, which evicts nothing: growing and releasing a list of every match to
+    // discover that cost one allocation and two passes over the instances per
+    // label per step, for a decision the count alone settles.
+    var matched: usize = 0;
+    for (g_instances.items) |inst| {
+        if (instanceHasLabel(inst, label)) matched += 1;
+    }
+    if (matched < cap) return;
+    // Now the list is over the cap and the gather is the work: reserve against
+    // the count just taken rather than the whole instance list, which is
+    // larger whenever any instance carries a different label.
     var matches: std.ArrayListUnmanaged(*SoundInstance) = .empty;
     defer matches.deinit(root.global_allocator);
-    matches.ensureTotalCapacity(root.global_allocator, g_instances.items.len) catch {};
+    matches.ensureTotalCapacity(root.global_allocator, matched) catch {};
     for (g_instances.items) |inst| {
         if (!instanceHasLabel(inst, label)) continue;
         // A scan that cannot finish leaves the cap unenforced and the new sound
@@ -299,9 +313,6 @@ fn evictOldestWithLabel(label: []const u8, lim: u32) void {
             return;
         };
     }
-    // Already under the cap: nothing to evict.
-    const cap: usize = lim;
-    if (matches.items.len < cap) return;
     std.sort.block(*SoundInstance, matches.items, {}, struct {
         fn lt(_: void, a: *SoundInstance, b: *SoundInstance) bool {
             return a.instance_id < b.instance_id;
@@ -370,22 +381,27 @@ pub fn resumeInstanceAt(inst: *SoundInstance, now: u64) void {
     if (now > inst.paused_at_ms) inst.start_ms += now - inst.paused_at_ms;
 }
 
-// Progress PLAYING instances to COMPLETE once their bank duration has elapsed.
-// A zero duration (sound unresolvable in any loaded bank) completes as soon as
-// processing starts: without this the instance would sit PLAYING forever and
-// MilesCompleteEventQueueProcessing would never reap it, growing g_instances
-// by one entry per enqueued event on games that loop event queues.
+// Progress one instance to COMPLETE once its bank duration has elapsed against
+// a clock reading the caller already took. Factored out so a caller walking
+// g_instances for another reason expires each instance in the visit it already
+// makes, rather than sweeping the list in a pass of its own first.
+pub fn expireInstanceAt(inst: *SoundInstance, now: u64) void {
+    if (inst.status != STATUS_PLAYING) return;
+    // Not wrapping arithmetic: installing a virtual clock rebases the ms
+    // counter, so an instance started before the rebase reads as already
+    // elapsed under `-%` and completes on the first poll.
+    const elapsed: u64 = if (now > inst.start_ms) @intCast(now - inst.start_ms) else 0;
+    if (elapsed >= inst.duration_ms) inst.status = STATUS_COMPLETE;
+}
+
+// Progress every PLAYING instance to COMPLETE. A zero duration (sound
+// unresolvable in any loaded bank) completes as soon as processing starts:
+// without this the instance would sit PLAYING forever and
+// MilesCompleteEventQueueProcessing would never reap it, growing g_instances by
+// one entry per enqueued event on games that loop event queues.
 pub fn updateInstances() void {
     const now = root.getMsCount64();
-    for (g_instances.items) |inst| {
-        if (inst.status == STATUS_PLAYING) {
-            // Not wrapping arithmetic: installing a virtual clock rebases the
-            // ms counter, so an instance started before the rebase reads as
-            // already elapsed under `-%` and completes on the first poll.
-            const elapsed: u64 = if (now > inst.start_ms) @intCast(now - inst.start_ms) else 0;
-            if (elapsed >= inst.duration_ms) inst.status = STATUS_COMPLETE;
-        }
-    }
+    for (g_instances.items) |inst| expireInstanceAt(inst, now);
 }
 
 pub fn destroyInstance(inst: *SoundInstance) void {

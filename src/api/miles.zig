@@ -75,29 +75,11 @@ pub const MILESEVENTSOUNDINFO = extern struct {
 fn updateInstancesAt(now: u64) u32 {
     var playing: u32 = 0;
     for (ev.g_instances.items) |inst| {
-        if (inst.status == ev.STATUS_PLAYING) {
-            // Not wrapping arithmetic: installing a virtual clock rebases the
-            // ms counter, so an instance started before the rebase reads as
-            // already elapsed under `-%` and completes on the first poll.
-            const elapsed: u64 = if (now > inst.start_ms) @intCast(now - inst.start_ms) else 0;
-            if (elapsed >= inst.duration_ms) {
-                inst.status = ev.STATUS_COMPLETE;
-            } else {
-                playing += 1;
-            }
-        }
+        const was_playing = inst.status == ev.STATUS_PLAYING;
+        ev.expireInstanceAt(inst, now);
+        if (was_playing and inst.status == ev.STATUS_PLAYING) playing += 1;
     }
     return playing;
-}
-
-// Expire one instance against a clock reading already taken this poll. Same
-// rule as updateInstancesAt, factored out so a caller walking g_instances for
-// another reason does not have to duplicate the elapsed test to keep the
-// statuses it reads consistent.
-fn expireInstanceAt(inst: *ev.SoundInstance, now: u64) void {
-    if (inst.status != ev.STATUS_PLAYING) return;
-    const elapsed: u64 = if (now > inst.start_ms) @intCast(now - inst.start_ms) else 0;
-    if (elapsed >= inst.duration_ms) inst.status = ev.STATUS_COMPLETE;
 }
 
 // --- lifecycle ---------------------------------------------------------------
@@ -250,10 +232,17 @@ pub fn MilesBeginEventQueueProcessing() callconv(.winapi) i32 {
 pub fn MilesCompleteEventQueueProcessing() callconv(.winapi) i32 {
     ev.stateLock();
     defer ev.stateUnlock();
-    ev.updateInstances();
+    // One pass, one clock reading: expire inline as the walk visits each
+    // instance and drop it in the same visit. The separate expiry sweep this
+    // replaced walked the whole list first and the removal walk walked it again,
+    // so a game that completes its event queue every frame paid two passes over
+    // every live instance and two reads of the clock to reap them.
+    const now = openmiles.getMsCount64();
     var i: usize = 0;
     while (i < ev.g_instances.items.len) {
-        if (ev.g_instances.items[i].status == ev.STATUS_COMPLETE) {
+        const inst = ev.g_instances.items[i];
+        ev.expireInstanceAt(inst, now);
+        if (inst.status == ev.STATUS_COMPLETE) {
             ev.destroyInstance(ev.g_instances.swapRemove(i));
         } else i += 1;
     }
@@ -365,7 +354,7 @@ pub fn MilesEnumerateSoundInstances(system: ?*anyopaque, io_next: ?*?*anyopaque,
     const after_id: u64 = if (cursor_raw == std.math.maxInt(usize) or cursor_raw == 0) 0 else cursor_raw;
     var found: ?*ev.SoundInstance = null;
     for (ev.g_instances.items) |inst| {
-        expireInstanceAt(inst, now);
+        ev.expireInstanceAt(inst, now);
         if (inst.instance_id <= after_id) continue;
         if ((@as(u64, @intCast(inst.status)) & filter) == 0) continue;
         if (!ev.labelMatch(inst.labels, labels)) continue;
