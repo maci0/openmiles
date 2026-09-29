@@ -47,7 +47,17 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/check_workflow_shell.py`, in `make lint` and therefore in CI: every
+  `run:` block in `.github` is extracted and shellchecked as bash. The shell in
+  a workflow installs the pinned tools, cross-checks `build.zig.zon` against the
+  tag, and reads the shipped PE header; yamllint read those blocks as YAML, so
+  a quoting mistake in one passed lint and failed on the runner. A finding names
+  the workflow and the step it came from.
+
 ### Changed
+
 - `scripts/check_vendored.py` fails a vendored entry whose **Source** is not an
   `https` URL on an approved host. Version, upstream commit and digest were all
   verified, so a header arriving from a lookalike host carrying the right bytes

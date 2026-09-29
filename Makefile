@@ -1,4 +1,4 @@
-.PHONY: all build test check clean lint format check-header check-examples check-versions check-pins check-python check-yaml check-threat-model check-release-archive check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity sanitize harnesses help
+.PHONY: all build test check clean lint format check-header check-examples check-versions check-pins check-python check-yaml check-threat-model check-release-archive check-workflow-shell check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity sanitize harnesses help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -180,6 +180,17 @@ check-threat-model: check-interpreter
 check-release-archive: check-interpreter
 	$(PYTHON) scripts/check_release_archive.py
 
+# The shell inside a workflow's `run:` blocks is the same language
+# scripts/*.sh is written in and does the same job: it pins the toolchain,
+# cross-checks build.zig.zon against the tag, and reads the shipped PE. yamllint
+# reads those blocks as YAML, so a quoting mistake there parses cleanly and
+# fails on the runner instead, where the fix is a re-run of a release rather
+# than a commit. Extract every run block and shellcheck it as bash; the tree
+# passes today, so this is coverage, not a cleanup. See
+# scripts/check_workflow_shell.py.
+check-workflow-shell: check-interpreter
+	$(PYTHON) scripts/check_workflow_shell.py
+
 check-python:
 	@command -v ruff >/dev/null 2>&1 || { echo "error: ruff $(RUFF_VERSION) not found on PATH; uv tool install ruff==$(RUFF_VERSION)" >&2; exit 1; }
 	@v=`ruff --version | cut -d' ' -f2`; [ "$$v" = "$(RUFF_VERSION)" ] || { echo "error: ruff $(RUFF_VERSION) required, found $$v; uv tool install ruff==$(RUFF_VERSION)" >&2; exit 1; }
@@ -193,7 +204,7 @@ check-yaml:
 	yamllint .github
 
 check-host-tools:
-	@command -v shellcheck >/dev/null 2>&1 || { echo "error: shellcheck not found on PATH; 'make lint' shellchecks scripts/*.sh" >&2; exit 1; }
+	@command -v shellcheck >/dev/null 2>&1 || { echo "error: shellcheck not found on PATH; 'make lint' shellchecks scripts/*.sh and the workflow run blocks" >&2; exit 1; }
 	@command -v yamllint >/dev/null 2>&1 || { echo "error: yamllint $(YAMLLINT_VERSION) not found on PATH; 'make lint' checks .github with it, uv tool install yamllint==$(YAMLLINT_VERSION)" >&2; exit 1; }
 	@[ -n "$(PYTHON)" ] || { echo "error: neither python3 nor python found on PATH; the scripts/*.py gates need one" >&2; exit 1; }
 
@@ -218,6 +229,7 @@ lint: check-toolchain check-host-tools
 	$(PYTHON) scripts/gen_sbom.py --check
 	$(PYTHON) scripts/check_threat_model_refs.py
 	$(PYTHON) scripts/check_release_archive.py
+	$(PYTHON) scripts/check_workflow_shell.py
 	@$(MAKE) --no-print-directory check-python
 	@$(MAKE) --no-print-directory check-yaml
 	@$(MAKE) --no-print-directory check-pins
@@ -252,7 +264,7 @@ help:
 	@echo "  sanitize   run the test suite with the C undefined-behaviour sanitizer (-Dsanitize)"
 	@echo "  harnesses  run the native plugin harness in tests/, the one that reaches the dlopen path"
 	@echo "  check      run every CI check in order: lint, build, test, sanitize, harnesses, cross"
-	@echo "  lint       pinned zig fmt, ruff, shellcheck, yamllint, header/vendored/archive parity, pin agreement"
+	@echo "  lint       pinned zig fmt, ruff, shellcheck, yamllint, header/vendored/archive parity, workflow shell, pin agreement"
 	@echo "  format     apply zig fmt and ruff format"
 	@echo "  cross      cross-compile the shipped x86-windows DLL"
 	@echo "  parity     diff every -Dmss-version export table against its reference DLL (needs scripts/requirements.txt)"
@@ -270,6 +282,7 @@ help:
 	@echo "  check-sbom          assert SBOM.cdx.json matches the vendored deps and the declared pip pins"
 	@echo "  check-threat-model  assert every file:line anchor in docs/THREAT_MODEL.md resolves"
 	@echo "  check-release-archive  assert the release archive carries every file deps/SHA256SUMS records and every file the shipped docs link"
+	@echo "  check-workflow-shell  shellcheck every \`run:\` block in .github as bash"
 	@echo "  check-python        assert ruff on PATH is the pinned version, then lint and format-check"
 	@echo "  check-yaml          assert yamllint on PATH is the pinned version, then lint .github"
 	@echo "  check-interpreter   assert a Python 3 interpreter is named python3 or python"

@@ -78,7 +78,8 @@ the workflows are linted too; `make lint` names any of the four that is
 missing. CI brings in the same four at the same pins: Zig through `setup-zig`
 at the version in `build.zig.zon`, ruff and yamllint through `uv tool install`
 at the versions in the `Makefile`, and shellcheck from the runner image. It
-checks `zig fmt`, shellchecks `scripts/*.sh`, lints `.github`, and asserts that
+checks `zig fmt`, shellchecks `scripts/*.sh` and every `run:` block in
+`.github`, lints `.github`, and asserts that
 every declaration in `src/mss.h` agrees with the export table for each
 `-Dmss-version` (return type, argument count, calling convention, version
 range, struct layout). `src/mss.h` is a documented core subset, so symbols it
