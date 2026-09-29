@@ -393,10 +393,32 @@ pub const MidiDriver = struct {
             self.soundfont_refs += 1;
             return;
         }
+        // The image is read here rather than handed to tsf_load_filename: that
+        // opens the file with fopen, which reads its name in the process ANSI
+        // code page on Windows, so a bank under "Juegos\Aventura Épica\" was
+        // looked for under a name every character outside that code page had
+        // been replaced in, and the load failed on a file that was there. The
+        // reader below takes the UTF-8 path the rest of the library speaks and
+        // opens it as UTF-16, and tsf_load_memory keeps the bytes only for the
+        // duration of the load, so the buffer is released on the way out.
+        const image = root.readWholeFile(path_z) catch |err| {
+            log("loadSoundfont: cannot read '{s}' ({any})\n", .{ filename, err });
+            self.allocator.free(path_z);
+            return error.SoundFontLoadFailed;
+        };
+        defer root.global_allocator.free(image);
+        // tsf_load_memory takes a C `int`; a bank that large cannot be loaded
+        // through this call at all, and truncating the length would hand tsf a
+        // header without the chunks it indexes.
+        if (image.len > std.math.maxInt(c_int)) {
+            log("loadSoundfont: '{s}' is {d} bytes, past what a C int length carries\n", .{ filename, image.len });
+            self.allocator.free(path_z);
+            return error.SoundFontLoadFailed;
+        }
         // Load the replacement before releasing the one in use: a load that
         // fails leaves the driver exactly as a single run left it, still
         // playing the previous soundfont, rather than silent with no bank.
-        const loaded = tsf.tsf_load_filename(path_z.ptr);
+        const loaded = tsf.tsf_load_memory(image.ptr, @intCast(image.len));
         if (loaded == null) {
             self.allocator.free(path_z);
             return error.SoundFontLoadFailed;
