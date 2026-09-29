@@ -356,6 +356,26 @@ extern "C" {
 #endif
 
 // Core System
+/* AIL_startup is reference-counted and returns the number of live uses, so the
+ * first call answers 1. Every start owes exactly one AIL_shutdown: a shutdown
+ * that leaves uses outstanding returns without touching the engine, and the
+ * last one closes the digital and MIDI drivers. A game that starts the DLL and
+ * its own audio module can therefore hold the engine up for as long as it
+ * wants, and a shutdown with no start behind it is harmless.
+ *
+ * AIL_last_error is the only error channel the API has, and the rules for
+ * reading it matter more than the spelling:
+ *   - it points into one static 256-byte buffer inside the DLL. The pointer is
+ *     the same on every call and must never be freed or written to;
+ *   - the text is overwritten by the next call that fails, so copy it before
+ *     calling anything else if it has to outlive the next line;
+ *   - the buffer is process-wide, not per-thread, so a failure on another
+ *     thread lands in it too. Read it on the thread whose call failed;
+ *   - it is never NULL, and an empty string means no error has been set. A
+ *     call that succeeds does not clear it, so a caller that checks has to
+ *     check right after the call it cares about.
+ * A message too long for the buffer is reported as "Error message too long"
+ * rather than a truncated string that reads as the whole error. */
 S32        MSS_CALLBACK AIL_startup(void);
 void       MSS_CALLBACK AIL_shutdown(void);
 char*      MSS_CALLBACK AIL_last_error(void);
@@ -378,6 +398,12 @@ S32        MSS_CALLBACK AIL_set_preference(U32 number, S32 value);
 HDIGDRIVER MSS_CALLBACK AIL_open_digital_driver(U32 frequency, S32 bits, S32 channels, U32 flags);
 void       MSS_CALLBACK AIL_close_digital_driver(HDIGDRIVER dig);
 #endif
+/* A game whose main loop already calls AIL_serve does not have to: the device
+ * is mixed on the audio driver's own thread. What the call does on the calling
+ * thread is advance the 3D sources that asked for automatic dead reckoning by
+ * the time since the previous serve, so it belongs in a per-frame call, not in
+ * a tight loop: a loop that has nothing to wait for keeps a core busy for as
+ * long as it runs. */
 void       MSS_CALLBACK AIL_serve(void);
 #if MSS_BEFORE(62)
 void       MSS_CALLBACK AIL_set_digital_master_volume(HDIGDRIVER dig, S32 master_volume);
@@ -386,10 +412,25 @@ S32        MSS_CALLBACK AIL_digital_master_volume(HDIGDRIVER dig);
 #if MSS_BEFORE(67)
 U32        MSS_CALLBACK AIL_waveOutOpen(HDIGDRIVER* drvr_ptr, U32* lphwo, S32 device_id, void* format);
 #endif
+/* The pair a game calls around a mode change or a modal pause, where the
+ * device is wanted back afterwards. There is no device to hand over in this
+ * build: the driver keeps its output, playback continues, and the calls exist
+ * so the sequence links and returns success. Both answer 1 for a live driver
+ * and 0 for NULL, so the return can be ignored safely. */
 S32        MSS_CALLBACK AIL_digital_handle_release(HDIGDRIVER dig);
 S32        MSS_CALLBACK AIL_digital_handle_reacquire(HDIGDRIVER dig);
 
 // Sample Management
+/* The handle comes from AIL_allocate_sample_handle and is released with
+ * AIL_release_sample_handle, which is the only call that frees it; the image
+ * the sample plays stays owned by the caller and must outlive the handle.
+ * Every call in this section takes NULL as a no-op. The levels are 0-127, a pan
+ * is -127 to 127, and a playback rate is the rate the file is to play at, in
+ * the same units AIL_sample_playback_rate reports: the rate the file carries
+ * is its own pitch, a rate of 0 or less leaves the current rate alone, and
+ * AIL_set_sample_playback_rate_factor is the separate 0.0-1.0 multiplier a v7
+ * build adds on top. A load that fails returns 0 with the reason in
+ * AIL_last_error, and the handle stays allocated and reusable. */
 HSAMPLE    MSS_CALLBACK AIL_allocate_sample_handle(HDIGDRIVER dig);
 void       MSS_CALLBACK AIL_release_sample_handle(HSAMPLE S);
 #if MSS_AT_LEAST(80)
@@ -897,6 +938,17 @@ void        MSS_CALLBACK MilesRequeueAsyncs(void);
 #endif
 
 // Timer API
+/* A timer runs its callback on a thread of the library's own, one per started
+ * timer, at the period set by AIL_set_timer_frequency (in hertz, 0 ignored) or
+ * AIL_set_timer_period (in microseconds); the frequency is the rounded form of
+ * the period, so a hertz that does not divide a second lands within a
+ * microsecond. The handle comes from AIL_register_timer, which answers NULL
+ * with the reason in AIL_last_error when the timer cannot be created, and
+ * AIL_release_timer_handle is the only call that frees it: that call joins the
+ * thread, so release it stopped. AIL_stop_timer joins the thread too, which is
+ * why a callback must not stop or restart the timer it is running on: that is
+ * answered without a join, because joining the current thread is fatal, and the
+ * handle is reaped by the next stop from another thread. */
 HTIMER      MSS_CALLBACK AIL_register_timer(AILTIMERCB callback);
 void        MSS_CALLBACK AIL_set_timer_frequency(HTIMER timer, U32 hertz);
 void        MSS_CALLBACK AIL_set_timer_period(HTIMER timer, U32 microseconds);
@@ -907,6 +959,11 @@ void        MSS_CALLBACK AIL_start_all_timers(void);
 void        MSS_CALLBACK AIL_stop_all_timers(void);
 
 // Quick API
+/* The one-call entry point: AIL_quick_startup opens the drivers the two flags
+ * ask for, AIL_quick_load takes a path or an image, and AIL_quick_play starts
+ * it. A load that fails answers NULL with the reason in AIL_last_error.
+ * AIL_quick_unload frees the handle; AIL_quick_status reports the SMP_*
+ * constants. Every call takes NULL as a no-op. */
 #if MSS_BEFORE(71)
 void        MSS_CALLBACK AIL_quick_startup(S32 use_digital, S32 use_MIDI, U32 output_rate, S32 output_bits, S32 output_channels);
 void        MSS_CALLBACK AIL_quick_shutdown(void);
@@ -923,7 +980,13 @@ S32         MSS_CALLBACK AIL_quick_status(HSAMPLE S);
  * AIL_quick_play can be called on it again. (AIL_quick_stop is a separate
  * pre-4.0 name this build no longer exports.) */
 void        MSS_CALLBACK AIL_quick_halt(HSAMPLE S);
+/* Two 0-127 levels, and both are needed: the result is volume * extravol / 127,
+ * so a caller that only wants one control passes 127 for the other. Passing
+ * 127 for both is the unscaled level, and passing 0 for either is silence. */
 void        MSS_CALLBACK AIL_quick_set_volume(HSAMPLE S, S32 volume, S32 extravol);
+/* rate is the playback rate in the same units AIL_sample_playback_rate reports
+ * (see Sample Management above): the loaded file's own rate plays at its own
+ * pitch, and a rate of 0 or less leaves the current rate alone. */
 void        MSS_CALLBACK AIL_quick_set_speed(HSAMPLE S, S32 rate);
 #if MSS_AT_LEAST(50)
 S32         MSS_CALLBACK AIL_quick_ms_length(HSAMPLE S);
@@ -958,6 +1021,12 @@ S32         MSS_CALLBACK AIL_decompress_ASI(void const* indata, U32 insize, char
 #endif
 
 // Memory
+/* The allocator the API hands out its own buffers through, for the calls that
+ * return one the caller has to release: the decompressed image from
+ * AIL_decompress_ASI and the dump from MilesTextDumpEventSystem. It answers
+ * NULL when the allocation fails, and AIL_mem_free_lock is the matching free.
+ * The memory is the C library's, so free() releases it just as well, and the
+ * two must not be mixed on one pointer. */
 #if MSS_AT_LEAST(30)
 void*      MSS_CALLBACK AIL_mem_alloc_lock(U32 size);
 void       MSS_CALLBACK AIL_mem_free_lock(void* ptr);
