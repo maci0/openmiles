@@ -1598,8 +1598,23 @@ pub const Clock = struct {
             self.advance(@intCast(@max(0, dur.nanoseconds)));
             return;
         }
-        io.sleep(dur, .awake) catch {};
+        // A refused sleep returns at once, so a caller looping on this one (the
+        // timer run loop is the production caller) spins a core instead of
+        // waiting. There is nothing to fall back on: the only other way to wait
+        // is a busy loop, which is the failure being reported. Say it once, then
+        // stop saying it: a run loop that logs per iteration would drown the
+        // thread that has to keep making progress.
+        io.sleep(dur, .awake) catch {
+            if (!sleep_reported) {
+                sleep_reported = true;
+                log("Clock.sleep: the platform refused a {d} ns wait; the caller is spinning until it can wait again\n", .{dur.nanoseconds});
+            }
+        };
     }
+
+    /// Set once the first refused platform sleep has been reported, so a caller
+    /// looping on sleep logs the condition once rather than every pass.
+    var sleep_reported: bool = false;
 };
 
 pub var clock: Clock = .{};

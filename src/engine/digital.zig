@@ -91,8 +91,26 @@ fn restartLoopOnEnd(self: anytype) bool {
         return false;
     }
     if (remaining > 1) _ = self.loops_remaining.fetchSub(1, .acq_rel);
-    _ = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
-    _ = ma.ma_sound_start(&self.sound);
+    // A restart that fails must read as the end of the sound, not as another
+    // pass: applyLoopBlock only checks that the block spans a frame, never that
+    // the start frame is inside the decoded image, so a game can name a loop
+    // start past the end of the file and have the seek rejected here. Reporting
+    // success would leave the sample SMP_PLAYING forever with no end callback,
+    // and an infinite loop count would spin this pair for the life of the
+    // process. Falling through as the last iteration spends the remaining count
+    // and fires the end callbacks, which is what a sound that cannot restart is.
+    const seek_result = ma.ma_sound_seek_to_pcm_frame(&self.sound, self.loop_start_frame);
+    if (seek_result != ma.MA_SUCCESS) {
+        log("restartLoopOnEnd: seek to loop frame {d} failed ({d}: {s}); the sound ends here\n", .{ self.loop_start_frame, seek_result, root.maResultDescription(seek_result) });
+        self.loops_remaining.store(0, .release);
+        return false;
+    }
+    const start_result = ma.ma_sound_start(&self.sound);
+    if (start_result != ma.MA_SUCCESS) {
+        log("restartLoopOnEnd: restarting at loop frame {d} failed ({d}: {s}); the sound ends here\n", .{ self.loop_start_frame, start_result, root.maResultDescription(start_result) });
+        self.loops_remaining.store(0, .release);
+        return false;
+    }
     return true;
 }
 
@@ -692,13 +710,22 @@ pub const DigitalDriver = struct {
 
     /// Allocate a new mixer bus (a miniaudio sound group) samples can route to.
     pub fn allocateBus(self: *DigitalDriver) ?*MixBus {
-        const bus = self.allocator.create(MixBus) catch return null;
+        // AIL_allocate_bus reports only "no bus". Three different failures
+        // reach it, so each says which one, naming the bus index the driver
+        // would have given it.
+        const bus = self.allocator.create(MixBus) catch {
+            log("allocateBus: bus {d} could not be allocated; no mixer bus was created\n", .{self.buses.items.len});
+            return null;
+        };
         bus.* = .{ .group = undefined, .index = @intCast(self.buses.items.len), .driver = self };
-        if (ma.ma_sound_group_init(&self.engine, 0, null, &bus.group) != ma.MA_SUCCESS) {
+        const init_result = ma.ma_sound_group_init(&self.engine, 0, null, &bus.group);
+        if (init_result != ma.MA_SUCCESS) {
+            log("allocateBus: bus {d} sound group init failed ({d}: {s})\n", .{ bus.index, init_result, root.maResultDescription(init_result) });
             self.allocator.destroy(bus);
             return null;
         }
         self.buses.append(self.allocator, bus) catch {
+            log("allocateBus: bus {d} could not be added to the driver's bus list; no mixer bus was created\n", .{bus.index});
             ma.ma_sound_group_uninit(&bus.group);
             self.allocator.destroy(bus);
             return null;
@@ -1242,7 +1269,14 @@ pub const Sample = struct {
         self.is_initialized = true;
         self.is_done.store(false, .release);
         self.is_paused = false;
-        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
+        // A failed query leaves the previous load's frame count in place, so
+        // AIL_sample_length would answer with a plausible number for a sound it
+        // never measured. Say so and drop it to 0, which reads as unknown.
+        const len_result = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
+        if (len_result != ma.MA_SUCCESS) {
+            log("Sample: measuring the sample length failed ({d}: {s}); AIL_sample_length reports 0\n", .{ len_result, root.maResultDescription(len_result) });
+            self.cached_length_frames = 0;
+        }
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
@@ -2231,7 +2265,13 @@ pub const Sample3D = struct {
         self.is_initialized = true;
         self.is_done.store(false, .release);
         self.is_paused = false;
-        _ = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
+        // As in Sample.finishDecoderLoad: a failed query would leave the
+        // previous load's frame count behind as the answer for this one.
+        const len_result = ma.ma_sound_get_length_in_pcm_frames(&self.sound, &self.cached_length_frames);
+        if (len_result != ma.MA_SUCCESS) {
+            log("Sample3D: measuring the sample length failed ({d}: {s}); AIL_sample_length reports 0\n", .{ len_result, root.maResultDescription(len_result) });
+            self.cached_length_frames = 0;
+        }
 
         if (self.target_rate) |tr| {
             const native_rate = @as(f32, @floatFromInt(decoder.outputSampleRate));
@@ -2733,4 +2773,46 @@ test "EOB stream bridge fires with single HSAMPLE arg" {
     try std.testing.expectEqual(@as(i32, 1), s.last_loaded_buffer.load(.acquire));
     try std.testing.expectEqual(@as(u32, 1), CbProbe.eob_calls);
     try std.testing.expectEqual(@as(?*anyopaque, @ptrCast(s)), CbProbe.eob_hs);
+}
+
+test "the end-of-sound bridge restarts a looping sample and clears the done flag" {
+    const allocator = std.testing.allocator;
+    const drv = try DigitalDriver.init(allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const s = try Sample.init(drv);
+    defer s.deinit();
+
+    const pcm = try allocator.alloc(u8, 4410 * 2);
+    defer allocator.free(pcm);
+    @memset(pcm, 0);
+    const wav = try root.buildWavFromPcm(allocator, pcm, 1, 44100, 16);
+    defer allocator.free(wav);
+    try s.loadFromMemory(wav, true);
+
+    // 0 is MSS's infinite loop count, so loops_remaining is never decremented.
+    // A restart that succeeded returns before the end callbacks, which is what
+    // separates a looping sample from one that has played out; the failure arms
+    // of restartLoopOnEnd take the same early return as the last iteration, so
+    // the callbacks are what distinguishes them.
+    s.setLoopCount(0);
+    s.setLoopBlock(100, 4000);
+    s.eob_callback = .init(@intFromPtr(&CbProbe.onEob));
+    s.eos_callback = .init(@intFromPtr(&CbProbe.onEos));
+    s.sob_callback = .init(0);
+    CbProbe.reset();
+
+    Sample.eosCallbackBridge(s, null);
+    try std.testing.expectEqual(@as(u32, 0), CbProbe.eob_calls);
+    try std.testing.expectEqual(@as(u32, 0), CbProbe.eos_calls);
+    try std.testing.expectEqual(@as(i32, 0), s.loops_remaining.load(.acquire));
+
+    // The last finite iteration takes the other arm: the count is spent, the
+    // sound is done, and the end callbacks fire.
+    s.setLoopCount(1);
+    s.is_done.store(false, .release);
+    CbProbe.reset();
+    Sample.eosCallbackBridge(s, null);
+    try std.testing.expect(s.is_done.load(.acquire));
+    try std.testing.expectEqual(@as(u32, 1), CbProbe.eob_calls);
+    try std.testing.expectEqual(@as(u32, 1), CbProbe.eos_calls);
 }

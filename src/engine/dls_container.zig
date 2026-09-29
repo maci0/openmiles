@@ -48,16 +48,25 @@ pub fn xmiImageSize(data: []const u8) usize {
     return end;
 }
 
-/// Byte length of a Standard MIDI File by walking its track chunks.
+/// Byte length of a Standard MIDI File by walking its track chunks, or 0 when
+/// the walk does not reach the declared track count.
+///
+/// A walk that runs out of data, or that meets a chunk that is not `MTrk`,
+/// has not measured the image: it has measured how far a truncated or foreign
+/// file happens to reach. Answering `data.len` there claimed the whole buffer
+/// was music, and findXmi then handed the trailing DLS bank back as part of
+/// the music image, which AIL_merge_DLS_with_XMI then wrote out as one file.
+/// Reporting 0 matches what the sibling pointer walker already answers and
+/// what the module's contract says.
 fn smfImageSize(data: []const u8) usize {
-    if (data.len < 14) return data.len;
+    if (data.len < 14) return 0;
     const hdr_len = std.mem.readInt(u32, data[4..8], .big);
     const num_tracks = std.mem.readInt(u16, data[10..12], .big);
     var pos: usize = @min(8 +| @as(usize, hdr_len), data.len);
     var found: u16 = 0;
     while (found < num_tracks) {
-        if (pos +| 8 > data.len) return data.len;
-        if (!std.mem.eql(u8, data[pos .. pos + 4], "MTrk")) return data.len;
+        if (pos +| 8 > data.len) return 0;
+        if (!std.mem.eql(u8, data[pos .. pos + 4], "MTrk")) return 0;
         const trk_len = std.mem.readInt(u32, data[pos + 4 .. pos + 8][0..4], .big);
         pos = @min(pos +| 8 +| @as(usize, trk_len), data.len);
         found += 1;

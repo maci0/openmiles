@@ -404,7 +404,13 @@ pub fn AIL_list_DLS(dls: ?*const anyopaque, lst: ?*?*anyopaque, lst_size: ?*u32,
     const dp = dls orelse return 0;
     const raw: [*]const u8 = @ptrCast(dp);
     const sz = openmiles.detectAudioSize(raw);
-    if (sz == 0) return 0;
+    if (sz == 0) {
+        // AIL_last_error is this ABI's only error channel, and a caller that
+        // reports the 0 would otherwise print whatever the previous failed call
+        // left there, naming an operation that did not fail.
+        openmiles.setLastError("AIL_list_DLS: unrecognized DLS image");
+        return 0;
+    }
     // `sz` is the size the header declares, and it is reported as such below, but
     // only the bounded prefix is ever dereferenced.
     const data = raw[0..@min(sz, list_dls_scan_limit)];

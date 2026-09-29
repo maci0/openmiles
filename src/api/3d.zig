@@ -233,6 +233,18 @@ pub fn AIL_set_3D_sample_info(s: ?*anyopaque, info: ?*anyopaque) callconv(.winap
     const sample: *openmiles.Sample3D = @ptrCast(@alignCast(p));
     const si: *openmiles.AILSOUNDINFO = @ptrCast(@alignCast(i));
     if (si.data_ptr == null or si.data_len == 0) return 0;
+    // data_len is a caller-supplied u32 and the only other bound on this buffer
+    // is the caller's word: channels and bits are clamped just below, but a
+    // length was not, so a game with a bad AILSOUNDINFO asks loadFromPcm to
+    // build a 4 GiB slice over a pointer of unknown extent. The cap is the one
+    // every other untrusted image in the library is held to (see
+    // root.max_file_load_bytes); a PCM image past it is not one this call can
+    // have been handed.
+    if (@as(u64, si.data_len) > openmiles.max_file_load_bytes) {
+        log("AIL_set_3D_sample_info: data_len {d} is over the {d}-byte image cap; the sample is not loaded\n", .{ si.data_len, openmiles.max_file_load_bytes });
+        openmiles.setLastErrorFmt("AIL_set_3D_sample_info: data_len {d} exceeds the {d}-byte image cap", .{ si.data_len, openmiles.max_file_load_bytes });
+        return 0;
+    }
     const data: [*]const u8 = @ptrCast(si.data_ptr.?);
     // Clamp untrusted AILSOUNDINFO fields to valid ranges before narrowing to
     // u16 (a raw @intCast of a huge/negative i32 would panic).

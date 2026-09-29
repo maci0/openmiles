@@ -245,14 +245,37 @@ pub fn limitsClear() void {
     g_limits.deinit(root.global_allocator);
     g_limits = .empty;
 }
-pub fn setLimits(limits_str: []const u8) void {
+/// Install the per-label concurrent-sound caps from `"label count:label2 count2"`.
+/// Returns the entries that were dropped, having named each in the log. The
+/// caller reports a failure from this: a cap that did not install is not a cap,
+/// and the process grows sound instances without limit, so a caller told
+/// "applied" for a string it silently could not parse is worse than one told
+/// nothing.
+pub fn setLimits(limits_str: []const u8) u32 {
     limitsClear();
+    var dropped: u32 = 0;
     var it = std.mem.tokenizeScalar(u8, limits_str, ':');
     while (it.next()) |entry| {
         var pit = std.mem.tokenizeAny(u8, entry, " \t");
-        const label = pit.next() orelse continue;
-        const count_s = pit.next() orelse continue;
-        const count = std.fmt.parseInt(u32, count_s, 10) catch continue;
+        const label = pit.next() orelse {
+            // An empty segment between two colons is not a malformed entry, it
+            // is the string ending in a separator. Nothing is dropped, and
+            // saying otherwise would report a well-formed string as broken.
+            if (entry.len == 0) continue;
+            root.log("MilesSetSoundLabelLimits: entry '{s}' names no label; the cap is not applied\n", .{entry});
+            dropped += 1;
+            continue;
+        };
+        const count_s = pit.next() orelse {
+            root.log("MilesSetSoundLabelLimits: entry '{s}' names no count for label '{s}'; the cap is not applied\n", .{ entry, label });
+            dropped += 1;
+            continue;
+        };
+        const count = std.fmt.parseInt(u32, count_s, 10) catch {
+            root.log("MilesSetSoundLabelLimits: count '{s}' for label '{s}' is not a number; the cap is not applied\n", .{ count_s, label });
+            dropped += 1;
+            continue;
+        };
         // A label repeated in one string is one entry, the last count winning.
         // put() on a name the map already owns keeps the key it stored and drops
         // the one passed in, so the dupe went with it: every repeated label
@@ -264,9 +287,18 @@ pub fn setLimits(limits_str: []const u8) void {
             slot.* = count;
             continue;
         }
-        const key = lowerDupe(probe.key) orelse continue;
-        g_limits.put(root.global_allocator, key, count) catch root.global_allocator.free(key);
+        const key = lowerDupe(probe.key) orelse {
+            root.log("MilesSetSoundLabelLimits: cannot copy the name of label '{s}'; the cap is not applied\n", .{label});
+            dropped += 1;
+            continue;
+        };
+        g_limits.put(root.global_allocator, key, count) catch {
+            root.global_allocator.free(key);
+            root.log("MilesSetSoundLabelLimits: cannot store the cap for label '{s}'; the cap is not applied\n", .{label});
+            dropped += 1;
+        };
     }
+    return dropped;
 }
 fn limitFor(label: []const u8) ?u32 {
     var probe: NameKey = undefined;
@@ -500,7 +532,12 @@ pub fn enqueueParse(event: ?[*]const u8, user_buffer: ?*anyopaque, ubl: i32, fla
             // installs out of band with MilesSetSoundLabelLimits. The walk is in
             // event order, so a limits step gates the start-sound steps after it.
             const ls = st.u.limits.limits;
-            if (ls.str) |lp| setLimits(lp[0..@intCast(@max(ls.len, 0))]);
+            if (ls.str) |lp| {
+                const dropped = setLimits(lp[0..@intCast(@max(ls.len, 0))]);
+                if (dropped > 0) {
+                    root.setLastErrorFmt("set_limits step: {d} limit entries were malformed and are not enforced", .{dropped});
+                }
+            }
         }
     }
     if (flags & ENQUEUE_FREE_EVENT != 0) std.c.free(@ptrCast(@constCast(event.?)));

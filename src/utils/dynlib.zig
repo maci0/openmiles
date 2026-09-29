@@ -196,10 +196,37 @@ const WindowsDynLib = struct {
 
     module: windows.HMODULE,
 
+    /// Why the last Windows load failed, for a caller to log. The code is
+    /// threadlocal because a load is threadlocal, and null on non-Windows.
+    pub threadlocal var last_load_error: ?LoadFailure = null;
+
+    pub const LoadFailure = struct {
+        /// The raw Win32 code, for a reader who knows the numeric namespace.
+        win32: u32,
+        /// The name Zig gives the matching std error, which is the readable one.
+        name: []const u8,
+    };
+
     pub fn open(path: []const u8) !DynLib {
         var buf: [std.fs.max_path_bytes]u16 = undefined;
-        const path_w = wide.toWide(path, &buf) catch return error.FileNotFound;
-        const module = LoadLibraryW(path_w.ptr) orelse return error.FileNotFound;
+        // toWide fails with NoSpaceLeft on an over-long path and InvalidUtf8 on
+        // one spelled outside Unicode, neither of which is a missing file, so
+        // the conversion error propagates as it stands rather than being
+        // renamed FileNotFound and sent to a caller hunting a file on disk.
+        const path_w = try wide.toWide(path, &buf);
+        // LoadLibraryW's null covers three causes the caller has to tell apart:
+        // the module is absent, one of its imports is absent (ERROR_MOD_NOT_
+        // FOUND with the module present on disk), or its DllMain refused. They
+        // were all reported as FileNotFound, which sends the operator looking
+        // for a file that is there. GetLastError is only valid until the next
+        // Win32 call, so it is captured here and read by the caller that knows
+        // the plugin's name.
+        const module = LoadLibraryW(path_w.ptr) orelse {
+            const err = windows.GetLastError();
+            last_load_error = .{ .win32 = @intFromEnum(err), .name = @errorName(err) };
+            return error.LoadLibraryFailed;
+        };
+        last_load_error = null;
         return .{ .module = module };
     }
 

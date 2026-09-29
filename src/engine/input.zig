@@ -17,6 +17,8 @@ pub const Input = struct {
     // Ring buffer of captured PCM (bounded to ~1 second)
     buffer: std.ArrayListUnmanaged(u8) = .empty,
     max_buffer_bytes: usize = 44100 * 2, // 1s of 16-bit mono
+    /// Capture chunks lost on the audio thread; see captureCallback.
+    dropped_chunks: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     mutex: std.Io.Mutex = .init,
     is_initialized: bool = false,
     // Snapshot of the buffer handed to getInfo(). Lives until the next getInfo()
@@ -118,7 +120,15 @@ pub const Input = struct {
         else
             in_ptr[0..byte_count];
 
-        if (!self.mutex.tryLock()) return;
+        // A contended lock drops a whole chunk of captured audio, and the app
+        // reads a shorter buffer with no way to tell a device that went quiet
+        // from one whose consumer kept it busy. Counted rather than logged:
+        // this is the audio thread, where a log line per dropped chunk is its
+        // own outage, and AIL_input_info can report the count on demand.
+        if (!self.mutex.tryLock()) {
+            _ = self.dropped_chunks.fetchAdd(1, .monotonic);
+            return;
+        }
         defer self.mutex.unlock(io);
 
         // Keep the newest max_buffer_bytes: drop from the front, or clear
@@ -134,8 +144,19 @@ pub const Input = struct {
         }
         if (self.buffer.capacity >= self.buffer.items.len + incoming.len) {
             self.buffer.appendSliceAssumeCapacity(incoming);
+        } else {
+            // Never allocate on the audio thread, so a chunk arriving after the
+            // consumer drained the ring past its pre-allocation is dropped. The
+            // sibling drop above counts, so this does too.
+            _ = self.dropped_chunks.fetchAdd(1, .monotonic);
         }
-        // else: silently drop — never allocate on the audio thread
+    }
+
+    /// Capture chunks lost to a contended lock or to a ring with no room.
+    /// Not an SDK surface: without it a device that has been dropping audio
+    /// reports the same buffer as one that is simply quiet.
+    pub fn droppedChunkCount(self: *const Input) u64 {
+        return self.dropped_chunks.load(.monotonic);
     }
 
     /// Capture state for basic query (rate, channels, bits, data buffer).

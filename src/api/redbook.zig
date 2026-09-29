@@ -3,7 +3,8 @@ const log = openmiles.log;
 
 pub fn AIL_redbook_open(drive: u32) callconv(.winapi) ?*openmiles.Redbook {
     log("AIL_redbook_open(drive={d})\n", .{drive});
-    return openmiles.Redbook.init(openmiles.global_allocator) catch {
+    return openmiles.Redbook.init(openmiles.global_allocator) catch |err| {
+        log("AIL_redbook_open(drive={d}) failed: {any}\n", .{ drive, err });
         openmiles.setLastError("Failed to open Redbook device");
         return null;
     };
@@ -66,7 +67,8 @@ pub fn AIL_redbook_id(hb: ?*openmiles.Redbook) callconv(.winapi) [*:0]const u8 {
 // AIL_redbook_open_drive(S32 drive) — drive is an integer drive index, not a string.
 pub fn AIL_redbook_open_drive(drive: i32) callconv(.winapi) ?*openmiles.Redbook {
     log("AIL_redbook_open_drive(drive={d})\n", .{drive});
-    return openmiles.Redbook.init(openmiles.global_allocator) catch {
+    return openmiles.Redbook.init(openmiles.global_allocator) catch |err| {
+        log("AIL_redbook_open_drive(drive={d}) failed: {any}\n", .{ drive, err });
         openmiles.setLastError("Failed to open Redbook drive");
         return null;
     };

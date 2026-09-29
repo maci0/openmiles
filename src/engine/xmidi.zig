@@ -388,7 +388,9 @@ fn evntDataToSmf(allocator: std.mem.Allocator, evnt: []const u8) ![]u8 {
 
     var track: std.ArrayListUnmanaged(u8) = .empty;
     defer track.deinit(allocator);
-    // Pre-allocate: each event contributes ~4-8 bytes (VLQ delta + data), plus header/footer
+    // Pre-allocate: each event contributes ~4-8 bytes (VLQ delta + data), plus
+    // header/footer. A reserve that fails is not an error: the appends below
+    // grow the list on demand, and this is a size hint, not a requirement.
     track.ensureTotalCapacity(allocator, events.items.len *| 6 +| 11) catch {};
 
     // XMIDI uses 120 ticks/second.  With PPQ=120, tempo must be 60 BPM = 1 000 000 µs/beat

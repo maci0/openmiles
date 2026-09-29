@@ -232,15 +232,30 @@ pub fn openFile(io: std.Io, path: []const u8, options: std.Io.File.OpenFlags) !s
         return std.Io.Dir.openFileAbsolute(io, path, options) catch |err| {
             var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
             const resolved = retryPath(path, &resolved_buf) orelse return err;
-            return std.Io.Dir.openFileAbsolute(io, resolved, options);
+            return std.Io.Dir.openFileAbsolute(io, resolved, options) catch |retry_err| {
+                reportRetryFailure(path, err, resolved, retry_err);
+                return retry_err;
+            };
         };
     }
 
     return cwd.openFile(io, path, options) catch |err| {
         var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
         const resolved = retryPath(path, &resolved_buf) orelse return err;
-        return cwd.openFile(io, resolved, options);
+        return cwd.openFile(io, resolved, options) catch |retry_err| {
+            reportRetryFailure(path, err, resolved, retry_err);
+            return retry_err;
+        };
     };
+}
+
+/// Name both failures when a case-insensitive retry also fails. The retry's
+/// error is the one returned, so the first is otherwise gone: a path that
+/// failed AccessDenied and a resolved spelling the OS does not agree with are
+/// then reported as a plain absence, and the caller writes "File not found" for
+/// a file whose only problem was permission.
+fn reportRetryFailure(original: []const u8, first: anyerror, resolved: []const u8, retry: anyerror) void {
+    log("fs_compat: opening '{s}' failed ({any}); the retry as '{s}' failed too ({any})\n", .{ original, first, resolved, retry });
 }
 
 pub fn openDir(io: std.Io, path: []const u8, options: std.Io.Dir.OpenOptions) !std.Io.Dir {
@@ -250,14 +265,20 @@ pub fn openDir(io: std.Io, path: []const u8, options: std.Io.Dir.OpenOptions) !s
         return std.Io.Dir.openDirAbsolute(io, path, options) catch |err| {
             var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
             const resolved = retryPath(path, &resolved_buf) orelse return err;
-            return std.Io.Dir.openDirAbsolute(io, resolved, options);
+            return std.Io.Dir.openDirAbsolute(io, resolved, options) catch |retry_err| {
+                reportRetryFailure(path, err, resolved, retry_err);
+                return retry_err;
+            };
         };
     }
 
     return cwd.openDir(io, path, options) catch |err| {
         var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
         const resolved = retryPath(path, &resolved_buf) orelse return err;
-        return cwd.openDir(io, resolved, options);
+        return cwd.openDir(io, resolved, options) catch |retry_err| {
+            reportRetryFailure(path, err, resolved, retry_err);
+            return retry_err;
+        };
     };
 }
 
@@ -266,7 +287,19 @@ pub fn createFile(io: std.Io, path: []const u8, flags: std.Io.Dir.CreateFileOpti
     if (std.fs.path.isAbsolute(path)) {
         return std.Io.Dir.createFileAbsolute(io, path, flags);
     }
-    return std.Io.Dir.cwd().createFile(io, path, flags);
+    // The case-insensitive retry the opens above get, and for the same reason:
+    // MSS resolves names case-insensitively on Windows, so a game writing
+    // "C:\Juegos\x.wav" into a directory spelled "juegos" creates the file, and
+    // AIL_file_read of the same name has to find it. Without this, the read
+    // succeeds and the write of the identical name fails.
+    return std.Io.Dir.cwd().createFile(io, path, flags) catch |err| {
+        var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const resolved = retryPath(path, &resolved_buf) orelse return err;
+        return std.Io.Dir.cwd().createFile(io, resolved, flags) catch |retry_err| {
+            reportRetryFailure(path, err, resolved, retry_err);
+            return retry_err;
+        };
+    };
 }
 
 /// Create `path` by absolute route only. AIL_open_ASI_provider tries the temp
@@ -277,7 +310,18 @@ pub fn createFile(io: std.Io, path: []const u8, flags: std.Io.Dir.CreateFileOpti
 /// the attempt that would have created the file.
 pub fn createFileAbsolute(io: std.Io, path: []const u8, flags: std.Io.Dir.CreateFileOptions) !std.Io.File {
     if (checkOpenFault(path)) |err| return err;
-    return std.Io.Dir.createFileAbsolute(io, path, flags);
+    // Same case-insensitive retry as createFile: an exclusive create against a
+    // differently-cased spelling of an existing file still reports
+    // PathAlreadyExists, so the retry cannot manufacture a name that the
+    // caller did not ask for.
+    return std.Io.Dir.createFileAbsolute(io, path, flags) catch |err| {
+        var resolved_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const resolved = retryPath(path, &resolved_buf) orelse return err;
+        return std.Io.Dir.createFileAbsolute(io, resolved, flags) catch |retry_err| {
+            reportRetryFailure(path, err, resolved, retry_err);
+            return retry_err;
+        };
+    };
 }
 
 /// Delete `path`, by absolute route when it is absolute and process-directory

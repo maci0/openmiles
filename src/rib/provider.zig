@@ -29,6 +29,14 @@ pub const RIB_INTERFACE_ENTRY = extern struct {
 /// interfaces (ASI codecs, DLS providers) hold tens.
 const max_interface_entries: i32 = 65536;
 
+/// Longest interface entry name read out of a plugin, terminator included. The
+/// entry count above bounds how many names a plugin hands over, not how long
+/// each one is, and the name pointer is the plugin's to point anywhere, so the
+/// read is bounded here. Real interface names ("ASI codec", "DLS provider",
+/// "Miles Sound System") are tens of bytes; MSS's own interface name field is
+/// a fixed-size buffer, not a pointer, so no real name comes near this.
+const max_interface_name_bytes: usize = 1024;
+
 pub const RIB_alloc_provider_handle_ptr = *const fn (i32) callconv(.c) HPROVIDER;
 
 pub const RIB_register_interface_ptr = *const fn (HPROVIDER, [*c]const u8, i32, [*c]RIB_INTERFACE_ENTRY) callconv(.c) usize;
@@ -159,7 +167,22 @@ pub const Provider = struct {
         current_loading_provider = self;
         defer current_loading_provider = prev;
 
-        var lib = try root.DynLib.open(resolved_path);
+        var lib = root.DynLib.open(resolved_path) catch |err| {
+            // Name the plugin, its path, and the OS code: LoadLibraryW's null
+            // covers "this file is missing", "a DLL it imports is missing", and
+            // "its DllMain refused", and the error name alone cannot tell an
+            // operator which one they are looking at.
+            if (@hasDecl(root.DynLib, "last_load_error")) {
+                if (root.DynLib.last_load_error) |why| {
+                    log("Provider.load: loading plugin '{s}' from '{s}' failed (Win32 {d}: {s}, {any})\n", .{ name, resolved_path, why.win32, why.name, err });
+                } else {
+                    log("Provider.load: loading plugin '{s}' from '{s}' failed ({any})\n", .{ name, resolved_path, err });
+                }
+            } else {
+                log("Provider.load: loading plugin '{s}' from '{s}' failed ({any})\n", .{ name, resolved_path, err });
+            }
+            return err;
+        };
         self.lib = lib;
         errdefer {
             lib.close();
@@ -303,11 +326,34 @@ pub const Provider = struct {
         errdefer iface.deinit();
         const rib_entries: [*]WireInterfaceEntry = if (entry_count == 0) undefined else @ptrCast(@alignCast(entries.?));
         var i: usize = 0;
+        var unnamed: usize = 0;
         while (i < entry_count) : (i += 1) {
             const entry = rib_entries[i];
-            if (entry.name != null) {
-                try iface.add(std.mem.span(entry.name), entry.token, entryTypeFromWire(entry.entry_type), entry.subtype);
+            if (entry.name) |entry_name| {
+                // span walks to the terminator, and a plugin's name pointer is
+                // not obliged to have one, so the search is bounded: an
+                // unterminated name would otherwise read past the end of the
+                // module's data. The ceiling is generous next to any interface
+                // name in the SDK, and one that hits it is reported rather than
+                // registered under a truncated name.
+                const bounded = entry_name[0..max_interface_name_bytes];
+                const term = std.mem.indexOfScalar(u8, bounded, 0) orelse {
+                    log("Provider.registerInterface: '{s}' entry {d} of {d} has an unterminated name; the entry is dropped\n", .{ name, i, entry_count });
+                    unnamed += 1;
+                    continue;
+                };
+                try iface.add(bounded[0..term], entry.token, entryTypeFromWire(entry.entry_type), entry.subtype);
+            } else {
+                unnamed += 1;
             }
+        }
+        // The plugin filled a slot with no name and gets a live interface handle
+        // back, then dispatches through a token that resolves to nothing. The
+        // partial interface is still installed (it holds the entries that were
+        // named), but the dropped ones are named here: a plugin that quietly
+        // loses one of its capabilities otherwise never learns which.
+        if (unnamed > 0) {
+            log("Provider.registerInterface: '{s}' registered {d} of {d} entries; {d} carried no usable name\n", .{ name, entry_count - unnamed, entry_count, unnamed });
         }
         // A counter that wrapped would hand out a handle an earlier interface
         // already had, which is the reuse the counter exists to prevent.

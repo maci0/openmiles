@@ -53,6 +53,52 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ### Fixed
 
+- A loop restart that miniaudio refuses no longer reports success. The
+  end-of-sound bridge dropped the result of `ma_sound_seek_to_pcm_frame` and
+  `ma_sound_start` and returned "loop again", so a sample whose loop start lies
+  past the end of the decoded image (a block `setLoopBlock` accepts, since it
+  only checks that the block spans a frame) stayed `SMP_PLAYING` forever, never
+  fired its end callback, and, on an infinite loop count, spun the audio thread
+  for the life of the process. A failed seek or start is now named in the log
+  and reported as the end of the sound.
+- A truncated or foreign SMF is no longer measured as a complete image.
+  `smfImageSize` answered `data.len` when its track walk ran out of data or met
+  a chunk that was not `MTrk`, so `findXmi` handed the trailing DLS bank back as
+  part of the music image and `AIL_merge_DLS_with_XMI` wrote the two out as one
+  file. Those paths now report 0, matching what the sibling pointer-based walker
+  already answered and what the module's contract says.
+- `AIL_set_3D_sample_info` bounds `data_len` against the 256 MiB image cap before
+  slicing, as every other untrusted image in the library is bounded. `channels`
+  and `bits` were already clamped, so a game with a bad `AILSOUNDINFO` asked for
+  a 4 GiB slice over a pointer of unknown extent.
+- `LoadLibraryW` failures are no longer all reported as `FileNotFound`. A path
+  that failed to convert to UTF-16, a plugin whose *imports* are missing, and a
+  plugin whose `DllMain` refused now reach the caller as distinct errors, and
+  the Win32 code is carried out to the load log beside the plugin name.
+- A soundbank's name index that fails to build says so. The bank still loads and
+  still answers every lookup, on the linear-scan path, but nothing recorded that
+  the index was abandoned.
+- `AIL_allocate_bus` names which of its three failures (allocation, miniaudio
+  group init, list append) produced the null, and carries the `ma_result`
+  description for the init failure. `AIL_list_DLS` records why it rejected an
+  image instead of leaving `AIL_last_error` holding the previous failed call's
+  message. `AIL_redbook_open` and `AIL_redbook_open_drive` log the error their
+  `catch` was discarding.
+- Capture chunks dropped by `Input.captureCallback` (contended lock, or a ring
+  with no room) are counted and readable through `Input.droppedChunkCount`.
+  Losing audio silently left a busy device indistinguishable from a quiet one.
+- A case-insensitive path that resolves but still fails to open now logs both
+  the first and the retry's error, instead of reporting only the retry's and
+  losing a permission failure to a "File not found". `createFile` and
+  `createFileAbsolute` get the retry the opens already had, so a name MSS
+  resolves case-insensitively can be written as well as read.
+- The three blocking external calls with no timeout (`LoadLibraryW`,
+  `ma_device_init`, `FindFirstFileW`) are recorded in `docs/THREAT_MODEL.md`
+  with the reason a bound is not inlined and the value one would take.
+- `MilesSetSoundLabelLimits` and a `set_limits` step name every limit entry they
+  could not parse or store, and record the count through `AIL_last_error`. The
+  call still returns 1: the caps that parsed are applied, and a caller told
+  "failed" for a partly applied string would not know which half is live.
 - The temporary ASI provider image is created with `Permissions.fromMode(0o600)`
   rather than a bare `0o600`. `std.Io.File.Permissions` is a non-exhaustive enum,
   not a mode integer, so the tree did not compile at all: every `zig build` and

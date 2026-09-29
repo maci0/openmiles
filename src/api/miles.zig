@@ -413,7 +413,14 @@ pub fn MilesSetSoundLabelLimits(system: ?*anyopaque, sound_limits: ?[*:0]const u
     _ = system;
     ev.stateLock();
     defer ev.stateUnlock();
-    ev.setLimits(if (sound_limits) |p| std.mem.span(p) else "");
+    // The return stays 1: the SDK reports success for a limits string it
+    // accepted, and a partially applied one is still applied. What was dropped
+    // is named in the log and through AIL_last_error, so the caller can see
+    // that a cap it expected is not enforcing.
+    const dropped = ev.setLimits(if (sound_limits) |p| std.mem.span(p) else "");
+    if (dropped > 0) {
+        openmiles.setLastErrorFmt("MilesSetSoundLabelLimits: {d} limit entries were malformed and are not enforced", .{dropped});
+    }
     return 1;
 }
 

@@ -260,33 +260,33 @@ pub const EventConstruct = struct {
     // A single nibble field (decoder copyDigit: one hex char + ';').
     fn fieldDigit(self: *EventConstruct, v: anytype) void {
         self.bytes.append(self.allocator, hexChar(@as(u8, @intCast(@as(i64, v) & 0xf)))) catch {
-            self.failed = true;
+            self.markFailed();
         };
         self.raw(";");
     }
     // A byte field as two hex chars + ';' (decoder copyUChar; SDK "%02x"-style).
     fn fieldUChar(self: *EventConstruct, v: u8) void {
         self.bytes.append(self.allocator, hexChar(v >> 4)) catch {
-            self.failed = true;
+            self.markFailed();
         };
         self.bytes.append(self.allocator, hexChar(v & 0xf)) catch {
-            self.failed = true;
+            self.markFailed();
         };
         self.raw(";");
     }
     // A u16 field as four hex chars + ';' (decoder copyUShort; SDK "%04x").
     fn fieldUShort(self: *EventConstruct, v: u16) void {
         self.bytes.append(self.allocator, hexChar(@intCast((v >> 12) & 0xf))) catch {
-            self.failed = true;
+            self.markFailed();
         };
         self.bytes.append(self.allocator, hexChar(@intCast((v >> 8) & 0xf))) catch {
-            self.failed = true;
+            self.markFailed();
         };
         self.bytes.append(self.allocator, hexChar(@intCast((v >> 4) & 0xf))) catch {
-            self.failed = true;
+            self.markFailed();
         };
         self.bytes.append(self.allocator, hexChar(@intCast(v & 0xf))) catch {
-            self.failed = true;
+            self.markFailed();
         };
         self.raw(";");
     }

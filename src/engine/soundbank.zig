@@ -715,9 +715,18 @@ pub fn loadFromMemory(allocator: std.mem.Allocator, filename: []const u8, image:
     // Build the events/sounds name indexes before the bank joins the registry:
     // until registryAdd publishes it, no other thread can reach the Bank, so
     // the build needs no lock and lookups never race it. A failed build leaves
-    // that table on the linear-scan path.
-    self.event_index = self.buildNameIndex(.events) catch .{};
-    self.sound_index = self.buildNameIndex(.sounds) catch .{};
+    // that table on the linear-scan path. The fallback is a performance
+    // regression, not a wrong answer, so it stays; the bank records it, because
+    // a bank silently scanning thousands of sounds per lookup is otherwise a
+    // problem with nothing in the log to attribute it to.
+    self.event_index = self.buildNameIndex(.events) catch |err| blk: {
+        root.log("soundbank: building the '{s}' event name index failed ({any}); the table falls back to a linear scan\n", .{ self.filename, err });
+        break :blk .{};
+    };
+    self.sound_index = self.buildNameIndex(.sounds) catch |err| blk: {
+        root.log("soundbank: building the '{s}' sound name index failed ({any}); the table falls back to a linear scan\n", .{ self.filename, err });
+        break :blk .{};
+    };
     const registered = registryAdd(self) orelse {
         self.teardown();
         return error.RegistryFull;
