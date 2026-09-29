@@ -318,11 +318,6 @@ pub fn AIL_set_sample_loop_samples(s_opt: ?*Sample, loop_start_samples: i32, loo
     // setLoopBlock takes byte offsets; a frame count that does not fit one
     // clamps to the largest a caller can express.
     const bpf = @as(u64, s.bytesPerFrame());
-    const byteOffset = struct {
-        fn f(frames: u64, bytes_per_frame: u64) i32 {
-            return @intCast(@min(frames *| bytes_per_frame, @as(u64, std.math.maxInt(i32))));
-        }
-    }.f;
     // The *_samples form counts per-channel samples; loop_start_frame is a
     // frame index and AIL_sample_loop_block converts it back with
     // bytesPerFrame (bytes per frame = bytes per sample * channels). Storing
@@ -338,8 +333,14 @@ pub fn AIL_set_sample_loop_samples(s_opt: ?*Sample, loop_start_samples: i32, loo
     }
     // setLoopBlock, not the fields directly: it is what narrows the decoder's
     // range to the loop end and sets the loop point an infinite count loops on.
-    s.setLoopBlock(byteOffset(start, bpf), byteOffset(end, bpf));
+    s.setLoopBlock(loopByteOffset(start, bpf), loopByteOffset(end, bpf));
     return 1;
+}
+
+/// `frames` samples of `bytes_per_frame` bytes each, as a byte offset clamped
+/// to what a caller can express.
+fn loopByteOffset(frames: u64, bytes_per_frame: u64) i32 {
+    return @intCast(@min(frames *| bytes_per_frame, @as(u64, std.math.maxInt(i32))));
 }
 
 // --- System-state stack ---

@@ -84,6 +84,7 @@ FIRST_PARTY_RE = re.compile(r"first-party")
 # header swapped for a newer release with the README entry left behind puts
 # the superseded version in the inventory, so every advisory published for the
 # release that actually shipped is a miss.
+#
 # Where a vendored header may come from. Both upstreams are GitHub repos, and
 # a single approved host is a short enough list to hold in the head: the point
 # is that a Source line naming any other URL fails here, at the moment the tree

@@ -133,17 +133,17 @@ def scan(
     target = ROOT / path
     if not target.exists():
         problems.append(f"MISSINGFILE {path}:{line_no} {anchor}: {path} does not exist")
-        return None
+        return
 
     lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
     if not 1 <= line_no <= len(lines):
         problems.append(f"BADLINE {path}:{line_no} {anchor}: file has {len(lines)} lines")
-        return None
+        return
 
     if anchor_re(anchor).search(lines[line_no - 1]):
         if args.verbose:
             print(f"ok {path}:{line_no} {anchor}")
-        return None
+        return
 
     if args.update:
         stale.setdefault(path, []).append(
@@ -151,7 +151,6 @@ def scan(
         )
     else:
         problems.append(f"NOMATCH {path}:{line_no} {anchor}: anchor is not on that line")
-    return problems, stale, None
 
 
 def main() -> int:

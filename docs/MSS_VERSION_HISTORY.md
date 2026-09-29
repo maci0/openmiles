@@ -42,14 +42,12 @@ This version is the most common target for legacy game mods and wrappers (e.g., 
 - **3D Audio:** `AIL_set_3D_position` and early EAX support.
 
 ## 3. Console Transition Era (v7.x)
-Improved performance for multi-core systems and handled console-specific audio hardware.
 
 - **Header Cleanup:** `mss.h` stopped including `windows.h`. All Miles types became independent (e.g., `U32` instead of `DWORD`).
 - **Memory Management:** Added `AIL_set_mem_callbacks` for better control over heap allocation on consoles.
 - **Ogg Vorbis:** Native support for Ogg streams began appearing in this era.
 
 ## 4. Modern Era (v8.x - v9.x)
-Shifted from a "Programmer's API" to an "Artist's API" with data-driven event systems.
 
 - **Event System:** The `AIL_enqueue_event_*` family (e.g. `AIL_enqueue_event_start`) allows playing sounds by name rather than handle. Logic (randomization, pitch shifting) is moved to data files.
 - **Soundbanks:** `AIL_open_soundbank` and `MilesAddSoundBank`. Unified asset management.

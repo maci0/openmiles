@@ -160,8 +160,6 @@ def eval_guard(expr, version):
     return True
 
 
-# One branch per preprocessor directive, mirroring what cpp does; splitting it
-# would put the #if/#elif/#else/#endif chain apart from the parse it guards.
 # PLR0912: one branch per preprocessor directive, because that is the shape
 # cpp gives the file. Anything smaller has to reconstruct the #if/#elif/#else
 # nesting to stay correct, which is the bug the branch count is protecting.
@@ -577,30 +575,14 @@ def compile_problems():
         # gate reserves 2 for a bad argument.
         sys.exit(1)
     for version in SUPPORTED_VERSIONS:
-        with tempfile.TemporaryDirectory() as tmp:
-            tu = Path(tmp) / "header_check.c"
-            tu.write_text(
-                f"#define OPENMILES_MSS_VERSION {version}\n"
-                f'#include "{MSS_H}"\n'
-                "int main(void) { return 0; }\n",
-                encoding="utf-8",
-            )
-            proc = compile_header(zig, tu, tmp)
+        proc = compile_version(zig, version)
         if proc.returncode != 0:
             problems.append(
                 f"v{version} COMPILE    mss.h does not compile as C99: "
                 + " ".join(proc.stderr.split())[:400]
             )
     for version in UNSUPPORTED_VERSIONS:
-        with tempfile.TemporaryDirectory() as tmp:
-            tu = Path(tmp) / "header_check.c"
-            tu.write_text(
-                f"#define OPENMILES_MSS_VERSION {version}\n"
-                f'#include "{MSS_H}"\n'
-                "int main(void) { return 0; }\n",
-                encoding="utf-8",
-            )
-            proc = compile_header(zig, tu, tmp)
+        proc = compile_version(zig, version)
         if proc.returncode == 0:
             problems.append(
                 f"v{version} COMPILE    mss.h accepts OPENMILES_MSS_VERSION="
@@ -613,7 +595,7 @@ def compile_problems():
 
 # S603: a fixed argv list with no shell, built here rather than from input,
 # running the zig resolved by the caller. The only path handed to it is the
-# temp file compile_problems just wrote; nothing from the repository reaches
+# temp file compile_version just wrote; nothing from the repository reaches
 # argv.
 #
 # The warning set is the one c_flags carries in build.zig, so a construct the
@@ -655,6 +637,19 @@ def compile_header(zig, tu, out_dir):
         errors="replace",
         check=False,
     )
+
+
+def compile_version(zig, version):
+    """Compile mss.h with OPENMILES_MSS_VERSION `version` and report the run."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tu = Path(tmp) / "header_check.c"
+        tu.write_text(
+            f"#define OPENMILES_MSS_VERSION {version}\n"
+            f'#include "{MSS_H}"\n'
+            "int main(void) { return 0; }\n",
+            encoding="utf-8",
+        )
+        return compile_header(zig, tu, tmp)
 
 
 def main():

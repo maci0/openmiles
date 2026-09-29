@@ -18,7 +18,6 @@ pub const Filter = struct {
     lpf_initialized: bool = false,
     cutoff_frequency: f64 = DEFAULT_CUTOFF_HZ, // Hz; initLpfNode replaces this with the driver Nyquist
     order: u32 = 2, // 2nd-order = 12dB/octave rolloff
-    // Track which samples are routed through this filter for cleanup
     attached_samples: std.ArrayListUnmanaged(*root.Sample),
 
     /// If true, this filter is being torn down as part of DigitalDriver.deinit.

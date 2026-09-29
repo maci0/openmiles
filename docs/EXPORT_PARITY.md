@@ -156,12 +156,7 @@ v9 280→159).
 
 **Remaining EXTRA is sub-version variance, plus a group since eliminated:**
 
-1. *Sub-version variance* (the bulk — e.g. v6's 118, v9's 143): genuine Miles
-   functions present in some sub-version of the major but not the single
-   mainline DLL we diff against. Our build is their **union**, so it serves
-   every sub-version's games — a faithful superset, not an error. Forcing it to
-   one sub-version would reduce fidelity to the others.
-2. *Artifacts, since eliminated:* `DllMainCRTStartup` (a Zig/lld entry-point
+1. *Artifacts, since eliminated:* `DllMainCRTStartup` (a Zig/lld entry-point
    artifact, never a real Miles export) and the 15 convenience wrappers counted
    above. Neither is in the table any more: the CRT entry is the PE entry point
    rather than an export, and `never_export` in `src/main.zig` drops the

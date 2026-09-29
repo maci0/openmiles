@@ -309,8 +309,7 @@ def document():
         sys.exit(f"error: {LICENSE.relative_to(ROOT)} is not the license {PROJECT_LICENSE} names")
     # read_sums returns (recorded, malformed); the malformed lines are
     # check_vendored.py's to report, so only the recorded digests are looked up
-    # here. Passing the tuple made every `name not in sums` true and the gate
-    # failed on the first header.
+    # here.
     recorded, _ = read_sums()
     return {
         "bomFormat": "CycloneDX",

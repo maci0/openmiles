@@ -137,7 +137,7 @@ pub fn AIL_set_sample_3D_distances(obj: ?*Sample, max_dist: f32, min_dist: f32, 
 }
 pub fn AIL_update_sample_3D_position(obj: ?*Sample, dt_ms: f32) callconv(.winapi) void {
     const s = obj orelse return;
-    if (!(dt_ms == dt_ms) or std.math.isInf(dt_ms)) return; // NaN/Inf guard
+    if (!std.math.isFinite(dt_ms)) return; // NaN/Inf guard
     // SDK m3d.cpp: advances S3D.position by velocity * dt -- velocity is already
     // per-millisecond (dX_per_ms), so dt is used directly (NOT converted to
     // seconds). Skips the update when velocity is ~0, then re-sets via the
@@ -334,7 +334,7 @@ pub fn AIL_set_listener_3D_velocity_vector(dig_opt: ?*DigitalDriver, dx: f32, dy
 }
 pub fn AIL_update_listener_3D_position(dig_opt: ?*DigitalDriver, dt_ms: f32) callconv(.winapi) void {
     const dig = dig_opt orelse return;
-    if (!(dt_ms == dt_ms) or std.math.isInf(dt_ms)) return; // NaN/Inf guard
+    if (!std.math.isFinite(dt_ms)) return; // NaN/Inf guard
     // SDK m3d.cpp: listener velocity is per-millisecond, so position advances by
     // velocity * dt_ms (NOT dt/1000); early-out when velocity is ~0.
     const v = dig.getListenerVelocity();

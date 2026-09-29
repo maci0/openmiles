@@ -138,7 +138,7 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [0.3.0] - 2026-09-28
 
-Digital driver lifecycle counting, SoundFont thread safety, Miles event-system hardening, ASI codec fuzzing, reproducible release packaging, and comprehensive stability and documentation fixes.
+Digital driver lifecycle counting, SoundFont thread safety, Miles event-system hardening, ASI codec fuzzing, reproducible release packaging.
 
 ### Breaking
 

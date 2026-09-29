@@ -101,8 +101,6 @@ def main():
     problems = []
     checked = 0
     for doc in DOCS:
-        if not doc.is_file():
-            continue
         text = doc.read_text(encoding="utf-8")
         for index, block in enumerate(BLOCK_RE.findall(text), start=1):
             checked += 1

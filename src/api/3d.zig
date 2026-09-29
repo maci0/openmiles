@@ -104,14 +104,10 @@ pub fn AIL_3D_sample_distances_v4(s: ?*openmiles.Sample3D, max_dist: ?*f32, min_
     if (a4) |p| p.* = 0;
 }
 pub fn AIL_set_3D_sample_float_distances_v5(s: ?*anyopaque, max_dist: f32, min_dist: f32, a3: f32, a4: f32) callconv(.winapi) void {
-    _ = a3;
-    _ = a4;
-    AIL_set_3D_sample_distances(s, max_dist, min_dist);
+    AIL_set_3D_sample_distances_v4(s, max_dist, min_dist, a3, a4);
 }
 pub fn AIL_3D_sample_float_distances_v5(s: ?*openmiles.Sample3D, max_dist: ?*f32, min_dist: ?*f32, a3: ?*f32, a4: ?*f32) callconv(.winapi) void {
-    AIL_3D_sample_distances(s, max_dist, min_dist);
-    if (a3) |p| p.* = 0;
-    if (a4) |p| p.* = 0;
+    AIL_3D_sample_distances_v4(s, max_dist, min_dist, a3, a4);
 }
 pub fn AIL_set_listener_3D_position(dig_opt: ?*DigitalDriver, x: f32, y: f32, z: f32) callconv(.winapi) void {
     const dig = dig_opt orelse return;
@@ -479,10 +475,7 @@ pub fn AIL_set_3D_distance_factor(dig_opt: ?*DigitalDriver, factor: f32) callcon
     dig.distance_factor = factor;
     // MSS folds distance_factor into the Doppler velocity scale; push the
     // combined factor to every live sample's miniaudio doppler factor.
-    const eff = dig.effectiveDoppler();
-    for (dig.samples_3d.items) |s| {
-        if (s.is_initialized) openmiles.ma.ma_sound_set_doppler_factor(&s.sound, eff);
-    }
+    pushDopplerFactor(dig);
 }
 pub fn AIL_3D_distance_factor(dig_opt: ?*DigitalDriver) callconv(.winapi) f32 {
     const dig = dig_opt orelse return 0.0; // SDK (mssds3d.cpp): null handle -> 0.0, not the 1.0 default
@@ -493,6 +486,11 @@ pub fn AIL_set_3D_doppler_factor(dig_opt: ?*DigitalDriver, factor: f32) callconv
     dig.doppler_factor = factor;
     // ma's doppler factor multiplies velocity, matching MSS's combined
     // distance_factor * doppler_factor scaling.
+    pushDopplerFactor(dig);
+}
+
+/// Push the driver's combined doppler scaling to every live 3D sample.
+fn pushDopplerFactor(dig: *DigitalDriver) void {
     const eff = dig.effectiveDoppler();
     for (dig.samples_3d.items) |s| {
         if (s.is_initialized) openmiles.ma.ma_sound_set_doppler_factor(&s.sound, eff);
@@ -557,10 +555,6 @@ pub fn AIL_close_3D_listener(listener: *anyopaque) callconv(.winapi) void {
     _ = listener;
 }
 pub fn AIL_open_3D_object(provider: *anyopaque) callconv(.winapi) ?*anyopaque {
-    // Prefer the active digital driver (the real engine); fall back to treating
-    // the provider handle as a driver for legacy callers, but only when it is
-    // one: an enumerated HPROVIDER is a *Provider, and a Sample3D built on that
-    // cast would read driver fields off the end of the provider.
     const dig = providerDriver(provider) orelse {
         openmiles.setLastError("No digital driver for 3D object");
         return null;

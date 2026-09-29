@@ -69,7 +69,7 @@ PROG = "check_workflow_shell.py"
 class Block(NamedTuple):
     """One `run:` step, and where in the concatenated script it starts."""
 
-    # The workflow, the step name, and the line the step's `run:` key is on.
+    # The workflow and the step name, which the finding is reported under.
     label: str
     # 1-based line in the script handed to shellcheck where the body starts.
     start: int
