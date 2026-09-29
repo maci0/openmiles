@@ -242,16 +242,6 @@ pub fn mixDelayToFrames(now_frames: u64, delay_ms: i32, sample_rate: u32) u64 {
     return now_frames +| @as(u64, @intCast(@divTrunc(delay_ns * @as(i96, sample_rate), std.time.ns_per_s)));
 }
 
-/// Mixer milliseconds on the engine's own clock: the inverse of
-/// mixTimeMsToFrames, and the same clock AIL_schedule_start_sample's argument
-/// is expressed in. A delay of N ms is "now + N" on this clock, never a
-/// wall-clock instant, so a system-time step cannot move it.
-pub fn engineTimeMs(self: *DigitalDriver) u64 {
-    const rate = self.getSampleRate();
-    if (rate == 0) return 0;
-    return engineTimeFrames(self) *| 1000 / rate;
-}
-
 /// A peak soft-limiter as a custom miniaudio node: passes audio below the knee
 /// untouched and saturates peaks toward unity so a bus can't clip.
 pub const LimiterNode = extern struct {
@@ -748,20 +738,6 @@ pub const DigitalDriver = struct {
     /// caller knows whether it has unpublished the handle already.
     pub fn releaseOwner(self: *DigitalDriver) bool {
         return self.refs.fetchSub(1, .acq_rel) == 1;
-    }
-
-    /// Drop one owner's reference and report whether that was the last one. The
-    /// close path uses this rather than `release` so the teardown stays behind
-    /// the digital driver's table claim: a close that only releases must leave
-    /// the driver in the table, or the next close of the same handle finds no
-    /// entry and the device is never torn down.
-    ///
-    /// The caller has established the handle is live, so the count cannot be
-    /// zero here; a zero would be a release with no matching open.
-    pub fn dropRef(self: *DigitalDriver) bool {
-        const prev = self.refs.fetchSub(1, .acq_rel);
-        std.debug.assert(prev > 0);
-        return prev == 1;
     }
 
     /// Unconditional teardown, ignoring outstanding opens. Shutdown uses it:
