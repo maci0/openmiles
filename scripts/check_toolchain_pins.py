@@ -17,6 +17,12 @@ The same drift applies to the C warning set, which build.zig declares once and
 the two gates that compile C on their own repeat: check_header.py for mss.h,
 check_examples.py for the snippets in the documentation.
 
+The README names the Zig version in prose, and nothing else reads a version
+out of prose. It is also the page that decides whether a contributor's first
+command works, so a pin bump that stops there leaves the front page asking for
+a compiler every gate in the tree refuses, and the drift is invisible to all
+of them.
+
 The gates themselves run on whatever `python3` the host resolves, so the
 interpreter is the fourth pin: ruff.toml names the floor the scripts need, and
 this asserts the one running is at or above it. Below it, a gate dies halfway
@@ -49,6 +55,7 @@ else:  # pragma: no cover - the script always lives inside the repository
     sys.exit(1)
 
 MAKEFILE = ROOT / "Makefile"
+README = ROOT / "README.md"
 CI_YML = ROOT / ".github" / "workflows" / "ci.yml"
 RELEASE_YML = ROOT / ".github" / "workflows" / "release.yml"
 ZON = ROOT / "build.zig.zon"
@@ -223,6 +230,36 @@ def c_flag_problems():
     return bad
 
 
+def readme_zig_problems(floor):
+    """Report a README whose build requirements name another Zig.
+
+    The README is the page a new contributor reads before anything else, and
+    the version in it is the one instruction they act on. A pin bump that
+    misses it is worse than a stale comment elsewhere: `make build` then
+    refuses on the compiler the front page told them to install, and the only
+    evidence is a version line three screens into a build failure.
+    """
+    if not floor:
+        return ["ZIG_VERSION source"]
+    text = read(README)
+    if text is None:
+        return ["README.md missing"]
+    # One version is named, in the build requirements. Reading every `Zig x.y.z`
+    # rather than that one line keeps a second mention (a flag example, a
+    # changelog quote) from making the gate pass or fail on the wrong one.
+    stated = re.search(r"^Requires \[Zig ([\d.]+)\]", text, re.MULTILINE)
+    if not stated:
+        print("README.md UNPINNED  the build requirements name no Zig version")
+        return ["README ZIG_VERSION"]
+    if stated.group(1) != floor:
+        print(
+            f"README.md DRIFT     build requirements name Zig {stated.group(1)}, "
+            f"build.zig.zon pins {floor}"
+        )
+        return ["README ZIG_VERSION"]
+    return []
+
+
 def interpreter_problems():
     """Report an interpreter below the floor ruff.toml declares.
 
@@ -292,6 +329,7 @@ def main():
         problems.extend(derived_pin_problems(path, text, names))
 
     problems.extend(c_flag_problems())
+    problems.extend(readme_zig_problems(floor))
     problems.extend(interpreter_problems())
 
     if problems:

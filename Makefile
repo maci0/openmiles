@@ -1,4 +1,4 @@
-.PHONY: all build test check clean lint format check-header check-examples check-versions check-pins check-python check-yaml check-threat-model check-release-archive check-workflow-shell check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity sanitize harnesses help
+.PHONY: all build test check clean lint format check-header check-examples check-versions check-pins check-python check-yaml check-threat-model check-config check-release-archive check-workflow-shell check-toolchain check-host-tools check-interpreter check-parity-tools check-vendored check-sbom cross parity sanitize harnesses help
 
 # The one toolchain this project builds with. build.zig.zon carries
 # .minimum_zig_version, but that is a floor, not the version the output was
@@ -172,6 +172,14 @@ check-pins: check-interpreter
 check-threat-model: check-interpreter
 	$(PYTHON) scripts/check_threat_model_refs.py
 
+# The configuration the library reads is constants in the sources, and every
+# value of it is a number or a default written down in the README and the
+# threat model. Widening a limit in a Zig source leaves both documents quoting
+# the old one, which sends an operator down a path the library has stopped
+# taking, and no other gate compares the two. See scripts/check_config_docs.py.
+check-config: check-interpreter
+	$(PYTHON) scripts/check_config_docs.py
+
 # The release archive stages what package_release.sh lists, and nothing checks
 # that what it stages can be verified by whoever unpacks it. Assert the archive
 # carries every file deps/SHA256SUMS records and every file the shipped docs
@@ -228,6 +236,7 @@ lint: check-toolchain check-host-tools
 	$(PYTHON) scripts/check_vendored.py
 	$(PYTHON) scripts/gen_sbom.py --check
 	$(PYTHON) scripts/check_threat_model_refs.py
+	$(PYTHON) scripts/check_config_docs.py
 	$(PYTHON) scripts/check_release_archive.py
 	$(PYTHON) scripts/check_workflow_shell.py
 	@$(MAKE) --no-print-directory check-python
@@ -281,6 +290,7 @@ help:
 	@echo "  check-vendored      assert deps/ matches the digests in deps/SHA256SUMS, and that each vendored entry names its upstream commit and states the version its own header carries"
 	@echo "  check-sbom          assert SBOM.cdx.json matches the vendored deps and the declared pip pins"
 	@echo "  check-threat-model  assert every file:line anchor in docs/THREAT_MODEL.md resolves"
+	@echo "  check-config        assert the documented configuration values are the ones the code reads"
 	@echo "  check-release-archive  assert the release archive carries every file deps/SHA256SUMS records and every file the shipped docs link"
 	@echo "  check-workflow-shell  shellcheck every \`run:\` block in .github as bash"
 	@echo "  check-python        assert ruff on PATH is the pinned version, then lint and format-check"

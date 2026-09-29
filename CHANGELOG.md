@@ -76,6 +76,29 @@ All notable changes to OpenMiles are recorded here. The format follows
   tag, and reads the shipped PE header; yamllint read those blocks as YAML, so
   a quoting mistake in one passed lint and failed on the runner. A finding names
   the workflow and the step it came from.
+- `scripts/check_config_docs.py`, in `make lint` and therefore in CI: the log
+  cap, the log path limit, the `TMPDIR` limit, the default log file name, and
+  the spellings `OPENMILES_DEBUG` accepts are constants in `src/`, and every
+  one of them was also a number written out in the README and the threat model.
+  Widening a limit in a source left both documents quoting the old one, so an
+  operator setting a `OPENMILES_LOG_PATH` the library had stopped accepting read
+  a document that said otherwise, with every gate green. The script reads the
+  constants back and asserts the documents name them.
+- `scripts/check_versions.py` also reads the accepted `-Dmss-version` set from
+  the header's side. A value added to `src/mss.h` and to `check_header.py`
+  without a matching entry in `build.zig` compiled for every consumer and for
+  every version probe the header gate runs, because each of those selects a
+  value `build.zig` does know, and the two lists were only compared with each
+  other. The gate now rejects a header value no build encodes, and compares the
+  two defaults it never read: `build.zig`'s `orelse "9"` and `mss.h`'s
+  `OPENMILES_MSS_VERSION 90`, which is what a consumer that defines nothing
+  gets. It also compares the `-Dmss-version=<...>` list and the default beside
+  it in the README, which is where a consumer picks a version from ahead of
+  `zig build --help`, and which nothing had read until now.
+- `scripts/check_toolchain_pins.py` checks the Zig version in the README's build
+  requirements against `.minimum_zig_version`. It was the one pin written in
+  prose, and a bump that missed it left the front page asking for a compiler
+  `make build` refuses, with every gate in the tree green.
 
 ### Changed
 
