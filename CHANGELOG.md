@@ -109,6 +109,21 @@ All notable changes to OpenMiles are recorded here. The format follows
   could not parse or store, and record the count through `AIL_last_error`. The
   call still returns 1: the caps that parsed are applied, and a caller told
   "failed" for a partly applied string would not know which half is live.
+- `scripts/check_all_versions.sh` sorted its unswept-version report with
+  `sort -V`, a GNU extension BSD `sort` rejects, so the parity sweep died before
+  printing a row on a macOS or BSD host. The order is now built from `awk`,
+  `sort` and `cut`, and the same sequence comes out.
+- The ELF plugin-image fixup applied no relocations on a 32-bit Linux target,
+  and on a riscv64 or ppc64 one, because `relative_reloc_type` named only
+  x86_64 and aarch64. The writable-segment repair still ran, so a plugin loaded
+  on those targets kept link-time addresses in its data and crashed on the first
+  dereference. riscv64 and ppc64 are now rebased as well; a 32-bit target still
+  gets the segment repair without them, because std.elf names no `R_386`
+  RELATIVE value to apply.
+- `CONTRIBUTING.md` claimed the library builds on any host Zig supports. It
+  does not on aarch64, on any operating system, and the README already said so.
+  The claim now names the exclusion, and it states that the two `scripts/*.sh`
+  gates need bash rather than the `sh` their shebangs are read as.
 - The temporary ASI provider image is created with `Permissions.fromMode(0o600)`
   rather than a bare `0o600`. `std.Io.File.Permissions` is a non-exhaustive enum,
   not a mode integer, so the tree did not compile at all: every `zig build` and

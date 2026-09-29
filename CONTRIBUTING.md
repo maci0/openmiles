@@ -84,10 +84,16 @@ noticeably longer than a plain run, so it is its own CI step rather than part of
 tests on Windows; nothing in the library is Linux-only, but a change that only
 builds on one host shows up there rather than locally.
 
-The library builds and tests on any host Zig supports, through `zig build` and
-`zig build test`. The `make` targets and the two `scripts/*.sh` gates need more:
-a POSIX shell (`sh`, GNU make, `sed`, `command -v`), plus `shellcheck` and a
-Python 3 interpreter named either `python3` or `python`. On Windows that means
+The library builds and tests on every Zig host except the aarch64 ones, through
+`zig build` and `zig build test`. Zig maps `callconv(.winapi)` to
+`aapcs_win` by architecture, not by target OS, and stage2 does not implement
+it, so an aarch64 host fails to compile the stdcall exports whatever its
+operating system; the README's note on that is the one to read before filing a
+bug against an ARM machine. The `make` targets and the two `scripts/*.sh` gates
+need more: a POSIX shell (`sh`, GNU make, `sed`, `command -v`), plus `bash`,
+`shellcheck`, and a Python 3 interpreter named either `python3` or `python`. The
+two shell gates carry a `#!/usr/bin/env bash` shebang and use bash arrays, so
+`sh` covers `make` and the recipe shells, not those two. On Windows that means
 MSYS2, Cygwin, or Git Bash, none of which the Windows runner has, which is why
 CI runs `make lint` on Ubuntu only. The gates themselves are ordinary Python and
 are invoked as `$(PYTHON) scripts/<name>.py`, so they run unchanged under a

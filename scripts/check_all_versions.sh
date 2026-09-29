@@ -163,10 +163,19 @@ done
 # A bash associative array has no defined key order, so iterating it directly
 # printed the unswept values in a different sequence from run to run. Sorted by
 # version, the report is a stable table a reader can diff across runs.
+#
+# The sort is version order built out of POSIX tools rather than `sort -V`,
+# which is a GNU extension: BSD sort (macOS, the BSDs) rejects the flag and the
+# sweep died before printing a row. A key is MAJOR or MAJOR.MINOR, so a
+# zero-padded sort field orders 6, 6.0 and 6.6 as versions rather than as the
+# strings "6", "6.0", "6.6", and the field is stripped back off afterwards.
 while IFS= read -r ver; do
   [ -n "$ver" ] || continue
   printf 'v%-4s not swept: %s\n' "$ver" "${UNSWEPT[$ver]}"
-done < <(printf '%s\n' "${!UNSWEPT[@]}" | sort -V)
+done < <(printf '%s\n' "${!UNSWEPT[@]}" |
+  awk -F. '{ printf "%04d.%04d %s\n", $1, ($2 == "" ? 0 : $2), $0 }' |
+  LC_ALL=C sort |
+  cut -d' ' -f2-)
 
 if [ "${#skipped[@]}" -ne 0 ]; then
   echo "RESULT: FAIL (no reference DLL for: ${skipped[*]})"

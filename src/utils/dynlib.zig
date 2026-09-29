@@ -29,13 +29,17 @@ const needs_elf_fixup = native_os == .linux and
     (!builtin.link_libc or (builtin.abi == .musl and builtin.link_mode == .static));
 
 /// The relocation an architecture uses to rebase a pointer against the load
-/// base, or null where the pass below does not apply. Two things narrow it: a
-/// 32-bit target, whose `Elf32_Dyn` entries the walk reads at 64-bit stride,
-/// and an architecture std names no RELATIVE type for. The writable-segment
-/// recopy that precedes this needs neither, so it runs either way.
+/// base, or null where the pass below does not apply: an architecture whose
+/// RELATIVE value this build has no name for, because std.elf defines the
+/// enum for only the four below. Those are the whole of the 64-bit ELF
+/// architectures std ships a relocation table for, and the writable-segment
+/// recopy that precedes this pass needs no architecture at all, so it runs on
+/// every Linux target either way.
 const relative_reloc_type: ?u32 = switch (builtin.cpu.arch) {
     .x86_64 => @intFromEnum(std.elf.R_X86_64.RELATIVE),
     .aarch64 => @intFromEnum(std.elf.R_AARCH64.RELATIVE),
+    .riscv64 => @intFromEnum(std.elf.R_RISCV.RELATIVE),
+    .powerpc64 => @intFromEnum(std.elf.R_PPC64.RELATIVE),
     else => null,
 };
 
