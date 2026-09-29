@@ -106,6 +106,13 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ### Changed
 
+- `scripts/check_vendored.py` fails a `README.md` dependency table that
+  disagrees with `deps/README.md` on a library's version, upstream, or license,
+  and fails a vendored library the table does not list. The table is the first
+  thing a reader of the repository, and of the release archive, sees, and it was
+  the one copy of the version a scanner matches an advisory against that no gate
+  checked: a header swap updated `deps/README.md`, `deps/SHA256SUMS` and
+  `SBOM.cdx.json`, and left the front page naming the superseded version.
 - `scripts/check_vendored.py` fails a vendored entry whose **Source** is not an
   `https` URL on an approved host. Version, upstream commit and digest were all
   verified, so a header arriving from a lookalike host carrying the right bytes

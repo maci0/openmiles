@@ -287,7 +287,7 @@ help:
 	@echo "  check-header        assert src/mss.h matches the export table and struct layouts per -Dmss-version"
 	@echo "  check-examples      compile every C snippet in README.md and docs/ against src/mss.h"
 	@echo "  check-versions      assert every -Dmss-version is parity-swept or declared unswept"
-	@echo "  check-vendored      assert deps/ matches the digests in deps/SHA256SUMS, and that each vendored entry names its upstream commit and states the version its own header carries"
+	@echo "  check-vendored      assert deps/ matches the digests in deps/SHA256SUMS, that each vendored entry names its upstream commit and states the version its own header carries, and that README.md's dependency table agrees with deps/README.md"
 	@echo "  check-sbom          assert SBOM.cdx.json matches the vendored deps and the declared pip pins"
 	@echo "  check-threat-model  assert every file:line anchor in docs/THREAT_MODEL.md resolves"
 	@echo "  check-config        assert the documented configuration values are the ones the code reads"

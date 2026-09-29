@@ -107,5 +107,9 @@ Update checklist:
 6. Run `scripts/check_vendored.py --update` in the same commit as the header
    swap, and read the diff: a changed digest is a reviewed change, not a
    formality.
-7. Run `scripts/gen_sbom.py` in that same commit, and read its diff too: the
+7. Update the dependency table in `README.md` with the new version, upstream,
+   and license. `scripts/check_vendored.py` compares that table against the
+   entries above, so a swap that skips it fails the gate with the field that
+   disagrees rather than shipping a front page naming the superseded version.
+8. Run `scripts/gen_sbom.py` in that same commit, and read its diff too: the
    inventory a consumer reads has to change when the bytes behind it do.

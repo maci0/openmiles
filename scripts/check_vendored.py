@@ -13,6 +13,12 @@ is the machine-readable half of the same record. It rejects a vendored header
 whose entry names no commit, whose version disagrees with the version in its own
 bytes, or whose Source is not one of the approved upstream hosts.
 
+The shipped README.md states the same three facts a second time, in a table a
+reader sees before anything else. Nothing cross-checked the two, so a header
+swap left the front page naming the version that shipped before it. This asserts
+that table against the record deps/README.md keeps, which is the one gen_sbom.py
+derives SBOM.cdx.json from.
+
 --update rewrites deps/SHA256SUMS from the files on disk, for a deliberate
 header swap. Review the diff before committing it: the point of the check is
 that changing a digest is a conscious act.
@@ -99,6 +105,32 @@ FIRST_PARTY_RE = re.compile(r"first-party")
 # vendor that moves off it is a deliberate edit to this set, not an accident.
 SOURCE_SCHEME = "https"
 SOURCE_HOSTS = {"github.com"}
+
+# README.md is the front page of the release archive as well as of the
+# repository, so its dependency table is a second hand-written copy of the
+# version, upstream, and license of every vendored header. It is read here for
+# the same reason deps/README.md is: the record that a scanner matches an
+# advisory against, and the attribution a consumer reads, cannot be one that
+# drifts from the bytes. The table is parsed only inside its own section, so the
+# document's other tables are not read as dependency rows.
+SHIPPED_README = ROOT / "README.md"
+DEPENDENCIES_HEADING = "Dependencies"
+SHIPPED_ROW_RE = re.compile(
+    r"^\|\s*\[(?P<package>[^\]]+)\]\((?P<source>[^)]+)\)\s*"
+    r"\|\s*(?P<version>[^|]+?)\s*\|\s*(?P<license>[^|]+?)\s*\|[^|]*\|\s*$",
+    re.MULTILINE,
+)
+
+
+# A license written the way upstream writes it carries a parenthetical that
+# annotates the grant rather than adding one ("MIT-0 / Public Domain
+# (Dual-licensed)"). The shipped table drops the annotation and keeps the grant,
+# because a front-page table cell is not the place for it, so the two are
+# compared on what they grant. Splitting on "/" and dropping anything from the
+# first "(" leaves the same tokens gen_sbom.py writes into SBOM.cdx.json.
+def license_tokens(declared):
+    return {t.split("(", 1)[0].strip().lower() for t in declared.split("/") if t.strip()}
+
 
 # A repository URL is "https://host/owner/repo"; anything shorter is a page
 # rather than the repository a commit id can be fetched from.
@@ -234,6 +266,83 @@ def entry_problems(name, entry):
     return findings
 
 
+def shipped_readme_rows():
+    """The dependency table README.md ships, as a list of row dicts.
+
+    Only the Dependencies section is read. A row is a table line whose first
+    cell is a link to the upstream and whose next two cells are the version and
+    the license, which is the shape of the table and of no other in the
+    document. A section with no such row yields nothing, and the caller says so
+    rather than treating a rewritten table as one that agrees.
+    """
+    text = SHIPPED_README.read_text(encoding="utf-8")
+    for m in SECTION_RE.finditer(text):
+        if m.group(1).strip() != DEPENDENCIES_HEADING:
+            continue
+        rest = text[m.end() :]
+        nxt = rest.find("\n## ")
+        body = rest if nxt < 0 else rest[:nxt]
+        return [row.groupdict() for row in SHIPPED_ROW_RE.finditer(body)]
+    return []
+
+
+def shipped_readme_problems(entries):
+    """Where README.md's dependency table disagrees with deps/README.md.
+
+    Two hand-written records of the same three facts, and a header swap updates
+    the one the SBOM is generated from without touching the one a reader sees
+    first. The version is the field that matters: it is what a scanner matches
+    an advisory against, so a front page left on the superseded version states
+    that the release carries code no advisory was ever checked against.
+    """
+    readme = SHIPPED_README.relative_to(ROOT)
+    vendored = {entry.package: entry for entry in entries.values() if not entry.first_party}
+    rows = shipped_readme_rows()
+    if not rows:
+        return [
+            f"{readme} NOTABLE  no dependency table under its ## {DEPENDENCIES_HEADING} heading"
+        ]
+
+    findings = []
+    listed = set()
+    for row in rows:
+        package = row["package"]
+        listed.add(package)
+        entry = vendored.get(package)
+        if entry is None:
+            findings.append(
+                f"{readme} UNKNOWN  its table lists {package}, which "
+                f"{README.relative_to(ROOT)} records no vendored package for"
+            )
+            continue
+        if None in (entry.version, entry.source, entry.license):
+            # entry_problems already reported the field deps/README.md is
+            # missing, and comparing a row against None here would repeat it as
+            # a disagreement the reader has to unpick.
+            continue
+        if row["source"] != entry.source:
+            findings.append(
+                f"{readme} SOURCE  {package} links {row['source']}, "
+                f"{README.relative_to(ROOT)} records {entry.source}"
+            )
+        if row["version"] != entry.version:
+            findings.append(
+                f"{readme} VERSION  {package} states {row['version']}, "
+                f"{README.relative_to(ROOT)} records {entry.version}"
+            )
+        if license_tokens(row["license"]) != license_tokens(entry.license):
+            findings.append(
+                f"{readme} LICENSE  {package} states {row['license']!r}, "
+                f"{README.relative_to(ROOT)} records {entry.license!r}"
+            )
+    findings += [
+        f"{readme} UNLISTED  {package} is vendored but its table does not list it"
+        for package in sorted(vendored)
+        if package not in listed
+    ]
+    return findings
+
+
 def vendored_files():
     return sorted(p for p in DEPS.iterdir() if p.is_file() and p.name not in NOT_VENDORED)
 
@@ -332,14 +441,19 @@ def main():
     for name in sorted(on_disk):
         problems += entry_problems(name, entries.get(name))
 
+    problems += shipped_readme_problems(entries)
+
     for p in problems:
         print(p)
 
     if problems:
-        print(f"{len(problems)} finding(s) disagree with {SUMS.relative_to(ROOT)}")
+        print(f"{len(problems)} finding(s) disagree with the recorded dependency state")
         return 1
 
-    print(f"{len(on_disk)} vendored file(s) match {SUMS.relative_to(ROOT)}")
+    print(
+        f"{len(on_disk)} vendored file(s) match {SUMS.relative_to(ROOT)}, and the "
+        f"dependency table in {SHIPPED_README.relative_to(ROOT)} matches {README.relative_to(ROOT)}"
+    )
     return 0
 
 
