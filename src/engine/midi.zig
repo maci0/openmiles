@@ -617,6 +617,14 @@ fn satBeats(v: f64) i32 {
     return @min(root.satI32(v), std.math.maxInt(i32) - 1);
 }
 
+/// satBeats with floor (round toward -inf) rounding. Saturated first: a beat
+/// count far below minInt(i32) must not have a whole negative magnitude added
+/// to it, which would leave the range.
+fn satBeatsFloor(v: f64) i32 {
+    if (std.math.isNan(v)) return 0;
+    return @min(root.satI32(@floor(v)), std.math.maxInt(i32) - 1);
+}
+
 pub const Sequence = struct {
     driver: *MidiDriver,
     // The allocator the driver was built with, held here rather than read back
@@ -772,7 +780,13 @@ pub const Sequence = struct {
     /// accumulation from whenever the grid last changed.
     fn resyncBeatClockAt(self: *Sequence, at_ms: f64) void {
         if (self.ms_per_beat <= 0) return;
-        const beats = satBeats(at_ms / self.ms_per_beat);
+        // Floor the beat count, not truncate toward zero. The counters below
+        // pair `@mod` (Euclidean) with `@divFloor`, and the deadline must be the
+        // next boundary at or after `at_ms`; truncating a negative, fractional
+        // quotient skipped a beat that was still in the future (ms_per_beat is
+        // fractional for any tempo meta whose us/beat is not a multiple of
+        // 1000, e.g. 333333).
+        const beats = satBeatsFloor(at_ms / self.ms_per_beat);
         self.next_beat_ms = @as(f64, @floatFromInt(beats + 1)) * self.ms_per_beat;
         // Both counters floor the beat count. `@mod` is already Euclidean, so
         // pairing it with `@divTrunc` disagreed below zero: a seek to a negative

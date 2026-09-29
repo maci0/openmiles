@@ -22,14 +22,26 @@ pub fn parseSmfBeatsPerMeasure(smf: []const u8) i32 {
     // walkers below do the same).
     const trk_end = @min(22 +| trk_len, smf.len);
     var i: usize = 22;
+    // Last channel-voice status, for running status (an event whose byte has
+    // the high bit clear repeats the previous status and is itself data).
+    // Without it a 3/4 file that uses running status had every byte after the
+    // first run misread as a status byte, so FF 58 04 03 was skipped and the
+    // measure count fell back to 4/4.
+    var running: ?u8 = null;
     while (i < trk_end) {
         // Skip VLQ delta time
         while (i < trk_end and smf[i] & 0x80 != 0) : (i += 1) {}
         if (i >= trk_end) break;
         i += 1; // consume final VLQ byte
         if (i >= trk_end) break;
-        const status = smf[i];
-        i += 1;
+        var status = smf[i];
+        if (status & 0x80 == 0) {
+            const prev = running orelse break;
+            status = prev;
+        } else {
+            i += 1;
+            if (status < 0xF0) running = status;
+        }
         if (status == 0xFF) {
             // Meta event
             if (i >= trk_end) break;

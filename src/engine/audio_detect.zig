@@ -265,7 +265,11 @@ pub fn wavInfoBounded(raw: [*]const u8, max_len: usize, info: *anyopaque) i32 {
         if (fact_samples) |fs| {
             out.samples = fs;
         } else if (block_align > 0 and num_channels > 0) {
-            const spb0: u32 = @as(u32, 4) << @intCast(@min(num_channels / 2, 16));
+            // The IMA ADPCM block header holds 4 bytes per channel, so the
+            // samples-per-block divisor is 4 * channels. A shift by
+            // channels/2 only matches that for powers of two: 3 channels gave
+            // 8 instead of 12 and over-reported the sample count by half.
+            const spb0: u32 = 4 * @as(u32, num_channels);
             if (block_align > spb0) {
                 const samples_per_block: u32 = 1 + (@as(u32, block_align) - spb0) * 8 / spb0;
                 const blocks: u32 = (data_len +| (block_align - 1)) / block_align;

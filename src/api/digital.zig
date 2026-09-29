@@ -946,7 +946,11 @@ fn writeSample(out: [*]u8, o: *usize, dest_bps: usize, v: i32) void {
         std.mem.writeInt(i16, out[o.*..][0..2], @intCast(v), .little);
         o.* += 2;
     } else {
-        out[o.*] = @intCast((@divTrunc(v, 256)) + 128); // 16-bit -> 8-bit unsigned
+        // 16-bit -> 8-bit unsigned. Floor, not truncation toward zero: the
+        // signed -> unsigned mapping is an arithmetic shift, so v = -1 is code
+        // 127, not 128 (digital silence). divTrunc biased the whole negative
+        // half of the waveform up by one code.
+        out[o.*] = @intCast((@divFloor(v, 256)) + 128);
         o.* += 1;
     }
 }

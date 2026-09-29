@@ -69,6 +69,10 @@ pub fn wrapAdpcmInWav(alloc: std.mem.Allocator, adpcm: []const u8, block_size: u
     // u16 store nor the (block_size-4*ch)*8 math can overflow/panic.
     if (block_size <= 4 * ch or block_size > 0xFFFF) return error.InvalidParam;
     const spb: u32 = (block_size - 4 * ch) * 8 / (4 * ch) + 1;
+    // wSamplesPerBlock is a u16 field; a block alignment inside the u16 range
+    // can still imply more samples than that (mono block_size 65535 -> 131063),
+    // which the header store below would truncate.
+    if (spb > 0xFFFF) return error.InvalidParam;
     if (adpcm.len > std.math.maxInt(u32)) return error.InvalidParam;
     const data_size: u32 = @intCast(adpcm.len);
     var buf = try alloc.alloc(u8, adpcm_header_size + adpcm.len);
@@ -159,6 +163,9 @@ pub fn buildAdpcmWav(alloc: std.mem.Allocator, pcm: [*]const i16, total_per_ch: 
     if (bs <= 4 * ch or bs > 0xFFFF) return error.InvalidParam;
     const block_size: u32 = @intCast(bs);
     const spb: u32 = (block_size - 4 * ch) * 8 / (4 * ch) + 1;
+    // wSamplesPerBlock is a u16 field: a block alignment inside the u16 range
+    // can still imply more samples per block than that stores.
+    if (spb > 0xFFFF) return error.InvalidParam;
     // Bound the sample count before the round-up and the product below: on the
     // 32-bit target `total_per_ch + spb - 1` and `num_blocks * block_size` both
     // wrap before any of these checks could see it.
