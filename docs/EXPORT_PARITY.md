@@ -89,7 +89,7 @@ documented here.
 
 > The per-version "ours" counts in the tables below are from the sweep runs
 > recorded here, which predate the current export table: the default v9 build
-> now emits 394 distinct exports (`objdump -p` on
+> now emits 392 distinct exports (`objdump -p` on
 > `zig build -Dtarget=x86-windows`), not the 635 those tables carry. Treat
 > them as the record of a past run, not the current count. The live count comes
 > from the built DLL or from `scripts/check_all_versions.sh`; the load-bearing

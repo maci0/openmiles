@@ -503,7 +503,7 @@ they are there: the XMIDI/sequence pair is a 6.1-to-7.0 declaration only (from
 8.0 on, use the `Miles*` event API), and the Quick API and the redbook pair are
 declared for the builds below 7.1. The v7 DSP-stage, the
 `AIL_add_*_event_step` event-text builders, the v9 per-bus mixer calls, and the
-legacy `waveOut`/`midiOut` exports are not declared; see
+legacy `midiOut`/`DLS` spellings are not declared; see
 [docs/API_STATUS.md](docs/API_STATUS.md) for the full list, and add your own
 declaration from the export table in `src/main.zig` if you need one. That
 includes `AIL_create_event` and the step builders `MilesEnqueueEvent` takes its
@@ -645,10 +645,11 @@ graph TD
 
 ## API Coverage
 
-The default (v9) DLL exports **394** functions spanning the v3–v9 API surface
-(legacy `waveOut`/`midiOut` compatibility included; `DIG_`/`MDI_` prefix aliases
-not yet exported). Every exported function is covered by the fuzz harness and by
-unit or C-integration tests. See
+The default (v9) DLL exports **392** functions spanning the v3–v9 API surface.
+The legacy `waveOut` calls stop at 6.6 and the `midiOut` calls at 7.0, matching
+the reference DLLs, so neither is in this table, and the `DIG_`/`MDI_` prefix
+aliases are not exported. Every exported function is covered by the fuzz
+harness and by unit or C-integration tests. See
 [docs/API_STATUS.md](docs/API_STATUS.md) for the per-function implementation matrix.
 
 Beyond export-table parity, behaviour is cross-checked against the MSS SDK

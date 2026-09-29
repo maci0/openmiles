@@ -159,7 +159,10 @@ const temp_image_name_units: usize = "om_asi_".len + 16 + ".dll".len;
 const temp_image_permissions: std.Io.File.Permissions = if (builtin.os.tag == .windows)
     .default_file
 else
-    0o600;
+    // The non-Windows type is an enum(std.posix.mode_t), which no comptime_int
+    // coerces into: fromMode is the constructor for a mode outside the named
+    // cases.
+    .fromMode(0o600);
 
 /// Whether `dir` plus that file name still fits inside `limit_units` UTF-16
 /// units, terminator included. Windows opens a path longer than MAX_PATH only
