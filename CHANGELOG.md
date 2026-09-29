@@ -45,6 +45,10 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-29
+
+BUILDINFO release metadata, Windows test harness command-line contract, error recovery on audio and plugin paths, RISC-V and PPC64 plugin relocations, and comprehensive verification gates.
+
 ### Added
 
 - The release archive carries a generated `BUILDINFO.txt` recording the Zig
@@ -1419,7 +1423,8 @@ contract.
   mixer for audio output, so event-driven sounds are queryable but silent.
   See `docs/API_STATUS.md` for the per-function matrix.
 
-[Unreleased]: https://github.com/maci0/openmiles/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/maci0/openmiles/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/maci0/openmiles/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/maci0/openmiles/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/maci0/openmiles/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/maci0/openmiles/releases/tag/v0.1.0

@@ -18,7 +18,7 @@ pub const Input = struct {
     buffer: std.ArrayListUnmanaged(u8) = .empty,
     max_buffer_bytes: usize = 44100 * 2, // 1s of 16-bit mono
     /// Capture chunks lost on the audio thread; see captureCallback.
-    dropped_chunks: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    dropped_chunks: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     mutex: std.Io.Mutex = .init,
     is_initialized: bool = false,
     // Snapshot of the buffer handed to getInfo(). Lives until the next getInfo()
@@ -155,7 +155,7 @@ pub const Input = struct {
     /// Capture chunks lost to a contended lock or to a ring with no room.
     /// Not an SDK surface: without it a device that has been dropping audio
     /// reports the same buffer as one that is simply quiet.
-    pub fn droppedChunkCount(self: *const Input) u64 {
+    pub fn droppedChunkCount(self: *const Input) usize {
         return self.dropped_chunks.load(.monotonic);
     }
 

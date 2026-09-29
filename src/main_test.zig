@@ -9465,4 +9465,3 @@ test "filter enumeration yields the built-in provider once" {
     try testing.expectEqual(@as(?*anyopaque, null), next);
     try testing.expectEqual(@as(?*openmiles.Provider, null), dest);
 }
-

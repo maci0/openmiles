@@ -5,9 +5,9 @@
   "metadata": {
     "component": {
       "type": "library",
-      "bom-ref": "pkg:generic/openmiles@0.3.0",
+      "bom-ref": "pkg:generic/openmiles@0.4.0",
       "name": "openmiles",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "description": "OpenMiles: a reimplementation of the Miles Sound System audio API",
       "licenses": [
         {

@@ -254,7 +254,7 @@ const WindowsDynLib = struct {
         // the plugin's name.
         const module = LoadLibraryW(path_w.ptr) orelse {
             const err = windows.GetLastError();
-            last_load_error = .{ .win32 = @intFromEnum(err), .name = @errorName(err) };
+            last_load_error = .{ .win32 = @intFromEnum(err), .name = @tagName(err) };
             return error.LoadLibraryFailed;
         };
         last_load_error = null;
