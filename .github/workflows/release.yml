@@ -166,10 +166,8 @@ jobs:
           # version typed into one of them is a version the other never sees.
           ruff_version=$(sed -n 's/^RUFF_VERSION := //p' Makefile)
           yamllint_version=$(sed -n 's/^YAMLLINT_VERSION := //p' Makefile)
-          [ -n "$ruff_version" ] && [ -n "$yamllint_version" ] || {
-            echo "no RUFF_VERSION or YAMLLINT_VERSION in the Makefile" >&2
-            exit 1
-          }
+          [ -n "$ruff_version" ] || { echo "no RUFF_VERSION in the Makefile" >&2; exit 1; }
+          [ -n "$yamllint_version" ] || { echo "no YAMLLINT_VERSION in the Makefile" >&2; exit 1; }
           uv tool install "ruff==${ruff_version}"
           uv tool install "yamllint==${yamllint_version}"
 
