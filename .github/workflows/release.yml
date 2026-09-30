@@ -137,25 +137,32 @@ jobs:
       # commit the CI gate refused, or re-run after one of the linters moved,
       # would otherwise publish a tree the merge gate says is not shippable.
       # shellcheck is on the runner image, as it is for the CI job.
-      # The runner image ships pipx, not uv, and ~/.local/bin is not on its
-      # PATH. Installing uv and running it has to be two steps, exactly as in
-      # ci.yml: GITHUB_PATH only reaches the steps after the one that writes
-      # it, so a single step that pipx-installs uv and then calls `uv tool
-      # install` in the same shell fails with exit 127 on a runner image that
-      # does not already list ~/.local/bin. This job is the one that publishes,
-      # so it cannot be the one that discovers the difference on a release day.
-      - name: Install uv
+      # The runner image ships no uv, and ~/.local/bin is not on its PATH.
+      # Reading the pin, installing uv, and running it are separate steps,
+      # exactly as in ci.yml: GITHUB_PATH only reaches the steps after the one
+      # that writes it, so a `uv tool install` in that same step fails with
+      # exit 127 on a runner image that does not already list ~/.local/bin.
+      # This job is the one that publishes, so it cannot be the one that
+      # discovers the difference on a release day.
+      - name: Read the uv pin
+        id: uv-pin
         run: |
           set -euo pipefail
           # The empty-check ci.yml has, and for the same reason: a sed that
-          # matched nothing leaves `uv==` for pipx to reject with a version
-          # parse error, which names neither the Makefile nor the field that
-          # has to change. This is the job that publishes, so it is the one
-          # that must not discover it on a release day.
+          # matched nothing leaves an empty version, and setup-uv would then
+          # install the latest uv instead of naming the Makefile field that
+          # has to change.
           version=$(sed -n 's/^UV_VERSION := //p' Makefile)
           [ -n "$version" ] || { echo "no UV_VERSION in the Makefile" >&2; exit 1; }
-          pipx install "uv==${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          version: ${{ steps.uv-pin.outputs.version }}
+          # no uv.lock to key a cache on; the tools install from the index
+          enable-cache: false
 
       - name: Install the pinned linters
         run: |

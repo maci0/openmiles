@@ -153,6 +153,10 @@ def zig_workflow_problems(path, text):
         print(f"{label} UNPINNED  never reads the zig version from build.zig.zon")
         bad.append("ZIG_VERSION source")
     for m in re.finditer(r"^\s*version:\s*(.+)$", text, re.MULTILINE):
+        # setup-uv reads the uv-pin step, which derived_pin_problems holds to
+        # the Makefile UV_VERSION.
+        if "steps.uv-pin.outputs.version" in m.group(1):
+            continue
         if "steps.zig.outputs.version" not in m.group(1):
             print(f"{label} DRIFT     setup-zig version is a literal, not the pinned one")
             bad.append("ZIG_VERSION setup step")

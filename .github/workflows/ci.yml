@@ -70,22 +70,28 @@ jobs:
       # here, the way release.yml reads them, so a version is declared once
       # and scripts/check_toolchain_pins.py fails a workflow that repeats one.
       #
-      # Nothing installed uv before: the runner image ships pipx, not uv, so
-      # the first `uv tool install` failed the whole ubuntu leg with exit 127
-      # before any gate ran. The binary lands in ~/.local/bin, the same
-      # directory the two install steps below put their tools in, and that
-      # directory is put on PATH here rather than relied on from the image: an
-      # entry appended to GITHUB_PATH applies to the steps after this one, so
-      # `uv` resolves in both install steps whether or not the runner image
-      # happens to ship that path.
-      - name: Install uv
+      # The runner image ships no uv, so without this step the first `uv tool
+      # install` fails the ubuntu leg with exit 127 before any gate runs.
+      # setup-uv puts uv on PATH; ~/.local/bin, where the two install steps
+      # below put their tools, is added here too, because an entry appended to
+      # GITHUB_PATH applies only to the steps after the one that writes it.
+      - name: Read the uv pin
+        id: uv-pin
         if: matrix.os == 'ubuntu-latest'
         run: |
           set -euo pipefail
           version=$(sed -n 's/^UV_VERSION := //p' Makefile)
           [ -n "$version" ] || { echo "no UV_VERSION in the Makefile" >&2; exit 1; }
-          pipx install "uv==${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install uv
+        if: matrix.os == 'ubuntu-latest'
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7  # v10.2.0
+        with:
+          version: ${{ steps.uv-pin.outputs.version }}
+          # no uv.lock to key a cache on; the tools install from the index
+          enable-cache: false
 
       - name: Install ruff
         if: matrix.os == 'ubuntu-latest'
