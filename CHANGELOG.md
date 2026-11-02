@@ -45,6 +45,14 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `AIL_init_sample` keeps a reused handle's user data, as Miles 6.0i does,
+  instead of zeroing it. A game that stores its own record in a slot when it
+  allocates the handle and reads it back when a sound ends lost that record
+  after one sound: NOLF's engine lost a voice with every sound, and its sound
+  stopped once all were spent.
+
 ## [0.4.0] - 2026-09-29
 
 BUILDINFO release metadata, Windows test harness command-line contract, error recovery on audio and plugin paths, RISC-V and PPC64 plugin relocations, and comprehensive verification gates.

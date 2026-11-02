@@ -5644,6 +5644,26 @@ test "AIL_init_sample resets level/reverb/filter/occlusion state to defaults (SD
     try testing.expectEqual(@as(u32, 2), dg.AIL_sample_granularity(s));
 }
 
+test "AIL_init_sample keeps the handle's user data (Miles 6.0i)" {
+    // Miles 6.0i leaves a reused handle's user data as it was. Games rely on
+    // it: NOLF's LithTech engine stores its voice record in slot 2 once, when
+    // it allocates the handle, re-inits the handle for every sound, and reads
+    // slot 2 back when the sound ends.
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    dg.AIL_set_sample_user_data(s, 0, 0x1111);
+    dg.AIL_set_sample_user_data(s, 2, 0xDEADBEEF);
+    dg.AIL_set_sample_user_data(s, 7, 0x7777);
+
+    dg.AIL_init_sample(s);
+
+    try testing.expectEqual(@as(u32, 0x1111), dg.AIL_sample_user_data(s, 0));
+    try testing.expectEqual(@as(u32, 0xDEADBEEF), dg.AIL_sample_user_data(s, 2));
+    try testing.expectEqual(@as(u32, 0x7777), dg.AIL_sample_user_data(s, 7));
+}
+
 test "fresh driver master reverb levels default to dry=1.0, wet=1.0 (SDK init)" {
     // SDK genericdig.cpp inits reverb[0].master_dry = master_wet = 1.0F. master_wet
     // is a neutral multiplier for per-sample wet sends; defaulting it to 0 would
