@@ -76,6 +76,14 @@ All notable changes to OpenMiles are recorded here. The format follows
   the engine with the filter at miniaudio's highest order; the image is 58-86
   dB down, nothing below 9 kHz changes, and a playback rate changed every 5 ms
   leaves the output as steady as before.
+- An IMA ADPCM sample's loop block is in bytes of its compressed blocks, as
+  Miles counts it, looping at the start of the block each offset falls in;
+  `AIL_sample_loop_block` reports it in the same bytes. The offsets were
+  divided by the decoded frame size, which for 4-bit ADPCM put the loop at
+  about an eighth of where it belongs: NOLF's crane, which loops bytes
+  3709..9535 of 512-byte blocks, played its first 108 ms and then repeated a
+  66 ms stretch of it, a loud rattle; it now loops frames 7119..18306, as
+  Miles 6.0i does.
 
 ## [0.4.0] - 2026-09-29
 

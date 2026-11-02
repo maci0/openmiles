@@ -72,6 +72,7 @@ const digital_mod = @import("engine/digital.zig");
 pub const DigitalDriver = digital_mod.DigitalDriver;
 pub const Sample = digital_mod.Sample;
 pub const fireSampleCallback = digital_mod.fireSampleCallback;
+pub const loopByteOfFrame = digital_mod.loopByteOfFrame;
 pub const MixBus = digital_mod.MixBus;
 pub const LimiterNode = digital_mod.LimiterNode;
 pub const CompressorNode = digital_mod.CompressorNode;
@@ -180,8 +181,8 @@ pub fn resolveLoopBlock(sample: anytype, loop_start: i32, loop_end: i32) ?[2]i32
     const bpf: u64 = sample.bytesPerFrame();
     var start = loop_start;
     var end = loop_end;
-    if (start == -2) start = @intCast(@min(sample.loop_start_frame *| bpf, @as(u64, std.math.maxInt(i32))));
-    if (end == -2) end = if (sample.loop_end_frame > 0) @intCast(@min(sample.loop_end_frame *| bpf, @as(u64, std.math.maxInt(i32)))) else 0;
+    if (start == -2) start = @intCast(@min(digital_mod.loopByteOfFrame(sample, sample.loop_start_frame, bpf), @as(u64, std.math.maxInt(i32))));
+    if (end == -2) end = if (sample.loop_end_frame > 0) @intCast(@min(digital_mod.loopByteOfFrame(sample, sample.loop_end_frame, bpf), @as(u64, std.math.maxInt(i32)))) else 0;
     if (@as(u32, @bitCast(start)) > @as(u32, @bitCast(end))) {
         const t = start;
         start = end;

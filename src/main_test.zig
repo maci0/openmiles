@@ -9698,3 +9698,70 @@ test "a 22050 Hz sound upsampled to a 44100 Hz mix leaves no mirror image, at an
         for (out[0 .. read * 2]) |v| try testing.expect(std.math.isFinite(v) and @abs(v) < 2.0);
     }
 }
+
+// A mono IMA ADPCM WAV of `blocks` silent 512-byte blocks (1017 frames each).
+fn imaAdpcmWav(allocator: std.mem.Allocator, blocks: u32) ![]u8 {
+    const block_align: u32 = 512;
+    const frames_per_block: u32 = (block_align - 4) * 2 + 1;
+    const data_len = blocks * block_align;
+    const buf = try allocator.alloc(u8, 60 + data_len);
+    @memset(buf, 0);
+    @memcpy(buf[0..4], "RIFF");
+    std.mem.writeInt(u32, buf[4..8], @intCast(buf.len - 8), .little);
+    @memcpy(buf[8..16], "WAVEfmt ");
+    std.mem.writeInt(u32, buf[16..20], 20, .little);
+    std.mem.writeInt(u16, buf[20..22], 0x11, .little); // IMA ADPCM
+    std.mem.writeInt(u16, buf[22..24], 1, .little); // mono
+    std.mem.writeInt(u32, buf[24..28], 22050, .little);
+    std.mem.writeInt(u32, buf[28..32], 22050 * block_align / frames_per_block, .little);
+    std.mem.writeInt(u16, buf[32..34], @intCast(block_align), .little);
+    std.mem.writeInt(u16, buf[34..36], 4, .little);
+    std.mem.writeInt(u16, buf[36..38], 2, .little); // cbSize
+    std.mem.writeInt(u16, buf[38..40], @intCast(frames_per_block), .little);
+    @memcpy(buf[40..44], "fact");
+    std.mem.writeInt(u32, buf[44..48], 4, .little);
+    std.mem.writeInt(u32, buf[48..52], blocks * frames_per_block, .little);
+    @memcpy(buf[52..56], "data");
+    std.mem.writeInt(u32, buf[56..60], data_len, .little);
+    return buf;
+}
+
+test "an IMA ADPCM loop block is in bytes of its compressed blocks (Miles 6.0i, measured)" {
+    // AIL_set_sample_loop_block takes byte offsets into the sample's own data,
+    // so for IMA ADPCM they are offsets into the compressed blocks, and Miles
+    // loops at the start of the block each falls in. NOLF's crane (LIFT3.wav,
+    // 512-byte blocks) sets bytes 3709..9535, and Miles 6.0i loops frames
+    // 7119..18306 -- blocks 7 and 18 of 1017 frames. Dividing by the decoded
+    // frame size put the loop at a fraction of that.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const wav = try imaAdpcmWav(testing.allocator, 20);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+
+    dg.AIL_set_sample_loop_block(s, 3709, 9535);
+    try testing.expectEqual(@as(u64, 7119), s.loop_start_frame);
+    try testing.expectEqual(@as(u64, 18306), s.loop_end_frame);
+
+    // -2 keeps a side: its frame converts back to the start of its block
+    // (3584), which lands on the same frame.
+    dg.AIL_set_sample_loop_block(s, -2, 9000);
+    try testing.expectEqual(@as(u64, 7119), s.loop_start_frame);
+    try testing.expectEqual(@as(u64, 17289), s.loop_end_frame);
+    var lo: i32 = 0;
+    var hi: i32 = 0;
+    _ = api_v8.AIL_sample_loop_block(s, &lo, &hi);
+    try testing.expectEqual(@as(i32, 3584), lo);
+    try testing.expectEqual(@as(i32, 8704), hi);
+
+    // a PCM sample still counts its loop block in bytes of frames
+    const pcm = [_]u8{0} ** 4410;
+    const pcm_wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 22050, 16);
+    defer testing.allocator.free(pcm_wav);
+    try s.loadFromMemory(pcm_wav, false);
+    dg.AIL_set_sample_loop_block(s, 1000, 3000);
+    try testing.expectEqual(@as(u64, 500), s.loop_start_frame);
+    try testing.expectEqual(@as(u64, 1500), s.loop_end_frame);
+}
