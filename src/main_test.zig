@@ -9572,3 +9572,70 @@ test "Miles 6 pan: the far side is its distance from the edge over 64.5 (6.0i, m
     try testing.expectApproxEqAbs(@as(f32, 1.0 - 62.0 / 129.0), s.pan, 1e-6);
     try testing.expectEqual(@as(i32, 96), dg.AIL_sample_pan(s));
 }
+
+test "a \\\\<handle> stream name parses to its handle, anything else does not" {
+    // Miles names an already-open Win32 file handle as "\\<n>", n in decimal.
+    try testing.expectEqual(@as(usize, 420), @intFromPtr(api_stream.handleFromStreamName("\\\\420").?));
+    try testing.expectEqual(@as(?*anyopaque, null), api_stream.handleFromStreamName("\\\\0"));
+    try testing.expectEqual(@as(?*anyopaque, null), api_stream.handleFromStreamName("\\\\"));
+    try testing.expectEqual(@as(?*anyopaque, null), api_stream.handleFromStreamName("\\\\12ab"));
+    try testing.expectEqual(@as(?*anyopaque, null), api_stream.handleFromStreamName("\\\\server\\share\\a.wav"));
+    try testing.expectEqual(@as(?*anyopaque, null), api_stream.handleFromStreamName("C:\\music\\a.wav"));
+    try testing.expectEqual(@as(?*anyopaque, null), api_stream.handleFromStreamName("420"));
+}
+
+const stream_handle_test_win32 = if (@import("builtin").os.tag == .windows) struct {
+    extern "kernel32" fn GetTempPathA(n: u32, buf: [*]u8) callconv(.winapi) u32;
+    extern "kernel32" fn CreateFileA(name: [*:0]const u8, access: u32, share: u32, sa: ?*anyopaque, disposition: u32, flags: u32, template: ?*anyopaque) callconv(.winapi) ?*anyopaque;
+    extern "kernel32" fn WriteFile(h: ?*anyopaque, buf: [*]const u8, n: u32, written: *u32, ov: ?*anyopaque) callconv(.winapi) i32;
+    extern "kernel32" fn SetFilePointer(h: ?*anyopaque, dist: i32, high: ?*i32, method: u32) callconv(.winapi) u32;
+    extern "kernel32" fn CloseHandle(h: ?*anyopaque) callconv(.winapi) i32;
+} else struct {};
+
+test "AIL_open_stream reads a RIFF file at an open handle's position (Windows)" {
+    // LithTech streams a sound stored inside a .rez archive by opening the
+    // archive, seeking to the sound and passing "\\<handle>": the stream is the
+    // RIFF file there, as long as its header says, and the handle stays the
+    // caller's -- open, and just past the sound.
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+    const k = stream_handle_test_win32;
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const pcm = [_]u8{0} ** 4410; // 100 ms of mono 16-bit at 22050 Hz
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 22050, 16);
+    defer testing.allocator.free(wav);
+
+    var path: [300]u8 = undefined;
+    const dir_len = k.GetTempPathA(260, &path);
+    try testing.expect(dir_len > 0 and dir_len < 260);
+    const leaf = "openmiles_stream_handle_test.bin";
+    @memcpy(path[dir_len .. dir_len + leaf.len], leaf);
+    path[dir_len + leaf.len] = 0;
+    const GENERIC_RW: u32 = 0x80000000 | 0x40000000;
+    const CREATE_ALWAYS: u32 = 2;
+    const DELETE_ON_CLOSE: u32 = 0x04000000;
+    const h = k.CreateFileA(@ptrCast(&path), GENERIC_RW, 0, null, CREATE_ALWAYS, DELETE_ON_CLOSE, null) orelse return error.CreateFileFailed;
+    try testing.expect(@intFromPtr(h) != std.math.maxInt(usize)); // INVALID_HANDLE_VALUE
+    defer _ = k.CloseHandle(h);
+
+    // an archive: something before the sound, the sound, something after
+    const pad = [_]u8{0xAA} ** 100;
+    var n: u32 = 0;
+    try testing.expect(k.WriteFile(h, &pad, pad.len, &n, null) != 0);
+    try testing.expect(k.WriteFile(h, wav.ptr, @intCast(wav.len), &n, null) != 0);
+    try testing.expect(k.WriteFile(h, &pad, pad.len, &n, null) != 0);
+    try testing.expectEqual(@as(u32, pad.len), k.SetFilePointer(h, pad.len, null, 0));
+
+    var name_buf: [32]u8 = undefined;
+    const name = try std.fmt.bufPrintZ(&name_buf, "\\\\{d}", .{@intFromPtr(h)});
+    const s = api_stream.AIL_open_stream(driver, name.ptr, 0) orelse return error.StreamDidNotOpen;
+    defer api_stream.AIL_close_stream(s);
+
+    var total_ms: i32 = 0;
+    var current_ms: i32 = 0;
+    api_stream.AIL_stream_ms_position(s, &total_ms, &current_ms);
+    try testing.expectEqual(@as(i32, 100), total_ms);
+    // read exactly the sound: the handle is just past it, and still open
+    try testing.expectEqual(@as(u32, @intCast(pad.len + wav.len)), k.SetFilePointer(h, 0, null, 1));
+}

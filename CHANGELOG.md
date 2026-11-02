@@ -62,6 +62,13 @@ All notable changes to OpenMiles are recorded here. The format follows
   buried under its music. The two now agree within 0.1 dB at every volume,
   pan and master volume tried. `AIL_digital_master_volume` reads back the
   value set.
+- `AIL_open_stream` on Windows takes Miles' `"\\<handle>"` names, an
+  already-open Win32 file handle in decimal, and streams the RIFF file at the
+  handle's current position, as many bytes as its header says, leaving the
+  handle open and past the sound. It looked for a file called `\\<n>` on
+  disk and failed: NOLF's engine streams its long sounds out of its `.rez`
+  archives this way, so they never played (its opening-credits song among
+  them).
 
 ## [0.4.0] - 2026-09-29
 
