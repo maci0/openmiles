@@ -9639,3 +9639,62 @@ test "AIL_open_stream reads a RIFF file at an open handle's position (Windows)" 
     // read exactly the sound: the handle is just past it, and still open
     try testing.expectEqual(@as(u32, @intCast(pad.len + wav.len)), k.SetFilePointer(h, 0, null, 1));
 }
+
+// Goertzel power of one frequency in a mono signal, Hann-windowed.
+fn tonePower(x: []const f32, rate: f64, freq: f64) f64 {
+    const w = 2.0 * std.math.pi * freq / rate;
+    const coeff = 2.0 * @cos(w);
+    var s1: f64 = 0;
+    var s2: f64 = 0;
+    const n: f64 = @floatFromInt(x.len);
+    for (x, 0..) |v, i| {
+        const hann = 0.5 - 0.5 * @cos(2.0 * std.math.pi * @as(f64, @floatFromInt(i)) / (n - 1.0));
+        const s0 = @as(f64, v) * hann + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    return s1 * s1 + s2 * s2 - coeff * s1 * s2;
+}
+
+test "a 22050 Hz sound upsampled to a 44100 Hz mix leaves no mirror image, at any pitch" {
+    // miniaudio's engine switches the pitch resampler's low-pass filter off,
+    // so a 22050 Hz sound mixed at 44100 Hz was upsampled by bare linear
+    // interpolation: a 5 kHz tone came with its image at 17.05 kHz, about
+    // 23 dB down. The driver turns the filter on.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    try testing.expectEqual(@as(u32, openmiles.ma.MA_MAX_FILTER_ORDER), drv.engine.pitchResamplingConfig.linear.lpfOrder);
+
+    const frames_in = 22050; // 1 s
+    var pcm: [frames_in * 2]u8 = undefined;
+    for (0..frames_in) |i| {
+        const v: i16 = @intFromFloat(@round(16000.0 * @sin(2.0 * std.math.pi * 5000.0 * @as(f64, @floatFromInt(i)) / 22050.0)));
+        std.mem.writeInt(i16, pcm[i * 2 ..][0..2], v, .little);
+    }
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 22050, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    dg.AIL_start_sample(s);
+
+    var out: [4096 * 2]f32 = undefined;
+    var read: u64 = 0;
+    _ = openmiles.ma.ma_engine_read_pcm_frames(&drv.engine, &out, 1024, &read); // past the filter's start
+    try testing.expectEqual(openmiles.ma.MA_SUCCESS, openmiles.ma.ma_engine_read_pcm_frames(&drv.engine, &out, 4096, &read));
+    try testing.expectEqual(@as(u64, 4096), read);
+    var left: [4096]f32 = undefined;
+    for (&left, 0..) |*v, i| v.* = out[i * 2];
+    const tone = tonePower(&left, 44100, 5000);
+    const image = tonePower(&left, 44100, 17050);
+    try testing.expect(tone > 0);
+    try testing.expect(10.0 * std.math.log10(image / tone) < -50.0);
+
+    // miniaudio left the filter off for fear of it going unstable under a
+    // changing pitch: change it every 256 frames and the output stays bounded.
+    for (0..40) |k| {
+        dg.AIL_set_sample_playback_rate(s, if (k % 2 == 0) 16000 else 30000);
+        try testing.expectEqual(openmiles.ma.MA_SUCCESS, openmiles.ma.ma_engine_read_pcm_frames(&drv.engine, &out, 256, &read));
+        for (out[0 .. read * 2]) |v| try testing.expect(std.math.isFinite(v) and @abs(v) < 2.0);
+    }
+}

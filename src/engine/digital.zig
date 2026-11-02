@@ -666,6 +666,17 @@ pub const DigitalDriver = struct {
         // inside ma_engine_init. MA_MAX_CHANNELS is 254; max standard rate 384k.
         config.sampleRate = if (frequency == 0) 44100 else @min(frequency, 384000);
         config.channels = if (channels == 0) 2 else @min(channels, 254);
+        // Each sound is resampled to the mix rate on its own, by the resampler
+        // miniaudio also uses for pitch and Doppler. miniaudio switches that
+        // one's low-pass filter off (lpfOrder 0, ma_engine_config_init), so
+        // upsampling a 22050 Hz sound to a 44100 Hz mix by bare linear
+        // interpolation left its mirror image at 11-22 kHz, 30-45 dB down;
+        // with the filter on the image goes and a 44100 Hz sound (speech)
+        // keeps its whole range. Real Miles 6 avoids the image by mixing at
+        // the rate the game opens it at, 22050 Hz for NOLF, which drops that
+        // range too.
+        config.pitchResampling = ma.ma_resampler_config_init(ma.ma_format_f32, 0, 0, 0, ma.ma_resample_algorithm_linear);
+        config.pitchResampling.linear.lpfOrder = ma.MA_MAX_FILTER_ORDER;
         config.onProcess = &mixDispatch; // drives AIL_register_mix_callback
         config.pProcessUserData = self;
         const result = ma.ma_engine_init(&config, &self.engine);

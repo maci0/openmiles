@@ -69,6 +69,13 @@ All notable changes to OpenMiles are recorded here. The format follows
   disk and failed: NOLF's engine streams its long sounds out of its `.rez`
   archives this way, so they never played (its opening-credits song among
   them).
+- Each sound's resampler low-passes. miniaudio's engine leaves its pitch and
+  Doppler resampler's filter off, so a sound at a lower rate than the mix was
+  upsampled by bare linear interpolation: a 22050 Hz sound mixed at 44100 Hz
+  carried its mirror image at 11-22 kHz, 17-45 dB down. The driver now opens
+  the engine with the filter at miniaudio's highest order; the image is 58-86
+  dB down, nothing below 9 kHz changes, and a playback rate changed every 5 ms
+  leaves the output as steady as before.
 
 ## [0.4.0] - 2026-09-29
 
