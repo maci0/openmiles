@@ -52,6 +52,16 @@ All notable changes to OpenMiles are recorded here. The format follows
   allocates the handle and reads it back when a sound ends lost that record
   after one sound: NOLF's engine lost a voice with every sound, and its sound
   stopped once all were spent.
+- Builds for Miles before 6.5 (`-Dmss-version` 3 to 6.1) work the sample
+  volume, master volume and pan as Miles 6.0i does, measured from its
+  `mss32.dll`: integer volumes over 128 (`v * 128 / 127`, rounded down),
+  linear in amplitude, a sample's level `(sample * master) >> 7`, and a pan
+  whose far side is its distance from that edge over 64.5. They used the
+  `v^(10/6)` curve of 6.5 and later, so a quiet sample came out up to 20 dB
+  too quiet (volume 32: -20 dB for -12), and NOLF's distant speakers were
+  buried under its music. The two now agree within 0.1 dB at every volume,
+  pan and master volume tried. `AIL_digital_master_volume` reads back the
+  value set.
 
 ## [0.4.0] - 2026-09-29
 

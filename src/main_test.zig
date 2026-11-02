@@ -73,13 +73,23 @@ test "Sample allocation and basic properties" {
     try testing.expect(!sample.is_initialized);
 
     sample.setVolume(64);
-    // MSS curve: gain = (64/127)^(10/6) ≈ 0.319 (0.5 vol -> -10 dB).
-    try testing.expect(sample.volume > 0.30 and sample.volume < 0.33);
+    if (openmiles.mss_version < 65) {
+        // Miles 6: linear, in integers over 128 -> 64 is half.
+        try testing.expectApproxEqAbs(@as(f32, 0.5), sample.volume, 1e-6);
+    } else {
+        // MSS curve: gain = (64/127)^(10/6) ≈ 0.319 (0.5 vol -> -10 dB).
+        try testing.expect(sample.volume > 0.30 and sample.volume < 0.33);
+    }
     try testing.expectEqual(@as(i32, 64), sample.original_volume);
 
     sample.setPan(32);
-    // pan is (32 - 64) / 64.0 = -0.5
-    try testing.expectEqual(@as(f32, -0.5), sample.pan);
+    if (openmiles.mss_version < 65) {
+        // Miles 6: the right side's gain is 32 * 2 / 129
+        try testing.expectApproxEqAbs(@as(f32, 64.0 / 129.0 - 1.0), sample.pan, 1e-6);
+    } else {
+        // pan is (32 - 64) / 64.0 = -0.5
+        try testing.expectEqual(@as(f32, -0.5), sample.pan);
+    }
 }
 
 test "Sample frees unlink by index, so a hole does not strand a later handle" {
@@ -1144,8 +1154,15 @@ test "mssVolumeToGain boundary values" {
     // (wavefile.cpp AIL_API_set_sample_volume_pan), NOT the old v^3 it replaced.
     // Pin three interior points so a regression to v^3 (which gives 0.016/0.128/
     // 0.43 here) is caught, not just the 0.30..0.33 mid band.
-    inline for (.{ .{ 32, 0.1005 }, .{ 64, 0.3191 }, .{ 96, 0.6273 } }) |c| {
-        try testing.expect(@abs(openmiles.mssVolumeToGain(c[0]) - c[1]) < 0.001);
+    // Before 6.5 the table is linear, as Miles 6.0i measures.
+    if (openmiles.mss_version < 65) {
+        inline for (.{ .{ 32, 32.0 / 127.0 }, .{ 64, 64.0 / 127.0 }, .{ 96, 96.0 / 127.0 } }) |c| {
+            try testing.expect(@abs(openmiles.mssVolumeToGain(c[0]) - c[1]) < 0.001);
+        }
+    } else {
+        inline for (.{ .{ 32, 0.1005 }, .{ 64, 0.3191 }, .{ 96, 0.6273 } }) |c| {
+            try testing.expect(@abs(openmiles.mssVolumeToGain(c[0]) - c[1]) < 0.001);
+        }
     }
 }
 
@@ -2218,8 +2235,14 @@ test "Sample setVolume and setPan land on the engine fields" {
 
     sample.setVolume(64);
     sample.setPan(32);
-    try testing.expect(sample.volume > 0.30 and sample.volume < 0.33); // MSS curve ^(10/6)
-    try testing.expectEqual(@as(f32, -0.5), sample.pan);
+    if (openmiles.mss_version < 65) {
+        // Miles 6: linear in integers over 128; far side 32 * 2 / 129
+        try testing.expectApproxEqAbs(@as(f32, 0.5), sample.volume, 1e-6);
+        try testing.expectApproxEqAbs(@as(f32, 64.0 / 129.0 - 1.0), sample.pan, 1e-6);
+    } else {
+        try testing.expect(sample.volume > 0.30 and sample.volume < 0.33); // MSS curve ^(10/6)
+        try testing.expectEqual(@as(f32, -0.5), sample.pan);
+    }
 }
 
 // The registry is global and shared: AIL_active_sequence_count reports how
@@ -8784,7 +8807,8 @@ test "volume/pan match the exact MSS curve (gain = volume^(10/6))" {
     // left=gain*(1-pan)^0.3, right=gain*pan^0.3, center uses 0.5^0.3=0.812252.
     try testing.expectEqual(@as(f32, 0.0), openmiles.mssVolumeToGain(0));
     try testing.expectEqual(@as(f32, 1.0), openmiles.mssVolumeToGain(127));
-    try testing.expectApproxEqAbs(@as(f32, 0.319), openmiles.mssVolumeToGain(64), 0.01);
+    // (before 6.5 the 0..127 table is linear, as Miles 6.0i measures)
+    try testing.expectApproxEqAbs(@as(f32, if (openmiles.mss_version < 65) 64.0 / 127.0 else 0.319), openmiles.mssVolumeToGain(64), 0.01);
 
     const hd = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer hd.deinit();
@@ -9484,4 +9508,67 @@ test "filter enumeration yields the built-in provider once" {
     try testing.expectEqual(@as(i32, 0), api_filter.AIL_enumerate_filters(&next, &dest, &name));
     try testing.expectEqual(@as(?*anyopaque, null), next);
     try testing.expectEqual(@as(?*openmiles.Provider, null), dest);
+}
+
+test "Miles 6 sample volume is linear: 64 is -6 dB, 32 is -12 dB (6.0i, measured)" {
+    // Miles 6.0/6.1 work the 0..127 sample volume in integers over 128 and
+    // linear in amplitude; v^(10/6) is the curve of 6.5 and later.
+    if (openmiles.mss_version >= 65) return error.SkipZigTest;
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    dg.AIL_set_sample_volume(s, 127);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), s.volume, 1e-6);
+    dg.AIL_set_sample_volume(s, 64);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), s.volume, 1e-6);
+    dg.AIL_set_sample_volume(s, 32);
+    try testing.expectApproxEqAbs(@as(f32, 0.25), s.volume, 1e-6);
+    dg.AIL_set_sample_volume(s, 0);
+    try testing.expectEqual(@as(f32, 0.0), s.volume);
+    try testing.expectEqual(@as(i32, 0), dg.AIL_sample_volume(s));
+}
+
+test "Miles 6 master volume combines with a sample's in integers (6.0i, measured)" {
+    // A sample's level is (v6Scale128(sample) * v6Scale128(master)) >> 7, over
+    // 128, so a quiet sample under a master below full loses its fraction.
+    if (openmiles.mss_version >= 65) return error.SkipZigTest;
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    try testing.expectEqual(@as(i32, 127), dg.AIL_digital_master_volume(driver));
+    dg.AIL_set_digital_master_volume(driver, 88);
+    try testing.expectEqual(@as(i32, 88), dg.AIL_digital_master_volume(driver));
+    // master 88 -> 88 over 128; the sample's own gain is its level over that
+    dg.AIL_set_sample_volume(s, 1);
+    try testing.expectEqual(@as(f32, 0.0), s.volume); // (1 * 88) >> 7 == 0: silent
+    dg.AIL_set_sample_volume(s, 2);
+    try testing.expectApproxEqAbs(@as(f32, 1.0 / 88.0), s.volume, 1e-6); // (2 * 88) >> 7 == 1
+    // a sample set before the master follows it
+    dg.AIL_set_sample_volume(s, 127);
+    dg.AIL_set_digital_master_volume(driver, 127);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), s.volume, 1e-6);
+    try testing.expectEqual(@as(i32, 127), dg.AIL_digital_master_volume(driver));
+}
+
+test "Miles 6 pan: the far side is its distance from the edge over 64.5 (6.0i, measured)" {
+    if (openmiles.mss_version >= 65) return error.SkipZigTest;
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    dg.AIL_set_sample_pan(s, 64);
+    try testing.expectEqual(@as(f32, 0.0), s.pan);
+    dg.AIL_set_sample_pan(s, 0);
+    try testing.expectApproxEqAbs(@as(f32, -1.0), s.pan, 1e-6);
+    dg.AIL_set_sample_pan(s, 127);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), s.pan, 1e-6);
+    // right gain at pan 32 is 32 * 2 / 129; as a balance, that minus 1
+    dg.AIL_set_sample_pan(s, 32);
+    try testing.expectApproxEqAbs(@as(f32, 64.0 / 129.0 - 1.0), s.pan, 1e-6);
+    // left gain at pan 96 is (127 - 96) * 2 / 129
+    dg.AIL_set_sample_pan(s, 96);
+    try testing.expectApproxEqAbs(@as(f32, 1.0 - 62.0 / 129.0), s.pan, 1e-6);
+    try testing.expectEqual(@as(i32, 96), dg.AIL_sample_pan(s));
 }

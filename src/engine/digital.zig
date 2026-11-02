@@ -573,6 +573,10 @@ pub const DigitalDriver = struct {
     providers: std.ArrayListUnmanaged(*root.Provider),
     timers: std.ArrayListUnmanaged(*root.Timer),
     samples: std.ArrayListUnmanaged(*Sample),
+    // Miles 6's master volume in 0..128 (root.v6Scale128), which each sample's
+    // level is worked out with; 128 is full.
+    v6_master: i32 = 128,
+    v6_master_volume: i32 = 127, // the 0..127 value it came from, for the getter
     // v9 system-state stack: saved master-volume per push level. The depth is
     // the level count, and pop restores the volume its own push saved, so the
     // two have to stay in step. Growth is reserved up front (see init) and the
@@ -1829,7 +1833,16 @@ pub const Sample = struct {
         // otherwise be handed straight back to a UI slider or persisted verbatim.
         self.original_volume = std.math.clamp(volume, 0, 127);
         self.save_vol_f = @as(f32, @floatFromInt(self.original_volume)) / 127.0;
-        self.volume = root.mssVolumeToGain(volume);
+        if (root.mss_version < 65) {
+            // Miles 6: (sample * master) >> 7 over 128, in integers (see
+            // root.v6Scale128). The engine volume carries master / 128, so the
+            // sample's own gain is the level over that.
+            const m = self.driver.v6_master;
+            const level = (root.v6Scale128(volume) * m) >> 7;
+            self.volume = if (m > 0) @as(f32, @floatFromInt(level)) / @as(f32, @floatFromInt(m)) else 0.0;
+        } else {
+            self.volume = root.mssVolumeToGain(volume);
+        }
         log("Sample.setVolume: s={*}, i32={d}, gain={d}\n", .{ self, volume, self.volume });
         if (self.is_initialized) ma.ma_sound_set_volume(&self.sound, self.volume);
     }
@@ -1844,7 +1857,16 @@ pub const Sample = struct {
     pub fn setPan(self: *Sample, pan: i32) void {
         self.original_pan = std.math.clamp(pan, 0, 127);
         self.save_pan_f = @as(f32, @floatFromInt(self.original_pan)) / 127.0;
-        self.pan = std.math.clamp((@as(f32, @floatFromInt(pan)) - 64.0) / 64.0, -1.0, 1.0);
+        if (root.mss_version < 65) {
+            // Miles 6.0i, measured: the far side's gain is its distance from
+            // that edge over 64.5 -- right = pan * 2 / 129 left of centre,
+            // left = (127 - pan) * 2 / 129 right of it -- and 64 is full on
+            // both. As a balance (miniaudio keeps the near side at full).
+            const p: f32 = @floatFromInt(self.original_pan);
+            self.pan = if (self.original_pan < 64) p * 2.0 / 129.0 - 1.0 else if (self.original_pan > 64) 1.0 - (127.0 - p) * 2.0 / 129.0 else 0.0;
+        } else {
+            self.pan = std.math.clamp((@as(f32, @floatFromInt(pan)) - 64.0) / 64.0, -1.0, 1.0);
+        }
         log("Sample.setPan: s={*}, i32={d}, f32={d}\n", .{ self, pan, self.pan });
         if (self.is_initialized) ma.ma_sound_set_pan(&self.sound, self.pan);
     }

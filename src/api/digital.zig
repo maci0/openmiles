@@ -224,11 +224,21 @@ pub fn AIL_set_digital_master_volume(driver_opt: ?*DigitalDriver, master_volume:
     // The master volume is a LINEAR final gain (the F32 AIL_set_digital_master_
     // volume_level sets dig->master_volume directly with no curve, per
     // wavefile.cpp), unlike the perceptual ^(10/6) sample-volume curve.
+    if (openmiles.mss_version < 65) {
+        // Miles 6: the master in 0..128, which each sample's level is worked
+        // out with (root.v6Scale128), so the samples' gains follow it.
+        driver.v6_master_volume = std.math.clamp(master_volume, 0, 127);
+        driver.v6_master = openmiles.v6Scale128(master_volume);
+        driver.setMasterVolume(@as(f32, @floatFromInt(driver.v6_master)) / 128.0);
+        for (driver.samples.items) |s| s.setVolume(s.original_volume);
+        return;
+    }
     const clamped: f32 = @floatFromInt(std.math.clamp(master_volume, 0, 127));
     driver.setMasterVolume(clamped / 127.0);
 }
 pub fn AIL_digital_master_volume(driver_opt: ?*DigitalDriver) callconv(.winapi) i32 {
     const driver = driver_opt orelse return 0;
+    if (openmiles.mss_version < 65) return driver.v6_master_volume;
     return openmiles.satI32(@round(driver.getMasterVolume() * 127.0));
 }
 pub fn AIL_allocate_sample_handle(driver_opt: ?*DigitalDriver) callconv(.winapi) ?*Sample {
