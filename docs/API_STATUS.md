@@ -434,7 +434,7 @@ behaviour, not linkability.
 | Function | Status | Notes |
 |----------|--------|-------|
 | `AIL_compress_ASI` | 🟢 Implemented | Encodes input file to IMA-ADPCM WAV (~4:1) via the bundled ADPCM encoder; symmetric with `AIL_decompress_ASI` |
-| `AIL_decompress_ASI` | 🟢 Implemented | Decodes to 16-bit stereo PCM at 44100 Hz via miniaudio, writes as WAV |
+| `AIL_decompress_ASI` | 🟢 Implemented | Decodes to 16-bit PCM at the source's channels and rate via miniaudio, writes as WAV |
 
 ## Input API
 *(Appeared in MSS v4+)*

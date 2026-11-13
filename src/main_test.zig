@@ -6533,6 +6533,52 @@ test "AIL_decompress_ASI decodes to a WAV (runs the decode loop; align-safe)" {
     try testing.expectEqual(@as(i32, 16), info.bits);
 }
 
+test "AIL_decompress_ASI keeps the source's channels and rate" {
+    const api_rib = @import("api/rib.zig");
+    // A mono 22050 Hz ramp: the image comes back mono at 22050 Hz with the
+    // same frames, not upmixed and resampled to stereo at 44100 Hz.
+    const frames: usize = 2205;
+    var pcm: [frames * 2]u8 = undefined;
+    for (0..frames) |i| std.mem.writeInt(i16, pcm[i * 2 ..][0..2], @intCast(i), .little);
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 22050, 16);
+    defer testing.allocator.free(wav);
+    var out_ptr: ?*anyopaque = null;
+    var out_size: u32 = 0;
+    try testing.expectEqual(@as(i32, 1), api_rib.AIL_decompress_ASI(wav.ptr, @intCast(wav.len), ".wav", &out_ptr, &out_size, null));
+    defer std.c.free(out_ptr);
+    var info: openmiles.AILSOUNDINFO = .{};
+    try testing.expect(dg.AIL_WAV_info(out_ptr.?, &info) != 0);
+    try testing.expectEqual(@as(i32, 1), info.channels);
+    try testing.expectEqual(@as(u32, 22050), info.rate);
+    try testing.expectEqual(@as(i32, 16), info.bits);
+    try testing.expectEqual(@as(u32, pcm.len), info.data_len);
+    const out: [*]const u8 = @ptrCast(info.data_ptr.?);
+    try testing.expectEqualSlices(u8, &pcm, out[0..pcm.len]);
+}
+
+test "AIL_decompress_ASI decodes a mono 22050 Hz MP3 as mono 22050 Hz" {
+    const api_rib = @import("api/rib.zig");
+    // MPEG-2 Layer III, 32 kbit/s, 22050 Hz, mono, no CRC: a 104-byte frame
+    // (72 * 32000 / 22050) of 576 samples, all-zero side info, so silence.
+    const frame_len = 104;
+    const frame_count = 16;
+    var mp3: [frame_len * frame_count]u8 = [_]u8{0} ** (frame_len * frame_count);
+    for (0..frame_count) |f| @memcpy(mp3[f * frame_len ..][0..4], &[_]u8{ 0xFF, 0xF3, 0x40, 0xC0 });
+    var out_ptr: ?*anyopaque = null;
+    var out_size: u32 = 0;
+    try testing.expectEqual(@as(i32, 1), api_rib.AIL_decompress_ASI(&mp3, mp3.len, ".mp3", &out_ptr, &out_size, null));
+    defer std.c.free(out_ptr);
+    var info: openmiles.AILSOUNDINFO = .{};
+    try testing.expect(dg.AIL_WAV_info(out_ptr.?, &info) != 0);
+    try testing.expectEqual(@as(i32, 1), info.channels);
+    try testing.expectEqual(@as(u32, 22050), info.rate);
+    try testing.expectEqual(@as(i32, 16), info.bits);
+    // At most the frames given, one 16-bit sample each (the decoder may hold
+    // back its first frame's delay), and never the 4x of stereo at 44100 Hz.
+    try testing.expect(info.data_len > 0 and info.data_len <= frame_count * 576 * 2);
+    try testing.expectEqual(@as(u32, 44), out_size - info.data_len);
+}
+
 test "AIL_MIDI_to_XMI allocates the output and returns it via XMIDI** (SDK)" {
     const smf = [_]u8{ 'M', 'T', 'h', 'd', 1, 2, 3, 4, 5, 6, 7, 8 };
     // Size query: null output pointer, just reports the size.

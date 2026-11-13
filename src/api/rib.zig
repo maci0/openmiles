@@ -693,19 +693,34 @@ pub fn AIL_compress_ASI(info_opt: ?*const openmiles.AILSOUNDINFO, ext: ?[*:0]con
 /// AIL_decompress_ASI(indata, insize, ext, wav, wavsize, callback)
 /// Decode a compressed in-memory audio image (any format miniaudio recognizes)
 /// to a PCM WAV image returned in wav/wavsize (freshly malloc'd). Returns 1 on
-/// success, 0 on failure.
+/// success, 0 on failure. The image is 16-bit PCM at the source's own channel
+/// count and rate, as Miles' MP3 decoder gives it: a mono 22050 Hz MP3 comes
+/// back mono at 22050 Hz, and the WAV header says so.
 pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]const u8, wav_out: ?*?*anyopaque, wavsize: ?*u32, callback: ?*anyopaque) callconv(.winapi) i32 {
     _ = ext;
     _ = callback;
     const data = indata orelse return 0;
     if (insize == 0) return 0;
     var decoder: openmiles.ma.ma_decoder = undefined;
-    var config = openmiles.ma.ma_decoder_config_init(openmiles.ma.ma_format_s16, 2, 44100);
+    // Channels and rate 0: the decoder's own. Asking for stereo at 44100 Hz
+    // made miniaudio upmix and resample every source to it, so a mono 22050
+    // Hz MP3 came back four times its size, and a caller that reads the
+    // image's format (or plays it at the source's rate) got another sound.
+    var config = openmiles.ma.ma_decoder_config_init(openmiles.ma.ma_format_s16, 0, 0);
     if (openmiles.ma.ma_decoder_init_memory(data, insize, &config, &decoder) != openmiles.ma.MA_SUCCESS) {
         openmiles.setLastError("AIL_decompress_ASI: failed to open input");
         return 0;
     }
     defer _ = openmiles.ma.ma_decoder_uninit(&decoder);
+    // The header fields are u16; a decoder reporting more channels than a WAV
+    // can carry (or none) has nothing this call can hand back.
+    const channels = std.math.cast(u16, decoder.outputChannels) orelse 0;
+    const rate: u32 = decoder.outputSampleRate;
+    if (channels == 0 or rate == 0) {
+        openmiles.setLastError("AIL_decompress_ASI: the input has no usable format");
+        return 0;
+    }
+    const pcm_bytes_per_frame: usize = @as(usize, channels) * 2;
 
     var all_pcm: std.ArrayListUnmanaged(u8) = .empty;
     defer all_pcm.deinit(openmiles.global_allocator);
@@ -715,24 +730,24 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
     // header-derived, hence spoofable, so the saturating multiply and the
     // clamp keep the hint from overflowing or panicking the usize cast on the
     // 32-bit target; the loop is bounded by real reads, so an inflated hint
-    // only over-reserves. Configured output is s16 stereo, four bytes a frame.
+    // only over-reserves. The output is s16 at the source's channel count.
     var length_frames: u64 = 0;
     _ = openmiles.ma.ma_decoder_get_length_in_pcm_frames(&decoder, &length_frames);
     if (length_frames > 0) {
-        const pcm_bytes_per_frame: u64 = 4;
-        const hint: u64 = @min(length_frames *| pcm_bytes_per_frame, std.math.maxInt(usize));
+        const hint: u64 = @min(length_frames *| @as(u64, pcm_bytes_per_frame), std.math.maxInt(usize));
         all_pcm.ensureTotalCapacity(openmiles.global_allocator, @intCast(hint)) catch {};
     }
     // Heap scratch (16-byte aligned): a stack buffer trips a layout-dependent
     // misaligned ma_int16 write inside miniaudio's decoder under the UBSan build.
-    const chunk_buf = openmiles.global_allocator.alignedAlloc(u8, .@"16", 4096 * 4) catch {
+    const chunk_frames: usize = 4096;
+    const chunk_buf = openmiles.global_allocator.alignedAlloc(u8, .@"16", chunk_frames * pcm_bytes_per_frame) catch {
         openmiles.setLastError("AIL_decompress_ASI: out of memory");
         return 0;
     };
     defer openmiles.global_allocator.free(chunk_buf);
     while (true) {
         var fr: u64 = 0;
-        const read_result = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk_buf.ptr, 4096, &fr);
+        const read_result = openmiles.ma.ma_decoder_read_pcm_frames(&decoder, chunk_buf.ptr, chunk_frames, &fr);
         // A decoder error also reports 0 frames and would end the loop as if
         // the stream had finished; fail the call instead of returning a
         // truncated image under a success return code.
@@ -744,7 +759,7 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
         if (fr == 0) break;
         // A partial decode must be reported as a failure, not wrapped in a WAV
         // and handed back as a complete one.
-        all_pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..@intCast(fr * 4)]) catch {
+        all_pcm.appendSlice(openmiles.global_allocator, chunk_buf[0..@intCast(fr * pcm_bytes_per_frame)]) catch {
             openmiles.setLastError("AIL_decompress_ASI: out of memory");
             return 0;
         };
@@ -754,7 +769,7 @@ pub fn AIL_decompress_ASI(indata: ?*const anyopaque, insize: u32, ext: ?[*:0]con
         return 0;
     }
 
-    const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, all_pcm.items, 2, 44100, 16) catch |err| {
+    const wav = openmiles.buildWavFromPcm(openmiles.global_allocator, all_pcm.items, channels, rate, 16) catch |err| {
         log("AIL_decompress_ASI: cannot build the output WAV ({any})\n", .{err});
         openmiles.setLastError("AIL_decompress_ASI: cannot build the output WAV");
         return 0;

@@ -84,6 +84,14 @@ All notable changes to OpenMiles are recorded here. The format follows
   3709..9535 of 512-byte blocks, played its first 108 ms and then repeated a
   66 ms stretch of it, a loud rattle; it now loops frames 7119..18306, as
   Miles 6.0i does.
+- `AIL_decompress_ASI` and the built-in ASI stream provider decode at the
+  source's own channel count and rate, as Miles' MP3 decoder does, and the
+  WAV header (or the `OUTPUT CHANNELS` / `OUTPUT RATE` attributes) says so.
+  Both asked miniaudio for 16-bit stereo at 44100 Hz: a mono MP3 -- nearly
+  every one NOLF and AvP2 ship, their dialogue and many effects -- came back
+  upmixed to stereo, twice its size, and a 22050 Hz one (NOLF has 38, AvP2
+  two in stereo) resampled too, four times its size, so a caller that reads
+  the image's format got a different sound from the one it loaded.
 
 ## [0.4.0] - 2026-09-29
 
