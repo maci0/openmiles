@@ -9811,3 +9811,41 @@ test "an IMA ADPCM loop block is in bytes of its compressed blocks (Miles 6.0i, 
     try testing.expectEqual(@as(u64, 500), s.loop_start_frame);
     try testing.expectEqual(@as(u64, 1500), s.loop_end_frame);
 }
+
+test "the mix is clipped to full scale, hard, as Miles 6 saturates it" {
+    // Miles 6 sums into 32-bit integers and saturates them into the output
+    // (packssdw): a sum past full scale is clipped flat, with no soft knee.
+    // The f32 mix went to the device as it was, past 1.0.
+    try testing.expectEqual(@as(f32, 0.5), openmiles.DigitalDriver.clipToFullScale(0.5));
+    try testing.expectEqual(@as(f32, -0.999), openmiles.DigitalDriver.clipToFullScale(-0.999));
+    try testing.expectEqual(@as(f32, 1.0), openmiles.DigitalDriver.clipToFullScale(1.1));
+    try testing.expectEqual(@as(f32, -1.0), openmiles.DigitalDriver.clipToFullScale(-3.0));
+    try testing.expectEqual(@as(f32, 0.0), openmiles.DigitalDriver.clipToFullScale(std.math.nan(f32)));
+
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    // Four loud mono sounds at once: each alone is below full scale, together
+    // well past it.
+    const frames_in = 4410;
+    var pcm: [frames_in * 2]u8 = undefined;
+    for (0..frames_in) |i| std.mem.writeInt(i16, pcm[i * 2 ..][0..2], 30000, .little);
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 44100, 16);
+    defer testing.allocator.free(wav);
+    var samples: [4]*openmiles.Sample = undefined;
+    for (&samples) |*s| {
+        s.* = try openmiles.Sample.init(drv);
+        try s.*.loadFromMemory(wav, false);
+        dg.AIL_start_sample(s.*);
+    }
+    defer for (samples) |s| s.deinit();
+
+    var out: [1024 * 2]f32 = undefined;
+    var read: u64 = 0;
+    try testing.expectEqual(openmiles.ma.MA_SUCCESS, openmiles.ma.ma_engine_read_pcm_frames(&drv.engine, &out, 1024, &read));
+    try testing.expectEqual(@as(u64, 1024), read);
+    var peak: f32 = 0;
+    for (out[0 .. read * 2]) |v| peak = @max(peak, @abs(v));
+    try testing.expectEqual(@as(f32, 1.0), peak);
+    // past the resampler's start the whole block sits flat at full scale
+    try testing.expectEqual(@as(f32, 1.0), out[out.len - 1]);
+}

@@ -746,11 +746,28 @@ pub const DigitalDriver = struct {
         return self;
     }
 
+    /// One mixed sample held to full scale, as Miles 6 saturates its mix:
+    /// the build buffer's 32-bit sums go to the output through `packssdw`
+    /// (or compares against 0x7FFF / -0x8000), a hard clip with no soft knee.
+    /// NaN becomes silence, not full scale.
+    pub fn clipToFullScale(x: f32) f32 {
+        if (x > 1.0) return 1.0;
+        if (x < -1.0) return -1.0;
+        return if (x == x) x else 0.0;
+    }
+
     /// Engine onProcess hook: fires once per mixed block on the audio thread.
+    /// The engine mixes in f32 and hands the device the block as it is: sounds
+    /// that sum past full scale (1.10 measured in a game) reached a float
+    /// device unclipped, to be clipped -- or not -- by whatever sits after it,
+    /// and an integer device's conversion clipped them only on that path. The
+    /// block is clipped here, before it leaves the mixer, whatever the format.
     pub fn mixDispatch(user: ?*anyopaque, frames: [*c]f32, frame_count: u64) callconv(.c) void {
-        _ = frames;
-        _ = frame_count;
         const self: *DigitalDriver = @ptrCast(@alignCast(user orelse return));
+        if (frames != null and frame_count > 0) {
+            const total: usize = @intCast(frame_count * ma.ma_engine_get_channels(&self.engine));
+            for (frames[0..total]) |*v| v.* = clipToFullScale(v.*);
+        }
         // Read on the audio thread; written on the app thread via
         // AIL_register_mix_callback. Atomic to avoid a torn/half-published pointer.
         if (@atomicLoad(?*const fn (?*DigitalDriver) callconv(.winapi) void, &self.mix_callback, .acquire)) |cb| cb(self);

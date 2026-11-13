@@ -92,6 +92,11 @@ All notable changes to OpenMiles are recorded here. The format follows
   upmixed to stereo, twice its size, and a 22050 Hz one (NOLF has 38, AvP2
   two in stereo) resampled too, four times its size, so a caller that reads
   the image's format got a different sound from the one it loaded.
+- The mix is clipped to full scale before it leaves the mixer, a hard clip,
+  as Miles 6 saturates its 32-bit mix into the output (`packssdw`, or
+  compares against 0x7FFF / -0x8000, in its `mss32.dll`). The f32 mix went
+  to the device as it was: AvP2's first Marine mission peaked at 1.21, past full
+  scale on a float device; a NaN now mixes as silence.
 
 ## [0.4.0] - 2026-09-29
 
