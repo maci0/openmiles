@@ -45,6 +45,59 @@ All notable changes to OpenMiles are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `AIL_init_sample` keeps a reused handle's user data, as Miles 6.0i does,
+  instead of zeroing it. A game that stores its own record in a slot when it
+  allocates the handle and reads it back when a sound ends lost that record
+  after one sound: NOLF's engine lost a voice with every sound, and its sound
+  stopped once all were spent.
+- Builds for Miles before 6.5 (`-Dmss-version` 3 to 6.1) work the sample
+  volume, master volume and pan as Miles 6.0i does, measured from its
+  `mss32.dll`: integer volumes over 128 (`v * 128 / 127`, rounded down),
+  linear in amplitude, a sample's level `(sample * master) >> 7`, and a pan
+  whose far side is its distance from that edge over 64.5. They used the
+  `v^(10/6)` curve of 6.5 and later, so a quiet sample came out up to 20 dB
+  too quiet (volume 32: -20 dB for -12), and NOLF's distant speakers were
+  buried under its music. The two now agree within 0.1 dB at every volume,
+  pan and master volume tried. `AIL_digital_master_volume` reads back the
+  value set.
+- `AIL_open_stream` on Windows takes Miles' `"\\<handle>"` names, an
+  already-open Win32 file handle in decimal, and streams the RIFF file at the
+  handle's current position, as many bytes as its header says, leaving the
+  handle open and past the sound. It looked for a file called `\\<n>` on
+  disk and failed: NOLF's engine streams its long sounds out of its `.rez`
+  archives this way, so they never played (its opening-credits song among
+  them).
+- Each sound's resampler low-passes. miniaudio's engine leaves its pitch and
+  Doppler resampler's filter off, so a sound at a lower rate than the mix was
+  upsampled by bare linear interpolation: a 22050 Hz sound mixed at 44100 Hz
+  carried its mirror image at 11-22 kHz, 17-45 dB down. The driver now opens
+  the engine with the filter at miniaudio's highest order; the image is 58-86
+  dB down, nothing below 9 kHz changes, and a playback rate changed every 5 ms
+  leaves the output as steady as before.
+- An IMA ADPCM sample's loop block is in bytes of its compressed blocks, as
+  Miles counts it, looping at the start of the block each offset falls in;
+  `AIL_sample_loop_block` reports it in the same bytes. The offsets were
+  divided by the decoded frame size, which for 4-bit ADPCM put the loop at
+  about an eighth of where it belongs: NOLF's crane, which loops bytes
+  3709..9535 of 512-byte blocks, played its first 108 ms and then repeated a
+  66 ms stretch of it, a loud rattle; it now loops frames 7119..18306, as
+  Miles 6.0i does.
+- `AIL_decompress_ASI` and the built-in ASI stream provider decode at the
+  source's own channel count and rate, as Miles' MP3 decoder does, and the
+  WAV header (or the `OUTPUT CHANNELS` / `OUTPUT RATE` attributes) says so.
+  Both asked miniaudio for 16-bit stereo at 44100 Hz: a mono MP3 -- nearly
+  every one NOLF and AvP2 ship, their dialogue and many effects -- came back
+  upmixed to stereo, twice its size, and a 22050 Hz one (NOLF has 38, AvP2
+  two in stereo) resampled too, four times its size, so a caller that reads
+  the image's format got a different sound from the one it loaded.
+- The mix is clipped to full scale before it leaves the mixer, a hard clip,
+  as Miles 6 saturates its 32-bit mix into the output (`packssdw`, or
+  compares against 0x7FFF / -0x8000, in its `mss32.dll`). The f32 mix went
+  to the device as it was: AvP2's first Marine mission peaked at 1.21, past full
+  scale on a float device; a NaN now mixes as silence.
+
 ## [0.4.0] - 2026-09-29
 
 BUILDINFO release metadata, Windows test harness command-line contract, error recovery on audio and plugin paths, RISC-V and PPC64 plugin relocations, and comprehensive verification gates.

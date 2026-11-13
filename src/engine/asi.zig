@@ -4,25 +4,29 @@ const ma = root.ma;
 const log = root.log;
 const fs_compat = root.fs_compat;
 
-// The decoded output geometry, declared once. The ASI ABI moves PCM as raw
-// bytes, so the byte/frame conversion in process and seek is the only thing
-// standing between the caller and the decoder's configuration: a second copy
-// of the stride in each entry point is an invariant nothing enforces, and a
-// change to the output here would leave them scaling positions by the old one.
+// The decoded output format, declared once: 16-bit PCM at the source's own
+// channel count and rate, as Miles' MP3 decoder gives it (the OUTPUT CHANNELS
+// and OUTPUT RATE attributes report them). The ASI ABI moves PCM as raw bytes,
+// so process and seek scale by the stream's own frame size (bytesPerFrame),
+// the one the attributes describe.
 const output_format = ma.ma_format_s16;
 const output_bits: u16 = 16;
-const output_channels: u32 = 2;
-const output_rate: u32 = 44100;
-const bytes_per_frame: usize = (output_bits / 8) * output_channels;
 
 /// Built-in ASI (Audio Stream Interface) codec implementation backed by miniaudio.
-/// Decodes MP3, OGG, WAV, and FLAC to 16-bit stereo PCM at 44100 Hz.
+/// Decodes MP3, OGG, WAV, and FLAC to 16-bit PCM at the source's channels and rate.
 const ASI_Stream_Impl = struct {
     decoder: ma.ma_decoder,
+    /// Bytes in one decoded frame, from the decoder's channel count.
+    fn bytesPerFrame(self: *const ASI_Stream_Impl) usize {
+        return (output_bits / 8) * @as(usize, @max(self.decoder.outputChannels, 1));
+    }
     pub fn open(filename: []const u8) !*ASI_Stream_Impl {
         const self = try root.global_allocator.create(ASI_Stream_Impl);
         errdefer root.global_allocator.destroy(self);
-        var config = ma.ma_decoder_config_init(output_format, output_channels, output_rate);
+        // Channels and rate 0: the decoder's own. Stereo at 44100 Hz upmixed
+        // and resampled every source, while a caller sizing its buffers from
+        // the source's format expected the source's frames.
+        var config = ma.ma_decoder_config_init(output_format, 0, 0);
         const resolved = try fs_compat.dupeResolvedPathZ(root.global_allocator, filename);
         defer root.global_allocator.free(resolved);
         const result = ma.ma_decoder_init_file(resolved.ptr, &config, &self.decoder);
@@ -62,6 +66,7 @@ fn openmiles_ASI_stream_process(stream: *ASI_stream, buffer: *anyopaque, len: i3
     if (len <= 0) return 0;
     const s: *ASI_Stream_Impl = @ptrCast(@alignCast(stream));
     var frames_read: u64 = 0;
+    const bytes_per_frame = s.bytesPerFrame();
     const frames_to_read = @as(u64, @intCast(len)) / bytes_per_frame;
     const result = ma.ma_decoder_read_pcm_frames(&s.decoder, buffer, frames_to_read, &frames_read);
     // A read error also leaves frames_read at 0, which the caller reads as the
@@ -77,6 +82,7 @@ fn openmiles_ASI_stream_process(stream: *ASI_stream, buffer: *anyopaque, len: i3
 fn openmiles_ASI_stream_seek(stream: *ASI_stream, pos: i32) callconv(.c) i32 {
     if (pos < 0) return 0;
     const s: *ASI_Stream_Impl = @ptrCast(@alignCast(stream));
+    const bytes_per_frame = s.bytesPerFrame();
     const frame = @as(u64, @intCast(pos)) / bytes_per_frame;
     // Reporting the requested offset on a failed seek told the caller the
     // stream had moved when it had not, so the next read decoded from the old
@@ -118,7 +124,7 @@ test "ASI stream read and seek move the decode position" {
     const pcm = try testing.allocator.alloc(u8, pcm_frames * 2);
     defer testing.allocator.free(pcm);
     for (0..pcm_frames) |i| std.mem.writeInt(i16, pcm[i * 2 ..][0..2], @intCast(i), .little);
-    const wav = try root.buildWavFromPcm(testing.allocator, pcm, 1, 44100, 16);
+    const wav = try root.buildWavFromPcm(testing.allocator, pcm, 1, 22050, 16);
     defer testing.allocator.free(wav);
 
     const dir_name = "om_asi_stream_test";
@@ -134,18 +140,19 @@ test "ASI stream read and seek move the decode position" {
     const stream = openmiles_ASI_stream_open(0, @ptrCast(path), 0) orelse return error.StreamOpenFailed;
     defer openmiles_ASI_stream_close(stream);
 
-    // The attributes the caller reads to size its buffer are the same declared
-    // geometry the byte/frame conversion in process and seek scales by, so a
-    // caller that divides a byte budget by the attribute value agrees with the
-    // stream about where a frame boundary falls.
+    // The attributes report the source's own format (mono, 22050 Hz here),
+    // the frame size process and seek scale by, so a caller that divides a
+    // byte budget by them agrees with the stream about where a frame falls.
     try testing.expectEqual(@as(i32, output_bits), openmiles_ASI_stream_attribute(stream, "OUTPUT BITS"));
-    try testing.expectEqual(@as(i32, output_channels), openmiles_ASI_stream_attribute(stream, "OUTPUT CHANNELS"));
-    try testing.expectEqual(@as(i32, output_rate), openmiles_ASI_stream_attribute(stream, "OUTPUT RATE"));
+    try testing.expectEqual(@as(i32, 1), openmiles_ASI_stream_attribute(stream, "OUTPUT CHANNELS"));
+    try testing.expectEqual(@as(i32, 22050), openmiles_ASI_stream_attribute(stream, "OUTPUT RATE"));
+    const bytes_per_frame: usize = 2;
 
-    // Output is 16-bit stereo, so the mono ramp appears in the left channel.
+    // The mono ramp comes back as it went in, one 16-bit sample a frame.
     var buf: [4096]u8 align(4) = undefined;
-    try testing.expect(openmiles_ASI_stream_process(stream, &buf, 400) > 0);
+    try testing.expectEqual(@as(i32, 400), openmiles_ASI_stream_process(stream, &buf, 400));
     try testing.expectEqual(@as(i16, 0), std.mem.readInt(i16, buf[0..2], .little));
+    try testing.expectEqual(@as(i16, 1), std.mem.readInt(i16, buf[2..4], .little));
 
     // A seek inside the file reports the offset it reached, and the next read
     // decodes from there rather than from where the stream already was.

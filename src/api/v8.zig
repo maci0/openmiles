@@ -643,8 +643,10 @@ pub fn AIL_sample_loop_block(s_opt: ?*Sample, loop_start: ?*i32, loop_end: ?*i32
     const s = s_opt orelse return 0;
     const bpf: u64 = s.bytesPerFrame();
     const sat = std.math.maxInt(i32);
-    if (loop_start) |p| p.* = @intCast(@min(s.loop_start_frame *| bpf, sat));
-    if (loop_end) |p| p.* = @intCast(@min(s.loop_end_frame *| bpf, sat));
+    // In the setter's units: bytes of the sample's own data, which for IMA
+    // ADPCM are bytes of its compressed blocks.
+    if (loop_start) |p| p.* = @intCast(@min(openmiles.loopByteOfFrame(s, s.loop_start_frame, bpf), sat));
+    if (loop_end) |p| p.* = @intCast(@min(openmiles.loopByteOfFrame(s, s.loop_end_frame, bpf), sat));
     // SDK (AIL_API_sample_loop_block) returns orig_loop_count, not a found-flag.
     return s.loop_count;
 }

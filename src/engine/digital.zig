@@ -114,18 +114,42 @@ fn restartLoopOnEnd(self: anytype) bool {
     return true;
 }
 
+/// The frame a loop block's byte offset names. Miles counts the offsets in the
+/// sample's own data, so for IMA ADPCM they are bytes of compressed blocks:
+/// Miles 6.0i loops at the start of the block the offset falls in (measured:
+/// NOLF's crane, LIFT3.wav, given 3709..9535 bytes of 512-byte blocks, loops
+/// frames 7119..18306). Dividing by the decoded frame size instead put the
+/// loop at a quarter of the offset or less -- a 66 ms stretch near the start,
+/// played over and over.
+fn loopFrameOfByte(self: anytype, bytes: u64, bpf: u32) u64 {
+    if (@hasField(@TypeOf(self.*), "src_adpcm_block_align")) {
+        if (self.src_adpcm_block_align > 0)
+            return bytes / self.src_adpcm_block_align * self.src_adpcm_frames_per_block;
+    }
+    return bytes / @as(u64, bpf);
+}
+
+/// The byte offset a loop frame stands for, the inverse of loopFrameOfByte.
+pub fn loopByteOfFrame(self: anytype, frame: u64, bpf: u64) u64 {
+    if (@hasField(@TypeOf(self.*), "src_adpcm_block_align")) {
+        if (self.src_adpcm_block_align > 0 and self.src_adpcm_frames_per_block > 0)
+            return frame / self.src_adpcm_frames_per_block *| self.src_adpcm_block_align;
+    }
+    return frame *| bpf;
+}
+
 /// Translate an MSS byte-offset loop block into miniaudio frame ranges. Works on
 /// any sample type exposing `bytesPerFrame`, `loop_start_frame`, `loop_end_frame`
 /// and `decoder` (Sample and Sample3D share the exact same logic).
 fn applyLoopBlock(self: anytype, start_bytes: i32, end_bytes: i32) void {
     const bpf = self.bytesPerFrame();
     if (start_bytes >= 0 and bpf > 0) {
-        self.loop_start_frame = @as(u64, @intCast(start_bytes)) / @as(u64, bpf);
+        self.loop_start_frame = loopFrameOfByte(self, @intCast(start_bytes), bpf);
     } else {
         self.loop_start_frame = 0;
     }
     if (end_bytes > 0 and bpf > 0) {
-        const end_frame: u64 = @as(u64, @intCast(end_bytes)) / @as(u64, bpf);
+        const end_frame: u64 = loopFrameOfByte(self, @intCast(end_bytes), bpf);
         // A block that does not span at least one whole frame once converted
         // (start == end after the byte-to-frame divide, or a caller passing the
         // arguments the wrong way round) leaves miniaudio a loop point that can
@@ -573,6 +597,10 @@ pub const DigitalDriver = struct {
     providers: std.ArrayListUnmanaged(*root.Provider),
     timers: std.ArrayListUnmanaged(*root.Timer),
     samples: std.ArrayListUnmanaged(*Sample),
+    // Miles 6's master volume in 0..128 (root.v6Scale128), which each sample's
+    // level is worked out with; 128 is full.
+    v6_master: i32 = 128,
+    v6_master_volume: i32 = 127, // the 0..127 value it came from, for the getter
     // v9 system-state stack: saved master-volume per push level. The depth is
     // the level count, and pop restores the volume its own push saved, so the
     // two have to stay in step. Growth is reserved up front (see init) and the
@@ -662,6 +690,17 @@ pub const DigitalDriver = struct {
         // inside ma_engine_init. MA_MAX_CHANNELS is 254; max standard rate 384k.
         config.sampleRate = if (frequency == 0) 44100 else @min(frequency, 384000);
         config.channels = if (channels == 0) 2 else @min(channels, 254);
+        // Each sound is resampled to the mix rate on its own, by the resampler
+        // miniaudio also uses for pitch and Doppler. miniaudio switches that
+        // one's low-pass filter off (lpfOrder 0, ma_engine_config_init), so
+        // upsampling a 22050 Hz sound to a 44100 Hz mix by bare linear
+        // interpolation left its mirror image at 11-22 kHz, 30-45 dB down;
+        // with the filter on the image goes and a 44100 Hz sound (speech)
+        // keeps its whole range. Real Miles 6 avoids the image by mixing at
+        // the rate the game opens it at, 22050 Hz for NOLF, which drops that
+        // range too.
+        config.pitchResampling = ma.ma_resampler_config_init(ma.ma_format_f32, 0, 0, 0, ma.ma_resample_algorithm_linear);
+        config.pitchResampling.linear.lpfOrder = ma.MA_MAX_FILTER_ORDER;
         config.onProcess = &mixDispatch; // drives AIL_register_mix_callback
         config.pProcessUserData = self;
         const result = ma.ma_engine_init(&config, &self.engine);
@@ -707,11 +746,28 @@ pub const DigitalDriver = struct {
         return self;
     }
 
+    /// One mixed sample held to full scale, as Miles 6 saturates its mix:
+    /// the build buffer's 32-bit sums go to the output through `packssdw`
+    /// (or compares against 0x7FFF / -0x8000), a hard clip with no soft knee.
+    /// NaN becomes silence, not full scale.
+    pub fn clipToFullScale(x: f32) f32 {
+        if (x > 1.0) return 1.0;
+        if (x < -1.0) return -1.0;
+        return if (x == x) x else 0.0;
+    }
+
     /// Engine onProcess hook: fires once per mixed block on the audio thread.
+    /// The engine mixes in f32 and hands the device the block as it is: sounds
+    /// that sum past full scale (1.10 measured in a game) reached a float
+    /// device unclipped, to be clipped -- or not -- by whatever sits after it,
+    /// and an integer device's conversion clipped them only on that path. The
+    /// block is clipped here, before it leaves the mixer, whatever the format.
     pub fn mixDispatch(user: ?*anyopaque, frames: [*c]f32, frame_count: u64) callconv(.c) void {
-        _ = frames;
-        _ = frame_count;
         const self: *DigitalDriver = @ptrCast(@alignCast(user orelse return));
+        if (frames != null and frame_count > 0) {
+            const total: usize = @intCast(frame_count * ma.ma_engine_get_channels(&self.engine));
+            for (frames[0..total]) |*v| v.* = clipToFullScale(v.*);
+        }
         // Read on the audio thread; written on the app thread via
         // AIL_register_mix_callback. Atomic to avoid a torn/half-published pointer.
         if (@atomicLoad(?*const fn (?*DigitalDriver) callconv(.winapi) void, &self.mix_callback, .acquire)) |cb| cb(self);
@@ -1006,6 +1062,32 @@ fn wavSourceBytesPerFrame(data: []const u8) ?u32 {
     return null;
 }
 
+/// An IMA ADPCM WAV's block size in bytes and frames per block, from its fmt
+/// chunk; null for any other format.
+fn wavAdpcmBlocks(data: []const u8) ?[2]u32 {
+    if (data.len < 44) return null;
+    if (!std.mem.eql(u8, data[0..4], "RIFF") or !std.mem.eql(u8, data[8..12], "WAVE")) return null;
+    var off: usize = 12;
+    while (off + 8 <= data.len) {
+        const tag = data[off .. off + 4];
+        const csize = std.mem.readInt(u32, data[off + 4 .. off + 8][0..4], .little);
+        off += 8;
+        if (std.mem.eql(u8, tag, "fmt ") and csize >= 16 and off + 16 <= data.len) {
+            if (std.mem.readInt(u16, data[off .. off + 2][0..2], .little) != 0x11) return null;
+            const channels: u32 = std.mem.readInt(u16, data[off + 2 .. off + 4][0..2], .little);
+            const block_align: u32 = std.mem.readInt(u16, data[off + 12 .. off + 14][0..2], .little);
+            if (channels == 0 or block_align <= 4 * channels) return null;
+            // 4 header bytes per channel (the first sample among them), then
+            // two 4-bit samples per byte.
+            return .{ block_align, (block_align - 4 * channels) * 2 / channels + 1 };
+        }
+        const next = off +| csize +| (csize & 1);
+        if (next <= off) return null;
+        off = next;
+    }
+    return null;
+}
+
 /// The rate AIL_init_sample seeds a fresh sample with, before any file is
 /// loaded. Not 44100: an unloaded sample has no file rate to report, and the
 /// SDK reports the seed.
@@ -1112,6 +1194,10 @@ pub const Sample = struct {
     // sample format, not whatever miniaudio decodes to, so this keeps granularity
     // stable and faithful (e.g. mono-8 -> 1, not the decoder's promoted size).
     src_bpf: u32 = 0,
+    // An IMA ADPCM source's block size and frames per block (0 for any other
+    // format): Miles' loop block offsets are bytes of these blocks.
+    src_adpcm_block_align: u32 = 0,
+    src_adpcm_frames_per_block: u32 = 0,
     reverb_node: ?*ma.ma_delay_node = null,
     reverb_room_type: f32 = 0.0,
     reverb_level: f32 = 0.0, // wet level
@@ -1345,6 +1431,7 @@ pub const Sample = struct {
         // the old file's bytes-per-frame (loadFromBoundedPointer clears it for
         // the same reason).
         self.src_bpf = wavSourceBytesPerFrame(data) orelse 0;
+        self.setAdpcmBlocks(data);
         self.finishDecoderLoad(decoder);
 
         log("Sample.loadFromOwnedMemory success: s={*}, vol={d}, pan={d}, pitch={d}, loop={d}\n", .{ self, self.volume, self.pan, self.pitch, self.loop_count });
@@ -1445,6 +1532,7 @@ pub const Sample = struct {
         // source-format hint left by a previous load (loadFromMemory would
         // recompute it; there is no WAV header to parse here).
         self.src_bpf = 0;
+        self.setAdpcmBlocks(&.{});
         self.finishDecoderLoad(decoder);
 
         log("Sample.loadFromBoundedPointer success: s={*}, vol={d}, pan={d}, pitch={d}, loop={d}\n", .{ self, self.volume, self.pan, self.pitch, self.loop_count });
@@ -1477,6 +1565,7 @@ pub const Sample = struct {
         }
         self.owned_buffer = owned_copy;
         self.src_bpf = wavSourceBytesPerFrame(internal_data) orelse 0;
+        self.setAdpcmBlocks(internal_data);
         self.finishDecoderLoad(decoder);
 
         log("Sample.loadFromMemory success: s={*}, vol={d}, pan={d}, pitch={d}, loop={d}\n", .{ self, self.volume, self.pan, self.pitch, self.loop_count });
@@ -1636,7 +1725,12 @@ pub const Sample = struct {
         self.s3d_cone_outer_vol = 1.0;
         self.falloff_cb = null;
         self.last_loaded_buffer.store(0, .release);
-        self.user_data = [_]u32{0} ** 8;
+        // user_data is deliberately kept: Miles 6.0i's AIL_init_sample leaves
+        // the handle's user data alone, and games rely on it. NOLF's LithTech
+        // engine stores its voice record in slot 2 once, when it allocates the
+        // handle, re-inits the handle for every sound, and reads slot 2 back to
+        // return the voice to its pool when the sound ends; cleared, every
+        // voice is lost after one use and sound stops once all are spent.
         // SDK wavefile.cpp AIL_init_sample also resets the level / reverb / filter
         // / occlusion state of a reused handle to its defaults:
         //   set_sample_volume_levels(1,1); low_pass_cutoff[*]=1; dry_level=1;
@@ -1824,7 +1918,16 @@ pub const Sample = struct {
         // otherwise be handed straight back to a UI slider or persisted verbatim.
         self.original_volume = std.math.clamp(volume, 0, 127);
         self.save_vol_f = @as(f32, @floatFromInt(self.original_volume)) / 127.0;
-        self.volume = root.mssVolumeToGain(volume);
+        if (root.mss_version < 65) {
+            // Miles 6: (sample * master) >> 7 over 128, in integers (see
+            // root.v6Scale128). The engine volume carries master / 128, so the
+            // sample's own gain is the level over that.
+            const m = self.driver.v6_master;
+            const level = (root.v6Scale128(volume) * m) >> 7;
+            self.volume = if (m > 0) @as(f32, @floatFromInt(level)) / @as(f32, @floatFromInt(m)) else 0.0;
+        } else {
+            self.volume = root.mssVolumeToGain(volume);
+        }
         log("Sample.setVolume: s={*}, i32={d}, gain={d}\n", .{ self, volume, self.volume });
         if (self.is_initialized) ma.ma_sound_set_volume(&self.sound, self.volume);
     }
@@ -1839,7 +1942,16 @@ pub const Sample = struct {
     pub fn setPan(self: *Sample, pan: i32) void {
         self.original_pan = std.math.clamp(pan, 0, 127);
         self.save_pan_f = @as(f32, @floatFromInt(self.original_pan)) / 127.0;
-        self.pan = std.math.clamp((@as(f32, @floatFromInt(pan)) - 64.0) / 64.0, -1.0, 1.0);
+        if (root.mss_version < 65) {
+            // Miles 6.0i, measured: the far side's gain is its distance from
+            // that edge over 64.5 -- right = pan * 2 / 129 left of centre,
+            // left = (127 - pan) * 2 / 129 right of it -- and 64 is full on
+            // both. As a balance (miniaudio keeps the near side at full).
+            const p: f32 = @floatFromInt(self.original_pan);
+            self.pan = if (self.original_pan < 64) p * 2.0 / 129.0 - 1.0 else if (self.original_pan > 64) 1.0 - (127.0 - p) * 2.0 / 129.0 else 0.0;
+        } else {
+            self.pan = std.math.clamp((@as(f32, @floatFromInt(pan)) - 64.0) / 64.0, -1.0, 1.0);
+        }
         log("Sample.setPan: s={*}, i32={d}, f32={d}\n", .{ self, pan, self.pan });
         if (self.is_initialized) ma.ma_sound_set_pan(&self.sound, self.pan);
     }
@@ -2161,6 +2273,12 @@ pub const Sample = struct {
 
     pub fn setLoopBlock(self: *Sample, start_bytes: i32, end_bytes: i32) void {
         applyLoopBlock(self, start_bytes, end_bytes);
+    }
+
+    fn setAdpcmBlocks(self: *Sample, data: []const u8) void {
+        const blocks = wavAdpcmBlocks(data) orelse [2]u32{ 0, 0 };
+        self.src_adpcm_block_align = blocks[0];
+        self.src_adpcm_frames_per_block = blocks[1];
     }
 
     pub fn getPosition(self: *Sample) u32 {

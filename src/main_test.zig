@@ -73,13 +73,23 @@ test "Sample allocation and basic properties" {
     try testing.expect(!sample.is_initialized);
 
     sample.setVolume(64);
-    // MSS curve: gain = (64/127)^(10/6) ≈ 0.319 (0.5 vol -> -10 dB).
-    try testing.expect(sample.volume > 0.30 and sample.volume < 0.33);
+    if (openmiles.mss_version < 65) {
+        // Miles 6: linear, in integers over 128 -> 64 is half.
+        try testing.expectApproxEqAbs(@as(f32, 0.5), sample.volume, 1e-6);
+    } else {
+        // MSS curve: gain = (64/127)^(10/6) ≈ 0.319 (0.5 vol -> -10 dB).
+        try testing.expect(sample.volume > 0.30 and sample.volume < 0.33);
+    }
     try testing.expectEqual(@as(i32, 64), sample.original_volume);
 
     sample.setPan(32);
-    // pan is (32 - 64) / 64.0 = -0.5
-    try testing.expectEqual(@as(f32, -0.5), sample.pan);
+    if (openmiles.mss_version < 65) {
+        // Miles 6: the right side's gain is 32 * 2 / 129
+        try testing.expectApproxEqAbs(@as(f32, 64.0 / 129.0 - 1.0), sample.pan, 1e-6);
+    } else {
+        // pan is (32 - 64) / 64.0 = -0.5
+        try testing.expectEqual(@as(f32, -0.5), sample.pan);
+    }
 }
 
 test "Sample frees unlink by index, so a hole does not strand a later handle" {
@@ -1144,8 +1154,15 @@ test "mssVolumeToGain boundary values" {
     // (wavefile.cpp AIL_API_set_sample_volume_pan), NOT the old v^3 it replaced.
     // Pin three interior points so a regression to v^3 (which gives 0.016/0.128/
     // 0.43 here) is caught, not just the 0.30..0.33 mid band.
-    inline for (.{ .{ 32, 0.1005 }, .{ 64, 0.3191 }, .{ 96, 0.6273 } }) |c| {
-        try testing.expect(@abs(openmiles.mssVolumeToGain(c[0]) - c[1]) < 0.001);
+    // Before 6.5 the table is linear, as Miles 6.0i measures.
+    if (openmiles.mss_version < 65) {
+        inline for (.{ .{ 32, 32.0 / 127.0 }, .{ 64, 64.0 / 127.0 }, .{ 96, 96.0 / 127.0 } }) |c| {
+            try testing.expect(@abs(openmiles.mssVolumeToGain(c[0]) - c[1]) < 0.001);
+        }
+    } else {
+        inline for (.{ .{ 32, 0.1005 }, .{ 64, 0.3191 }, .{ 96, 0.6273 } }) |c| {
+            try testing.expect(@abs(openmiles.mssVolumeToGain(c[0]) - c[1]) < 0.001);
+        }
     }
 }
 
@@ -2218,8 +2235,14 @@ test "Sample setVolume and setPan land on the engine fields" {
 
     sample.setVolume(64);
     sample.setPan(32);
-    try testing.expect(sample.volume > 0.30 and sample.volume < 0.33); // MSS curve ^(10/6)
-    try testing.expectEqual(@as(f32, -0.5), sample.pan);
+    if (openmiles.mss_version < 65) {
+        // Miles 6: linear in integers over 128; far side 32 * 2 / 129
+        try testing.expectApproxEqAbs(@as(f32, 0.5), sample.volume, 1e-6);
+        try testing.expectApproxEqAbs(@as(f32, 64.0 / 129.0 - 1.0), sample.pan, 1e-6);
+    } else {
+        try testing.expect(sample.volume > 0.30 and sample.volume < 0.33); // MSS curve ^(10/6)
+        try testing.expectEqual(@as(f32, -0.5), sample.pan);
+    }
 }
 
 // The registry is global and shared: AIL_active_sequence_count reports how
@@ -5644,6 +5667,26 @@ test "AIL_init_sample resets level/reverb/filter/occlusion state to defaults (SD
     try testing.expectEqual(@as(u32, 2), dg.AIL_sample_granularity(s));
 }
 
+test "AIL_init_sample keeps the handle's user data (Miles 6.0i)" {
+    // Miles 6.0i leaves a reused handle's user data as it was. Games rely on
+    // it: NOLF's LithTech engine stores its voice record in slot 2 once, when
+    // it allocates the handle, re-inits the handle for every sound, and reads
+    // slot 2 back when the sound ends.
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    dg.AIL_set_sample_user_data(s, 0, 0x1111);
+    dg.AIL_set_sample_user_data(s, 2, 0xDEADBEEF);
+    dg.AIL_set_sample_user_data(s, 7, 0x7777);
+
+    dg.AIL_init_sample(s);
+
+    try testing.expectEqual(@as(u32, 0x1111), dg.AIL_sample_user_data(s, 0));
+    try testing.expectEqual(@as(u32, 0xDEADBEEF), dg.AIL_sample_user_data(s, 2));
+    try testing.expectEqual(@as(u32, 0x7777), dg.AIL_sample_user_data(s, 7));
+}
+
 test "fresh driver master reverb levels default to dry=1.0, wet=1.0 (SDK init)" {
     // SDK genericdig.cpp inits reverb[0].master_dry = master_wet = 1.0F. master_wet
     // is a neutral multiplier for per-sample wet sends; defaulting it to 0 would
@@ -6488,6 +6531,52 @@ test "AIL_decompress_ASI decodes to a WAV (runs the decode loop; align-safe)" {
     try testing.expect(dg.AIL_WAV_info(out_ptr.?, &info) != 0);
     try testing.expectEqual(@as(i32, 1), info.format);
     try testing.expectEqual(@as(i32, 16), info.bits);
+}
+
+test "AIL_decompress_ASI keeps the source's channels and rate" {
+    const api_rib = @import("api/rib.zig");
+    // A mono 22050 Hz ramp: the image comes back mono at 22050 Hz with the
+    // same frames, not upmixed and resampled to stereo at 44100 Hz.
+    const frames: usize = 2205;
+    var pcm: [frames * 2]u8 = undefined;
+    for (0..frames) |i| std.mem.writeInt(i16, pcm[i * 2 ..][0..2], @intCast(i), .little);
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 22050, 16);
+    defer testing.allocator.free(wav);
+    var out_ptr: ?*anyopaque = null;
+    var out_size: u32 = 0;
+    try testing.expectEqual(@as(i32, 1), api_rib.AIL_decompress_ASI(wav.ptr, @intCast(wav.len), ".wav", &out_ptr, &out_size, null));
+    defer std.c.free(out_ptr);
+    var info: openmiles.AILSOUNDINFO = .{};
+    try testing.expect(dg.AIL_WAV_info(out_ptr.?, &info) != 0);
+    try testing.expectEqual(@as(i32, 1), info.channels);
+    try testing.expectEqual(@as(u32, 22050), info.rate);
+    try testing.expectEqual(@as(i32, 16), info.bits);
+    try testing.expectEqual(@as(u32, pcm.len), info.data_len);
+    const out: [*]const u8 = @ptrCast(info.data_ptr.?);
+    try testing.expectEqualSlices(u8, &pcm, out[0..pcm.len]);
+}
+
+test "AIL_decompress_ASI decodes a mono 22050 Hz MP3 as mono 22050 Hz" {
+    const api_rib = @import("api/rib.zig");
+    // MPEG-2 Layer III, 32 kbit/s, 22050 Hz, mono, no CRC: a 104-byte frame
+    // (72 * 32000 / 22050) of 576 samples, all-zero side info, so silence.
+    const frame_len = 104;
+    const frame_count = 16;
+    var mp3: [frame_len * frame_count]u8 = [_]u8{0} ** (frame_len * frame_count);
+    for (0..frame_count) |f| @memcpy(mp3[f * frame_len ..][0..4], &[_]u8{ 0xFF, 0xF3, 0x40, 0xC0 });
+    var out_ptr: ?*anyopaque = null;
+    var out_size: u32 = 0;
+    try testing.expectEqual(@as(i32, 1), api_rib.AIL_decompress_ASI(&mp3, mp3.len, ".mp3", &out_ptr, &out_size, null));
+    defer std.c.free(out_ptr);
+    var info: openmiles.AILSOUNDINFO = .{};
+    try testing.expect(dg.AIL_WAV_info(out_ptr.?, &info) != 0);
+    try testing.expectEqual(@as(i32, 1), info.channels);
+    try testing.expectEqual(@as(u32, 22050), info.rate);
+    try testing.expectEqual(@as(i32, 16), info.bits);
+    // At most the frames given, one 16-bit sample each (the decoder may hold
+    // back its first frame's delay), and never the 4x of stereo at 44100 Hz.
+    try testing.expect(info.data_len > 0 and info.data_len <= frame_count * 576 * 2);
+    try testing.expectEqual(@as(u32, 44), out_size - info.data_len);
 }
 
 test "AIL_MIDI_to_XMI allocates the output and returns it via XMIDI** (SDK)" {
@@ -8764,7 +8853,8 @@ test "volume/pan match the exact MSS curve (gain = volume^(10/6))" {
     // left=gain*(1-pan)^0.3, right=gain*pan^0.3, center uses 0.5^0.3=0.812252.
     try testing.expectEqual(@as(f32, 0.0), openmiles.mssVolumeToGain(0));
     try testing.expectEqual(@as(f32, 1.0), openmiles.mssVolumeToGain(127));
-    try testing.expectApproxEqAbs(@as(f32, 0.319), openmiles.mssVolumeToGain(64), 0.01);
+    // (before 6.5 the 0..127 table is linear, as Miles 6.0i measures)
+    try testing.expectApproxEqAbs(@as(f32, if (openmiles.mss_version < 65) 64.0 / 127.0 else 0.319), openmiles.mssVolumeToGain(64), 0.01);
 
     const hd = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
     defer hd.deinit();
@@ -9464,4 +9554,298 @@ test "filter enumeration yields the built-in provider once" {
     try testing.expectEqual(@as(i32, 0), api_filter.AIL_enumerate_filters(&next, &dest, &name));
     try testing.expectEqual(@as(?*anyopaque, null), next);
     try testing.expectEqual(@as(?*openmiles.Provider, null), dest);
+}
+
+test "Miles 6 sample volume is linear: 64 is -6 dB, 32 is -12 dB (6.0i, measured)" {
+    // Miles 6.0/6.1 work the 0..127 sample volume in integers over 128 and
+    // linear in amplitude; v^(10/6) is the curve of 6.5 and later.
+    if (openmiles.mss_version >= 65) return error.SkipZigTest;
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    dg.AIL_set_sample_volume(s, 127);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), s.volume, 1e-6);
+    dg.AIL_set_sample_volume(s, 64);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), s.volume, 1e-6);
+    dg.AIL_set_sample_volume(s, 32);
+    try testing.expectApproxEqAbs(@as(f32, 0.25), s.volume, 1e-6);
+    dg.AIL_set_sample_volume(s, 0);
+    try testing.expectEqual(@as(f32, 0.0), s.volume);
+    try testing.expectEqual(@as(i32, 0), dg.AIL_sample_volume(s));
+}
+
+test "Miles 6 master volume combines with a sample's in integers (6.0i, measured)" {
+    // A sample's level is (v6Scale128(sample) * v6Scale128(master)) >> 7, over
+    // 128, so a quiet sample under a master below full loses its fraction.
+    if (openmiles.mss_version >= 65) return error.SkipZigTest;
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    try testing.expectEqual(@as(i32, 127), dg.AIL_digital_master_volume(driver));
+    dg.AIL_set_digital_master_volume(driver, 88);
+    try testing.expectEqual(@as(i32, 88), dg.AIL_digital_master_volume(driver));
+    // master 88 -> 88 over 128; the sample's own gain is its level over that
+    dg.AIL_set_sample_volume(s, 1);
+    try testing.expectEqual(@as(f32, 0.0), s.volume); // (1 * 88) >> 7 == 0: silent
+    dg.AIL_set_sample_volume(s, 2);
+    try testing.expectApproxEqAbs(@as(f32, 1.0 / 88.0), s.volume, 1e-6); // (2 * 88) >> 7 == 1
+    // a sample set before the master follows it
+    dg.AIL_set_sample_volume(s, 127);
+    dg.AIL_set_digital_master_volume(driver, 127);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), s.volume, 1e-6);
+    try testing.expectEqual(@as(i32, 127), dg.AIL_digital_master_volume(driver));
+}
+
+test "Miles 6 pan: the far side is its distance from the edge over 64.5 (6.0i, measured)" {
+    if (openmiles.mss_version >= 65) return error.SkipZigTest;
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+    const s = try openmiles.Sample.init(driver);
+    defer s.deinit();
+    dg.AIL_set_sample_pan(s, 64);
+    try testing.expectEqual(@as(f32, 0.0), s.pan);
+    dg.AIL_set_sample_pan(s, 0);
+    try testing.expectApproxEqAbs(@as(f32, -1.0), s.pan, 1e-6);
+    dg.AIL_set_sample_pan(s, 127);
+    try testing.expectApproxEqAbs(@as(f32, 1.0), s.pan, 1e-6);
+    // right gain at pan 32 is 32 * 2 / 129; as a balance, that minus 1
+    dg.AIL_set_sample_pan(s, 32);
+    try testing.expectApproxEqAbs(@as(f32, 64.0 / 129.0 - 1.0), s.pan, 1e-6);
+    // left gain at pan 96 is (127 - 96) * 2 / 129
+    dg.AIL_set_sample_pan(s, 96);
+    try testing.expectApproxEqAbs(@as(f32, 1.0 - 62.0 / 129.0), s.pan, 1e-6);
+    try testing.expectEqual(@as(i32, 96), dg.AIL_sample_pan(s));
+}
+
+test "a \\\\<handle> stream name parses to its handle, anything else does not" {
+    // Miles names an already-open Win32 file handle as "\\<n>", n in decimal.
+    try testing.expectEqual(@as(usize, 420), @intFromPtr(api_stream.handleFromStreamName("\\\\420").?));
+    try testing.expectEqual(@as(?*anyopaque, null), api_stream.handleFromStreamName("\\\\0"));
+    try testing.expectEqual(@as(?*anyopaque, null), api_stream.handleFromStreamName("\\\\"));
+    try testing.expectEqual(@as(?*anyopaque, null), api_stream.handleFromStreamName("\\\\12ab"));
+    try testing.expectEqual(@as(?*anyopaque, null), api_stream.handleFromStreamName("\\\\server\\share\\a.wav"));
+    try testing.expectEqual(@as(?*anyopaque, null), api_stream.handleFromStreamName("C:\\music\\a.wav"));
+    try testing.expectEqual(@as(?*anyopaque, null), api_stream.handleFromStreamName("420"));
+}
+
+const stream_handle_test_win32 = if (@import("builtin").os.tag == .windows) struct {
+    extern "kernel32" fn GetTempPathA(n: u32, buf: [*]u8) callconv(.winapi) u32;
+    extern "kernel32" fn CreateFileA(name: [*:0]const u8, access: u32, share: u32, sa: ?*anyopaque, disposition: u32, flags: u32, template: ?*anyopaque) callconv(.winapi) ?*anyopaque;
+    extern "kernel32" fn WriteFile(h: ?*anyopaque, buf: [*]const u8, n: u32, written: *u32, ov: ?*anyopaque) callconv(.winapi) i32;
+    extern "kernel32" fn SetFilePointer(h: ?*anyopaque, dist: i32, high: ?*i32, method: u32) callconv(.winapi) u32;
+    extern "kernel32" fn CloseHandle(h: ?*anyopaque) callconv(.winapi) i32;
+} else struct {};
+
+test "AIL_open_stream reads a RIFF file at an open handle's position (Windows)" {
+    // LithTech streams a sound stored inside a .rez archive by opening the
+    // archive, seeking to the sound and passing "\\<handle>": the stream is the
+    // RIFF file there, as long as its header says, and the handle stays the
+    // caller's -- open, and just past the sound.
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+    const k = stream_handle_test_win32;
+    const driver = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer driver.deinit();
+
+    const pcm = [_]u8{0} ** 4410; // 100 ms of mono 16-bit at 22050 Hz
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 22050, 16);
+    defer testing.allocator.free(wav);
+
+    var path: [300]u8 = undefined;
+    const dir_len = k.GetTempPathA(260, &path);
+    try testing.expect(dir_len > 0 and dir_len < 260);
+    const leaf = "openmiles_stream_handle_test.bin";
+    @memcpy(path[dir_len .. dir_len + leaf.len], leaf);
+    path[dir_len + leaf.len] = 0;
+    const GENERIC_RW: u32 = 0x80000000 | 0x40000000;
+    const CREATE_ALWAYS: u32 = 2;
+    const DELETE_ON_CLOSE: u32 = 0x04000000;
+    const h = k.CreateFileA(@ptrCast(&path), GENERIC_RW, 0, null, CREATE_ALWAYS, DELETE_ON_CLOSE, null) orelse return error.CreateFileFailed;
+    try testing.expect(@intFromPtr(h) != std.math.maxInt(usize)); // INVALID_HANDLE_VALUE
+    defer _ = k.CloseHandle(h);
+
+    // an archive: something before the sound, the sound, something after
+    const pad = [_]u8{0xAA} ** 100;
+    var n: u32 = 0;
+    try testing.expect(k.WriteFile(h, &pad, pad.len, &n, null) != 0);
+    try testing.expect(k.WriteFile(h, wav.ptr, @intCast(wav.len), &n, null) != 0);
+    try testing.expect(k.WriteFile(h, &pad, pad.len, &n, null) != 0);
+    try testing.expectEqual(@as(u32, pad.len), k.SetFilePointer(h, pad.len, null, 0));
+
+    var name_buf: [32]u8 = undefined;
+    const name = try std.fmt.bufPrintZ(&name_buf, "\\\\{d}", .{@intFromPtr(h)});
+    const s = api_stream.AIL_open_stream(driver, name.ptr, 0) orelse return error.StreamDidNotOpen;
+    defer api_stream.AIL_close_stream(s);
+
+    var total_ms: i32 = 0;
+    var current_ms: i32 = 0;
+    api_stream.AIL_stream_ms_position(s, &total_ms, &current_ms);
+    try testing.expectEqual(@as(i32, 100), total_ms);
+    // read exactly the sound: the handle is just past it, and still open
+    try testing.expectEqual(@as(u32, @intCast(pad.len + wav.len)), k.SetFilePointer(h, 0, null, 1));
+}
+
+// Goertzel power of one frequency in a mono signal, Hann-windowed.
+fn tonePower(x: []const f32, rate: f64, freq: f64) f64 {
+    const w = 2.0 * std.math.pi * freq / rate;
+    const coeff = 2.0 * @cos(w);
+    var s1: f64 = 0;
+    var s2: f64 = 0;
+    const n: f64 = @floatFromInt(x.len);
+    for (x, 0..) |v, i| {
+        const hann = 0.5 - 0.5 * @cos(2.0 * std.math.pi * @as(f64, @floatFromInt(i)) / (n - 1.0));
+        const s0 = @as(f64, v) * hann + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    return s1 * s1 + s2 * s2 - coeff * s1 * s2;
+}
+
+test "a 22050 Hz sound upsampled to a 44100 Hz mix leaves no mirror image, at any pitch" {
+    // miniaudio's engine switches the pitch resampler's low-pass filter off,
+    // so a 22050 Hz sound mixed at 44100 Hz was upsampled by bare linear
+    // interpolation: a 5 kHz tone came with its image at 17.05 kHz, about
+    // 23 dB down. The driver turns the filter on.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    try testing.expectEqual(@as(u32, openmiles.ma.MA_MAX_FILTER_ORDER), drv.engine.pitchResamplingConfig.linear.lpfOrder);
+
+    const frames_in = 22050; // 1 s
+    var pcm: [frames_in * 2]u8 = undefined;
+    for (0..frames_in) |i| {
+        const v: i16 = @intFromFloat(@round(16000.0 * @sin(2.0 * std.math.pi * 5000.0 * @as(f64, @floatFromInt(i)) / 22050.0)));
+        std.mem.writeInt(i16, pcm[i * 2 ..][0..2], v, .little);
+    }
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 22050, 16);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+    dg.AIL_start_sample(s);
+
+    var out: [4096 * 2]f32 = undefined;
+    var read: u64 = 0;
+    _ = openmiles.ma.ma_engine_read_pcm_frames(&drv.engine, &out, 1024, &read); // past the filter's start
+    try testing.expectEqual(openmiles.ma.MA_SUCCESS, openmiles.ma.ma_engine_read_pcm_frames(&drv.engine, &out, 4096, &read));
+    try testing.expectEqual(@as(u64, 4096), read);
+    var left: [4096]f32 = undefined;
+    for (&left, 0..) |*v, i| v.* = out[i * 2];
+    const tone = tonePower(&left, 44100, 5000);
+    const image = tonePower(&left, 44100, 17050);
+    try testing.expect(tone > 0);
+    try testing.expect(10.0 * std.math.log10(image / tone) < -50.0);
+
+    // miniaudio left the filter off for fear of it going unstable under a
+    // changing pitch: change it every 256 frames and the output stays bounded.
+    for (0..40) |k| {
+        dg.AIL_set_sample_playback_rate(s, if (k % 2 == 0) 16000 else 30000);
+        try testing.expectEqual(openmiles.ma.MA_SUCCESS, openmiles.ma.ma_engine_read_pcm_frames(&drv.engine, &out, 256, &read));
+        for (out[0 .. read * 2]) |v| try testing.expect(std.math.isFinite(v) and @abs(v) < 2.0);
+    }
+}
+
+// A mono IMA ADPCM WAV of `blocks` silent 512-byte blocks (1017 frames each).
+fn imaAdpcmWav(allocator: std.mem.Allocator, blocks: u32) ![]u8 {
+    const block_align: u32 = 512;
+    const frames_per_block: u32 = (block_align - 4) * 2 + 1;
+    const data_len = blocks * block_align;
+    const buf = try allocator.alloc(u8, 60 + data_len);
+    @memset(buf, 0);
+    @memcpy(buf[0..4], "RIFF");
+    std.mem.writeInt(u32, buf[4..8], @intCast(buf.len - 8), .little);
+    @memcpy(buf[8..16], "WAVEfmt ");
+    std.mem.writeInt(u32, buf[16..20], 20, .little);
+    std.mem.writeInt(u16, buf[20..22], 0x11, .little); // IMA ADPCM
+    std.mem.writeInt(u16, buf[22..24], 1, .little); // mono
+    std.mem.writeInt(u32, buf[24..28], 22050, .little);
+    std.mem.writeInt(u32, buf[28..32], 22050 * block_align / frames_per_block, .little);
+    std.mem.writeInt(u16, buf[32..34], @intCast(block_align), .little);
+    std.mem.writeInt(u16, buf[34..36], 4, .little);
+    std.mem.writeInt(u16, buf[36..38], 2, .little); // cbSize
+    std.mem.writeInt(u16, buf[38..40], @intCast(frames_per_block), .little);
+    @memcpy(buf[40..44], "fact");
+    std.mem.writeInt(u32, buf[44..48], 4, .little);
+    std.mem.writeInt(u32, buf[48..52], blocks * frames_per_block, .little);
+    @memcpy(buf[52..56], "data");
+    std.mem.writeInt(u32, buf[56..60], data_len, .little);
+    return buf;
+}
+
+test "an IMA ADPCM loop block is in bytes of its compressed blocks (Miles 6.0i, measured)" {
+    // AIL_set_sample_loop_block takes byte offsets into the sample's own data,
+    // so for IMA ADPCM they are offsets into the compressed blocks, and Miles
+    // loops at the start of the block each falls in. NOLF's crane (LIFT3.wav,
+    // 512-byte blocks) sets bytes 3709..9535, and Miles 6.0i loops frames
+    // 7119..18306 -- blocks 7 and 18 of 1017 frames. Dividing by the decoded
+    // frame size put the loop at a fraction of that.
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    const wav = try imaAdpcmWav(testing.allocator, 20);
+    defer testing.allocator.free(wav);
+    const s = try openmiles.Sample.init(drv);
+    defer s.deinit();
+    try s.loadFromMemory(wav, false);
+
+    dg.AIL_set_sample_loop_block(s, 3709, 9535);
+    try testing.expectEqual(@as(u64, 7119), s.loop_start_frame);
+    try testing.expectEqual(@as(u64, 18306), s.loop_end_frame);
+
+    // -2 keeps a side: its frame converts back to the start of its block
+    // (3584), which lands on the same frame.
+    dg.AIL_set_sample_loop_block(s, -2, 9000);
+    try testing.expectEqual(@as(u64, 7119), s.loop_start_frame);
+    try testing.expectEqual(@as(u64, 17289), s.loop_end_frame);
+    var lo: i32 = 0;
+    var hi: i32 = 0;
+    _ = api_v8.AIL_sample_loop_block(s, &lo, &hi);
+    try testing.expectEqual(@as(i32, 3584), lo);
+    try testing.expectEqual(@as(i32, 8704), hi);
+
+    // a PCM sample still counts its loop block in bytes of frames
+    const pcm = [_]u8{0} ** 4410;
+    const pcm_wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 22050, 16);
+    defer testing.allocator.free(pcm_wav);
+    try s.loadFromMemory(pcm_wav, false);
+    dg.AIL_set_sample_loop_block(s, 1000, 3000);
+    try testing.expectEqual(@as(u64, 500), s.loop_start_frame);
+    try testing.expectEqual(@as(u64, 1500), s.loop_end_frame);
+}
+
+test "the mix is clipped to full scale, hard, as Miles 6 saturates it" {
+    // Miles 6 sums into 32-bit integers and saturates them into the output
+    // (packssdw): a sum past full scale is clipped flat, with no soft knee.
+    // The f32 mix went to the device as it was, past 1.0.
+    try testing.expectEqual(@as(f32, 0.5), openmiles.DigitalDriver.clipToFullScale(0.5));
+    try testing.expectEqual(@as(f32, -0.999), openmiles.DigitalDriver.clipToFullScale(-0.999));
+    try testing.expectEqual(@as(f32, 1.0), openmiles.DigitalDriver.clipToFullScale(1.1));
+    try testing.expectEqual(@as(f32, -1.0), openmiles.DigitalDriver.clipToFullScale(-3.0));
+    try testing.expectEqual(@as(f32, 0.0), openmiles.DigitalDriver.clipToFullScale(std.math.nan(f32)));
+
+    const drv = try openmiles.DigitalDriver.init(testing.allocator, 44100, 16, 2);
+    defer drv.deinit();
+    // Four loud mono sounds at once: each alone is below full scale, together
+    // well past it.
+    const frames_in = 4410;
+    var pcm: [frames_in * 2]u8 = undefined;
+    for (0..frames_in) |i| std.mem.writeInt(i16, pcm[i * 2 ..][0..2], 30000, .little);
+    const wav = try openmiles.buildWavFromPcm(testing.allocator, &pcm, 1, 44100, 16);
+    defer testing.allocator.free(wav);
+    var samples: [4]*openmiles.Sample = undefined;
+    for (&samples) |*s| {
+        s.* = try openmiles.Sample.init(drv);
+        try s.*.loadFromMemory(wav, false);
+        dg.AIL_start_sample(s.*);
+    }
+    defer for (samples) |s| s.deinit();
+
+    var out: [1024 * 2]f32 = undefined;
+    var read: u64 = 0;
+    try testing.expectEqual(openmiles.ma.MA_SUCCESS, openmiles.ma.ma_engine_read_pcm_frames(&drv.engine, &out, 1024, &read));
+    try testing.expectEqual(@as(u64, 1024), read);
+    var peak: f32 = 0;
+    for (out[0 .. read * 2]) |v| peak = @max(peak, @abs(v));
+    try testing.expectEqual(@as(f32, 1.0), peak);
+    // past the resampler's start the whole block sits flat at full scale
+    try testing.expectEqual(@as(f32, 1.0), out[out.len - 1]);
 }

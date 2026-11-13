@@ -72,6 +72,7 @@ const digital_mod = @import("engine/digital.zig");
 pub const DigitalDriver = digital_mod.DigitalDriver;
 pub const Sample = digital_mod.Sample;
 pub const fireSampleCallback = digital_mod.fireSampleCallback;
+pub const loopByteOfFrame = digital_mod.loopByteOfFrame;
 pub const MixBus = digital_mod.MixBus;
 pub const LimiterNode = digital_mod.LimiterNode;
 pub const CompressorNode = digital_mod.CompressorNode;
@@ -180,8 +181,8 @@ pub fn resolveLoopBlock(sample: anytype, loop_start: i32, loop_end: i32) ?[2]i32
     const bpf: u64 = sample.bytesPerFrame();
     var start = loop_start;
     var end = loop_end;
-    if (start == -2) start = @intCast(@min(sample.loop_start_frame *| bpf, @as(u64, std.math.maxInt(i32))));
-    if (end == -2) end = if (sample.loop_end_frame > 0) @intCast(@min(sample.loop_end_frame *| bpf, @as(u64, std.math.maxInt(i32)))) else 0;
+    if (start == -2) start = @intCast(@min(digital_mod.loopByteOfFrame(sample, sample.loop_start_frame, bpf), @as(u64, std.math.maxInt(i32))));
+    if (end == -2) end = if (sample.loop_end_frame > 0) @intCast(@min(digital_mod.loopByteOfFrame(sample, sample.loop_end_frame, bpf), @as(u64, std.math.maxInt(i32)))) else 0;
     if (@as(u32, @bitCast(start)) > @as(u32, @bitCast(end))) {
         const t = start;
         start = end;
@@ -1493,6 +1494,16 @@ pub fn setPreference(number: u32, value: i32) i32 {
 /// (e.g., 30/127) produced dramatic attenuation. The curve `(v/127)^(10/6)`
 /// matches `AIL_API_set_sample_volume_pan` (0.5 → −10 dB): value 30 → gain
 /// ~0.090 (vs linear ~0.236). See `volume_to_gain_table`.
+/// Miles 6.0/6.1 (before 6.5) work their integer volumes in 0..128: a 0..127
+/// sample or master volume v is scaled to v * 128 / 127, rounded down, and a
+/// sample's level is (sample * master) >> 7, over 128 -- measured from the
+/// real Miles 6.0i mss32.dll, every case within 0.01 dB. So a quiet sample
+/// under a master volume below full loses its fraction: with the master at
+/// 88, a sample at volume 1 is silent and one at 2 is a full 6 dB down.
+pub fn v6Scale128(value: i32) i32 {
+    return @divTrunc(std.math.clamp(value, 0, 127) * 128, 127);
+}
+
 pub fn mssVolumeToGain(value: i32) f32 {
     if (value <= 0) return 0.0;
     if (value >= 127) return 1.0;
@@ -1526,15 +1537,25 @@ pub fn gainToMssVolume(gain: f32) i32 {
     return if (gain - g_lo <= g_hi - gain) hi else @intCast(lo_clamped);
 }
 
+// Miles 6.0/6.1's integer 0..127 sample volume is linear in amplitude,
+// gain = volume / 127, as measured from the real Miles 6.0i mss32.dll (a
+// 440 Hz tone played through it at each volume and recorded): 64 is -6.0 dB,
+// 32 -12.0, 4 -30.0, where v^(10/6) gives -10, -20 and -50. With the steeper
+// curve every quiet sound in a Miles 6 game (a distant speaker, which the
+// game attenuates by lowering the volume) came out far too quiet.
 const volume_to_gain_table: [128]f32 = blk: {
     @setEvalBranchQuota(200000);
     var table: [128]f32 = undefined;
     table[0] = 0.0;
     for (1..128) |i| {
         const n: f64 = @as(f64, @floatFromInt(i)) / 127.0;
-        // MSS volume curve: gain = volume^(10/6) (0.5 -> -10 dB), per
-        // AIL_API_set_sample_volume_pan in wavefile.cpp. (Was volume^3 = -18 dB.)
-        table[i] = @floatCast(std.math.pow(f64, n, 10.0 / 6.0));
+        if (mss_version < 65) {
+            table[i] = @floatCast(n);
+        } else {
+            // MSS volume curve: gain = volume^(10/6) (0.5 -> -10 dB), per
+            // AIL_API_set_sample_volume_pan in wavefile.cpp. (Was volume^3 = -18 dB.)
+            table[i] = @floatCast(std.math.pow(f64, n, 10.0 / 6.0));
+        }
     }
     break :blk table;
 };
